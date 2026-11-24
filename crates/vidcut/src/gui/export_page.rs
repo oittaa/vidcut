@@ -278,16 +278,25 @@ impl Workspace {
                                 }
                             });
                     });
-                    super::dialog::row(ui, "File Name", |ui| {
-                        let field = match d.per_clip {
-                            true => &mut d.template,
-                            false => &mut d.name,
-                        };
-                        ui.add(egui::TextEdit::singleline(field).desired_width(220.0));
+                    super::dialog::row(ui, "File Name", |ui| match (d.per_clip, d.source_names) {
+                        (true, true) => {
+                            ui.weak("Source Name");
+                        }
+                        (true, false) => {
+                            let edit = egui::TextEdit::singleline(&mut d.template);
+                            ui.add(edit.desired_width(220.0));
+                        }
+                        (false, _) => {
+                            let edit = egui::TextEdit::singleline(&mut d.name);
+                            ui.add(edit.desired_width(220.0));
+                        }
                     });
-                    if d.per_clip {
+                    if d.per_clip && !d.source_names {
                         super::dialog::row(ui, "", |ui| {
-                            super::dialog::why(ui, "{index}, {index:03}, {name}, {clip}, {media}")
+                            super::dialog::why(
+                                ui,
+                                "{source}, {index}, {index:03}, {name}, {clip}, {media}",
+                            )
                         });
                     }
                     super::dialog::row(ui, "Location", |ui| {

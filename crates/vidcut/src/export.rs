@@ -10,16 +10,16 @@ use vidcut_core::editor::{media_context, source_context};
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
-    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Numbering, Preset,
-    VideoSettings, apply_overrides, builtin_presets, validate,
+    Container, EncoderChoice, ExportSettings, FILENAME_DIGITS, HdrMetadata, HdrMode, Numbering,
+    Preset, VideoSettings, apply_overrides, builtin_presets, validate,
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
-use vidcut_core::model::{Clip, Generator};
+use vidcut_core::model::{Clip, Generator, padded_frame};
 use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
-use vidcut_core::request::{ExportParams, SubtitlesAs};
+use vidcut_core::request::{ExportParams, LevelsFrom, SubtitlesAs, UniqueAs};
 use vidcut_core::time::{TimeContext, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Project, Result};
 
@@ -212,6 +212,7 @@ pub fn timeline(
 ) -> Result<Value> {
     let format =
         timeline_format(&params.output).ok_or_else(|| Error::internal("not a timeline export"))?;
+    check_clip_names(params)?;
     if params.per_clip
         || params.audio_only
         || params.preset.is_some()
@@ -653,23 +654,142 @@ fn sanitize(name: &str) -> String {
     if s.is_empty() { "clip".into() } else { s }
 }
 
-fn file_name(template: &str, index: usize, name: &str, clip: &str, media: &str) -> String {
+struct ClipName<'a> {
+    index: usize,
+    name: &'a str,
+    clip: &'a str,
+    media: &'a str,
+    source: &'a Path,
+    place: String,
+    count: i64,
+}
+
+fn file_name(template: &str, c: &ClipName, source: &str) -> String {
     let mut s = template
-        .replace("{name}", name)
-        .replace("{clip}", clip)
-        .replace("{media}", media)
-        .replace("{index}", &index.to_string());
+        .replace("{source}", source)
+        .replace("{name}", c.name)
+        .replace("{clip}", c.clip)
+        .replace("{media}", c.media)
+        .replace("{index}", &c.index.to_string());
     while let Some(start) = s.find("{index:0") {
         let Some(end) = s[start..].find('}') else {
             break;
         };
         let width: usize = s[start + 8..start + end].parse().unwrap_or(1);
-        s.replace_range(
-            start..start + end + 1,
-            &vidcut_core::model::padded_frame(index as u64, width),
-        );
+        s.replace_range(start..start + end + 1, &padded_frame(c.index as u64, width));
     }
-    sanitize(&s)
+    s
+}
+
+fn clip_path(params: &ExportParams, settings: &ExportSettings, c: &ClipName) -> Result<PathBuf> {
+    let source = c.source.file_stem().unwrap_or_default().to_string_lossy();
+    let mut stem = match params.source_names {
+        true => source.to_string(),
+        false => file_name(params.name.as_deref().unwrap_or("{source}"), c, &source),
+    };
+    if !params.source_names
+        && !params.no_frame_count
+        && params.unique.is_none()
+        && !settings.container.image_sequence()
+    {
+        let digits = settings.video.as_ref().and_then(|v| v.filename_digits);
+        let digits = usize::from(digits.unwrap_or(FILENAME_DIGITS));
+        stem.push_str(&padded_frame(c.count.max(0) as u64, digits));
+    }
+    stem = match params.unique {
+        Some(UniqueAs::Prefix) => format!("{}_{stem}", c.place),
+        Some(UniqueAs::Suffix) => format!("{stem}_{}", c.place),
+        None => stem,
+    };
+    if let Some(suffix) = params.suffix.as_deref().filter(|_| !params.source_names) {
+        stem.push_str(suffix);
+    }
+    let mut dir = params.output.clone();
+    if let Some(sub) = params.subfolder.as_deref() {
+        dir.push(sub.trim());
+    }
+    let from = c.source.parent().unwrap_or(Path::new(""));
+    dir.push(kept_levels(from, params.source_levels, params.levels_from)?);
+    Ok(dir.join(format!(
+        "{}.{}",
+        sanitize(&stem),
+        settings.container.extension()
+    )))
+}
+
+fn kept_levels(dir: &Path, levels: u32, from: LevelsFrom) -> Result<PathBuf> {
+    use std::path::{Component, Prefix};
+    if levels == 0 {
+        return Ok(PathBuf::new());
+    }
+    let names: Vec<_> = dir
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+    let n = levels as usize;
+    match from {
+        LevelsFrom::Tail => Ok(names[names.len().saturating_sub(n)..].iter().collect()),
+        LevelsFrom::Head => {
+            let disk = dir.components().next().is_some_and(|c| {
+                matches!(c, Component::Prefix(p) if matches!(p.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+            });
+            if n != 1 || !disk {
+                return Err(Error::usage(format!(
+                    "{}: levels_from head takes only 1 level, on a path with a drive letter",
+                    dir.display()
+                )));
+            }
+            Ok(names.iter().collect())
+        }
+    }
+}
+
+fn check_clip_names(params: &ExportParams) -> Result<()> {
+    let named = params.name.is_some()
+        || params.source_names
+        || params.suffix.is_some()
+        || params.no_frame_count
+        || params.unique.is_some()
+        || params.subfolder.is_some()
+        || params.source_levels > 0
+        || params.levels_from != LevelsFrom::Tail;
+    if !params.per_clip && named {
+        return Err(Error::usage(
+            "name, source_names, suffix, no_frame_count, unique, subfolder, source_levels and \
+             levels_from are for per_clip",
+        ));
+    }
+    let apart = [
+        (
+            params.subfolder.is_some() && params.source_levels > 0,
+            "subfolder and source_levels",
+        ),
+        (
+            params.suffix.is_some() && params.unique.is_some(),
+            "suffix and unique",
+        ),
+        (
+            params.source_names && params.unique.is_some(),
+            "source_names and unique",
+        ),
+    ];
+    if let Some((_, both)) = apart.iter().find(|(on, _)| *on) {
+        return Err(Error::usage(format!("vidcut does not combine {both} yet")));
+    }
+    if let Some(sub) = params.subfolder.as_deref() {
+        let plain = Path::new(sub.trim())
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !plain || sub.trim().is_empty() {
+            return Err(Error::usage(format!(
+                "subfolder {sub:?} must be a folder name or a relative path, with no .."
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn prepare(
@@ -701,6 +821,7 @@ pub fn prepare(
         }
     };
     apply_overrides(&mut settings, &params.set)?;
+    check_clip_names(params)?;
     if let Some(enc) = params.encoder
         && let Some(v) = settings.video.as_mut()
     {
@@ -748,28 +869,61 @@ pub fn prepare(
         proj.settings.sample_rate = enc.rate;
         proj.settings.channels = enc.channels;
     }
-    let ext = settings.container.extension();
     let drop_frame = p.counts_drop_frame();
     let mut outputs = Vec::new();
     let offline;
     if params.per_clip {
-        let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
-        let clips: Vec<_> = proj
+        let marked = [
+            (params.source_names, "source_names"),
+            (params.suffix.is_some(), "suffix"),
+            (params.no_frame_count, "no_frame_count"),
+            (params.unique.is_some(), "unique"),
+        ];
+        if let Some((_, what)) = marked
+            .iter()
+            .find(|(on, _)| *on && settings.container.image_sequence())
+        {
+            return Err(Error::usage(format!(
+                "vidcut does not combine {what} with an image sequence yet"
+            )));
+        }
+        let mut clips: Vec<_> = proj
             .tracks
             .iter()
-            .flat_map(|t| t.clips.iter())
-            .filter(|c| c.start < b && c.end() > a && !c.is_block())
-            .map(|c| (c.start, c.id.clone(), c.media.clone()))
+            .flat_map(|t| t.clips.iter().enumerate().map(move |(k, c)| (t, k, c)))
+            .filter(|(_, _, c)| c.start < b && c.end() > a && !c.is_block())
+            .map(|(t, k, c)| {
+                let place = format!("{}-{}", t.id, padded_frame(k as u64 + 1, 4));
+                (c.start, c.id.clone(), place)
+            })
             .collect();
-        let mut clips = clips;
         clips.sort();
         offline = p.offline_in(clips.iter().filter_map(|(_, id, _)| p.clip(id)));
-        for (i, (start, id, media)) in clips.iter().enumerate() {
-            let plan = render::flatten_clip(&proj, id)?;
-            let name = file_name(template, i + 1, &plan.name, id, media);
+        for (i, (start, id, place)) in clips.into_iter().enumerate() {
+            let plan = render::flatten_clip(&proj, &id)?;
+            let clip = p
+                .clip(&id)
+                .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+            let media = p.media(&clip.media);
+            let count = media.map_or(0, |m| {
+                let per = render::per_frame(m, p.settings.fps, p.fps());
+                render::shown_frame(per, clip.source_in as f64 + clip.phase)
+            });
+            let name = ClipName {
+                index: i + 1,
+                name: &plan.name,
+                clip: &id,
+                media: &clip.media,
+                source: media.map_or(Path::new(""), |m| m.path.as_path()),
+                place,
+                count,
+            };
+            let path = clip_path(params, &settings, &name)?;
+            let mut numbering = settings.numbering(p.start_tc() + start, drop_frame);
+            numbering.first = settings.first_number(count);
             outputs.push(Output {
-                path: params.output.join(format!("{name}.{ext}")),
-                numbering: settings.numbering(p.start_tc() + start, drop_frame),
+                path,
+                numbering,
                 plan,
                 settings: settings.clone(),
                 color: None,

@@ -43,6 +43,10 @@ flowchart TD
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
+  - `clip_path` makes the path of each clip file from the File tab fields of `ExportParams`. `kept_levels` gives the folders of `source_levels`.
+  - The frame count is the source frame of the clip's first frame (`render::per_frame` and `render::shown_frame`). An image sequence numbers its frames from it.
+  - `check_clip_names` refuses these fields without `per_clip`, and a `subfolder` that leaves the output folder.
+  - `prepare` also refuses the combinations of rows whose names are not measured. Why: the order of the parts is then not known.
   - `render::flatten` works in stages. `planned_video` makes the pictures and `planned_audio` makes the sound.
   - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts. It gives the layers of that track and what they hide (`Drawn`).
   - `uncovered` removes the layers that a higher layer hides. It also removes the layers of a compound clip that a Smooth Cut draws as one picture.
