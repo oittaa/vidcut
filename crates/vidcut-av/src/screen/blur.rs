@@ -547,7 +547,7 @@ fn made_into(
             let bytes = paint_bytes(p, (size.width, size.height));
             draw_step(
                 gpu,
-                (&gpu.blur.background, &bytes),
+                (&gpu.blur().background, &bytes),
                 views,
                 &to.view,
                 encoder,
@@ -568,7 +568,7 @@ fn made_into(
             };
             draw_step(
                 gpu,
-                (&gpu.blur.noise, &noise_bytes(n)),
+                (&gpu.blur().noise, &noise_bytes(n)),
                 views,
                 &to.view,
                 encoder,
@@ -597,11 +597,11 @@ fn mask_made<'a>(
                 cells: Some(&points),
                 ..Views::same(&scratch[from].view)
             };
-            let drawn = (&gpu.blur.shape, &shape_bytes(shape, figure, i > 0)[..]);
+            let drawn = (&gpu.blur().shape, &shape_bytes(shape, figure, i > 0)[..]);
             draw_step(gpu, drawn, views, &scratch[1 - from].view, encoder);
             from = 1 - from;
         }
-        for (pipeline, bytes) in soft_steps(&gpu.blur, shape.soft) {
+        for (pipeline, bytes) in soft_steps(gpu.blur(), shape.soft) {
             let views = Views::same(&scratch[from].view);
             draw_step(
                 gpu,
@@ -615,7 +615,7 @@ fn mask_made<'a>(
         let to = kept.map_or(0, |k| 1 - k);
         let start = kept.map_or(&scratch[1 - from].view, |k| &room[k].view);
         let how = [shape.level, flag(shape.invert), flag(kept.is_none()), 0.0];
-        let joined = (&gpu.blur.mask_join, &float_bytes(&how)[..]);
+        let joined = (&gpu.blur().mask_join, &float_bytes(&how)[..]);
         let views = Views::with(&scratch[from].view, start);
         draw_step(gpu, joined, views, &room[to].view, encoder);
         kept = Some(to);
@@ -1134,7 +1134,7 @@ fn run(
                     ..Views::same(&back.view)
                 };
                 let bytes = merge_bytes(merging, on.is_some());
-                draw_step(gpu, (&gpu.blur.merge, &bytes), views, &to.view, encoder);
+                draw_step(gpu, (&gpu.blur().merge, &bytes), views, &to.view, encoder);
             }
             Op::Text(text) => letters_into(gpu, &mut worked.letters, (text, to), encoder),
             Op::Make(making) => {
@@ -1426,9 +1426,9 @@ fn draw_step(
     let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("vidcut blur"),
         layout: if views.cells.is_some() {
-            &gpu.blur.reading
+            &gpu.blur().reading
         } else {
-            &gpu.blur.layout
+            &gpu.blur().layout
         },
         entries: &entries,
     });
@@ -1467,7 +1467,7 @@ fn blurred_between<'a>(
             pass_bytes(pass, *down, border, more, window)
         })
         .collect();
-    let steps: Vec<_> = bytes.iter().map(|b| (&gpu.blur.blur, &b[..])).collect();
+    let steps: Vec<_> = bytes.iter().map(|b| (&gpu.blur().blur, &b[..])).collect();
     stepped_between(gpu, &steps, textures, encoder)
 }
 
@@ -1483,7 +1483,7 @@ fn glow_blurred<'a>(
     let [Some(a), Some(b)] = textures else {
         return mask;
     };
-    let cells = (&gpu.blur.glow_cells, &grid.cells_bytes(seen)[..]);
+    let cells = (&gpu.blur().glow_cells, &grid.cells_bytes(seen)[..]);
     draw_step(gpu, cells, Views::same(mask), &a.view, encoder);
     let border = if seen { BORDER_BLACK } else { BORDER_MIRROR };
     let window = [1.0, TAIL.0, TAIL.1, 0.0];
@@ -1506,7 +1506,7 @@ fn landed(
             };
             draw_step(
                 gpu,
-                (&gpu.blur.masked, &[0; 16]),
+                (&gpu.blur().masked, &[0; 16]),
                 views,
                 &free.view,
                 encoder,
@@ -1536,7 +1536,7 @@ fn glow_into(
     let two = glow.second.as_ref().map(|s| GlowGrid::of(s, size, seen));
     let bytes = glow_bytes(glow, effect, (&one, two.as_ref()));
     let mask = &scratch[0].view;
-    let first = (&gpu.blur.glow_mask, &bytes[..]);
+    let first = (&gpu.blur().glow_mask, &bytes[..]);
     draw_step(gpu, first, Views::same(&own.view), mask, encoder);
     let blurs = |g: &GlowGrid| glow.output != GlowOutput::ShinyRegions && g.blurs();
     let one_blurs = blurs(&one).then_some(&one);
@@ -1561,7 +1561,7 @@ fn glow_into(
     let [free, made] = scratch;
     draw_step(
         gpu,
-        (&gpu.blur.glow, &bytes[..]),
+        (&gpu.blur().glow, &bytes[..]),
         views,
         &made.view,
         encoder,
@@ -1586,24 +1586,24 @@ fn grade_into(
             return;
         };
         let guide = float_bytes(&[TONE_EPS, f64::from(w), f64::from(h), 0.0]);
-        let stats = (&gpu.blur.grade_stats, &guide[..]);
+        let stats = (&gpu.blur().grade_stats, &guide[..]);
         draw_step(gpu, stats, Views::same(&own.view), &a.view, encoder);
         let width = f64::from(2 * filter.radius + 1);
         let boxes: Vec<Vec<u8>> = box_ways(width, width, 1)
             .iter()
             .map(|(pass, down)| pass_bytes(pass, *down, BORDER_CLAMP, [0.0; 4], [1.0; 4]))
             .collect();
-        let boxed = boxes.iter().map(|b| (&gpu.blur.boxes, &b[..]));
+        let boxed = boxes.iter().map(|b| (&gpu.blur().boxes, &b[..]));
         let steps: Vec<_> = boxed
             .clone()
-            .chain([(&gpu.blur.grade_coef, &guide[..])])
+            .chain([(&gpu.blur().grade_coef, &guide[..])])
             .chain(boxed)
             .collect();
         source = &stepped_between(gpu, &steps, (a, b), encoder).view;
     }
     let [made, free] = scratch;
     let bytes = grade_bytes(g, blend);
-    let grade = (&gpu.blur.grade, &bytes[..]);
+    let grade = (&gpu.blur().grade, &bytes[..]);
     draw_step(
         gpu,
         grade,
@@ -1630,7 +1630,7 @@ fn mix_into(
     };
     draw_step(
         gpu,
-        (&gpu.blur.grade_mix, &bytes[..]),
+        (&gpu.blur().grade_mix, &bytes[..]),
         views,
         &scratch.view,
         encoder,
@@ -1803,7 +1803,7 @@ fn curves_blurred<'a>(
         cells: Some(&buffer),
         ..Views::same(&scratch[1].view)
     };
-    let drawn = (&gpu.blur.window_curves, &bytes[..]);
+    let drawn = (&gpu.blur().window_curves, &bytes[..]);
     draw_step(gpu, drawn, views, &scratch[0].view, encoder);
     let mut across = [0.0; CURVE_CHANNELS];
     let mut down = [0.0; CURVE_CHANNELS];
@@ -1883,7 +1883,7 @@ fn key_into(
             mask: &dummy.view,
             cells: Some(&buffer),
         };
-        let drawn = (&gpu.blur.window_key, &bytes[..]);
+        let drawn = (&gpu.blur().window_key, &bytes[..]);
         draw_step(gpu, drawn, views, &out.view, encoder);
         state = Some(out);
     }
@@ -1926,7 +1926,7 @@ fn key_fold_into(
     let views = Views::with(source, start);
     draw_step(
         gpu,
-        (&gpu.blur.key_fold, &bytes[..]),
+        (&gpu.blur().key_fold, &bytes[..]),
         views,
         &to.view,
         encoder,
@@ -1989,7 +1989,7 @@ fn pass_into(
         ),
         GradePass::Luma { from, to } => draw_step(
             gpu,
-            (&gpu.blur.key_luma, &float_bytes(&[0.0; 4])[..]),
+            (&gpu.blur().key_luma, &float_bytes(&[0.0; 4])[..]),
             Views::same(&at[*from].view),
             &at[*to].view,
             encoder,
@@ -1998,7 +1998,7 @@ fn pass_into(
             let (k, map) = key_parts(key, at);
             let bytes = float_bytes(&[k, flag(map.is_some()), 0.0, 0.0]);
             let views = Views::with(map.unwrap_or(&at[*alpha].view), &at[*alpha].view);
-            let step = (&gpu.blur.key_gray, &bytes[..]);
+            let step = (&gpu.blur().key_gray, &bytes[..]);
             draw_step(gpu, step, views, &at[*to].view, encoder);
         }
         GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
@@ -2077,7 +2077,7 @@ pub(super) fn shot_source(
         wide.max(1.0),
         tall.max(1.0),
     ]);
-    let step = (&gpu.blur.shot, &bytes[..]);
+    let step = (&gpu.blur().shot, &bytes[..]);
     draw_step(gpu, step, Views::same(from), &own.view, encoder);
 }
 
@@ -2240,7 +2240,7 @@ fn grain_into(
     }
     let shift = grain::shift(grain.tile.seed, grain.frame, canvas);
     let bytes = grain_bytes(grain, effect, (shift, !detail.is_empty()));
-    let noise = (&gpu.blur.grain_noise, &bytes[..]);
+    let noise = (&gpu.blur().grain_noise, &bytes[..]);
     draw_step(
         gpu,
         noise,
@@ -2265,7 +2265,7 @@ fn grain_into(
         mask: input,
         cells: None,
     };
-    let last = (&gpu.blur.grain, &bytes[..]);
+    let last = (&gpu.blur().grain, &bytes[..]);
     draw_step(gpu, last, views, &made.view, encoder);
     landed(gpu, own, (made, free), on, encoder);
 }
@@ -2277,7 +2277,7 @@ fn effects_into(
     effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
 ) {
-    let pipes = &gpu.blur;
+    let pipes = gpu.blur();
     let size = own.texture.size();
     for effect in effects {
         let on = match effect.masks.is_empty() {
