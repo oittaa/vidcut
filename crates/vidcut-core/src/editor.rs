@@ -829,6 +829,9 @@ impl Editor {
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
             _ => {}
         }
+        if request.in_queue() {
+            return self.queue(&request, dry_run);
+        }
         let mut working = self.project.clone();
         let mut parts = Vec::new();
         let result = match &request {
@@ -1253,6 +1256,24 @@ impl Editor {
             "the undo step makes another project as JSON"
         );
         Ok((project, history, moved))
+    }
+
+    fn queue(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
+        let mut working = self.project.clone();
+        let result = ops::render::change(&mut working, request)?;
+        let changes = diff(&self.project, &working);
+        if !dry_run {
+            working.rev = self.project.rev + 1;
+            self.project = working;
+        }
+        Ok(Response {
+            rev: self.project.rev,
+            changes,
+            result,
+            dry_run,
+            via: String::new(),
+            warnings: Vec::new(),
+        })
     }
 
     fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {
@@ -3089,7 +3110,8 @@ fn batch(
                 | Request::HistoryRestore { .. }
                 | Request::HistoryRevert { .. }
                 | Request::Apply { .. }
-        ) {
+        ) || cmd.in_queue()
+        {
             return Err(Error::usage(format!(
                 "entry {}: {} cannot be batched",
                 i + 1,
@@ -8954,6 +8976,7 @@ pub fn query(
         ),
         Request::BinsList {} => json!(p.bins),
         Request::TimelineList {} => ops::timelines::list(p),
+        Request::RenderList {} => ops::render::list(p),
         Request::GradeCopy {
             clip,
             timeline,
@@ -9575,6 +9598,7 @@ pub fn query(
         | Request::Doctor {}
         | Request::ExportPlan(_)
         | Request::ExportStart(_)
+        | Request::RenderStart { .. }
         | Request::FrameRender { .. }
         | Request::FrameScope { .. }
         | Request::StoryboardRender { .. }

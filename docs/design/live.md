@@ -178,6 +178,7 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 
 - These requests are jobs:
   - `export.start` to a media file
+  - each job that `render.start` renders ([export](export.md#the-guis-exports))
   - `proxy.generate`
   - `subtitles.transcribe`, `media.transcribe`, and `analyze.words` when it hears the timeline
   - `subtitles.retime` and `subtitles.time_words`

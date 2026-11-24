@@ -281,6 +281,33 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 r.rev
             );
         }
+        "render.add" if r.dry_run => {
+            let files: Vec<&str> = (r.result["existing"].as_array().into_iter().flatten())
+                .filter_map(Value::as_str)
+                .collect();
+            match files.is_empty() {
+                true => println!("dry run: {method}: no output file exists"),
+                false => println!("dry run: {method}: {} exists", files.join(", ")),
+            }
+        }
+        "render.add" => {
+            let id = r.result["id"].as_str().unwrap_or_default();
+            println!("ok {method}: {id} (rev {})", r.rev);
+        }
+        "render.remove" | "render.clear" => {
+            let removed: Vec<&str> = (r.result["removed"].as_array().into_iter().flatten())
+                .filter_map(Value::as_str)
+                .collect();
+            let removed = if removed.is_empty() {
+                "none".to_string()
+            } else {
+                removed.join(", ")
+            };
+            println!("ok {method}: removed {removed} (rev {})", r.rev);
+        }
+        "render.move" | "render.rename" | "render.clear_status" | "render.ended" => {
+            println!("ok {method} (rev {})", r.rev);
+        }
         "timeline.list" => {
             let open = r.result["open"].as_str();
             for t in r.result["timelines"].as_array().into_iter().flatten() {

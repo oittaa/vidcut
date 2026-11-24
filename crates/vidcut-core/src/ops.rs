@@ -13,6 +13,7 @@ pub mod linked;
 pub mod motion;
 pub mod normalize;
 pub mod picture;
+pub mod render;
 mod source_overwrite;
 pub mod speed;
 pub mod subtitles;

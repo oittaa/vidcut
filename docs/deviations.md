@@ -41,6 +41,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export page also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
+  - Each render of the render queue is a job too. The Jobs window also shows it.
   - Create Subtitles from Audio is a job too. It downloads its models as a job.
   - No progress dialog opens. Jobs shows the progress of each job, and can cancel it.
 - **Why:**

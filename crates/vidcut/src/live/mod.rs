@@ -23,13 +23,13 @@ use vidcut_core::editor::{
     Env, compound_context, media_context, resolve_clip, resolve_cue, source_context,
 };
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
+use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, RenderStatus, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GradeLevel, GradePalette,
-    GuiPanel, OneOrMany, Page, PoolMode, PrimariesView, ScreenshotTarget, TimecodeDisplay,
-    TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, ExportParams, GeneratorSettings, GradeLevel,
+    GradePalette, GuiPanel, OneOrMany, Page, PoolMode, PrimariesView, ScreenshotTarget,
+    TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -99,6 +99,8 @@ pub enum GuiChange {
     Palette(GradePalette),
     Primaries(PrimariesView),
     Window(usize),
+    QueueJobs(Vec<String>),
+    JobDetails(bool),
     Nodes(Vec<String>, bool),
     Element(u8),
     GradeNodes(Vec<u32>, Option<u32>),
@@ -191,6 +193,8 @@ pub struct GuiState {
     pub target: String,
     pub timeline: TimelineState,
     pub windows: Vec<GuiPanel>,
+    pub jobs: Vec<String>,
+    pub job_details: bool,
 }
 
 pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
@@ -1884,6 +1888,30 @@ impl Live {
         {
             return self.start_export(envelope, job);
         }
+        if let Request::RenderStart { .. } = &envelope.request {
+            return self.start_queue(envelope, job);
+        }
+        if let Some(busy) = self.rendering(&envelope.request) {
+            return self.finish(
+                job,
+                Err(Error::invalid(format!("{busy} renders now; stop it first"))),
+            );
+        }
+        if let Request::RenderAdd(params) = &envelope.request
+            && let Some(open) = &self.project
+        {
+            let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
+            let files = match crate::queue::existing(open.project(), params, &proxies) {
+                Ok(f) => f,
+                Err(e) => return self.finish(job, Err(e)),
+            };
+            if envelope.dry_run {
+                return self.finish(job, Ok(answer(json!({ "existing": files }))));
+            }
+            if let Err(e) = crate::queue::refuse_existing(&files) {
+                return self.finish(job, Err(e));
+            }
+        }
         let limit = match &envelope.request {
             Request::JobsWait { timeout, .. } => {
                 match timeout.map(|t| Duration::try_from_secs_f64(t.max(0.0))) {
@@ -2198,6 +2226,101 @@ impl Live {
         } else {
             self.finish(job, Ok(answer(json!({ "job": id }))));
         }
+        self.spawn_export(id, project, project_path, params, cancel, progress_tx, gate);
+    }
+
+    fn rendering(&self, request: &Request) -> Option<String> {
+        let gone = match request {
+            Request::RenderRemove { jobs } => jobs.to_vec(),
+            Request::RenderClear { all } => {
+                let p = self.project.as_ref()?.project();
+                (p.queue.iter())
+                    .filter(|j| *all || matches!(j.status, Some(RenderStatus::Completed { .. })))
+                    .map(|j| j.id.clone())
+                    .collect()
+            }
+            _ => return None,
+        };
+        (self.jobs.iter())
+            .filter(|j| j.unfinished())
+            .filter_map(|j| j.render.clone())
+            .find(|r| gone.contains(r))
+    }
+
+    fn start_queue(&mut self, envelope: Envelope, job: Job) {
+        let Some(open) = &self.project else {
+            return self.finish(job, Err(no_project()));
+        };
+        let Request::RenderStart {
+            jobs,
+            again,
+            replace,
+        } = &envelope.request
+        else {
+            unreachable!("checked by the caller");
+        };
+        let busy: Vec<String> = (self.jobs.iter())
+            .filter(|j| j.unfinished())
+            .filter_map(|j| j.render.clone())
+            .collect();
+        let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
+        let jobs = jobs.as_ref().map(|j| j.to_vec());
+        let plan =
+            match crate::queue::plan(open.project(), &proxies, jobs.as_deref(), *again, *replace) {
+                Ok(plan) => plan,
+                Err(e) => return self.finish(job, Err(e)),
+            };
+        if envelope.dry_run {
+            return self.finish(job, Ok(answer(plan.json())));
+        }
+        if let Err(e) = plan.refuse(*again) {
+            return self.finish(job, Err(e));
+        }
+        let project_path = open.store.path().to_path_buf();
+        let mut started = Vec::new();
+        for picked in plan.render {
+            if busy.contains(&picked.job) {
+                continue;
+            }
+            let id = format!("j{}", self.next_job);
+            self.next_job += 1;
+            let cancel = Arc::new(AtomicBool::new(false));
+            let params = serde_json::to_value(&picked.params).unwrap_or_default();
+            let mut info = JobInfo::new(id.clone(), job.origin.name(), params);
+            info.render = Some(picked.job.clone());
+            let title = info.title.clone();
+            self.add_job(info, cancel.clone());
+            let gate = self.take_turn(&id, true, &title, None);
+            started.push(json!({ "job": picked.job, "id": id }));
+            self.spawn_export(
+                id,
+                picked.project,
+                project_path.clone(),
+                picked.params,
+                cancel,
+                None,
+                gate,
+            );
+        }
+        self.finish(
+            job,
+            Ok(answer(
+                json!({ "started": started, "skipped": plan.skipped }),
+            )),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_export(
+        &mut self,
+        id: String,
+        project: Project,
+        project_path: PathBuf,
+        params: ExportParams,
+        cancel: Arc<AtomicBool>,
+        progress_tx: Option<Sender<ReplyEvent>>,
+        gate: Receiver<()>,
+    ) {
         let tx = self.tx.clone();
         let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
             let _noting = job_notes(&tx, &id);
@@ -2448,10 +2571,26 @@ impl Live {
         if j.kind == "proxy" {
             self.missing_watch.look_again();
         }
-        if j.origin != (Origin::Gui { drag: false }).name() && j.origin != Origin::Session.name() {
+        let output = j.params["output"].as_str().map(PathBuf::from);
+        let queued = (j.render.clone()).map(|job| Request::RenderEnded {
+            job,
+            status: crate::queue::status(result, j.clock.elapsed().as_secs_f64()),
+        });
+        let told =
+            j.origin == (Origin::Gui { drag: false }).name() || j.origin == Origin::Session.name();
+        let kind = j.kind;
+        if let Some(ended) = queued
+            && let Request::RenderEnded { job, .. } = &ended
+            && self.project.as_ref().is_some_and(|o| {
+                (o.project().queue.iter())
+                    .any(|q| &q.id == job && Some(&q.export.output) == output.as_ref())
+            })
+        {
+            let _ = self.edit(Envelope::new(ended), Origin::Session);
+        }
+        if !told {
             return;
         }
-        let kind = j.kind;
         match result {
             Ok(r) => {
                 self.notice(format!("{kind} {id} finished"), false);
@@ -3377,11 +3516,15 @@ impl Live {
                 palette,
                 primaries,
                 window,
+                jobs,
+                job_details,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
                     .chain(palette.map(GuiChange::Palette))
                     .chain(primaries.map(GuiChange::Primaries))
                     .chain(window.map(GuiChange::Window))
+                    .chain(jobs.map(GuiChange::QueueJobs))
+                    .chain(job_details.map(GuiChange::JobDetails))
                     .collect();
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))

@@ -169,6 +169,13 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("speed.ease", &["clips"]),
     ("export.start", &["output"]),
     ("export.plan", &["output"]),
+    ("render.add", &["output"]),
+    ("render.start", &["jobs"]),
+    ("render.remove", &["jobs"]),
+    ("render.move", &["job", "to"]),
+    ("render.rename", &["job", "name"]),
+    ("render.clear_status", &["jobs"]),
+    ("render.ended", &["job"]),
     ("jobs.get", &["job"]),
     ("jobs.wait", &["job"]),
     ("jobs.cancel", &["job"]),
@@ -300,6 +307,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "proxy",
         "Playback proxies: smaller copies the preview plays",
+    ),
+    (
+        "render",
+        "The render queue of the Export page: exports that wait for a render",
     ),
     (
         "selection",
@@ -596,6 +607,10 @@ const EXAMPLES: &[(&str, &str)] = &[
         "motion.track",
         "vidcut motion track c3 Tracker1 --download\n  \
          vidcut motion track c3 Tracker1 --pattern 2 --frame 40 --way forward",
+    ),
+    (
+        "render.add",
+        "vidcut render add out.mp4 --preset youtube-1080p --range in..out\n  vidcut render start",
     ),
     (
         "export.start",

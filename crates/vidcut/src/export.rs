@@ -426,6 +426,13 @@ fn preset(name: &str) -> Result<Preset> {
         .ok_or_else(|| Error::not_found(format!("no preset {name:?}; see `vidcut presets list`")))
 }
 
+pub(crate) fn usual_preset(params: &ExportParams) -> &'static str {
+    match params.per_clip {
+        true => "h264-master",
+        false => default_preset(&params.output),
+    }
+}
+
 fn default_preset(output: &Path) -> &'static str {
     match output
         .extension()
@@ -591,7 +598,7 @@ impl Output {
         }
     }
 
-    fn taken(&self) -> Option<PathBuf> {
+    pub(crate) fn taken(&self) -> Option<PathBuf> {
         if !self.settings.container.image_sequence() {
             return Some(self.path.clone()).filter(|file| file.exists());
         }
@@ -686,11 +693,7 @@ pub fn prepare(
                     params.output.display()
                 )));
             }
-            let name = if params.per_clip {
-                "h264-master"
-            } else {
-                default_preset(&params.output)
-            };
+            let name = usual_preset(params);
             (preset(name)?.settings, Some(name.to_string()))
         }
         (Some(_), Some(_)) => {

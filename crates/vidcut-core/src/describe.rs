@@ -108,9 +108,16 @@ pub fn describe_at(
             _ => format!("Duplicate timeline {}", d.timeline("timeline")),
         },
         "timeline.delete" => format!("Delete timeline {}", d.timeline("timeline")),
-        "timeline.set" => match d.text("timeline").as_str() {
-            "" => "Change the timeline settings".to_string(),
-            _ => format!("Change the settings of timeline {}", d.timeline("timeline")),
+        "timeline.set" if params.as_object().is_some_and(|o| o.len() == 1) => {
+            match params["render"].as_str() {
+                Some("entire") => "Render Entire Timeline".to_string(),
+                Some(_) => "Render In/Out Range".to_string(),
+                None => "Change the timeline settings".to_string(),
+            }
+        }
+        "timeline.set" => match params["timeline"].is_null() {
+            true => "Change the timeline settings".to_string(),
+            false => format!("Change the settings of timeline {}", d.timeline("timeline")),
         },
         "timeline.import" => match d.text("mode").as_str() {
             "append" => format!("Import timeline {} after the last clip", d.file("path")),

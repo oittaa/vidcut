@@ -229,7 +229,11 @@ pub(super) fn footer(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 pub(super) fn main_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
+    main_button_ui(ui, label, enabled).clicked()
+}
+
+pub(super) fn main_button_ui(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
     let c = theme::colors();
     let button = egui::Button::new(RichText::new(label).color(c.selected_text)).fill(c.selection);
-    ui.add_enabled(enabled, button).clicked()
+    ui.add_enabled(enabled, button)
 }

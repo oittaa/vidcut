@@ -12,6 +12,7 @@ use vidcut_core::export::{
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
 
+use super::export_page::{AddChoice, QueueStep};
 use super::folders::Kind;
 use super::theme;
 use super::workspace::{Workspace, dim, escape_cancels};
@@ -30,10 +31,24 @@ impl Ask {
         method: &str,
         params: Value,
     ) -> Self {
+        Self::send_json(live, ctx, json!({ "method": method, "params": params }))
+    }
+
+    pub(super) fn send_dry(
+        live: &live::Handle,
+        ctx: &egui::Context,
+        method: &str,
+        params: Value,
+    ) -> Self {
+        let envelope = json!({ "method": method, "params": params, "dry_run": true });
+        Self::send_json(live, ctx, envelope)
+    }
+
+    fn send_json(live: &live::Handle, ctx: &egui::Context, envelope: Value) -> Self {
+        let envelope = Envelope::from_json(envelope);
         let slot = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let (out, halt, live, ctx) = (slot.clone(), stop.clone(), live.clone(), ctx.clone());
-        let envelope = Envelope::from_json(json!({ "method": method, "params": params }));
         let _ = crate::threads::spawn("vidcut-ask", crate::threads::Work::Interactive, move || {
             let mut going = |_| !halt.load(Ordering::Relaxed);
             let result = envelope
@@ -174,6 +189,10 @@ pub struct ExportUi {
     pub(super) render: Option<Box<Render>>,
     render_wanted: bool,
     pub(super) viewer_before: Option<vidcut_core::request::ViewerMode>,
+    pub(super) selected: Vec<String>,
+    pub(super) job_details: bool,
+    pub(super) queue: Option<super::export_page::QueueStep>,
+    pub(super) renaming: Option<super::export_page::Renaming>,
     starting: Option<Starting>,
     pub show_jobs: bool,
     jobs_seen: std::collections::HashMap<String, JobState>,
@@ -210,11 +229,21 @@ impl ExportUi {
     pub(super) fn switch_project(&mut self) {
         self.render = None;
         self.render_wanted = false;
+        self.selected.clear();
+        self.queue = None;
+        self.renaming = None;
     }
 
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
         matches!(self.otio, Some(Otio::Choose(..) | Otio::Missing { .. }))
             || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
+            || matches!(
+                self.queue,
+                Some(QueueStep::ReRender { .. } | QueueStep::Replace { .. })
+            )
+            || self.starting.as_ref().is_some_and(|s| {
+                !s.offline.is_empty() || s.weights || (!s.existing.is_empty() && s.rename.is_none())
+            })
     }
 }
 
@@ -236,6 +265,18 @@ struct Starting {
     ask: Option<Ask>,
     weights: bool,
     offline: Vec<String>,
+    check: Option<Ask>,
+    existing: Vec<String>,
+    rename: Option<Picked>,
+}
+
+impl Starting {
+    fn method(&self) -> &'static str {
+        match self.from {
+            From::Quick => "export.start",
+            From::Page => "render.add",
+        }
+    }
 }
 
 enum Otio {
@@ -372,7 +413,7 @@ fn fixed_format(c: VideoCodec) -> bool {
     )
 }
 
-fn name<T: serde::Serialize>(v: &T) -> String {
+pub(super) fn name<T: serde::Serialize>(v: &T) -> String {
     serde_json::to_value(v)
         .ok()
         .and_then(|v| v.as_str().map(String::from))
@@ -483,7 +524,7 @@ pub(super) fn near_center(ctx: &egui::Context, w: f32, h: f32) -> egui::Pos2 {
     )
 }
 
-fn clock(secs: f64) -> String {
+pub(super) fn clock(secs: f64) -> String {
     let s = secs.max(0.0).round() as u64;
     if s >= 3600 {
         format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
@@ -846,6 +887,9 @@ impl Workspace {
                 ask: None,
                 weights: false,
                 offline: Vec::new(),
+                check: None,
+                existing: Vec::new(),
+                rename: None,
             });
         }
         if open {
@@ -880,6 +924,69 @@ impl Workspace {
                 None => {}
             }
         }
+        if let Some(check) = &s.check
+            && let Some(r) = check.take()
+        {
+            s.check = None;
+            match r {
+                Ok(r) => {
+                    let files = r.result["existing"].as_array().into_iter().flatten();
+                    s.existing = files.filter_map(Value::as_str).map(String::from).collect();
+                    if s.existing.is_empty() {
+                        self.send_now(ctx, &mut s);
+                    }
+                }
+                Err(e) => {
+                    if let Some(d) = &mut self.export.render {
+                        d.error = Some(e.message);
+                    }
+                    return;
+                }
+            }
+        }
+        if !s.existing.is_empty() {
+            let rename = !s.params["per_clip"].as_bool().unwrap_or(false);
+            match super::export_page::ask_add_replace(ctx, &s.existing, rename) {
+                Some(AddChoice::Replace) => {
+                    s.existing.clear();
+                    s.params["overwrite"] = json!(true);
+                    self.send_now(ctx, &mut s);
+                }
+                Some(AddChoice::Rename) => {
+                    s.existing.clear();
+                    let output = PathBuf::from(s.params["output"].as_str().unwrap_or_default());
+                    let folder = output.parent().map(Path::to_path_buf).unwrap_or_default();
+                    let file = output.file_name().map(|f| f.to_string_lossy().to_string());
+                    let ext = output.extension().map(|e| e.to_string_lossy().to_string());
+                    let (file, ext) = (file.unwrap_or_default(), ext.unwrap_or_default());
+                    let dialogs = self.dialogs.clone();
+                    s.rename = Some(Picked::ask(ctx, move || {
+                        dialogs.save_file("Rename", &folder, &file, &[ext.as_str()])
+                    }));
+                }
+                Some(AddChoice::Cancel) => return,
+                None => {}
+            }
+        }
+        if let Some(p) = &s.rename
+            && let Some(choice) = p.take()
+        {
+            s.rename = None;
+            let Some(path) = choice else {
+                return;
+            };
+            s.params["output"] = json!(path);
+            s.params["overwrite"] = json!(path.exists());
+            if let Some(d) = &mut self.export.render {
+                if let Some(stem) = path.file_stem() {
+                    d.name = stem.to_string_lossy().to_string();
+                }
+                if let Some(folder) = path.parent() {
+                    d.folder = folder.to_string_lossy().to_string();
+                }
+            }
+            self.send_now(ctx, &mut s);
+        }
         if s.weights {
             let (retimes, upscalers) = self.ai_models();
             let needs = super::upscale::needed(&retimes, &upscalers);
@@ -893,16 +1000,20 @@ impl Workspace {
                 if download {
                     s.params["download"] = json!(true);
                 }
-                s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
+                s.ask = Some(Ask::send(&self.live, ctx, s.method(), s.params.clone()));
             }
         }
         if let Some(ask) = &s.ask
             && let Some(r) = ask.take()
         {
             match r {
-                Ok(_) => match s.from {
+                Ok(r) => match s.from {
                     From::Quick => self.export.quick = None,
-                    From::Page => {}
+                    From::Page => {
+                        if let Some(id) = r.result["id"].as_str() {
+                            self.export.selected = vec![id.to_string()];
+                        }
+                    }
                 },
                 Err(e) => match s.from {
                     From::Quick => {
@@ -939,17 +1050,24 @@ impl Workspace {
     }
 
     fn send_checked(&self, ctx: &egui::Context, s: &mut Starting) {
+        if s.from == From::Page && s.params["overwrite"] != json!(true) {
+            s.check = Some(Ask::send_dry(&self.live, ctx, s.method(), s.params.clone()));
+            return;
+        }
+        self.send_now(ctx, s);
+    }
+
+    fn send_now(&self, ctx: &egui::Context, s: &mut Starting) {
         let (retimes, upscalers) = self.ai_models();
         if !super::upscale::needed(&retimes, &upscalers).is_empty() {
             s.weights = true;
         } else {
-            s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
+            s.ask = Some(Ask::send(&self.live, ctx, s.method(), s.params.clone()));
         }
     }
 
     pub(super) fn start_render(&mut self, ctx: &egui::Context, d: &mut Render) {
-        let mut params = d.params();
-        params["background"] = json!(true);
+        let params = d.params();
         d.error = None;
         self.folders.remember(Kind::Exports, &d.output());
         let mut s = Starting {
@@ -959,6 +1077,9 @@ impl Workspace {
             picking: None,
             weights: false,
             offline: Vec::new(),
+            check: None,
+            existing: Vec::new(),
+            rename: None,
         };
         self.send_start(ctx, &mut s);
         self.export.starting = Some(s);
