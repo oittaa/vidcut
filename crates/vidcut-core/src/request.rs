@@ -2888,7 +2888,8 @@ pub enum Request {
     /// values and its usual Key Output. With `keep_nodes`, each corrector
     /// does, and the nodes and their links stay. With `node` or
     /// `keep_nodes`, the keyframes stay, and the values go back where
-    /// `grade.set` changes them.
+    /// `grade.set` changes them. The palette `primaries` keeps the Auto
+    /// Color tool of the corrector.
     #[serde(rename = "grade.clear")]
     GradeClear {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2904,6 +2905,10 @@ pub enum Request {
         /// all of them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         palette: Option<GradePalette>,
+        /// With `node`, in place of `palette`: only the Auto Color tool of
+        /// the corrector goes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto_color: bool,
         /// The time whose keyframe goes back. Left out: the playhead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
@@ -2939,6 +2944,11 @@ pub enum Request {
     /// The master gets the luma of these points. New Lift and Gain of red,
     /// green, blue and the master map them to 0 and 1, in place of all
     /// earlier Lift and Gain values. Undo takes them back.
+    ///
+    /// With `tool`, the result goes to the Auto Color tool of the corrector
+    /// in place of its Lift and Gain, and the tool turns on. `grade.set`
+    /// with `auto_color_on` turns the tool off and on. `grade.clear` with
+    /// `auto_color` removes it.
     #[serde(rename = "grade.auto_color")]
     GradeAutoColor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2950,6 +2960,9 @@ pub enum Request {
         /// Left out: the playhead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
+        /// The result goes to the Auto Color tool of the corrector.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tool: bool,
     },
     /// Add a corrector to the grade of a clip, or with `timeline` to the
     /// timeline grade, as `add` says. The new node gets the next number.
@@ -4503,10 +4516,11 @@ pub enum Request {
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
     /// tab's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
-    /// clip (the topmost clip at the playhead when none is selected), or
-    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom, Auto
-    /// Color and their buttons, or `select_tool` (a tool to add on the
-    /// effects page). Answers what `gui.state` does.
+    /// clip (the topmost clip at the playhead when none is selected), the
+    /// viewer's `color_tool` (the switch, Auto Color and Reset of the Auto
+    /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
+    /// Dynamic Zoom, Color and their buttons, or `select_tool` (a tool to
+    /// add on the effects page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -4804,6 +4818,11 @@ pub struct GradeChange {
     /// Where the Log Highlight range starts, below 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub high_range: Option<f64>,
+    /// The Auto Color tool of the corrector changes the picture (true), or
+    /// keeps its values and does nothing (false). The corrector needs the
+    /// tool (`grade.auto_color` with `tool`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_color_on: Option<bool>,
 }
 
 /// What changes on a node of a grade, apart from the values of a corrector.
@@ -5941,8 +5960,11 @@ pub enum GuiPanel {
     /// The viewer's Dynamic Zoom boxes on the selected clip: the start box
     /// and the end box.
     DynamicZoom,
-    /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
-    /// Swap, the ease and Reset.
+    /// The viewer's Color tool on the selected clip: the switch, Auto Color
+    /// and Reset of the Auto Color tool of node 1.
+    ColorTool,
+    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Color, the
+    /// flips, Swap, the ease, Auto Color and Reset.
     Tools,
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.

@@ -219,7 +219,7 @@ fn stats_on(
         .ok_or_else(|| Error::Invalid(format!("{}: no video stream", path.display())))?;
     let (index, tb) = (stream.index(), stream.time_base());
     let tick = f64::from(tb);
-    let rate = f64::from(stream.avg_frame_rate());
+    let rate = source.rate().map_or(0.0, f64::from);
     let mut ctx = codec::context::Context::from_parameters(stream.parameters())
         .ctx(|| "creating video decoder context".into())?;
     unsafe { (*ctx.as_mut_ptr()).pkt_timebase = tb.into() };
