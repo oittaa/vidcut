@@ -953,6 +953,9 @@ pub struct Noising {
     pub coloring: NoiseColoring,
     pub colors: [[f64; 4]; 2],
     pub stops: Vec<GradientStop>,
+    pub offset: f64,
+    pub repeat: GradientRepeat,
+    pub samples: u32,
     pub maps: [bool; 2],
 }
 
@@ -973,6 +976,9 @@ impl Noising {
             coloring: f.colored(),
             colors: [f.first(), f.second()],
             stops: f.colors().to_vec(),
+            offset: f.shift(),
+            repeat: f.repeats(),
+            samples: f.samples().count(),
             maps,
         }
     }
@@ -987,6 +993,7 @@ pub struct Painting {
     pub stops: Vec<GradientStop>,
     pub offset: f64,
     pub repeat: GradientRepeat,
+    pub samples: u32,
 }
 
 impl Painting {
@@ -1000,6 +1007,7 @@ impl Painting {
             stops: b.colors().to_vec(),
             offset: b.shift(),
             repeat: b.repeats(),
+            samples: b.samples().count(),
         }
     }
 }

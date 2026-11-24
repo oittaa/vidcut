@@ -1464,13 +1464,14 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 .collect();
             println!("page {}", v["page"].as_str().unwrap_or("-"));
             println!(
-                "effects clip {}, nodes {}",
+                "effects clip {}, nodes {}, active {}",
                 v["clip"].as_str().unwrap_or("-"),
                 if nodes.is_empty() {
                     "-".to_string()
                 } else {
                     nodes.join(" ")
-                }
+                },
+                v["node"].as_str().unwrap_or("-")
             );
             let viewers = &v["viewers"];
             println!(

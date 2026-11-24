@@ -4,8 +4,8 @@ use std::time::Instant;
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP,
-    ARROWS_LEFT_RIGHT, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND,
-    FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
+    ARROWS_LEFT_RIGHT, CARET_DOWN, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT,
+    CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::composition::Corner;
@@ -20,7 +20,7 @@ use vidcut_core::model::{
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
     JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
     Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
-    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
     TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -2100,8 +2100,18 @@ fn background_rows(
         );
         let repeat = (b.repeats(), GradientRepeat::default());
         choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+        sub_pixel_row(ui, slot, b.samples(), acts);
     }
     value(ui, acts, V::Blend, "Blend");
+}
+
+fn sub_pixel_row(ui: &mut egui::Ui, slot: usize, now: SubPixel, acts: &mut Vec<Act>) {
+    let all = (
+        &SubPixel::ALL[..],
+        SubPixel::label as fn(SubPixel) -> &'static str,
+    );
+    let now = (now, SubPixel::default());
+    choice_row(ui, (slot, "Sub-Pixel", "sub_pixel"), now, all, acts);
 }
 
 fn noise_rows(
@@ -2155,6 +2165,14 @@ fn noise_rows(
         NoiseColoring::Gradient => {
             let stops = (f.colors(), !f.stops.is_empty());
             gradient_rows(ui, (slot, &n.name), stops, acts);
+            value(ui, acts, V::Offset, "Offset");
+            let repeats = (
+                &GradientRepeat::ALL[..],
+                GradientRepeat::label as fn(GradientRepeat) -> &'static str,
+            );
+            let repeat = (f.repeats(), GradientRepeat::default());
+            choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+            sub_pixel_row(ui, slot, f.samples(), acts);
         }
     }
     value(ui, acts, V::Blend, "Blend");
@@ -2508,9 +2526,15 @@ fn operation_rows(
     go
 }
 
-fn node_header(ui: &mut egui::Ui, n: &Node, (active, view): (bool, View<'_>), acts: &mut Vec<Act>) {
+fn node_header(
+    ui: &mut egui::Ui,
+    n: &Node,
+    (active, open, view): (bool, bool, View<'_>),
+    acts: &mut Vec<Act>,
+) {
     let header = ui.horizontal(|ui| {
-        let name = RichText::new(&n.name).strong();
+        let caret = if open { CARET_DOWN } else { CARET_RIGHT };
+        let name = RichText::new(format!("{caret} {}", n.name)).strong();
         let name = if active {
             name.color(theme::colors().accent)
         } else {
@@ -2603,6 +2627,7 @@ impl Workspace {
             }
         }
         let active = self.effects_page.picked().map(str::to_owned);
+        let open = active.is_some();
         let shown: Vec<Node> = picked
             .iter()
             .map(|&k| comp.nodes[k].sampled(source))
@@ -2617,12 +2642,12 @@ impl Workspace {
                 for (&k, n) in picked.iter().zip(&shown) {
                     let mut acts = Vec::new();
                     let on = active.as_deref() == Some(n.name.as_str());
-                    node_header(ui, n, (on, (&keys, &viewed)), &mut acts);
+                    node_header(ui, n, (on, open, (&keys, &viewed)), &mut acts);
                     let slot = node_slot(k);
-                    if n.tool.tracker().is_some() {
+                    if open && n.tool.tracker().is_some() {
                         let node = &comp.nodes[k];
                         self.tracker_section(ui, (&clip, &comp), node, (slot, &mut acts));
-                    } else {
+                    } else if open {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
                             node_rows(ui, i, (slot, n, element), &sight, &mut acts);
@@ -4683,6 +4708,38 @@ fn tint_bytes(color: [f64; 3]) -> [u8; 3] {
     color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
+fn vignette_center(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, v): (usize, &Effect, &Vignette),
+    acts: &mut Vec<Act>,
+) {
+    let knobs = [VignetteKnob::CenterX, VignetteKnob::CenterY].map(Knob::Vignette);
+    let set = v.middle() != Vignette::MIDDLE;
+    label(ui, "Center", set);
+    ui.horizontal(|ui| {
+        for k in knobs {
+            let range = k.dial().range;
+            drag(
+                ui,
+                Key::Effect(n, k),
+                i,
+                (k.read(e), range),
+                &Look::default(),
+                acts,
+            );
+        }
+        let keys = knobs[0].value_of(e).and_then(|(v, _)| i.mark_of(n, v));
+        if let Some(keys) = keys {
+            key_acts(ui, Key::Effect(n, knobs[0]), &keys, acts);
+        }
+    });
+    if reset(ui, set) {
+        acts.push(Act::EffectSet(n, json!({ "center": Vignette::MIDDLE })));
+    }
+    ui.end_row();
+}
+
 fn vignette_main(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -4735,7 +4792,9 @@ fn vignette_main(
         vignette(ui, VignetteKnob::Rotation, acts);
     }
     vignette(ui, VignetteKnob::Anamorphism, acts);
-    if advanced {
+    if advanced && slot_node(n).is_some() {
+        vignette_center(ui, i, (n, e, v), acts);
+    } else if advanced {
         vignette(ui, VignetteKnob::CenterX, acts);
         vignette(ui, VignetteKnob::CenterY, acts);
     }
