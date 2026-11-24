@@ -4,9 +4,9 @@ use crate::effect_keys::Keyed;
 use crate::model::{
     Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
     Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
-    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
-    MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime, ShadingElement,
-    TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
+    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, MaskChannel, Merge, MergeEdges,
+    MergeOperator, MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime,
+    ShadingElement, SubPixel, TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -94,12 +94,39 @@ impl BlurClipping {
         BlurClipping::Domain,
         BlurClipping::Frame,
     ];
+    pub const MASK: [BlurClipping; 2] = [BlurClipping::None, BlurClipping::Frame];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::None => "None",
             Self::Domain => "Domain",
             Self::Frame => "Frame",
+        }
+    }
+}
+
+impl MaskChannel {
+    pub const ALL: [MaskChannel; 8] = [
+        MaskChannel::Red,
+        MaskChannel::Green,
+        MaskChannel::Blue,
+        MaskChannel::Alpha,
+        MaskChannel::Hue,
+        MaskChannel::Luminance,
+        MaskChannel::Saturation,
+        MaskChannel::Coverage,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Red => "Red",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+            Self::Alpha => "Alpha",
+            Self::Hue => "Hue",
+            Self::Luminance => "Luminance",
+            Self::Saturation => "Saturation",
+            Self::Coverage => "Coverage",
         }
     }
 }
@@ -125,6 +152,7 @@ impl Default for Mask {
             y_rotation: None,
             corner_radius: None,
             fill_method: None,
+            clipping: None,
             points: Vec::new(),
         }
     }
@@ -518,6 +546,10 @@ impl Background {
     pub fn repeats(&self) -> GradientRepeat {
         self.repeat.unwrap_or_default()
     }
+
+    pub fn samples(&self) -> SubPixel {
+        self.sub_pixel.unwrap_or_default()
+    }
 }
 
 impl Default for FastNoise {
@@ -539,6 +571,9 @@ impl Default for FastNoise {
             color1: None,
             color2: None,
             stops: Vec::new(),
+            offset: None,
+            repeat: None,
+            sub_pixel: None,
             image: ImageFormat::default(),
         }
     }
@@ -607,6 +642,18 @@ impl FastNoise {
         }
     }
 
+    pub fn shift(&self) -> f64 {
+        self.offset.unwrap_or(0.0)
+    }
+
+    pub fn repeats(&self) -> GradientRepeat {
+        self.repeat.unwrap_or_default()
+    }
+
+    pub fn samples(&self) -> SubPixel {
+        self.sub_pixel.unwrap_or_default()
+    }
+
     pub fn color_values(second: bool) -> [EffectValue; 4] {
         use EffectValue as V;
         match second {
@@ -665,6 +712,36 @@ impl GradientType {
             GradientType::Cross => "Cross",
             GradientType::Radial => "Radial",
             GradientType::Angle => "Angle",
+        }
+    }
+}
+
+impl SubPixel {
+    pub const ALL: [SubPixel; 5] = [
+        SubPixel::One,
+        SubPixel::Two,
+        SubPixel::Three,
+        SubPixel::Four,
+        SubPixel::Five,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SubPixel::One => "1x1",
+            SubPixel::Two => "2x2",
+            SubPixel::Three => "3x3",
+            SubPixel::Four => "4x4",
+            SubPixel::Five => "5x5",
+        }
+    }
+
+    pub fn count(self) -> u32 {
+        match self {
+            SubPixel::One => 1,
+            SubPixel::Two => 2,
+            SubPixel::Three => 3,
+            SubPixel::Four => 4,
+            SubPixel::Five => 5,
         }
     }
 }
@@ -1170,6 +1247,10 @@ impl Mask {
         self.soft_edge.unwrap_or(0.0)
     }
 
+    pub fn clipping(&self) -> BlurClipping {
+        self.clipping.unwrap_or(BlurClipping::None)
+    }
+
     pub fn filter(&self) -> BlurFilter {
         self.filter.unwrap_or_default()
     }
@@ -1340,6 +1421,19 @@ impl Tool {
         }
     }
 
+    pub fn takes_picture_mask(&self) -> bool {
+        self.takes(NodeInput::EffectMask) && !self.is_mask()
+    }
+
+    pub fn takes_from(&self, input: NodeInput, source: &Tool) -> bool {
+        match input {
+            NodeInput::EffectMask if self.takes_picture_mask() => {
+                source.is_mask() || source.gives_picture()
+            }
+            _ => source.feeds(input),
+        }
+    }
+
     pub fn tracker(&self) -> Option<&Tracker> {
         match self {
             Tool::Tracker(t) => Some(t),
@@ -1439,6 +1533,9 @@ impl EffectType {
 }
 
 impl Node {
+    pub const MASK_RANGE: [f64; 2] = [0.0, 1.0];
+    pub const MASK_RANGES: (f64, f64) = (-1e6, 1e6);
+
     pub fn new(name: &str, tool: Tool, place: [f64; 2]) -> Self {
         Self {
             name: name.to_string(),
@@ -1449,9 +1546,13 @@ impl Node {
             detail_map: None,
             brightness_map: None,
             pass_through: false,
+            locked: false,
             blend: None,
             blur_alpha: true,
             multiply_by_mask: false,
+            mask_channel: None,
+            mask_range: None,
+            mask_clip: None,
             place,
             keys: Vec::new(),
             connect: None,
@@ -1460,6 +1561,18 @@ impl Node {
 
     pub fn mixed(&self) -> f64 {
         self.blend.unwrap_or(1.0)
+    }
+
+    pub fn mask_channel(&self) -> MaskChannel {
+        self.mask_channel.unwrap_or_default()
+    }
+
+    pub fn mask_range(&self) -> [f64; 2] {
+        self.mask_range.unwrap_or(Node::MASK_RANGE)
+    }
+
+    pub fn mask_clip(&self) -> [bool; 2] {
+        self.mask_clip.unwrap_or([true; 2])
     }
 
     pub fn usual_point(&self, value: EffectValue) -> Option<[f64; 2]> {
@@ -1814,9 +1927,11 @@ impl Composition {
             }
             seen[i] = true;
             stack.push((i, true));
+            let mask = self.mask_picture(&self.nodes[i]).map(|m| m.name.as_str());
             let from = self.nodes[i]
                 .pictures()
                 .flatten()
+                .chain(mask)
                 .filter_map(|n| self.index(n));
             for j in from.collect::<Vec<_>>().into_iter().rev() {
                 uses[j] += 1;
@@ -1824,6 +1939,14 @@ impl Composition {
             }
         }
         Some((order, uses))
+    }
+
+    pub fn mask_picture(&self, node: &Node) -> Option<&Node> {
+        if !node.tool.takes_picture_mask() {
+            return None;
+        }
+        self.node(node.effect_mask.as_deref()?)
+            .filter(|m| !m.tool.is_mask())
     }
 
     pub fn masks_of(&self, node: &Node) -> Vec<&Node> {

@@ -1040,12 +1040,14 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - The masks and the Blend of the Text+ then go through `place::masked`.
   - `Merge::lookup` gives the affine map from a pixel of the output to a pixel of the foreground. It holds the flip, Size, Angle, Center and Invert Transform.
   - The mode, the operator, the edges and the sliders go to the shader as they are.
-- A Background gives an `Op::Make` into a free register. Its `place::Making` holds a `place::Painting`: the fill, the four colors, the gradient line in pixels, the stops, the offset and the repeat.
+- A Background gives an `Op::Make` into a free register. Its `place::Making` holds a `place::Painting`: the fill, the four colors, the gradient line in pixels, the stops, the offset, the repeat and the samples.
   - `place::masked` adds the masks and the Blend, as for a Text+.
-- A Fast Noise gives an `Op::Make` with a `place::Noising`. It holds the center in pixels, the noise cells for each pixel and the turn. It also holds the depth of Seethe at the frame, the levels and the colors.
+- A Fast Noise gives an `Op::Make` with a `place::Noising`. It holds the center in pixels, the noise cells for each pixel and the turn. It also holds the depth of Seethe at the frame, the levels, the colors, and the offset, the repeat and the samples of its gradient.
   - A mask on a map input first gives a white `Painting` through `place::masked`, in its own register. The `from` of the `Op::Make` holds these registers.
   - `place::masked` then adds the masks and the Blend.
-- `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
+- `Working.masks` holds the masks of a tool, a `place::Masks`. Its shapes come from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
+  - A picture on the effect mask of a tool gives `Masks.picture`, a `place::Picturing`: the register of that picture, its Channel, its range and its Clip.
+  - `Composition::mask_picture` names that node, and `Composition::picture_order` runs it first and counts it as a read. A node that gives no picture there gives a clear register.
   - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
   - Its `place::Softening` is the blur of its soft edge.
   - A `place::Figure` holds a `place::Outline` and its middle.
@@ -1068,6 +1070,7 @@ The draw:
   - With `Merging.replaces`, the result of `fs_merge` is the foreground that `merge_fore` reads, with no mode.
   - `made_into` draws an `Op::Make`. `fs_background` fills the register with the colors of a `Painting` as they are. The colors are not multiplied by their alpha. Thus a Merge adds them as premultiplied colors ([spec](../spec.md#the-background-tool)). The stops go to the shader in a storage buffer.
   - `fs_noise` sums the layers of `perlin`, the noise that the Glow also uses. It reads the alpha of the map registers. Its gradient uses `paint_ramp`, as `fs_background` does. Its colors are not multiplied by their alpha either.
+  - Both gradients average N x N samples in each pixel, and both use `gradient_repeat` for Repeat. `fs_noise` reads the maps once for each pixel.
   - `letters_into` draws an `Op::Text`. It clears the register and copies the text into it.
     - `burn::inked` lays out the text on the CPU and draws one shading element, with premultiplied colors. It gives only the part of the picture that the element covers.
     - A fill fills the outlines of the glyphs or the boxes. An outline strokes them. Outside Only takes the fill away from the stroke.
@@ -1084,6 +1087,7 @@ The draw:
 The masks:
 
 - `blur::mask_made` makes the mask of a tool before its passes. It uses the two pictures of the passes and two pictures of `Worked.masks`.
+  - A picture on the effect mask comes first. `fs_picture_mask` takes the level of its Channel and maps the range: (r − low) / (high − low), with a hard step when low is high. The mask is never below 0, and Clip White keeps it at 1 at most.
   - It draws each figure of a mask into one picture before the soft edge. `fs_shape` keeps the larger cover of the figures there.
 - `fs_shape` draws the coverage of one mask from the distance to its edge. Each edge thus fades over one pixel.
   - `ellipse_distance` finds the nearest point of the ellipse by Newton steps. `box_distance` gives the distance to a box with round corners.
@@ -1091,7 +1095,13 @@ The masks:
   - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
   - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
 - The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
-- `fs_mask_join` gives the mask its Invert and its Level, then adds the masks before it: a + b − a × b.
+  - Clipping Mode None also makes the mask beyond the picture. `blur::mask_pads` adds pixels at each side that the soft edge reaches from the shape.
+  - The reach is the sum of the taps of the passes (`blur::soft_reach`). The added pixels are in two textures of `Worked`. `fs_mask_join` reads them at their offset.
+  - Why: the replicate border then acts only beyond the reach, where no tap of a pixel of the picture goes.
+  - The added pixels stop at the largest texture of the device. Beyond them, the replicate border acts.
+  - A shape that is not in the reach of an edge adds no pixels. Clipping Mode Frame adds none.
+- `fs_mask_join` joins the mask to the masks before it by the Merge paint mode: n + i × (1 − c).
+  - c is the shape after Invert, and n is c × Level. i is the masks before it.
 - `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.
 
 The boxes:

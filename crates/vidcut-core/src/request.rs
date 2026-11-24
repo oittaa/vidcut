@@ -12,11 +12,11 @@ use crate::model::{
     BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel,
     EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
-    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges, MergeOperator,
-    Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType, Place,
-    ReferenceTime, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
-    ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape,
-    WindowKind, ZoomBox,
+    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
+    MergeOperator, Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType,
+    Place, ReferenceTime, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
+    TitleStyle, ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode,
+    VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3419,7 +3419,8 @@ pub enum Request {
     /// With `after` a node other than a mask, a tool goes into the picture's
     /// way after it, and each node that took that picture takes the new tool.
     /// With `after` a node that has an effect mask, a mask goes on it, after
-    /// the masks that are there. With `after` a mask, a mask goes after it
+    /// the masks that are there. A picture there is joined to nothing then.
+    /// With `after` a mask, a mask goes after it
     /// in its chain, and each mask input that took that mask takes the new
     /// mask. A tool that makes its own picture, as `text_plus`,
     /// `background` or `fast_noise`, with `after` a node other than a mask
@@ -3452,8 +3453,10 @@ pub enum Request {
     /// Join the output of node `from` to an input of `node`, in place of
     /// what was there, or with no `from`, leave that input empty. The
     /// `input` and the `foreground` take any node other than a mask. The
-    /// `effect_mask`, the `detail_map` and the `brightness_map` take a
-    /// mask. A join that makes a loop is an error.
+    /// `effect_mask` of a tool takes a mask or any other node: a picture
+    /// there gives the mask from one of its channels. The `effect_mask` of
+    /// a mask, the `detail_map` and the `brightness_map` take a mask. A
+    /// join that makes a loop is an error.
     #[serde(rename = "comp.connect")]
     CompConnect {
         clip: ClipRef,
@@ -3473,9 +3476,10 @@ pub enum Request {
         to: String,
     },
     /// Take a node out of a clip's composition. The nodes on each side join
-    /// up: what took its picture takes the picture that came into it, and
-    /// what took its mask takes the masks that came into it. The masks on
-    /// its effect mask stay, joined to nothing.
+    /// up: what took the output of a tool takes the node on its `input`,
+    /// and what took the output of a mask takes the node on its
+    /// `effect_mask`, where that input takes that node. The masks on the
+    /// effect mask of a tool stay, joined to nothing.
     #[serde(rename = "comp.remove")]
     CompRemove { clip: ClipRef, node: String },
     /// Put copies of nodes, with their values and keyframes, into the
@@ -4436,7 +4440,8 @@ pub enum Request {
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom, Auto
-    /// Color and their buttons. Answers what `gui.state` does.
+    /// Color and their buttons, or `select_tool` (a tool to add on the
+    /// effects page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -4464,11 +4469,16 @@ pub enum Request {
         window: Option<usize>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
-    /// Inspector and the viewer then show the last one. An empty list
-    /// selects none. Answers what `gui.state` does.
+    /// last one is the active node. An empty list selects none. Answers
+    /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
         nodes: Vec<String>,
+        /// False: no node is active, and the Inspector shows only the
+        /// header of each node. A box select in the node editor does this.
+        /// Left out, the last node is active.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active: Option<bool>,
         /// The shading element of a `text_plus` that the Inspector shows,
         /// from 1 to 8. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5804,6 +5814,9 @@ pub enum GuiPanel {
     /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
     /// Swap, the ease and Reset.
     Tools,
+    /// The Select Tool window of the effects page: it finds a tool by its
+    /// name or its kind, and adds it as a click in the Effects Library does.
+    SelectTool,
 }
 
 /// Media tab sort orders.
@@ -6239,6 +6252,9 @@ pub struct NodeChange {
     /// On, the node does nothing: it passes on what comes in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<bool>,
+    /// On, the values of the node do not change until it is unlocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
@@ -6248,6 +6264,18 @@ pub struct NodeChange {
     /// changes nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiply_by_mask: Option<bool>,
+    /// With a picture on the effect mask input of a tool: the channel of
+    /// the picture that gives the mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_channel: Option<MaskChannel>,
+    /// With a picture on the effect mask input of a tool: `[low, high]`,
+    /// low at most high. The mask is (level - low) / (high - low).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_range: Option<[f64; 2]>,
+    /// With a picture on the effect mask input of a tool: `[black, white]`.
+    /// White on keeps the mask at 1 at most.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_clip: Option<[bool; 2]>,
     /// Its place in the node editor, `[x, y]` in node widths and heights.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<[f64; 2]>,
@@ -6264,7 +6292,8 @@ pub struct NodeChange {
     /// How many boxes a `multi_box` blur or soft edge uses, from 1 to 64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passes: Option<u32>,
-    /// What a blur takes from beyond the edges of the picture.
+    /// What a blur takes from beyond the edges of the picture, or where a
+    /// mask is made: `none` or `frame`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clipping: Option<BlurClipping>,
     /// Which of red, green, blue and alpha a blur blurs, `[r, g, b, a]`.
@@ -6580,10 +6609,14 @@ pub struct NodeChange {
     /// 2 to 64 stops. They replace all the stops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stops: Option<Vec<GradientStop>>,
-    /// What the gradient of a `background` shows past its start and its
-    /// end.
+    /// What the gradient of a `background` or a `fast_noise` shows past
+    /// its ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<GradientRepeat>,
+    /// The samples of the gradient of a `background` or a `fast_noise` in
+    /// each pixel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pixel: Option<SubPixel>,
     /// The size of the picture of a `background` or a `fast_noise`. Each
     /// value given replaces its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6591,7 +6624,7 @@ pub struct NodeChange {
     /// On, a `fast_noise` has hard lines along some of its contours.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discontinuous: Option<bool>,
-    /// On, the noise of a `fast_noise` changes sign before `contrast` and `brightness`.
+    /// On, the level of a `fast_noise` before `brightness` is taken from 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inverted: Option<bool>,
     /// The layers of finer noise of a `fast_noise`, from 0 to 10.
@@ -6872,7 +6905,8 @@ pub struct KindChange {
     pub grain_strength: Option<f64>,
     /// The code value of a Film Grain with `grain_only`, from 0 to 1. How
     /// far the gradient of a `background` moves along its line, as a part
-    /// of its length, from -1000000 to 1000000.
+    /// of its length, from -1000000 to 1000000. How far the levels of the
+    /// gradient of a `fast_noise` move, from -1000000 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<f64>,
     /// Moves a Film Grain to the dark side, under 0.5, or to the bright side,

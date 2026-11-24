@@ -632,6 +632,11 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
 
 These facts come from measurements in Resolve Studio 21.2, by hand and through its scripting API.
 
+- **The Keyframe button of a locked node on the Fusion page adds a key with the value 0.**
+  - A Blur with Blur Size 5 was locked. A click on the Keyframe button of Blur Size added a key, and Blur Size showed 0.
+  - One undo took back both. The same click after an unlock added a key at 5.
+  - A locked node refuses the other changes of its values: a typed value, a drag and Reset.
+  - vidcut does not copy this fault. `comp.key` refuses a locked node, as `comp.set` and `comp.reset` do ([spec §8.19](spec.md#edits)).
 - **Convert In and Out to Compound Clip changes locked tracks.**
   - It cuts the clips of a locked track at the marks, and takes the part in the range inside.
   - It cuts a cue of a locked subtitle track at the marks. Both parts stay on that track.
@@ -692,6 +697,37 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - With Zoom below 1 over a lower video clip, the outer area keeps the unzoomed picture until the last dissolve frame.
   - On the next frame, that outer area snaps from full brightness to black.
   - vidcut blends smoothly across every frame ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
+
+## Resolve's Fusion page
+
+These facts come from measurements in Resolve Studio 21.2, by hand.
+
+- **Paint Mode Replace gives the new mask alone.**
+  - Replace gives the same mask as Copy in each read.
+  - Where the new mask is 0 and the input mask is 1, Replace gives 0.
+  - The manual says that the areas that are zero in the new mask do not change the input mask (p. 2465).
+  - vidcut has no Paint Mode yet. The [todo](todo/effects-page.md) follows the manual ([spec §8.19](spec.md#the-masks)).
+- **The Luminance and the Hue channels of an effect mask swap red and blue.**
+  - Luminance gives 0.114 × R + 0.587 × G + 0.299 × B. These are the Rec. 601 weights with red and blue swapped.
+  - Hue gives the hue of (B, G, R). Thus red gives 240° and blue gives 0°.
+  - Red, Green, Blue, Alpha and Saturation give the correct values.
+  - vidcut uses the Rec. 601 luma and the true hue (`fs_picture_mask`, [spec §8.19](spec.md#the-masks)).
+- **A mask whose input mask is deleted stops rendering.**
+  - After a delete of the mask on its effect mask input, the mask and the tool after it show red names.
+  - The viewer keeps the old picture. A change of the mask does not render.
+  - After a delete of the mask too, the tool renders again.
+  - vidcut renders a mask with nothing on its effect mask input as its own shape ([spec §8.19](spec.md#the-masks)).
+- **Auto Render Range gives the whole source, and a change of page keeps a set range.**
+  - Auto Render Range sets the range from the first to the last frame of the source. For a clip of 238 frames, the read was −4800 to 12819.
+  - Play then goes on past the Out into the tail.
+  - A change to the Edit page and back keeps a range of 10 to 30.
+  - The manual says that both give back the In and the Out of the timeline clip (p. 1294).
+  - vidcut has no render range fields. Its render range is always the In and the Out of the clip ([spec §8.19](spec.md#the-effects-page)). The [todo](todo/effects-page.md) follows the manual.
+- **After a failed track, Track Forward fails until a new Tracker is made.**
+  - Track Forward from frame 144, after a render range of 10 to 30, renders no frame. A window says "Render did not complete".
+  - Then Track Forward from frame 20 fails too. The Console says "MediaOut1 cannot get Parameter for Input at time 20".
+  - The names of the Tracker and of MediaOut1 are red. A new Tracker tracks.
+  - vidcut keeps no state of a failed track. A start outside the In and the Out gets an error, and the Tracker stays as it was ([spec §8.19](spec.md#the-tracker)).
 
 ## transcribe.cpp and its models
 

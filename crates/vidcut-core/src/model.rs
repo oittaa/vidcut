@@ -4637,7 +4637,9 @@ pub struct Node {
     pub foreground: Option<String>,
     /// The mask node on its effect mask input. A tool then works only where
     /// the mask is. A mask adds its own shape to the masks that come in.
-    /// Left out, a tool works on the whole picture.
+    /// On a tool, it can also be a node that gives a picture: one channel of
+    /// that picture is then the mask (`mask_channel`). Left out, a tool
+    /// works on the whole picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_mask: Option<String>,
     /// The mask node on the detail map input of a `fast_noise`. Where the
@@ -4654,6 +4656,11 @@ pub struct Node {
     /// in, and a mask passes on the masks that come in. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pass_through: bool,
+    /// On, the values of the node do not change. `comp.set` then takes
+    /// only `place`, `pass_through` and `locked`. `comp.key`, `comp.reset`
+    /// and the `motion` requests refuse the node. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 (the
     /// picture on its `input`) to 1 (all of the tool). Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4668,6 +4675,21 @@ pub struct Node {
     /// Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multiply_by_mask: bool,
+    /// With a picture on the effect mask input of a tool: the channel of
+    /// that picture that gives the mask. Usual: `alpha`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_channel: Option<MaskChannel>,
+    /// With a picture on the effect mask input of a tool: `[low, high]`,
+    /// each from -1000000 to 1000000, low at most high. The mask is
+    /// (level - low) / (high - low); low equal to high gives a hard step at
+    /// low. Usual: `[0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_range: Option<[f64; 2]>,
+    /// With a picture on the effect mask input of a tool: `[black, white]`.
+    /// White on keeps the mask at 1 at most. The mask is never below 0, so
+    /// black changes nothing. Usual: both on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_clip: Option<[bool; 2]>,
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
@@ -5038,6 +5060,9 @@ pub struct Background {
     /// What a `gradient` shows past its start and its end. Usual: `once`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<GradientRepeat>,
+    /// The samples of a `gradient` in each pixel. Usual: `1x1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pixel: Option<SubPixel>,
     /// The size of the picture.
     #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
     pub image: ImageFormat,
@@ -5095,6 +5120,28 @@ pub enum GradientRepeat {
     PingPong,
 }
 
+/// How many samples a gradient takes across and down in each pixel. The
+/// colors of the samples are averaged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub enum SubPixel {
+    /// One sample.
+    #[default]
+    #[serde(rename = "1x1")]
+    One,
+    /// 2 by 2 samples.
+    #[serde(rename = "2x2")]
+    Two,
+    /// 3 by 3 samples.
+    #[serde(rename = "3x3")]
+    Three,
+    /// 4 by 4 samples.
+    #[serde(rename = "4x4")]
+    Four,
+    /// 5 by 5 samples.
+    #[serde(rename = "5x5")]
+    Five,
+}
+
 /// A color of a gradient, at a place along it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GradientStop {
@@ -5105,16 +5152,18 @@ pub struct GradientStop {
 }
 
 /// The picture of a `fast_noise` node: smooth noise, colored by two colors
-/// or by a gradient. Its level is 0.5 with no noise, and it is not clamped.
+/// or by a gradient. Its level is 0.5 with no noise, or 0 with
+/// `discontinuous`, and it is not clamped.
 /// A color is `[r, g, b, a]`, each from -1000000 to 1000000. A field left
 /// out is at its usual value. Its numbers can have keyframes, in the `keys`
 /// of its node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FastNoise {
-    /// On, the noise has hard lines along some of its contours. Usual: off.
+    /// On, each layer of the noise is its absolute value, with hard lines
+    /// along some of its contours. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub discontinuous: bool,
-    /// On, the noise changes sign before `contrast` and `brightness`. Usual: off.
+    /// On, the level before `brightness` is taken from 1. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inverted: bool,
     /// The middle of the noise, `[x, y]` as fractions of the picture from
@@ -5168,6 +5217,16 @@ pub struct FastNoise {
     /// stops. Left out, black at 0 and white at 1.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stops: Vec<GradientStop>,
+    /// Moves the level of `gradient` along its stops: the level less the
+    /// offset gives the color. From -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+    /// What `gradient` shows below level 0 and above level 1. Usual: `once`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<GradientRepeat>,
+    /// The samples of `gradient` in each pixel. Usual: `1x1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pixel: Option<SubPixel>,
     /// The size of the picture.
     #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
     pub image: ImageFormat,
@@ -5571,17 +5630,39 @@ pub enum BlurFilter {
     FastGaussian,
 }
 
-/// What a `blur` takes from beyond the edges of the picture.
+/// What a `blur` takes from beyond the edges of the picture, and where a
+/// mask is made.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BlurClipping {
-    /// Clear black. The edges of the picture fade.
+    /// Clear black, so the edges of a blurred picture fade. A mask is also
+    /// made beyond the picture.
     None,
-    /// The pixels of the edge, repeated.
+    /// The pixels of the edge, repeated. Not for a mask.
     Domain,
-    /// The pixels of the edge, repeated.
+    /// The pixels of the edge, repeated. A mask is made in the picture only.
     #[default]
     Frame,
+}
+
+/// The channel of a picture on the effect mask input of a tool that gives
+/// the mask.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskChannel {
+    Red,
+    Green,
+    Blue,
+    #[default]
+    Alpha,
+    /// The hue, from 0 to 1: red 0, green 1/3 and blue 2/3.
+    Hue,
+    /// 0.299 × red + 0.587 × green + 0.114 × blue.
+    Luminance,
+    /// (largest − smallest) / largest of red, green and blue.
+    Saturation,
+    /// 0. A picture of a composition has no coverage channel.
+    Coverage,
 }
 
 /// A mask: where the tool that it is on works. A field left out is at its
@@ -5661,6 +5742,12 @@ pub struct Mask {
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,
+    /// Where it is made: `none` or `frame`. `none` also makes it beyond the
+    /// picture, so the soft edge of a part outside reaches in. `frame` makes
+    /// it in the picture only, and its soft edge repeats the edge pixels.
+    /// Usual: `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipping: Option<BlurClipping>,
     /// The corners of a `polygon`, in their order. Each is `[x, y]` from its
     /// middle: x as a fraction of the width of the picture, and y as a
     /// fraction of its height, up. From 3 to 128 of them. With fewer, it

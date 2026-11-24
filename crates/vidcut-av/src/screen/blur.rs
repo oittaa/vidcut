@@ -4,14 +4,14 @@ use vidcut_core::grade::{
 };
 use vidcut_core::lru::{ByBytes, Lru};
 use vidcut_core::model::{
-    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MergeEdges,
+    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MaskChannel, MergeEdges,
     MergeOperator, NoiseColoring,
 };
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
     Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Inking, Level, Making,
-    Merging, Noising, Op, Outline, Painting, Placing, Program, Shading, Shaping, Sharpening,
-    Softening, Tiling, Work, Working,
+    Masks, Merging, Noising, Op, Outline, Painting, Picturing, Placing, Program, Shading, Shaping,
+    Sharpening, Softening, Tiling, Work, Working,
 };
 use vidcut_core::window_key::{
     CURVE_SAMPLE, FAR_OUTSIDE, Keying, Outline as WindowOutline, Shaped, texel_map,
@@ -39,6 +39,7 @@ const TAIL: (f64, f64) = (3.8, 4.3);
 const BORDER_BLACK: u32 = 0;
 
 const BORDER_CLAMP: u32 = 1;
+const MASK_NEAR: f64 = 4.0;
 
 const MOST_BOX: f64 = 65536.0;
 
@@ -105,6 +106,7 @@ pub(super) struct Pipes {
     boxes: wgpu::RenderPipeline,
     shape: wgpu::RenderPipeline,
     mask_join: wgpu::RenderPipeline,
+    picture_mask: wgpu::RenderPipeline,
     masked: wgpu::RenderPipeline,
     merge: wgpu::RenderPipeline,
     background: wgpu::RenderPipeline,
@@ -210,6 +212,7 @@ impl Pipes {
             boxes: pipeline(&plain, "fs_boxes"),
             shape: pipeline(&of(&reading), "fs_shape"),
             mask_join: pipeline(&plain, "fs_mask_join"),
+            picture_mask: pipeline(&plain, "fs_picture_mask"),
             masked: pipeline(&plain, "fs_masked"),
             merge: pipeline(&plain, "fs_merge"),
             background: pipeline(&of(&reading), "fs_background"),
@@ -491,7 +494,7 @@ fn paint_bytes(p: &Painting, (w, h): (u32, u32)) -> Vec<u8> {
         p.offset,
         f64::from(w),
         f64::from(h),
-        0.0,
+        f64::from(p.samples),
     ]);
     float_bytes(&floats)
 }
@@ -516,6 +519,10 @@ fn noise_bytes(n: &Noising) -> Vec<u8> {
         flags,
         place_of(&NoiseColoring::ALL, &n.coloring),
         n.stops.len() as f64,
+        n.offset,
+        place_of(&GradientRepeat::ALL, &n.repeat),
+        f64::from(n.samples),
+        0.0,
     ]);
     float_bytes(&floats)
 }
@@ -573,46 +580,158 @@ fn made_into(
     }
 }
 
+fn soft_reach(soft: Option<Softening>) -> [u32; 2] {
+    let ways = match soft {
+        None => Vec::new(),
+        Some(Softening::Gaussian(sigma)) => gaussian_ways(sigma),
+        Some(Softening::Boxes { width, count }) => box_ways(width, width, count),
+    };
+    let mut reach = [0, 0];
+    for (pass, down) in ways {
+        reach[usize::from(down)] += (pass.taps + 1) * pass.step;
+    }
+    reach
+}
+
+fn mask_pads(shape: &Shaping, (w, h): (u32, u32), most: u32) -> [u32; 4] {
+    let reach = soft_reach(shape.soft);
+    let points: Vec<[f64; 2]> = shape.figures.iter().flat_map(Figure::line).collect();
+    if !shape.beyond || reach == [0, 0] || points.is_empty() {
+        return [0; 4];
+    }
+    let near = shape.border.abs() + MASK_NEAR;
+    let low = |k: usize| points.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min) - near;
+    let high = |k: usize| {
+        points
+            .iter()
+            .map(|p| p[k])
+            .fold(f64::NEG_INFINITY, f64::max)
+            + near
+    };
+    let size = [w, h];
+    let room = size.map(|s| most.saturating_sub(s) / 2);
+    let pad = |k: usize, reaches: bool| match reaches {
+        true => reach[k].min(room[k]),
+        false => 0,
+    };
+    [
+        pad(0, low(0) < f64::from(reach[0])),
+        pad(1, low(1) < f64::from(reach[1])),
+        pad(0, high(0) > f64::from(size[0]) - f64::from(reach[0])),
+        pad(1, high(1) > f64::from(size[1]) - f64::from(reach[1])),
+    ]
+}
+
+fn padded_room<'a>(
+    gpu: &Gpu,
+    padded: &'a mut Option<[Texture; 2]>,
+    (w, h): (u32, u32),
+) -> &'a [Texture; 2] {
+    let size = wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
+    };
+    if padded.as_ref().is_some_and(|m| m[0].texture.size() != size) {
+        *padded = None;
+    }
+    padded.get_or_insert_with(|| [Texture::new(gpu, (w, h)), Texture::new(gpu, (w, h))])
+}
+
+fn moved(figure: &Figure, [dx, dy]: [f64; 2]) -> Figure {
+    let outline = match &figure.outline {
+        Outline::Polygon { points, winding } => Outline::Polygon {
+            points: points.iter().map(|[x, y]| [x + dx, y + dy]).collect(),
+            winding: *winding,
+        },
+        other => other.clone(),
+    };
+    Figure {
+        outline,
+        middle: [figure.middle[0] + dx, figure.middle[1] + dy],
+    }
+}
+
+fn picture_bytes(p: &Picturing) -> Vec<u8> {
+    let channel = MaskChannel::ALL.iter().position(|c| *c == p.channel);
+    float_bytes(&[
+        channel.unwrap_or_default() as f64,
+        flag(p.clip[1]),
+        0.0,
+        0.0,
+        p.range[0],
+        p.range[1],
+        0.0,
+        0.0,
+    ])
+}
+
 fn mask_made<'a>(
     gpu: &Gpu,
-    (scratch, room): (&[Texture; 2], &'a [Texture; 2]),
-    shapes: &[Shaping],
+    (scratch, room, padded): (&[Texture; 2], &'a [Texture; 2], &mut Option<[Texture; 2]>),
+    (masks, picture): (&Masks, Option<&wgpu::TextureView>),
     encoder: &mut wgpu::CommandEncoder,
 ) -> &'a wgpu::TextureView {
+    let size = scratch[0].texture.size();
+    let most = gpu.device.limits().max_texture_dimension_2d;
     let mut kept: Option<usize> = None;
+    if let (Some(p), Some(view)) = (&masks.picture, picture) {
+        let picked = (&gpu.blur.picture_mask, &picture_bytes(p)[..]);
+        draw_step(gpu, picked, Views::same(view), &room[0].view, encoder);
+        kept = Some(0);
+    }
     let none = [Figure::NONE];
-    for shape in shapes {
+    for shape in &masks.shapes {
+        let [left, top, right, bottom] = mask_pads(shape, (size.width, size.height), most);
+        let work = match left + top + right + bottom {
+            0 => scratch,
+            _ => {
+                let wide = (size.width + left + right, size.height + top + bottom);
+                padded_room(gpu, padded, wide)
+            }
+        };
+        let by = [f64::from(left), f64::from(top)];
         let figures = match shape.figures.is_empty() {
             true => &none[..],
             false => &shape.figures[..],
         };
         let mut from = 1;
         for (i, figure) in figures.iter().enumerate() {
-            let points = shape_points(gpu, figure);
+            let figure = moved(figure, by);
+            let points = shape_points(gpu, &figure);
             let views = Views {
                 cells: Some(&points),
-                ..Views::same(&scratch[from].view)
+                ..Views::same(&work[from].view)
             };
-            let drawn = (&gpu.blur.shape, &shape_bytes(shape, figure, i > 0)[..]);
-            draw_step(gpu, drawn, views, &scratch[1 - from].view, encoder);
+            let drawn = (&gpu.blur.shape, &shape_bytes(shape, &figure, i > 0)[..]);
+            draw_step(gpu, drawn, views, &work[1 - from].view, encoder);
             from = 1 - from;
         }
         for (pipeline, bytes) in soft_steps(&gpu.blur, shape.soft) {
-            let views = Views::same(&scratch[from].view);
+            let views = Views::same(&work[from].view);
             draw_step(
                 gpu,
                 (pipeline, &bytes[..]),
                 views,
-                &scratch[1 - from].view,
+                &work[1 - from].view,
                 encoder,
             );
             from = 1 - from;
         }
         let to = kept.map_or(0, |k| 1 - k);
-        let start = kept.map_or(&scratch[1 - from].view, |k| &room[k].view);
-        let how = [shape.level, flag(shape.invert), flag(kept.is_none()), 0.0];
+        let start = kept.map_or(&room[1].view, |k| &room[k].view);
+        let how = [
+            shape.level,
+            flag(shape.invert),
+            flag(kept.is_none()),
+            0.0,
+            by[0],
+            by[1],
+            0.0,
+            0.0,
+        ];
         let joined = (&gpu.blur.mask_join, &float_bytes(&how)[..]);
-        let views = Views::with(&scratch[from].view, start);
+        let views = Views::with(&work[from].view, start);
         draw_step(gpu, joined, views, &room[to].view, encoder);
         kept = Some(to);
     }
@@ -963,6 +1082,7 @@ struct Worked {
     shrink: [f64; 2],
     frame: [f64; 2],
     masks: Option<[Texture; 2]>,
+    padded: Option<[Texture; 2]>,
 }
 
 fn lettered(gpu: &Gpu, inked: Inked) -> Lettered {
@@ -1113,15 +1233,18 @@ fn run(
                     );
                 }
                 let one = std::slice::from_ref(working);
-                effects_into(gpu, to, (scratch, worked), one, encoder);
+                let picture = working.masks.picture.as_ref().map(|p| &at(p.from).view);
+                effects_into(gpu, (to, picture), (scratch, worked), one, encoder);
             }
             Op::Merge(merging) => {
                 let (back, fore) = (at(stage.from[0]), at(stage.from[1]));
+                let picture = merging.masks.picture.as_ref().map(|p| &at(p.from).view);
                 let on = match merging.masks.is_empty() {
                     true => None,
                     false => {
                         let room = mask_room(gpu, &mut worked.masks, size);
-                        Some(mask_made(gpu, (scratch, room), &merging.masks, encoder))
+                        let made = (scratch, room, &mut worked.padded);
+                        Some(mask_made(gpu, made, (&merging.masks, picture), encoder))
                     }
                 };
                 let views = Views {
@@ -1199,7 +1322,13 @@ impl Blurred {
             canvas.texture.as_image_copy(),
             canvas.texture.size(),
         );
-        effects_into(gpu, canvas, (scratch, &mut self.worked), effects, encoder);
+        effects_into(
+            gpu,
+            (canvas, None),
+            (scratch, &mut self.worked),
+            effects,
+            encoder,
+        );
     }
 
     pub(super) fn adjust(
@@ -1232,7 +1361,7 @@ impl Blurred {
             _ => (effects, None),
         };
         if !ofx.is_empty() {
-            effects_into(gpu, adj, (scratch, &mut self.worked), ofx, encoder);
+            effects_into(gpu, (adj, None), (scratch, &mut self.worked), ofx, encoder);
         }
         if let Some(dst) = shot {
             encoder.copy_texture_to_texture(
@@ -1244,7 +1373,7 @@ impl Blurred {
         if let Some(g) = grade {
             effects_into(
                 gpu,
-                adj,
+                (adj, None),
                 (scratch, &mut self.worked),
                 std::slice::from_ref(g),
                 encoder,
@@ -1278,7 +1407,13 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, canvas, (scratch, &mut self.worked), works, encoder);
+        effects_into(
+            gpu,
+            (canvas, None),
+            (scratch, &mut self.worked),
+            works,
+            encoder,
+        );
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -1305,7 +1440,13 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, own, (scratch, &mut self.worked), effects, encoder);
+        effects_into(
+            gpu,
+            (own, None),
+            (scratch, &mut self.worked),
+            effects,
+            encoder,
+        );
         &own.view
     }
 
@@ -1330,7 +1471,13 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, mask, (scratch, &mut self.worked), effects, encoder);
+        effects_into(
+            gpu,
+            (mask, None),
+            (scratch, &mut self.worked),
+            effects,
+            encoder,
+        );
         if live.is_empty() {
             return (&own.view, &mask.view, 5.0);
         }
@@ -1346,7 +1493,7 @@ impl Blurred {
             own.texture.as_image_copy(),
             own.texture.size(),
         );
-        effects_into(gpu, own, (scratch, &mut self.worked), live, encoder);
+        effects_into(gpu, (own, None), (scratch, &mut self.worked), live, encoder);
         (&own.view, &own.view, 3.0)
     }
 }
@@ -2268,7 +2415,7 @@ fn grain_into(
 
 fn effects_into(
     gpu: &Gpu,
-    own: &Texture,
+    (own, picture): (&Texture, Option<&wgpu::TextureView>),
     (scratch, worked): (&[Texture; 2], &mut Worked),
     effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
@@ -2280,7 +2427,8 @@ fn effects_into(
             true => None,
             false => {
                 let room = mask_room(gpu, &mut worked.masks, size);
-                Some(mask_made(gpu, (scratch, room), &effect.masks, encoder))
+                let made = (scratch, room, &mut worked.padded);
+                Some(mask_made(gpu, made, (&effect.masks, picture), encoder))
             }
         };
         let mut from = &own.view;

@@ -653,13 +653,14 @@ Writing:
   - `Tool::FastNoise` holds a `FastNoise`: its noise values, its `NoiseColoring`, its two colors, its gradient stops and its `ImageFormat`.
     - Its node has two more mask inputs, `NodeInput::DetailMap` and `NodeInput::BrightnessMap`. `Composition::masks_on` gives the masks on any mask input.
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
+  - `Tool::takes_from` adds one case: the effect mask of a tool takes a picture too (`Tool::takes_picture_mask`). `Node.mask_channel`, `Node.mask_range` and `Node.mask_clip` then make the mask from it.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
     - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.
     - `ops::picture::connect_checked` refuses a connection to a pattern that is not there, a node with no Center, and a connected node with its own center.
     - `comp.set` refuses a connection of a Center with keyframes. When it stops a connection, the Center keeps the point of the given frame (`left_point`). A rename of the Tracker renames the connection. A removal of the Tracker or of the pattern takes it off.
-  - `input` names the node whose picture comes in. For a Merge, this is the background. `foreground` names the node whose picture a Merge puts on it. `effect_mask` names the last mask of a chain of masks.
+  - `input` names the node whose picture comes in. For a Merge, this is the background. `foreground` names the node whose picture a Merge puts on it. `effect_mask` names the last mask of a chain of masks, or on a tool a node that gives a picture.
 - A composition counts the frames of the file of its clip. `Composition::start` is the frame of the file that is its frame 0.
   - `ops::comp` sets it to the In of the clip when it makes the composition. A later trim does not change it.
   - `render::FileClock` takes a keyframe position of the clip to the frame of the file that it shows. It follows the speed of the clip and the two frame rates.

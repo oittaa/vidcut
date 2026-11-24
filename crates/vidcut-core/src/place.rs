@@ -4,9 +4,9 @@ use crate::model::{
     ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
     FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
-    GradientType, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
-    Pattern, Picture, PivotType, ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool, Tracker,
-    TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
+    GradientType, Mask, MaskChannel, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
+    NoiseColoring, Pattern, Picture, PivotType, ReferenceTime, ShadingElement, Sharpen, TextPlus,
+    Tool, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -114,7 +114,7 @@ pub struct Working {
     pub work: Work,
     pub blend: f64,
     pub use_alpha: bool,
-    pub masks: Vec<Shaping>,
+    pub masks: Masks,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -253,6 +253,38 @@ pub struct Shaping {
     pub level: f64,
     pub invert: bool,
     pub soft: Option<Softening>,
+    pub beyond: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Picturing {
+    pub from: usize,
+    pub channel: MaskChannel,
+    pub range: [f64; 2],
+    pub clip: [bool; 2],
+}
+
+impl Picturing {
+    fn of(n: &Node, from: usize) -> Self {
+        Self {
+            from,
+            channel: n.mask_channel(),
+            range: n.mask_range(),
+            clip: n.mask_clip(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Masks {
+    pub shapes: Vec<Shaping>,
+    pub picture: Option<Picturing>,
+}
+
+impl Masks {
+    pub fn is_empty(&self) -> bool {
+        self.shapes.is_empty() && self.picture.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -333,6 +365,7 @@ impl Shaping {
             level: m.level(),
             invert: m.invert,
             soft,
+            beyond: m.clipping() == BlurClipping::None,
         }
     }
 
@@ -844,7 +877,7 @@ impl Working {
             work,
             blend: e.mixed(),
             use_alpha: e.use_alpha,
-            masks: Vec::new(),
+            masks: Masks::default(),
         })
     }
 
@@ -853,7 +886,7 @@ impl Working {
             work,
             blend,
             use_alpha: true,
-            masks: Vec::new(),
+            masks: Masks::default(),
         }
     }
 
@@ -865,7 +898,7 @@ impl Working {
             },
             blend: 1.0,
             use_alpha: false,
-            masks: Vec::new(),
+            masks: Masks::default(),
         })
     }
 
@@ -953,6 +986,9 @@ pub struct Noising {
     pub coloring: NoiseColoring,
     pub colors: [[f64; 4]; 2],
     pub stops: Vec<GradientStop>,
+    pub offset: f64,
+    pub repeat: GradientRepeat,
+    pub samples: u32,
     pub maps: [bool; 2],
 }
 
@@ -973,6 +1009,9 @@ impl Noising {
             coloring: f.colored(),
             colors: [f.first(), f.second()],
             stops: f.colors().to_vec(),
+            offset: f.shift(),
+            repeat: f.repeats(),
+            samples: f.samples().count(),
             maps,
         }
     }
@@ -987,6 +1026,7 @@ pub struct Painting {
     pub stops: Vec<GradientStop>,
     pub offset: f64,
     pub repeat: GradientRepeat,
+    pub samples: u32,
 }
 
 impl Painting {
@@ -1000,6 +1040,7 @@ impl Painting {
             stops: b.colors().to_vec(),
             offset: b.shift(),
             repeat: b.repeats(),
+            samples: b.samples().count(),
         }
     }
 }
@@ -1020,12 +1061,12 @@ pub struct Merging {
     pub gain: f64,
     pub burn: f64,
     pub blend: f64,
-    pub masks: Vec<Shaping>,
+    pub masks: Masks,
     pub replaces: bool,
 }
 
 impl Merging {
-    pub fn of(m: &Merge, blend: f64, (w, h): (f64, f64), masks: Vec<Shaping>) -> Self {
+    pub fn of(m: &Merge, blend: f64, (w, h): (f64, f64), masks: Masks) -> Self {
         Self {
             replaces: false,
             back: m.lookup((w, h)),
@@ -1153,7 +1194,7 @@ fn masked(
     stages: &mut Vec<Stage>,
     regs: &mut Registers,
     made: usize,
-    (shaped, mixed): (Vec<Shaping>, f64),
+    (shaped, mixed): (Masks, f64),
     size: (f64, f64),
 ) -> usize {
     if shaped.is_empty() && mixed == 1.0 {
@@ -1357,7 +1398,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
             .collect()
     };
     let masks = |n: &Node| masks_on(n, NodeInput::EffectMask);
-    let work = |n: &Node, shaped: Vec<Shaping>, mix: f64| {
+    let work = |n: &Node, shaped: Masks, mix: f64| {
         let mut working = match &n.tool {
             _ if n.pass_through => return None,
             Tool::Blur(b) => Working::of_blur(b, mix, w)?,
@@ -1392,11 +1433,29 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
             .collect();
         let first = came.first().copied().flatten();
         let gives: Vec<bool> = came.iter().map(Option::is_some).collect();
-        let shaped = masks(n);
+        let pictured = c
+            .mask_picture(n)
+            .map(|p| c.index(&p.name).and_then(|j| made[j]));
+        let picture = pictured.map(|r| match r {
+            Some(r) => (r, false),
+            None => {
+                let r = regs.taken();
+                stages.push(Stage {
+                    op: Op::Clear,
+                    from: Vec::new(),
+                    to: r,
+                });
+                (r, true)
+            }
+        });
+        let shaped = Masks {
+            shapes: masks(n),
+            picture: picture.map(|(from, _)| Picturing::of(n, from)),
+        };
         let multiplied =
             n.multiply_by_mask && n.tool.multiplies() && n.tool.operates() && !n.pass_through;
         let (shaped, mix, outer) = match multiplied && !shaped.is_empty() {
-            true => (Vec::new(), 1.0, Some((shaped, n.mixed()))),
+            true => (Masks::default(), 1.0, Some((shaped, n.mixed()))),
             false => (shaped, n.mixed(), None),
         };
         let result = match &n.tool {
@@ -1434,7 +1493,8 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
                         None => to,
                         Some(back) => {
                             let out = regs.taken();
-                            let over = Merging::of(&Merge::default(), 1.0, (w, h), Vec::new());
+                            let none = Masks::default();
+                            let over = Merging::of(&Merge::default(), 1.0, (w, h), none);
                             stages.push(Stage {
                                 op: Op::Merge(over),
                                 from: vec![back, to],
@@ -1471,7 +1531,10 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
             Tool::FastNoise(_) if n.pass_through => None,
             Tool::FastNoise(f) => {
                 let maps = [NodeInput::DetailMap, NodeInput::BrightnessMap].map(|input| {
-                    let shaped = masks_on(n, input);
+                    let shaped = Masks {
+                        shapes: masks_on(n, input),
+                        picture: None,
+                    };
                     if shaped.is_empty() {
                         return None;
                     }
@@ -1516,19 +1579,18 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
                 }
                 let [undo, redo] = matched(t, (w, h), (c.start, source));
                 let base = t.merging();
-                let moved =
-                    |back: [f64; 6], replaces: bool, shaped: Vec<Shaping>, mix: f64| Merging {
-                        back: Some(back),
-                        replaces,
-                        ..Merging::of(&base, mix, (w, h), shaped)
-                    };
+                let moved = |back: [f64; 6], replaces: bool, shaped: Masks, mix: f64| Merging {
+                    back: Some(back),
+                    replaces,
+                    ..Merging::of(&base, mix, (w, h), shaped)
+                };
                 let picture = fore.unwrap_or(b);
                 let last = [regs.read(b), f.is_some_and(|f| regs.read(f))];
                 let mut to = regs.taken();
                 match merge {
                     TrackerMerge::BgOverFg => {
                         stages.push(Stage {
-                            op: Op::Merge(moved(redo, false, Vec::new(), 1.0)),
+                            op: Op::Merge(moved(redo, false, Masks::default(), 1.0)),
                             from: vec![picture, b],
                             to,
                         });
@@ -1606,6 +1668,10 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
             (Some(r), Some(outer)) => Some(masked(&mut stages, &mut regs, r, outer, (w, h))),
             (result, _) => result,
         };
+        if let Some((r, own)) = picture {
+            let last = own || regs.read(r);
+            regs.freed(r, last && result != Some(r));
+        }
         if let Some(r) = result {
             regs.hold(r, uses[i]);
         }

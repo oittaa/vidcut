@@ -276,7 +276,7 @@ impl Workspace {
         if self.project().is_none()
             && matches!(
                 panel,
-                GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer
+                GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer | GuiPanel::SelectTool
             )
         {
             return;
@@ -317,6 +317,7 @@ impl Workspace {
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
+            GuiPanel::SelectTool => self.open_select_tool(),
         }
     }
 
@@ -358,7 +359,7 @@ impl Workspace {
                 }
                 live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
                 live::GuiChange::Window(w) => self.effects_page.window = w,
-                live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
+                live::GuiChange::Nodes(nodes, active) => self.pick_nodes(nodes, active)?,
                 live::GuiChange::Element(e) => self.effects_page.element = e,
                 live::GuiChange::GradeNodes(nodes, current) => {
                     self.pick_grade_nodes(nodes, current)?
@@ -432,6 +433,7 @@ impl Workspace {
                 }
             }
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
+            GuiPanel::SelectTool => self.close_select_tool(),
         }
     }
 
@@ -475,6 +477,7 @@ impl Workspace {
                 tool == Some(PictureTool::DynamicZoom),
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
+            (GuiPanel::SelectTool, self.select_tool_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
@@ -490,6 +493,7 @@ impl Workspace {
                 (Page::Color, GradeLevel::Timeline) | (Page::Cut, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
+            node: self.effects_page.picked().map(str::to_owned),
             element: self.effects_page.element,
             grade_nodes: match page {
                 Page::Color => self.effects_page.picked_grade().to_vec(),
@@ -1435,6 +1439,7 @@ impl Workspace {
             || self.key_editor.asking()
             || self.sync_clips.open
             || self.preferences.capturing()
+            || self.select_tool_open()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {
@@ -1463,6 +1468,21 @@ impl Workspace {
             PasteWatch::Wait => PasteWatch::Miss,
             PasteWatch::Miss | PasteWatch::Off => PasteWatch::Off,
         };
+    }
+
+    fn undo_keys(&mut self, fired: &Fired) {
+        if fired.pressed(Action::Undo) {
+            match &mut self.timeline.silence {
+                Some(d) => d.undo(),
+                None => self.send("history.undo", json!({})),
+            }
+        }
+        if fired.pressed(Action::Redo) {
+            match &mut self.timeline.silence {
+                Some(d) => d.redo(),
+                None => self.send("history.redo", json!({})),
+            }
+        }
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
@@ -1535,6 +1555,7 @@ impl Workspace {
         }
         if self.effects_page.page == Page::Effects {
             self.effects_keys(&fired, &input);
+            self.undo_keys(&fired);
             return;
         }
         let viewer = self.snap.viewer;
@@ -1756,18 +1777,7 @@ impl Workspace {
                 self.delete_key(lift);
             }
         }
-        if fired.pressed(Action::Undo) {
-            match &mut self.timeline.silence {
-                Some(d) => d.undo(),
-                None => self.send("history.undo", json!({})),
-            }
-        }
-        if fired.pressed(Action::Redo) {
-            match &mut self.timeline.silence {
-                Some(d) => d.redo(),
-                None => self.send("history.redo", json!({})),
-            }
-        }
+        self.undo_keys(&fired);
         if fired.pressed(Action::Import) {
             self.import_media();
         }

@@ -102,9 +102,33 @@ const GRADES_LEFT_KEPT: usize = 4096;
 const VIEWERS_KEPT: usize = 4096;
 const DETAIL_KNOT: Color32 = Color32::from_rgb(150, 150, 150);
 
+#[derive(Default)]
+struct SelectTool {
+    open: bool,
+    text: String,
+    at: usize,
+    focus: bool,
+}
+
+fn found_tools(text: &str) -> Vec<ToolType> {
+    let text = text.trim().to_lowercase();
+    let mut found: Vec<(bool, ToolType)> = LIBRARY
+        .iter()
+        .flat_map(|(kind, tools)| tools.iter().map(move |t| (kind, *t)))
+        .filter_map(|(kind, t)| {
+            let name = t.label().to_lowercase();
+            let hit = name.contains(&text) || kind.to_lowercase().contains(&text);
+            hit.then_some((!name.starts_with(&text), t))
+        })
+        .collect();
+    found.sort_by_key(|(later, _)| *later);
+    found.into_iter().map(|(_, t)| t).collect()
+}
+
 pub(super) struct EffectsPage {
     pub(super) page: Page,
     pub(super) nodes: Vec<String>,
+    loose: bool,
     pub(super) element: u8,
     seen: Option<String>,
     viewed: Lru<String, [Option<String>; 2], VIEWERS_KEPT>,
@@ -137,6 +161,7 @@ pub(super) struct EffectsPage {
     asked: Vec<(Answer, Then)>,
     renaming: Option<Renaming>,
     replacing: Option<(String, String)>,
+    select_tool: SelectTool,
     spot: Option<(String, [f64; 2])>,
     copied: Vec<Node>,
     away: Option<Away>,
@@ -150,6 +175,7 @@ impl Default for EffectsPage {
         Self {
             page: Page::Cut,
             nodes: Vec::new(),
+            loose: false,
             element: 1,
             seen: None,
             viewed: Lru::new(),
@@ -182,6 +208,7 @@ impl Default for EffectsPage {
             asked: Vec::new(),
             renaming: None,
             replacing: None,
+            select_tool: SelectTool::default(),
             spot: None,
             copied: Vec::new(),
             away: None,
@@ -194,7 +221,15 @@ impl Default for EffectsPage {
 
 impl EffectsPage {
     pub(super) fn picked(&self) -> Option<&str> {
-        self.nodes.last().map(String::as_str)
+        self.nodes
+            .last()
+            .filter(|_| !self.loose)
+            .map(String::as_str)
+    }
+
+    pub(super) fn select(&mut self, nodes: Vec<String>) {
+        self.nodes = nodes;
+        self.loose = false;
     }
 
     pub(super) fn pick_grade(&mut self, nodes: Vec<u32>, loose: bool) {
@@ -224,6 +259,7 @@ impl EffectsPage {
         self.grade_view.stop();
         self.renaming = None;
         self.replacing = None;
+        self.select_tool.open = false;
         self.spot = None;
         self.away = None;
         self.zooming = None;
@@ -395,6 +431,7 @@ enum MenuAct {
     View(Option<usize>),
     Rename,
     PassThrough,
+    Lock,
     Copy,
     Paste,
     Delete,
@@ -467,7 +504,7 @@ fn tile(n: &Node, viewed: &[Option<String>; 2]) -> Tile<String> {
         drops: false,
         note: String::new(),
         badges: Vec::new(),
-        locked: None,
+        locked: n.locked.then_some(true),
         outlets: vec![outlets],
         inlets,
         edge: None,
@@ -511,12 +548,28 @@ pub(super) fn view_on_menu(
 }
 
 fn default_input(d: &Node, s: &Node) -> Option<NodeInput> {
-    let mask = s.tool.is_mask();
-    let mut fits = d.tool.inputs().iter().copied();
-    match mask {
-        true => fits.find(|i| !i.carries_picture()),
-        false => fits.find(|i| i.carries_picture() && d.join(*i).is_none()),
+    let inputs = d.tool.inputs().iter().copied();
+    let mask = inputs.clone().find(|i| !i.carries_picture());
+    let free = |i: &NodeInput| d.join(*i).is_none() && d.tool.takes_from(*i, &s.tool);
+    match s.tool.is_mask() {
+        true => mask.filter(free),
+        false => inputs
+            .filter(|i| i.carries_picture())
+            .chain(mask)
+            .find(free),
     }
+}
+
+fn kept_input(comp: &Composition, node: &str, gone: &[String]) -> Option<String> {
+    let input = |n: &Node| match n.tool.is_mask() {
+        true => n.effect_mask.clone(),
+        false => n.input.clone(),
+    };
+    let mut next = comp.node(node).and_then(input);
+    while let Some(n) = next.clone().filter(|n| gone.contains(n)) {
+        next = comp.node(&n).and_then(input);
+    }
+    next
 }
 
 fn command(method: &str, params: Value) -> Value {
@@ -700,7 +753,7 @@ fn grip_value(grip: Grip) -> Option<EffectValue> {
 }
 
 fn pinned(n: &Node, grip: Grip) -> bool {
-    n.connect.is_some() && grip_value(grip) == Some(EffectValue::Center)
+    n.locked || (n.connect.is_some() && grip_value(grip) == Some(EffectValue::Center))
 }
 
 fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
@@ -874,7 +927,7 @@ impl Workspace {
         self.sync_bounds();
     }
 
-    pub(super) fn pick_nodes(&mut self, nodes: Vec<String>) -> Result<(), String> {
+    pub(super) fn pick_nodes(&mut self, nodes: Vec<String>, active: bool) -> Result<(), String> {
         let p = self.project_shared().ok_or("Open a project first")?;
         let clip = self
             .effects_clip()
@@ -889,6 +942,7 @@ impl Workspace {
             kept.retain(|k| *k != n);
             kept.push(n);
         }
+        self.effects_page.loose = !active && !kept.is_empty();
         self.effects_page.nodes = kept;
         self.effects_page.seen = Some(clip.id.clone());
         Ok(())
@@ -1019,7 +1073,7 @@ impl Workspace {
         let clip = self.effects_clip();
         if clip != self.effects_page.seen {
             self.effects_page.seen = clip;
-            self.effects_page.nodes.clear();
+            self.effects_page.select(Vec::new());
             self.effects_page.graph.stop();
             self.effects_page.away = None;
             self.effects_page.replacing = None;
@@ -1069,15 +1123,16 @@ impl Workspace {
                     *v = Some(node.clone());
                 }
             }
-            self.effects_page.nodes = match then {
-                Then::Select => all.unwrap_or_else(|| vec![node]),
-                Then::Renamed(old) => self
-                    .effects_page
-                    .nodes
-                    .iter()
-                    .map(|n| if *n == old { node.clone() } else { n.clone() })
-                    .collect(),
-            };
+            match then {
+                Then::Select => self.effects_page.select(all.unwrap_or_else(|| vec![node])),
+                Then::Renamed(old) => {
+                    for n in &mut self.effects_page.nodes {
+                        if *n == old {
+                            *n = node.clone();
+                        }
+                    }
+                }
+            }
         }
         if !self.effects_page.asked.is_empty() || self.effects_page.held.is_some() {
             ctx.request_repaint();
@@ -1133,8 +1188,18 @@ impl Workspace {
             .iter()
             .map(|n| command("comp.remove", json!({ "clip": clip.id, "node": n })))
             .collect();
-        self.effects_page.nodes = self.before_nodes(&comp, &gone);
+        let mut views = json!({});
+        for (side, v) in self.viewers_now().iter().enumerate() {
+            if let Some(v) = v.as_ref().filter(|v| gone.contains(v)) {
+                views[SIDES[side]] = json!(kept_input(&comp, v, &gone).unwrap_or_default());
+            }
+        }
+        let before = self.before_nodes(&comp, &gone);
+        self.effects_page.select(before);
         self.send_all(commands, "Delete Nodes");
+        if views != json!({}) {
+            self.send("gui.viewers", views);
+        }
     }
 
     fn pass_through(&mut self) {
@@ -1159,6 +1224,25 @@ impl Workspace {
         self.send_all(commands, "Pass Through");
     }
 
+    fn lock_nodes(&mut self) {
+        let Some((clip, comp)) = self.page_clip() else {
+            return;
+        };
+        let picked: Vec<&Node> = (self.effects_page.nodes.iter())
+            .filter_map(|n| comp.node(n))
+            .collect();
+        let on = picked.iter().any(|n| !n.locked);
+        let commands = picked
+            .iter()
+            .filter(|n| n.locked != on)
+            .map(|n| {
+                let params = json!({ "clip": clip.id, "node": n.name, "locked": on });
+                command("comp.set", params)
+            })
+            .collect();
+        self.send_all(commands, "Lock");
+    }
+
     fn start_rename(&mut self) {
         let Some(clip) = self.effects_clip() else {
             return;
@@ -1173,6 +1257,111 @@ impl Workspace {
             name: first,
             focus: true,
         });
+    }
+
+    pub(super) fn open_select_tool(&mut self) {
+        self.set_page(Page::Effects);
+        let s = &mut self.effects_page.select_tool;
+        s.open = true;
+        s.focus = true;
+        s.at = 0;
+    }
+
+    pub(super) fn close_select_tool(&mut self) {
+        self.effects_page.select_tool.open = false;
+    }
+
+    pub(super) fn select_tool_open(&self) -> bool {
+        self.effects_page.select_tool.open
+    }
+
+    fn select_tool_window(&mut self, ctx: &egui::Context) {
+        let s = &mut self.effects_page.select_tool;
+        if !s.open {
+            return;
+        }
+        let mut open = true;
+        let mut add = None;
+        let mut changed = false;
+        let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let (up, down, enter) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::Enter),
+            )
+        });
+        super::dialog::window(ctx, "Select Tool", &mut open, |ui| {
+            super::dialog::form(ui, "select-tool-form", |ui| {
+                super::dialog::row(ui, "Find", |ui| {
+                    let output = egui::TextEdit::singleline(&mut s.text)
+                        .desired_width(260.0)
+                        .show(ui);
+                    let edit = output.response;
+                    if !edit.has_focus() {
+                        edit.request_focus();
+                    }
+                    if s.focus {
+                        let mut state = output.state;
+                        let all = egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(s.text.chars().count()),
+                        );
+                        state.cursor.set_char_range(Some(all));
+                        state.store(ui.ctx(), edit.id);
+                        s.focus = false;
+                    }
+                    if edit.changed() {
+                        s.at = 0;
+                        changed = true;
+                    }
+                });
+            });
+            let found = found_tools(&s.text);
+            let last = found.len().saturating_sub(1);
+            if down {
+                s.at = (s.at + 1).min(last);
+            }
+            if up {
+                s.at = s.at.saturating_sub(1);
+            }
+            let room = ui.spacing();
+            let text = ui.text_style_height(&egui::TextStyle::Body);
+            let row = room.interact_size.y.max(text + 2.0 * room.button_padding.y);
+            let rows = LIBRARY.iter().map(|(_, t)| t.len()).sum::<usize>() as f32;
+            let height = rows * row + (rows - 1.0) * room.item_spacing.y;
+            egui::ScrollArea::vertical()
+                .min_scrolled_height(height)
+                .max_height(height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for (k, tool) in found.iter().enumerate() {
+                        let row = ui.selectable_label(k == s.at, tool.label());
+                        if k == s.at && (up || down || changed) {
+                            row.scroll_to_me(None);
+                        }
+                        if row.clicked() {
+                            s.at = k;
+                        }
+                        if row.double_clicked() {
+                            add = Some(*tool);
+                        }
+                    }
+                });
+            let picked = found.get(s.at).copied();
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Add", picked.is_some()) || enter {
+                    add = add.or(picked);
+                }
+                cancel |= ui.button("Cancel").clicked();
+            });
+        });
+        if add.is_some() || cancel || !open {
+            self.effects_page.select_tool.open = false;
+        }
+        if let Some(tool) = add {
+            self.add_node(tool);
+        }
     }
 
     fn rename_window(&mut self, ctx: &egui::Context) {
@@ -1316,10 +1505,11 @@ impl Workspace {
     }
 
     fn select_all(&mut self, on: bool) {
-        self.effects_page.nodes = match (on, self.page_clip()) {
+        let all = match (on, self.page_clip()) {
             (true, Some((_, comp))) => comp.nodes.iter().map(|n| n.name.clone()).collect(),
             _ => Vec::new(),
         };
+        self.effects_page.select(all);
     }
 
     fn menu_act(&mut self, act: MenuAct, node: String) {
@@ -1327,6 +1517,7 @@ impl Workspace {
             MenuAct::View(side) => self.view_on(&node, side),
             MenuAct::Rename => self.start_rename(),
             MenuAct::PassThrough => self.pass_through(),
+            MenuAct::Lock => self.lock_nodes(),
             MenuAct::Copy => self.copy_node(false),
             MenuAct::Paste => {
                 let clip = self.effects_clip();
@@ -1340,6 +1531,7 @@ impl Workspace {
         self.settle_page(ui.ctx());
         self.rename_window(ui.ctx());
         self.replace_window(ui.ctx());
+        self.select_tool_window(ui.ctx());
         let panel = theme::colors().panel;
         egui::Panel::left("effects-library")
             .resizable(true)
@@ -1709,6 +1901,7 @@ impl Workspace {
             let hit = spots
                 .iter()
                 .rev()
+                .filter(|(name, ..)| !comp.node(name).is_some_and(|n| n.locked))
                 .find_map(|(name, k, r, area)| Some((name, *k, edge_at(*r, press)?, *area)));
             if let Some((name, k, edge, area)) = hit {
                 let start = place(press);
@@ -1867,6 +2060,7 @@ impl Workspace {
             let near = shown
                 .iter()
                 .rev()
+                .filter(|s| !comp.node(&s.name).is_some_and(|n| n.locked))
                 .flat_map(|s| {
                     let middle = screen(s.middle);
                     s.spots
@@ -2536,7 +2730,11 @@ impl Workspace {
             tiles: comp.nodes.iter().map(|n| tile(n, &viewed)).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
-            current: self.effects_page.nodes.last(),
+            current: self
+                .effects_page
+                .nodes
+                .last()
+                .filter(|_| !self.effects_page.loose),
             active: theme::colors().accent,
             viewers: self.effects_page.viewer_rects,
         };
@@ -2555,6 +2753,7 @@ impl Workspace {
                 let items = [
                     (MenuAct::Rename, "Rename", true),
                     (MenuAct::PassThrough, "Pass Through", tool),
+                    (MenuAct::Lock, "Locked", true),
                     (MenuAct::Copy, "Copy", tool),
                     (MenuAct::Paste, "Paste", one_copied),
                     (MenuAct::Delete, "Delete", true),
@@ -2564,6 +2763,7 @@ impl Workspace {
                         MenuAct::PassThrough => {
                             ui.add_enabled(on, egui::Button::selectable(n.pass_through, text))
                         }
+                        MenuAct::Lock => ui.add(egui::Button::selectable(n.locked, text)),
                         _ => ui.add_enabled(on, egui::Button::new(text)),
                     };
                     if item.clicked() {
@@ -2583,13 +2783,15 @@ impl Workspace {
             },
         );
         if let Some((inside, off)) = done.band {
+            let kept = (self.effects_page.picked()).filter(|n| !inside.iter().any(|i| i == n));
+            let active = off && kept.is_some();
             let mut nodes = self.effects_page.nodes.clone();
             if off {
                 nodes.retain(|n| !inside.contains(n));
             } else {
                 nodes = inside;
             }
-            self.send("gui.nodes", json!({ "nodes": nodes }));
+            self.send("gui.nodes", json!({ "nodes": nodes, "active": active }));
         }
         if let Some(at) = done.spot {
             self.effects_page.spot = Some((clip.id.clone(), at));
@@ -2612,7 +2814,7 @@ impl Workspace {
             .collect();
         self.send_all(moves, "Move Nodes");
         if let Some(name) = done.pointed {
-            self.effects_page.nodes = vec![name];
+            self.effects_page.select(vec![name]);
         }
         if let Some((name, side)) = done.viewed {
             self.toggle_view(&name, side);
@@ -2682,6 +2884,9 @@ impl Workspace {
         if mine.pressed(Action::PassThrough) {
             self.pass_through();
         }
+        if mine.pressed(Action::LockNode) {
+            self.lock_nodes();
+        }
         for (side, action) in [Action::ViewLeft, Action::ViewRight]
             .into_iter()
             .enumerate()
@@ -2716,6 +2921,9 @@ impl Workspace {
         if fired.pressed(Action::SelectNothing) {
             self.select_all(false);
         }
+        if mine.pressed(Action::SelectTool) {
+            self.open_select_tool();
+        }
     }
 
     pub(super) fn effects_keys(&mut self, fired: &Fired, input: &egui::InputState) {
@@ -2726,6 +2934,11 @@ impl Workspace {
         }
         if mine.pressed(Action::NextNodeKeyframe) {
             self.node_key_step(1);
+        }
+        if mine.pressed(Action::NodeOriginalSize) {
+            self.effects_page
+                .graph
+                .ask(vidcut_core::request::NodeZoom::Original);
         }
         if self.tracks_running().is_empty() {
             self.node_keys(fired, &mine);

@@ -1501,6 +1501,7 @@ fn fs_shape(in: Out) -> @location(0) vec4<f32> {
 
 struct Joining {
     how: vec4<f32>,
+    at: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> joining: Joining;
@@ -1509,10 +1510,61 @@ struct Joining {
 @fragment
 fn fs_mask_join(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
-    let s = textureLoad(blur_source, px, 0).r;
-    let own = joining.how.x * select(s, 1.0 - s, joining.how.y > 0.5);
+    let s = textureLoad(blur_source, px + vec2<i32>(joining.at.xy), 0).r;
+    let shape = select(s, 1.0 - s, joining.how.y > 0.5);
     let a = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
-    return vec4<f32>(own + a - own * a);
+    return vec4<f32>(joining.how.x * shape + a * (1.0 - shape));
+}
+
+struct Picking {
+    how: vec4<f32>,
+    range: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> picking: Picking;
+
+fn picked_hue(c: vec3<f32>) -> f32 {
+    let most = max(c.r, max(c.g, c.b));
+    let spread = most - min(c.r, min(c.g, c.b));
+    if spread <= 0.0 {
+        return 0.0;
+    }
+    var h = 4.0 + (c.r - c.g) / spread;
+    if most == c.r {
+        h = (c.g - c.b) / spread;
+    } else if most == c.g {
+        h = 2.0 + (c.b - c.r) / spread;
+    }
+    return fract(h / 6.0 + 1.0);
+}
+
+fn picked_level(c: vec4<f32>, channel: i32) -> f32 {
+    switch channel {
+        case 0: { return c.r; }
+        case 1: { return c.g; }
+        case 2: { return c.b; }
+        case 3: { return c.a; }
+        case 4: { return picked_hue(c.rgb); }
+        case 5: { return dot(c.rgb, BT601); }
+        case 6: {
+            let most = max(c.r, max(c.g, c.b));
+            return select(0.0, (most - min(c.r, min(c.g, c.b))) / most, most > 0.0);
+        }
+        default: { return 0.0; }
+    }
+}
+
+@fragment
+fn fs_picture_mask(in: Out) -> @location(0) vec4<f32> {
+    let c = textureLoad(blur_source, vec2<i32>(in.position.xy), 0);
+    let r = picked_level(c, i32(picking.how.x));
+    let low = picking.range.x;
+    let wide = picking.range.y - low;
+    var m = max(select(select(0.0, 1.0, r > low), (r - low) / wide, wide > 0.0), 0.0);
+    if picking.how.y > 0.5 {
+        m = min(m, 1.0);
+    }
+    return vec4<f32>(m);
 }
 
 @fragment
@@ -1865,8 +1917,8 @@ fn paint_ramp(t: f32, n: i32) -> vec4<f32> {
     return paint_color(n - 1);
 }
 
-fn paint_repeat(t: f32) -> f32 {
-    switch i32(painting.how.z) {
+fn gradient_repeat(t: f32, mode: i32) -> f32 {
+    switch mode {
         case 1: {
             return t - floor(t);
         }
@@ -1928,8 +1980,16 @@ fn fs_background(in: Out) -> @location(0) vec4<f32> {
             color = mix(mix(c[0], c[1], uv.x), mix(c[2], c[3], uv.x), uv.y);
         }
         case 4: {
-            let t = paint_along(in.position.xy) - painting.more.x;
-            color = paint_ramp(paint_repeat(t), i32(painting.how.w));
+            let n = max(i32(painting.more.w), 1);
+            var sum = vec4<f32>(0.0);
+            for (var j = 0; j < n; j++) {
+                for (var i = 0; i < n; i++) {
+                    let at = in.position.xy + vec2<f32>(f32(i), -f32(j)) / f32(n);
+                    let t = gradient_repeat(paint_along(at) - painting.more.x, i32(painting.how.z));
+                    sum += paint_ramp(t, i32(painting.how.w));
+                }
+            }
+            color = sum / f32(n * n);
         }
         default: {}
     }
@@ -1941,6 +2001,7 @@ struct Noising {
     place: vec4<f32>,
     how: vec4<f32>,
     more: vec4<f32>,
+    ramp: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> noising: Noising;
@@ -1970,7 +2031,7 @@ fn noise_sum(at: vec2<f32>, detail: f32) -> f32 {
         let layer = NOISE_LAYERS * f32(i);
         var n = perlin(vec3<f32>(at * size + layer, noising.how.z * size + layer));
         if noise_has(NOISE_DISCONTINUOUS) {
-            n = 2.0 * abs(n) - 1.0;
+            n = abs(n);
         }
         sum += weight * amount * n;
         amount *= 0.5;
@@ -1979,13 +2040,22 @@ fn noise_sum(at: vec2<f32>, detail: f32) -> f32 {
     return sum;
 }
 
-@fragment
-fn fs_noise(in: Out) -> @location(0) vec4<f32> {
-    let px = vec2<i32>(in.position.xy);
-    let d = vec2<f32>(in.position.x - noising.place.x, noising.place.y - in.position.y);
+fn noise_at(at: vec2<f32>, detail: f32, base: f32) -> f32 {
+    let d = vec2<f32>(at.x - noising.place.x, noising.place.y - at.y);
     let c = cos(noising.how.x);
     let s = sin(noising.how.x);
     let turned = vec2<f32>(c * d.x + s * d.y, c * d.y - s * d.x);
+    let n = noise_sum(turned * noising.place.zw, detail) * noising.more.x;
+    var x = select(0.5 + 0.5 * n, n, noise_has(NOISE_DISCONTINUOUS));
+    if noise_has(NOISE_INVERTED) {
+        x = 1.0 - x;
+    }
+    return x + base - 0.5 + 0.5 * noising.how.w;
+}
+
+@fragment
+fn fs_noise(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
     var detail = noising.how.y;
     if noise_has(NOISE_DETAIL_MAP) {
         detail *= textureLoad(noise_detail, px, 0).a;
@@ -1994,16 +2064,20 @@ fn fs_noise(in: Out) -> @location(0) vec4<f32> {
     if noise_has(NOISE_LEVEL_MAP) {
         base = textureLoad(noise_level, px, 0).a;
     }
-    var n = noise_sum(turned * noising.place.zw, detail);
-    if noise_has(NOISE_INVERTED) {
-        n = -n;
+    if i32(noising.more.z) != 1 {
+        let v = noise_at(in.position.xy, detail, base);
+        return mix(noising.colors[0], noising.colors[1], v);
     }
-    let v = base + 0.5 * (n * noising.more.x + noising.how.w);
-    var color = mix(noising.colors[0], noising.colors[1], v);
-    if i32(noising.more.z) == 1 {
-        color = paint_ramp(v, i32(noising.more.w));
+    let n = max(i32(noising.ramp.z), 1);
+    var sum = vec4<f32>(0.0);
+    for (var j = 0; j < n; j++) {
+        for (var i = 0; i < n; i++) {
+            let at = in.position.xy + vec2<f32>(f32(i), -f32(j)) / f32(n);
+            let v = noise_at(at, detail, base) - noising.ramp.x;
+            sum += paint_ramp(gradient_repeat(v, i32(noising.ramp.y)), i32(noising.more.w));
+        }
     }
-    return color;
+    return sum / f32(n * n);
 }
 
 struct Vignetting {

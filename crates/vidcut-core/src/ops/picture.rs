@@ -9,10 +9,10 @@ use crate::model::{
     CellShape, Clip, CompositeMode, Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
     EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming,
     GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite, ImageFormat, Mask,
-    Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern, Picture,
-    PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool,
-    TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern,
+    Picture, PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, SubPixel,
+    TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -566,6 +566,26 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
     if !n.place.iter().all(|v| v.is_finite()) {
         return Err(Error::invalid("a node's place is two finite numbers"));
     }
+    let picture_mask = n.mask_channel.is_some() || n.mask_range.is_some() || n.mask_clip.is_some();
+    if picture_mask && !n.tool.takes_picture_mask() {
+        return Err(Error::invalid(format!(
+            "{} ({}) has no mask_channel, mask_range or mask_clip: only a tool takes them",
+            n.name,
+            n.tool.label()
+        )));
+    }
+    for v in n.mask_range.into_iter().flatten() {
+        within(
+            Some(v),
+            Node::MASK_RANGES,
+            "a mask range is from -1000000 to 1000000",
+        )?;
+    }
+    if n.mask_range.is_some_and(|[low, high]| low > high) {
+        return Err(Error::invalid(
+            "the low of a mask range is at most its high",
+        ));
+    }
     let tool = match &n.tool {
         Tool::Blur(b) => Tool::Blur(blur_checked(b)?),
         Tool::Effect(kind) => Tool::Effect(kind_checked(kind)?),
@@ -582,6 +602,9 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
     Ok(Node {
         tool,
         blend: n.blend.filter(|v| *v != 1.0),
+        mask_channel: n.mask_channel.filter(|c| *c != MaskChannel::default()),
+        mask_range: n.mask_range.filter(|r| *r != Node::MASK_RANGE),
+        mask_clip: n.mask_clip.filter(|c| *c != [true; 2]),
         ..n.clone()
     })
 }
@@ -654,6 +677,7 @@ fn background_checked(b: &Background) -> Result<Background> {
         stops,
         offset: b.offset.filter(|v| *v != 0.0),
         repeat: b.repeat.filter(|r| *r != GradientRepeat::default()),
+        sub_pixel: b.sub_pixel.filter(|s| *s != SubPixel::default()),
         image: b.image,
     })
 }
@@ -691,6 +715,11 @@ fn noise_checked(f: &FastNoise) -> Result<FastNoise> {
     let why = "a fast noise's color is four numbers, each from -1000000 to 1000000";
     colors_checked([f.color1, f.color2].into_iter().flatten(), why)?;
     let stops = stops_checked(&f.stops)?;
+    within(
+        f.offset,
+        Background::OFFSETS,
+        "a gradient's offset is from -1000000 to 1000000",
+    )?;
     image_checked(&f.image)?;
     Ok(FastNoise {
         center: f.center.filter(|p| *p != Mask::MIDDLE),
@@ -706,6 +735,9 @@ fn noise_checked(f: &FastNoise) -> Result<FastNoise> {
         color1: f.color1.filter(|c| *c != FastNoise::COLOR1),
         color2: f.color2.filter(|c| *c != FastNoise::COLOR2),
         stops,
+        offset: f.offset.filter(|v| *v != 0.0),
+        repeat: f.repeat.filter(|r| *r != GradientRepeat::default()),
+        sub_pixel: f.sub_pixel.filter(|s| *s != SubPixel::default()),
         ..f.clone()
     })
 }
@@ -1055,6 +1087,9 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         Mask::BORDERS,
         "a mask's border width is from -1 to 1",
     )?;
+    if m.clipping == Some(BlurClipping::Domain) {
+        return Err(Error::invalid("a mask's clipping is none or frame"));
+    }
     for v in m.center.into_iter().flatten() {
         within(
             Some(v),
@@ -1133,6 +1168,7 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         y_rotation: m.y_rotation.filter(|v| *v != 0.0),
         corner_radius: m.corner_radius.filter(|v| *v != 0.0),
         fill_method: m.fill_method.filter(|f| *f != FillMethod::default()),
+        clipping: m.clipping.filter(|c| *c != BlurClipping::None),
         ..m.clone()
     })
 }
@@ -1170,7 +1206,7 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
                         n.name
                     )));
                 }
-                Some(m) if !m.tool.feeds(input) => {
+                Some(m) if !n.tool.takes_from(input, &m.tool) => {
                     return Err(Error::invalid(format!(
                         "{}'s {what} is {from}, a {}, which doesn't fit there",
                         n.name,

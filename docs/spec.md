@@ -2680,7 +2680,7 @@ This section follows the Fusion page. The facts without a page are measured in R
     - Thus a Text+ gives the same picture with Multiply by Mask on or off.
   - With no mask on the effect mask input, Multiply by Mask changes nothing.
   - The Settings tab of a Text+ has Multiply by Mask and no Blend. The Settings tab of a Tracker has both.
-  - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
+  - A mask on the effect mask input of a mask joins the two by the Paint Mode of the mask (p. 2474). See [The masks](#the-masks).
 - Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
 
 #### The tools in clip pixels
@@ -2720,21 +2720,82 @@ Each mask has these controls (pp. 2491–2492, 2500):
 - Solid: on. Off, the mask is only a band of Border Width / 2 × W on each side of the edge.
 - Center: (0.5, 0.5), as fractions of the picture from its bottom left. Y goes up.
 
-Measured, a mask with an effect mask input:
+A mask with a mask on its effect mask input (p. 2474):
 
-- Invert and Level act on its own shape only. Invert comes first, then Level.
-- Then the mask adds what comes in: a + b − a × b.
+- Paint Mode joins the input mask i with the new mask n of the node. Its row shows only when a mask is on the effect mask input (p. 2474).
+- Paint Mode: Merge, Add, Subtract, Minimum, Maximum, Average, Multiply, Replace, Invert, Copy or Ignore. Usual: Merge (p. 2474).
+- Measured in Resolve Studio 21.2:
+  - Invert and Level act on its own shape only. Invert comes first, then Level. n is the shape after Level.
+  - c is n / Level: the shape before Level.
+  - Merge: n + i × (1 − c). With Level 1, c is n, and Merge is i + n − i × n.
+  - Add: min(i + n, 1). Subtract: max(i − n, 0).
+  - Minimum: min(i, n). Maximum: max(i, n). Average: (i + n) / 2. Multiply: i × n.
+  - Invert: i + n − 2 × i × n.
+  - Copy: n. Ignore: i.
+  - Replace: n, the same as Copy. The manual says that the areas where n is 0 keep i (p. 2465) ([gotchas](gotchas.md#resolves-fusion-page)).
+  - The forms agree with the reads within 0.00001. The new mask of the reads has Level 0.7.
+  - A delete of the input mask stops the render of the mask and of the tool after it ([gotchas](gotchas.md#resolves-fusion-page)).
 - The manual says that Level and Invert act on the whole mask (p. 2491). The render shows otherwise. vidcut follows the render.
+- vidcut: Merge is the only mode ([todo](todo/effects-page.md)).
+
+The Image tab of a mask (pp. 2500–2501). Measured in Resolve Studio 21.2:
+
+- Output Size: Default or Custom. Usual: Default.
+- Custom adds these rows above Clipping Mode, in this order:
+  - Process Mode: Full Frames, NTSC Fields, PAL/HD Fields, PAL/HD Fields (Reversed) or NTSC Fields (Reversed). Usual: Full Frames.
+  - Width and Height: the size of the composition. Pixel Aspect: (1, 1).
+  - Use Frame Format Settings: on.
+  - Depth: Default, int8, int16, float16 or float32. Usual: Default.
+- Clipping Mode: None or Frame. Usual: None. The manual gives Frame as the usual value (p. 2501).
+  - None: the mask is made beyond the frame. The Soft Edge of an edge outside the frame reaches into the frame.
+  - Frame: the mask is cut at the frame. The Soft Edge repeats the edge pixels of the frame.
+  - A rectangle 1.2 wide with Soft Edge 0.1 gives 0.98908 in the first column with None, and 0.99896 with Frame. With Frame, each column that was read is 0.99896.
+- A viewed mask shows "int8" at the top right of the viewer.
+- vidcut: Clipping Mode is the last row of a mask, with None and Frame. Usual: None. Output Size is not built yet ([todo](todo/effects-page.md)).
 
 The shapes:
 
 - Ellipse: Width and Height 0.5, from 0 to 1000000. The sliders go to 2. Both are fractions of W. Angle: 0, counterclockwise.
 - Rectangle: Width 0.5, a fraction of W. Height 0.5, a fraction of H. Both from 0 to 1000000, and the sliders go to 1. Angle: 0. Corner Radius: 0, from 0 to 1, a fraction of half the shorter side.
+  - Border Style, measured in Resolve Studio 21.2: a row of two groups of three buttons, above Center. Each rectangle has it, also with Solid on. The Ellipse has none.
+  - The joins: Bevel, Round or Miter. Usual: Miter. Miter gives a square corner. Bevel cuts the corner with a straight line. Round gives a round corner.
+  - The ends: Flat, Rounded or Square. Usual: Rounded. Flat stops at the end point. Square goes on past it with a square end. Rounded ends in a half circle.
+  - With Solid off, Position and Length show under Border Style. Usual: 0 and 1.
+  - Length 0.5 with Position 0 draws the band from the middle of the left side, over the top, to the middle of the right side.
 - Polygon (p. 2483): its points, from its center. X is a fraction of W. Y is a fraction of H, up.
   - Size: 1, from 0 to 1000000. The slider goes to 5. The points move out from the center by this.
   - Z Rotation, X Rotation and Y Rotation: 0. Measured: Z turns the shape counterclockwise in square pixels. Then X tilts it, and then Y.
   - The tilts have no perspective. X 60 makes the shape half as high, and Y 60 makes it half as wide.
   - Fill Method: Alternate. A part that the sides go around twice is a hole. Non Zero Winding fills it.
+
+A picture on the effect mask input of a tool (p. 2463). Measured in Resolve Studio 21.2:
+
+- With nothing on its effect mask input, the Settings tab of a Brightness Contrast tool has these rows:
+  - Blend, Process When Blend Is 0.0, Process R, G, B and A, Apply Mask Inverted and Multiply by Mask.
+  - Use Object, Use Material and Clipping Mode. A Blur has its Clipping Mode on its Controls tab.
+  - Use GPU, Hide Incoming Connections, the Layers rows, Comments and the render scripts.
+- With a picture on the effect mask input, these rows follow Multiply by Mask:
+  - Fit Mask: Crop, Stretch, Inside, Width, Height or Outside. Usual: Crop.
+  - Channel: Red, Green, Blue, Alpha, Hue, Luminance, Saturation or Coverage. Usual: Alpha.
+  - A range of Low and High. Usual: 0 and 1.
+  - Clip: Black and White. Usual: both on.
+- The Channel of the picture gives the mask. A Background of (0.2, 0.6, 1.0, 0.5) gives these masks:
+  - Red, Green, Blue and Alpha: 0.2, 0.6, 1.0 and 0.5. The mask takes the colors as they are, not multiplied by the alpha.
+  - Saturation: (max − min) / max, 0.8.
+  - Coverage: 0. A Background has no coverage channel.
+  - Luminance: 0.114 × R + 0.587 × G + 0.299 × B, 0.674. Hue: the hue of (B, G, R), 30° as 0.08333. Both swap red and blue ([gotchas](gotchas.md#resolves-fusion-page)).
+- The range gives the mask (r − Low) / (High − Low), clipped to 0 and 1. r is the level of the Channel.
+  - A Linear gradient from black to white, Channel Red: at r 0.70046, Low 0.25 and High 0.75 gave 0.90092.
+  - Low equal to High gives a hard step. Low cannot pass High.
+  - A High typed below Low sets Low to it. A Low typed above High sets High to it.
+- Clip White off lets the mask go above 1. A Red of 1.5 gave 1 with Clip White on, and 1.5 with it off.
+- Clip Black off changes nothing. A Red of −0.5 gave 0 with Clip Black on and off.
+- Fit Mask puts a picture of another size in the frame. The reads used a 960 × 1080 picture in a 1920 × 1080 frame:
+  - Crop, Inside and Height keep its size, in the middle of the frame. Outside the picture, the mask is 0.
+  - Stretch fills the frame.
+  - Width and Outside scale it by 2 on the two axes, in the middle of the frame.
+- vidcut: a picture on the effect mask input of a tool gives the mask as measured. Luminance and Hue use the Rec. 601 luma and the true hue.
+- vidcut: each picture of a composition has the size of the frame. Thus there is no Fit Mask row ([todo](todo/effects-page.md)).
 
 #### The Merge
 
@@ -2961,8 +3022,20 @@ The Color tab (pp. 2358–2360):
   - Square: the larger of the distances across and up from S to P, divided by the length from S to E.
   - Cross: the smaller of the two distances, divided by the length from S to E.
   - Radial: the distance from S to P, divided by the length from S to E.
-  - Angle: the angle of P − S, counterclockwise, in turns. With End to the right of Start, the pixels right of Start are 0 and the pixels above Start are 0.25.
+  - Angle: the angle of P − S, counterclockwise from the direction of End, in turns. With End to the right of Start, the pixels right of Start are 0 and the pixels above Start are 0.25.
   - The reads agree with these forms to one pixel. The readout at Fit does not give a finer place.
+- Reads with End not to the right of Start. Start is (0.5, 0.5), and the stops are black and white. The pixels are (column, row from the bottom) of 1920 × 1080:
+
+| End | Gradient Type | (1199, 539) | (960, 778) |
+|---|---|---|---|
+| (0.5, 0.75) | Square | 0.88902 | 0.88566 |
+| (0.5, 0.75) | Cross | 0 | 0 |
+| (0.5, 0.75) | Angle | 0.75064 | 1.0 |
+| (0.25, 0.5) | Square | 0.49922 | 0.49733 |
+| (0.25, 0.5) | Cross | 0 | 0 |
+| (0.25, 0.5) | Angle | 0.49967 | 0.75019 |
+
+- With End above Start, Angle is black just left of the line from Start to End and white just right of it.
 - Start and End: usual (0, 0.5) and (1, 0.5). The viewer shows them as two red points with a green line between them (p. 2359).
   - vidcut: the points show for a selected Background with Type Gradient. A drag moves a point.
 - The gradient bar holds the colors of the gradient (p. 2359):
@@ -2972,8 +3045,16 @@ The Color tab (pp. 2358–2360):
   - A drag up past the bar removes a stop.
   - A click on the bar adds a stop with a color between the colors of its two neighbors.
   - Between two stops the color blends in a straight line.
+  - The menu of the bar has Set Key, Animate, From Image, KeyStretcher, Perturb, Publish and Switch (p. 2360). Then it has Connect To, Edit..., Edit Control..., Remove, Paste Setting and Expression.
+  - Set Key, Edit... and Remove are gray.
+  - Animate puts a keyframe on the bar. A change of a stop on another frame adds a keyframe there. Between the keyframes, the colors of the stops blend.
+    - Thus a stop that is black at frame 40 and red at frame 80 has a red of 0.5 at frame 60.
+  - vidcut: the bar has no menu and no keyframes yet ([todo](todo/generator-nodes.md)).
 - Interpolation Space sets the colors between the stops (p. 2359): RGB, HLS, HSV or LAB. Usual: RGB.
   - HLS and HSV turn the hue the shorter way. Thus red to blue goes through magenta.
+  - HLS blends L and S in a straight line. HSV blends V and S in a straight line.
+  - Gray (0.5, 0.5, 0.5) to red (1, 0, 0) gives (0.75013, 0.24987, 0.24987) in the middle column with RGB and with HLS. HSV gives (0.75013, 0.37487, 0.37487).
+  - (0.2, 0, 0) to blue (0, 0, 1) gives (0.5999, 0, 0.60021) in the middle column with HLS and with HSV. RGB gives (0.09995, 0, 0.50026).
   - LAB blends in CIE L\*a\*b\* with the D65 white. The values go to XYZ as linear values with the Rec. 709 primaries, with no gamma.
   - LAB can give values below 0. Red to blue gives (0.587, −0.018, 0.248) at the middle.
   - vidcut: not yet ([todo](todo/generator-nodes.md)).
@@ -2985,7 +3066,8 @@ The Color tab (pp. 2358–2360):
   - Ping-Pong: the gradient goes back and forth. The place −0.44 shows the color of 0.44.
 - Sub-Pixel sets the samples in each pixel (p. 2360): 1x1, 2x2, 3x3, 4x4 or 5x5. Usual: 1x1.
   - N x N samples in each pixel are averaged. At a hard edge, 3x3 gives a mix of 1/3 and 2/3, and 5x5 a mix of 2/5 and 3/5.
-  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+  - The samples are k / N of a pixel right of the place of the one sample of 1x1, with k from 0 to N − 1. Thus 3x3 moves the mean 1/3 of a pixel to the right, and 5x5 moves it 2/5.
+  - vidcut: the samples also go up by k / N of a pixel. The reads cover the steps across only.
 
 The Effect Mask:
 
@@ -3014,6 +3096,8 @@ The facts without a page are measured in Resolve Studio 21.2.
   - Noise Detail Map: a mask there gives flat noise where the mask is black and full detail where it is white. It works before the colors.
   - Noise Brightness Map: a mask there controls the noise map. With Detail 0, it takes the place of the noise.
   - Effect Mask: a mask there limits the noise to the inside of the mask.
+  - The top map input is the Noise Brightness Map, and the bottom map input is the Noise Detail Map. Their tooltips give the names.
+  - A picture dropped on the tile joins the Effect Mask. Drops on the two map inputs joined nothing in five tries.
 - The picture holds the colors of the level as they are. The colors are not multiplied by the alpha.
   - Thus Detail 0 with Color 1 (0, 0, 0, 0) and Color 2 (1, 1, 1, 1) gives (0.5, 0.5, 0.5, 0.5).
 - The Image tab has the same rows and the same usual values as on the Background (p. 2401).
@@ -3047,7 +3131,12 @@ The noise with Detail 1, Color 1 (0, 0, 0, 1) and Color 2 (1, 1, 1, 1). P is 230
 - The level is not clamped. Contrast 10 gives 2.16584 at P, and the color is 2.16584.
 - A part of Detail adds the same part of the next layer. At P, Detail 1.5 is the middle of Detail 1 and Detail 2.
 - Discontinuous gives the absolute value of n. At P it gives 0.33317. At a grid point it gives 0.00126.
-- Seethe 0.5 changes the level at P to 0.56616. Seethe Rate 0.1 changes nothing at frame 0. At frame 5 it gives 0.69766.
+  - With Discontinuous, the level is Contrast × |n| + Brightness / 2. Contrast 2 gives 0.66634 at P, twice the level of Contrast 1. Brightness 0.2 gives 0.43317, 0.1 more.
+  - With Discontinuous, Inverted gives 1 − Contrast × |n| + Brightness / 2. A second read at P gave 0.33286. Inverted then gave 0.66714, with Contrast 2 0.33428, and with Brightness 0.2 0.76714.
+  - With Discontinuous and Detail 0, the level is Brightness / 2. Contrast 2 gives 0, and Brightness 0.2 gives 0.1.
+  - With Discontinuous, Contrast also multiplies the level of two layers. Detail 2 gives 0.45626 at P, and with Contrast 2 0.91251.
+- Seethe 0.5 changes the level at P to 0.56616. Seethe Rate 0.1 changes nothing at frame 0. At frame 5 it gives 0.69766, and at frame 10 0.71979.
+  - Seethe 0.0167 gives 0.67782 at P, 0.02 gives 0.67994, and 0.0208 gives 0.68045. Thus frame 5 does not give the level of any of these Seethe values.
 
 The Color tab (p. 2366):
 
@@ -3056,16 +3145,20 @@ The Color tab (p. 2366):
   - Detail 0, Brightness 0.2, Color 1 (1, 0, 0, 1) and Color 2 (0, 0, 1, 1) give (0.4, 0, 0.6, 1).
 - Gradient: the level of the noise picks a color on a gradient bar.
   - The bar, Interpolation Space, Offset, Repeat and Sub-Pixel are as on the Background. There are no Start and End rows.
-  - Gradient Type: usual Uni.
+  - Offset and Repeat act on the level: the level less Offset gives the color. Sub-Pixel averages the colors of N x N levels in each pixel.
+  - vidcut: Interpolation Space is not built yet ([todo](todo/generator-nodes.md)).
+  - Gradient Type: Uni, Linear, Reflect, Square, Cross, Radial or Angle. Usual: Uni.
+  - Contrast 10 gives 1.0 at P with the usual bar. Thus the level 2.16584 shows the color of the end stop.
 
 The manual and the measurements do not give the noise function of Resolve. vidcut uses a widely used method, fractal Perlin noise:
 
 - The noise is improved Perlin noise in three axes. Seethe is the third axis.
 - The grid, Scale, Center, Angle, Lock X/Y, Contrast, Brightness and Inverted are as measured. The values of the noise between the grid points differ.
 - Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
-- Discontinuous makes each layer 2 × |n| − 1. With one layer, the level is then |n|, as measured.
+- Discontinuous makes each layer |n|. The level before Brightness is then Contrast × the sum of the layers. Without Discontinuous, it is 0.5 + Contrast × the sum / 2.
+- Inverted takes the level before Brightness from 1. Without Discontinuous, this changes the sign of n, as measured.
 - Seethe Rate × the frame is added to Seethe.
-- A mask on the Noise Brightness Map gives the middle level in place of 0.5.
+- A mask on the Noise Brightness Map adds its level − 0.5 to the level. Thus without Discontinuous, it gives the middle level in place of 0.5.
 - The level is not clamped. Past the ends of a gradient, the colors of its end stops go on.
 
 #### Edits
@@ -3077,6 +3170,13 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Lock (Ctrl+L): no changes can be made to the node (pp. 1313, 1424). The node shows a lock badge at the right of its name (p. 1424).
+  - Measured in Resolve Studio 21.2: a locked node refuses a typed value, a drag of a value and Reset.
+  - A locked node can still be renamed, moved, joined, deleted and passed through.
+  - vidcut: a drag of its handles in the viewer changes nothing, as the node takes no change (p. 1313). This is not measured.
+  - The Keyframe button of a locked node adds a key with the value 0 in Resolve ([gotchas](gotchas.md#resolves-edits)). vidcut refuses it.
+- Ctrl+1 sets the Node Editor back to its usual scale (p. 1310).
+  - In Resolve, Ctrl+1 in a viewer sets the viewer to 100 percent (p. 1290). vidcut has no zoom of the viewer yet. Thus Ctrl+1 acts on the Node Editor from all of the page.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
   - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
 - Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
@@ -3091,10 +3191,16 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - The copy takes the place and the joins of that node. vidcut: a join that the copy cannot take goes.
   - vidcut: the item works when one node is copied.
 - Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
-- A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
+- A right-click on a node opens a menu: Rename, Pass Through, Locked, Copy, Paste and Delete.
 - Join (pp. 1394–1397):
   - Drag from an output to an input, or from an input to an output.
   - A drop on a node joins its input. A mask joins the effect mask input.
+  - When the main input is joined, a drop joins the next input. For a node with one input, that can be the effect mask input (p. 1395).
+  - Measured in Resolve Studio 21.2: a Background dropped on a Blur with its input joined joins the effect mask input. The join is blue.
+  - Measured: a Background dropped on a Merge with its Background and Foreground joined joins the effect mask input, in 3 of 3 tries. The manual gives the same (p. 1403).
+  - Measured: a Background dropped on a Merge with only its Background joined joins the Foreground. A Background dropped on a Blur with an empty input joins the input.
+  - Measured: a drop joins only a free input. An Ellipse dropped on a Blur with a Rectangle on its effect mask joins nothing.
+  - Measured: a Background dropped on an Ellipse with an empty effect mask joins nothing. The effect mask of a mask takes only a mask.
   - A pointer on a knot shows its name.
 - Part and move a join (pp. 1400–1401):
   - A pointer on a join shows the half under it in blue.
@@ -3102,6 +3208,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - A drag of a half takes that end of the join. A drop on a knot or a node joins it there. A drop on an empty place parts the join.
 - Select (pp. 1390–1391):
   - A drag on the empty Node Editor selects the nodes in its box. A Ctrl-drag takes them out of the selection.
+  - Measured in Resolve Studio 21.2: after a box select, no node is active. The Inspector shows the header of each selected node, closed.
   - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
 - Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
@@ -3121,7 +3228,12 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
     - A node can be in the two viewers at the same time. A new node goes in no viewer.
     - A viewed mask shows as a white shape on black.
     - The size of the picture shows at the top right of the viewer.
-    - The viewers are not in the undo history. Delete of a viewed node empties its viewer. Undo does not put the node back in the viewer.
+    - The viewers are not in the undo history. Undo of a delete does not put the node back in the viewer.
+    - A delete of a viewed node puts the node on its input in that viewer. On a mask, this is the node on its Effect Mask input. With no such node, the viewer is empty.
+      - A delete of a viewed Blur put the node on its input in that viewer. A delete of a viewed Merge put its Background node there.
+      - A delete of a viewed Rectangle with an Ellipse on its Effect Mask put the Ellipse there. A delete of a viewed mask with no input left its viewer empty.
+      - In Background6 → Blur1 → Blur2, a delete of Blur1 and Blur2 together put Background6 in the viewer of Blur2.
+      - A delete of a node in the two viewers put its input in both.
     - A change to another page and back keeps the viewers.
 - Two dots at the bottom left of a node put the node in a viewer (pp. 1290, 1392–1393). Measured in Resolve Studio 21.2:
   - The left dot is the left viewer. A white dot shows that the node is in that viewer.
@@ -3152,18 +3264,39 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - A click or a drag on the ruler moves the playhead. The playhead cannot leave the source (pp. 1293, 1295).
   - A gray bar with two handles zooms and scrolls the ruler. A drag with the middle mouse button on the ruler scrolls it (p. 1295).
   - The keyframes of the selected node show as tick marks on the Time Ruler (p. 1302).
+- The render range sets the frames that the page plays (p. 1294). Usual: from the In to the Out of the clip, between the yellow lines (p. 1293).
+  - The Render Start and Render End fields at the left of the transport set it (p. 1297). Measured in Resolve Studio 21.2: a typed value moves its yellow line.
+  - The manual names more ways (p. 1294): a Ctrl-drag on the ruler, a drag of a yellow line and a node dropped on the ruler. Set Render Range in the menu of the ruler is one more.
+  - Measured in Resolve Studio 21.2:
+    - The menu of the ruler has Auto Render Range and Set to Output Range. It has no Set Render Range.
+    - Set to Output Range sets the range from the In to the Out.
+    - Auto Render Range sets the whole source of the clip. The manual says that it gives back the In and the Out (p. 1294) ([gotchas](gotchas.md#resolves-fusion-page)).
+    - A MediaIn node dropped on the ruler sets the whole source.
+    - A change to the Edit page and back keeps a set range. The manual says that it gives back the In and the Out (p. 1294) ([gotchas](gotchas.md#resolves-fusion-page)).
+    - A Ctrl-drag from frame 10 to frame 30 moved the playhead to 30 and did not change the range. It is not known if Ctrl reached Resolve.
+  - vidcut: the render range is always the In and the Out of the clip ([todo](todo/effects-page.md)).
 - The transport has six buttons: First Frame, Play Reverse, Stop, Play Forward, Last Frame and Loop (p. 1295).
   - The first and the last frame are the ends of the source, because the composition covers the whole source (p. 1294).
   - The Current Time field at the right shows the frame of the playhead. A drag on it or a number typed in it moves the playhead (p. 1297).
+  - A right-click on Play Forward opens a menu with the frame increment (p. 1296). Measured in Resolve Studio 21.2:
+    - Playback Update is a submenu: Auto, Fast or Full. Usual: Auto.
+    - The frame increment: 0.5, 1, 2, 3, 4, 5, 8, 10, 15, 16, 20, 25 or 30. Usual: 1.
+    - Left and Right move by the increment. With 5, Right from frame 50 goes to 55.
+    - Play moves by the increment. With 5 and a render range of 10 to 30, play from 12 shows 17, 22 and 27, and stops at 27.
 - Keys (pp. 1295–1296):
   - Space plays and stops. J, K and L play backward, stop and play forward.
   - Left and Right move one frame. Shift+Left and Shift+Right go to the first and the last frame of the source.
-  - Ctrl+Left and Ctrl+Right (Command on a Mac) go to the In and the Out.
+    - Measured in Resolve Studio 21.2: with a render range of 10 to 30, Shift+Left and Shift+Right also go to the ends of the source.
+  - Ctrl+Left and Ctrl+Right (Command on a Mac) go to the start and the end of the render range (p. 1296). Usual: the In and the Out.
+    - Measured in Resolve Studio 21.2: Ctrl+Left at the start of the range stays there. Left there moves out of the range.
 - Play, measured in Resolve Studio 21.2:
   - Play forward from a frame between the In and the Out stops at the Out. Play backward stops at the In.
   - Play forward from the head goes through the head and on to the Out. Play backward from the tail goes through the tail and on to the In.
   - Play forward from the tail starts at the In. Play backward from the head starts at the Out.
   - With Loop on, play forward from the Out goes on from the In. Play backward from the In goes on from the Out.
+  - With a render range set, play forward uses the ends of the range in the place of the In and the Out. Measured with a range of 10 to 30:
+    - Loop off: play from 20 stops at 30. Play from 5 goes on to 30 and stops there. Play from 35 starts at 10 and stops at 30.
+    - Loop on: play from 5 goes into the range and then loops from 30 to 10. Play from 35 starts at 10.
   - A right-click on Loop picks the way it loops (p. 1296). The menu of 21.2 has Loop and Ping Pong.
   - With Ping Pong, play turns back at the In and at the Out. The manual says that it turns back at the ends of the Time Ruler (p. 1296).
   - With Ping Pong, play from the head and from the tail starts as it does with Loop.
@@ -3171,19 +3304,44 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
   - Play shows each frame of the file at the frame rate of the file. A speed change of the clip does not change this.
 - The page plays the sound of the timeline (p. 1297). Play in the head and in the tail has no sound (Resolve Studio 21.2).
+  - The Audio button mutes the sound. It is at the left of the transport, right of the render range fields (p. 1297).
+  - Measured in Resolve Studio 21.2: its tooltip is "Mute". Usual: the sound is on, and the button shows a speaker with waves.
+  - Its right-click menu picks the source of the sound. With one clip, the menu has Mute Audio and MediaIn1, with a dot at MediaIn1.
 - Select:
   - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
   - One selected node is the active node. New tools go after it (p. 1391).
   - Alt-click (Option on a Mac) on a selected node makes it the active node. The selection stays (p. 1391).
   - A click on the empty Node Editor selects none (p. 1391).
 - A click on a tool in the Effects Library adds it after the active node (p. 1287).
+- Shift+Space opens the Select Tool window (p. 1386).
+  - The typed text finds the tools by their name or by their kind, for example "mask".
+  - Up and Down pick a tool. Return or the main button adds it as a click in the Effects Library does.
+  - The window keeps the text for the next time. Thus Shift+Space and Return add the same tool again.
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
+  - A switch at the left of the header turns a tool on and off. It is the same as Pass Through (p. 1424).
+  - The Lock button at the right of the header locks the node (p. 1313). Measured: it is left of Reset.
   - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
+  - Measured in Resolve Studio 21.2: the Center of a Vignette is one row with an X and a Y field. The viewer shows no point for it.
 - Each value has a Keyframe button at its right (p. 1519).
   - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
   - Its arrows go to the keyframes on each side.
   - After a value has a keyframe, a change on another frame puts a keyframe there.
+- The header of a node in the Inspector, measured in Resolve Studio 21.2:
+  - From left to right: the switch that turns the node on and off, the name, Set Color, Versions, Pin, Lock and Reset.
+  - Set Color is a dot and a chevron. Its menu has Clear Color and 16 colors (p. 1313).
+    - The colors: Orange, Apricot, Yellow, Lime, Olive, Green, Teal, Navy, Blue, Purple, Violet, Pink, Tan, Beige, Brown and Chocolate.
+    - A color tints the tile of the node and the line under its name. The dot takes the color.
+    - Clear Color gives back the color of the category of the tool. A Blur is then orange.
+  - Versions shows a row of six buttons under the header (p. 1313). Each button keeps one set of values of the node.
+    - The first visit to a version copies the current values.
+    - The number of a used version is white.
+    - The right-click menu of a version button has one item, Clear.
+  - Pin keeps a node in the Inspector when the selection changes (p. 1314).
+    - The selected node shows at the top, and the pinned node under it.
+    - A click on the empty Node Editor then keeps both in the Inspector.
+    - Unpin turns the pin gray. The node stays until the selection changes.
+  - vidcut: the header has no Set Color, Versions or Pin ([todo](todo/effects-page.md)).
 - Each viewer with a picture shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
   - Measured in Resolve Studio 21.2: the handles show whatever node the viewer shows.
   - Measured in Resolve Studio 21.2: a mask whose Center is joined to a tracker shows its center at the joined point. A drag of the center moves nothing.
@@ -3238,6 +3396,9 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - The second row has Track Reverse One Frame, Stop Tracking and Track Forward One Frame.
   - A One Frame button tracks one frame from the playhead. Then the playhead is on that frame.
   - The render range is from the In to the Out. A track stops at its end (p. 1785).
+    - Measured in Resolve Studio 21.2: Track Forward from a frame after the render range renders no frame. A window says "Render did not complete".
+    - After that, the Tracker does not track again ([gotchas](gotchas.md#resolves-fusion-page)).
+    - vidcut: a track from a frame outside the In and the Out gets an error. The Tracker stays as it was.
   - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
     - The frames of the old path that the track did not reach also stay. This is measured with each button of the first row.
     - Stop Tracking asks "Are you sure you wish to do this?" first.

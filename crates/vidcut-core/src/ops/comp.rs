@@ -124,7 +124,8 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
         }
         Some(a) if node.tool.is_mask() && a.tool.takes(NodeInput::EffectMask) => {
             node.place = above(c, a.place);
-            node.effect_mask = a.effect_mask.clone();
+            let held = a.effect_mask.as_deref().and_then(|m| c.node(m));
+            node.effect_mask = held.filter(|m| m.tool.is_mask()).map(|m| m.name.clone());
             if let Some(i) = c.index(&a.name) {
                 c.nodes[i].effect_mask = Some(node.name.clone());
             }
@@ -221,7 +222,8 @@ fn replaced(c: &mut Composition, mut node: Node, name: &str) {
     for n in &mut c.nodes {
         for input in NodeInput::ALL {
             if n.join(input) == Some(name) {
-                *n.join_mut(input) = node.tool.feeds(input).then(|| node.name.clone());
+                let fits = n.tool.takes_from(input, &node.tool);
+                *n.join_mut(input) = fits.then(|| node.name.clone());
             }
         }
         if let Some(k) = n.connect.as_mut().filter(|k| k.tracker == name) {
@@ -338,9 +340,9 @@ pub fn connect(
     }
     if let Some(from) = from {
         let source = &c.nodes[found(c, id, from)?].tool;
-        if !source.feeds(input) {
+        if !tool.takes_from(input, source) {
             return Err(Error::invalid(format!(
-                "{from} ({}) does not fit: a picture input takes a node that gives a picture, and an effect mask takes a mask",
+                "{from} ({}) does not fit: a picture input takes a node that gives a picture, the effect mask of a tool takes a mask or a picture, and the other mask inputs take a mask",
                 source.label()
             )));
         }
@@ -385,18 +387,22 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
 pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let gone = c.nodes.remove(found(c, id, name)?);
+    let through = match gone.tool.is_mask() {
+        true => NodeInput::EffectMask,
+        false => NodeInput::Input,
+    };
+    let next = gone.join(through).filter(|_| gone.tool.takes(through));
+    let next_tool = next.and_then(|n| c.node(n)).map(|n| n.tool.clone());
     for n in &mut c.nodes {
         if n.connect.as_ref().is_some_and(|k| k.tracker == name) {
             n.connect = None;
         }
         for input in NodeInput::ALL {
             if n.join(input) == Some(name) {
-                let through = match input.carries_picture() {
-                    true => NodeInput::Input,
-                    false => NodeInput::EffectMask,
-                };
-                let passes = gone.tool.takes(through) && gone.tool.feeds(input);
-                *n.join_mut(input) = gone.join(through).filter(|_| passes).map(str::to_string);
+                let fits = next_tool
+                    .as_ref()
+                    .is_some_and(|t| n.tool.takes_from(input, t));
+                *n.join_mut(input) = next.filter(|_| fits).map(str::to_string);
             }
         }
     }
@@ -420,6 +426,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     let mut next = n.clone();
     let mut left = change.clone();
     taken(&mut left.pass_through, &mut next.pass_through);
+    taken(&mut left.locked, &mut next.locked);
     taken(&mut left.place, &mut next.place);
     if let Some(connect) = left.connect.take() {
         next.connect = connect;
@@ -432,6 +439,11 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     }
     if next.tool.multiplies() {
         taken(&mut left.multiply_by_mask, &mut next.multiply_by_mask);
+    }
+    if next.tool.takes_picture_mask() {
+        given(&mut left.mask_channel, &mut next.mask_channel);
+        given(&mut left.mask_range, &mut next.mask_range);
+        given(&mut left.mask_clip, &mut next.mask_clip);
     }
     if matches!(
         &next.tool,
@@ -458,6 +470,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.filter, &mut m.filter);
             given(&mut left.passes, &mut m.passes);
             given(&mut left.border_width, &mut m.border_width);
+            given(&mut left.clipping, &mut m.clipping);
             taken(&mut left.values.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);
             taken(&mut left.show_view_controls, &mut m.show_view_controls);
@@ -619,6 +632,7 @@ fn background_applied(b: &mut Background, left: &mut NodeChange) {
     }
     given(&mut left.values.offset, &mut b.offset);
     given(&mut left.repeat, &mut b.repeat);
+    given(&mut left.sub_pixel, &mut b.sub_pixel);
     image_applied(&mut b.image, left);
 }
 
@@ -656,6 +670,9 @@ fn noise_applied(f: &mut FastNoise, left: &mut NodeChange) -> Result<()> {
     if let Some(stops) = left.stops.take() {
         f.stops = stops;
     }
+    given(&mut left.values.offset, &mut f.offset);
+    given(&mut left.repeat, &mut f.repeat);
+    given(&mut left.sub_pixel, &mut f.sub_pixel);
     image_applied(&mut f.image, left);
     Ok(())
 }
@@ -758,6 +775,16 @@ pub fn set(
     if *change == NodeChange::default() {
         return Err(Error::usage("comp.set needs a value to change"));
     }
+    let modes = NodeChange {
+        place: change.place,
+        pass_through: change.pass_through,
+        locked: change.locked,
+        ..NodeChange::default()
+    };
+    let unlocks = change.locked == Some(false);
+    if *change != modes && !unlocks && node_of(p, id, name).is_some_and(|n| n.locked) {
+        return Err(locked(name));
+    }
     let mut change = change.clone();
     trimmed(p, id, name, &mut change, frame)?;
     moved_path(p, id, name, &mut change, frame)?;
@@ -787,6 +814,19 @@ pub fn set(
     }
     tidied(p, id)?;
     Ok(())
+}
+
+fn node_of<'a>(p: &'a Project, id: &str, name: &str) -> Option<&'a Node> {
+    p.clip(id)
+        .and_then(|c| c.picture.as_ref())
+        .and_then(|x| x.composition.as_ref())
+        .and_then(|c| c.node(name))
+}
+
+pub(super) fn locked(name: &str) -> Error {
+    Error::invalid(format!(
+        "{name} is locked: first unlock it (comp.set with locked false)"
+    ))
 }
 
 fn reference_locked(name: &str) -> Error {
@@ -1013,6 +1053,9 @@ pub fn key(
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if n.locked {
+        return Err(locked(name));
+    }
     if let (Tool::Merge(m), Some(v)) = (&n.tool, value)
         && m.locks(v)
     {
@@ -1099,6 +1142,9 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if n.locked {
+        return Err(locked(name));
+    }
     *n = Node {
         name: n.name.clone(),
         tool: n.tool.made(),
