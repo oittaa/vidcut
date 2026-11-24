@@ -358,6 +358,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
   - `peak`: for each Cr code, the highest luma code with it. The same for each Cb code.
   - `peak`: for each luma code, the Cb and Cr pair that gives the most green.
   - The CPU ranks all the Cb and Cr pairs by their green once (`light::ranks`).
+  - The ranks stay in a `ByBytes` with a fixed limit (`RANKS_BYTES`). Why: one table of 12-bit pictures holds 128 MiB.
   - The luma of each 2×2 block is its highest luma, as on the CPU.
   - `sample`: the luma and chroma codes of each point of the sample grid.
 - Then the CPU computes the light of these codes, with the code that measures frames in memory (`Spread`).
