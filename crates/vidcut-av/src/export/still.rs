@@ -25,6 +25,36 @@ pub fn png(
     encoded(frame)
 }
 
+pub fn floats(
+    piece: &VideoPiece,
+    fps: Rational,
+    size: (u32, u32),
+    colors: super::renderer::Finish<'_>,
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<Vec<[f32; 3]>> {
+    crate::cancel::stop()?;
+    crate::init();
+    let pixel = format::Pixel::GBRPF32LE;
+    let mut frames = super::renderer::frames(fps, size, pixel, colors, decoder)?.in_frame(size);
+    frames.read_piece(piece);
+    let frame = frames
+        .next_frame()?
+        .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
+    let (w, h) = (frame.width() as usize, frame.height() as usize);
+    let value = |plane: usize, x: usize, y: usize| {
+        let at = y * frame.stride(plane) + 4 * x;
+        let bytes = &frame.data(plane)[at..at + 4];
+        f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+    };
+    let mut out = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            out.push([value(2, x, y), value(0, x, y), value(1, x, y)]);
+        }
+    }
+    Ok(out)
+}
+
 pub fn rgba(
     piece: &VideoPiece,
     fps: Rational,

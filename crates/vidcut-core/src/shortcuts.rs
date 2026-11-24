@@ -174,6 +174,7 @@ actions! {
     ResetGradesKeepNodes "reset_grades_keep_nodes",
     ResetAllGrades "reset_all_grades",
     AddStaticKeyframe "add_static_keyframe",
+    AutoColor "auto_color",
     SourceStart "source_start",
     SourceEnd "source_end",
     ClipIn "clip_in",
@@ -221,7 +222,8 @@ impl Action {
             | Action::ResetNodeGrade
             | Action::ResetGradesKeepNodes
             | Action::ResetAllGrades
-            | Action::AddStaticKeyframe => Panel::Color,
+            | Action::AddStaticKeyframe
+            | Action::AutoColor => Panel::Color,
             _ => Panel::App,
         }
     }
@@ -1644,6 +1646,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl+]"],
         "Add a static keyframe",
         Some("On each corrector in All mode, or on the current node in Color mode."),
+    ),
+    own(
+        Color,
+        Action::AutoColor,
+        &["Alt+Shift+C"],
+        "Auto Color on the current node",
+        Some("Balances the blacks and the whites from the frame at the playhead."),
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

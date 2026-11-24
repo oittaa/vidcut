@@ -2931,6 +2931,30 @@ pub enum Request {
         /// for a quarter point.
         points: f64,
     },
+    /// Auto Color: balance the blacks and the whites of a clip from one
+    /// frame. A new analysis reads that frame after the corrector, with its
+    /// Lift and Gain at their usual values. Each channel gets its black
+    /// point from the darkest pixels and its white point from the brightest.
+    /// The master gets the luma of these points. The new Lift and Gain of
+    /// red, green, blue and the master map them to 0 and 1. The corrector
+    /// keeps the Lift and Gain that they replaced. With `on`, there is no
+    /// analysis: false shows the replaced values again and keeps the result,
+    /// and true shows the result again.
+    #[serde(rename = "grade.auto_color")]
+    GradeAutoColor {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame that the analysis reads, and whose keyframe changes.
+        /// Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// Show (true) or hide (false) the kept result, with no analysis.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
     /// Add a corrector to the grade of a clip, or with `timeline` to the
     /// timeline grade, as `add` says. The new node gets the next number.
     /// Returns its `node` number.

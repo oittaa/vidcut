@@ -28,6 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
+- Auto Color, with the legacy method (§8.25, X174)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
@@ -40,7 +41,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
-- color ([todo](todo/auto-color.md)), the Fusion tools that §8.19 does not have
+- the Fusion tools that §8.19 does not have
 - LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
@@ -4187,7 +4188,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The analysis then sees the output of the node with the Offset, and with Lift and Gain at their usual values.
   - 1920 × 1080 and 3840 × 2160 give the same points for most values. 588 × 260 differs by up to 0.0016.
 - An OpenTimelineIO export holds no grade of a clip. Its clip metadata is empty. Auto Color itself in the file is not measured.
-- vidcut has no Auto Color yet ([todo](todo/auto-color.md)).
+- **vidcut** uses the legacy method above for each Auto Color ([X174](deviations.md#x174-auto-color-uses-the-legacy-method)).
+  - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
+  - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
+  - The Auto Color button of the viewer Tools works on node 1.
+  - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
+    - The Lift and Gain of that corrector are at their usual values.
+    - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
+  - The corrector keeps the Lift and Gain that the result replaces.
+    - `on: false` shows the kept values again, and keeps the result. `on: true` shows the result again.
+    - A new analysis on a corrector that shows a result replaces only the result.
+    - A Reset of the Primaries palette removes the kept values.
+  - The Auto Color button of the viewer Tools is lit while the result shows.
+    - A click turns the result off, or on again. With no kept result, a click runs the analysis.
+  - The grade of the timeline has no Auto Color.
+  - An OpenTimelineIO file of vidcut keeps the result and the kept values in the vidcut metadata ([todo](todo/auto-color.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -4678,6 +4693,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
+| Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |

@@ -1,9 +1,10 @@
 use serde_json::{Value, json};
 
+use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput,
-    KeyMix, KeyOutput, Project, WindowKind,
+    AutoColor, Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow,
+    KeyInput, KeyMix, KeyOutput, Project, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -432,7 +433,7 @@ pub(super) fn edited(
     store(p, of, &g)
 }
 
-pub(super) fn no_node(n: u32) -> Error {
+pub(crate) fn no_node(n: u32) -> Error {
     Error::not_found(format!("the grade has no node {n}"))
 }
 
@@ -693,6 +694,63 @@ pub fn printer(
         })?;
     }
     Ok(())
+}
+
+pub enum AutoStep {
+    Analysed(Balance),
+    Shown(bool),
+}
+
+pub fn auto_color(
+    p: &mut Project,
+    of: &GradeOf,
+    (n, at): (u32, Option<i64>),
+    step: AutoStep,
+) -> Result<()> {
+    let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
+    edited(p, of, |g| {
+        let mut had = None;
+        changed(g, n, frame, |c| {
+            had = Some(c.auto_color.is_some());
+            auto_shown(c, &step)
+        })?;
+        match (&step, had) {
+            (AutoStep::Shown(_), Some(false)) => Err(Error::invalid(format!(
+                "node {n} has no Auto Color result: run grade.auto_color without `on` first"
+            ))),
+            _ => Ok(()),
+        }
+    })
+}
+
+fn auto_shown(c: &Corrector, step: &AutoStep) -> Corrector {
+    let kept = |on: bool| {
+        Some(AutoColor {
+            on,
+            lift: c.lift,
+            gain: c.gain,
+        })
+    };
+    match (step, &c.auto_color) {
+        (AutoStep::Analysed(b), Some(a)) if a.on => Corrector {
+            lift: b.lift,
+            gain: b.gain,
+            ..c.clone()
+        },
+        (AutoStep::Analysed(b), _) => Corrector {
+            lift: b.lift,
+            gain: b.gain,
+            auto_color: kept(true),
+            ..c.clone()
+        },
+        (AutoStep::Shown(on), Some(a)) if a.on != *on => Corrector {
+            lift: a.lift,
+            gain: a.gain,
+            auto_color: kept(*on),
+            ..c.clone()
+        },
+        (AutoStep::Shown(_), _) => c.clone(),
+    }
 }
 
 pub fn get(p: &Project, of: &GradeOf, at: Option<i64>) -> Result<Value> {

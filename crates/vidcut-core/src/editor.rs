@@ -137,6 +137,13 @@ pub trait Env {
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
+    fn still_levels(&self, plan: &RenderPlan) -> Result<Arc<crate::auto_color::Levels>> {
+        let _ = plan;
+        Err(Error::usage(
+            "Auto Color reads the picture in the vidcut program",
+        ))
+    }
+
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
 
     fn transcribe(&self, plan: &RenderPlan, asked: &transcript::Asked) -> Result<Arc<Speech>> {
@@ -4998,6 +5005,21 @@ fn mutate(
             ops::grade::printer(p, &of, n, (*color, *points), &lights)?;
             Value::Null
         }
+        Request::GradeAutoColor { clip, node, at, on } => {
+            let of = grade_of(p, clip, false, playhead)?;
+            let n = node.unwrap_or(1);
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            let step = match on {
+                Some(on) => ops::grade::AutoStep::Shown(*on),
+                None => {
+                    let plan = auto_color_plan(p, &of, n, at)?;
+                    let levels = env.still_levels(&plan)?;
+                    ops::grade::AutoStep::Analysed(crate::auto_color::legacy(&levels))
+                }
+            };
+            ops::grade::auto_color(p, &of, (n, at), step)?;
+            Value::Null
+        }
         Request::GradeAdd {
             clip,
             timeline,
@@ -8231,6 +8253,71 @@ fn track_start(
 }
 
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
+
+pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
+    let Request::GradeAutoColor {
+        clip,
+        node,
+        at,
+        on: None,
+    } = request
+    else {
+        return Vec::new();
+    };
+    let of = grade_of(p, clip, false, playhead);
+    let at = time_or_playhead(p, at.as_ref(), playhead);
+    let plan = of.and_then(|of| auto_color_plan(p, &of, node.unwrap_or(1), at?));
+    plan.into_iter().collect()
+}
+
+fn auto_color_plan(
+    p: &Project,
+    of: &ops::grade::GradeOf,
+    n: u32,
+    at: Option<i64>,
+) -> Result<RenderPlan> {
+    let ops::grade::GradeOf::Clip(id) = of else {
+        return Err(Error::invalid("Auto Color works on the grade of a clip"));
+    };
+    let t =
+        at.ok_or_else(|| Error::usage("grade.auto_color needs `at` (--at): there is no playhead"))?;
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    if t < c.start || t >= c.end() {
+        return Err(Error::invalid(format!(
+            "{id} is not at frame {t}: Auto Color reads a frame of the clip"
+        )));
+    }
+    let frame = ops::grade::frame_of(p, of, t)?;
+    let mut g = ops::grade::stored(p, of)?.at(frame as f64).into_owned();
+    match g.node_mut(n).map(|d| &mut d.tool) {
+        Some(crate::model::GradeTool::Corrector(c)) => {
+            let usual = crate::model::Corrector::default();
+            (c.lift, c.gain) = (usual.lift, usual.gain);
+        }
+        Some(_) => return Err(Error::invalid(format!("node {n} is a mixer"))),
+        None => return Err(ops::grade::no_node(n)),
+    }
+    g.output = Some(crate::model::GradeLink::picture(n));
+    let mut solo = p.clone();
+    solo.subtitles.clear();
+    for track in &mut solo.tracks {
+        track.clips.retain(|k| k.id == *id);
+    }
+    let picture = solo
+        .tracks
+        .iter_mut()
+        .flat_map(|track| track.clips.iter_mut())
+        .map(|k| k.picture.get_or_insert_with(Default::default))
+        .next()
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    picture.opacity = None;
+    picture.opacity_keys.clear();
+    picture.composite_mode = None;
+    picture.grade = Some(g);
+    crate::render::flatten(&solo, t, t + 1)
+}
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {
     let Request::MotionTrack {
