@@ -23,7 +23,7 @@ use vidcut_core::editor::{
     Env, compound_context, media_context, resolve_clip, resolve_cue, source_context,
 };
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
+use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, RenderStatus, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
@@ -2219,9 +2219,12 @@ impl Live {
     fn rendering(&self, request: &Request) -> Option<String> {
         let gone = match request {
             Request::RenderRemove { jobs } => jobs.to_vec(),
-            Request::RenderClear { all: true } => {
+            Request::RenderClear { all } => {
                 let p = self.project.as_ref()?.project();
-                p.queue.iter().map(|j| j.id.clone()).collect()
+                (p.queue.iter())
+                    .filter(|j| *all || matches!(j.status, Some(RenderStatus::Completed { .. })))
+                    .map(|j| j.id.clone())
+                    .collect()
             }
             _ => return None,
         };

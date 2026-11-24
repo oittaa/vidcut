@@ -4794,7 +4794,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
   - Each render is a job, and Jobs shows it too ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - A job that failed shows "Failed:" and the error, in red.
-  - A job that renders cannot be removed, and Clear All is greyed while jobs render.
+  - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - Individual clips names the files with a template. The File tab has Filename Digits and First Frame for image sequences, and Replace Files.
   - Filename Digits is 8 by default. First Frame is 1 when it is turned on.
