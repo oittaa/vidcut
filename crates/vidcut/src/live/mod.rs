@@ -2572,6 +2572,7 @@ impl Live {
             self.missing_watch.look_again();
         }
         let output = j.params["output"].as_str().map(PathBuf::from);
+        let rendered = j.render.clone();
         let queued = (j.render.clone()).map(|job| Request::RenderEnded {
             job,
             status: crate::queue::status(result, j.clock.elapsed().as_secs_f64()),
@@ -2587,6 +2588,11 @@ impl Live {
             })
         {
             let _ = self.edit(Envelope::new(ended), Origin::Session);
+        }
+        if result.is_ok()
+            && let Some(at) = rendered.and_then(|job| self.rendered_from(&job))
+        {
+            self.seek(TIMELINE, at, false);
         }
         if !told {
             return;
@@ -2606,6 +2612,18 @@ impl Live {
                 self.notice(format!("{kind} {id} cancelled"), false)
             }
             Err(e) => self.notice(format!("{kind} {id} failed: {}", e.message), true),
+        }
+    }
+
+    fn rendered_from(&self, job: &str) -> Option<i64> {
+        let p = self.project.as_ref()?.project();
+        let q = p.queue.iter().find(|q| q.id == job)?;
+        if p.open_id() != Some(q.timeline.as_str()) {
+            return None;
+        }
+        match q.export.range.as_ref()?.start {
+            TimeSpec::Frames(a) => Some(a),
+            _ => None,
         }
     }
 
