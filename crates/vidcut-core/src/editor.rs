@@ -1587,7 +1587,11 @@ fn tracks_markers_step(
                 apply_json,
                 |k, field, by| {
                     match field {
-                        "at" => k.at += by,
+                        "at" => {
+                            k.at =
+                                k.at.checked_add(by)
+                                    .ok_or(format!("at of {} goes out of range", k.id))?
+                        }
                         _ => shift_json(k, field, by)?,
                     }
                     Ok(())
@@ -1657,7 +1661,12 @@ fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Res
                 apply_json,
                 |c, field, by| {
                     match field {
-                        "start" => c.start += by,
+                        "start" => {
+                            c.start = c
+                                .start
+                                .checked_add(by)
+                                .ok_or(format!("start of {} goes out of range", c.id))?
+                        }
                         _ => shift_json(c, field, by)?,
                     }
                     Ok(())

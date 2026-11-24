@@ -1917,8 +1917,8 @@ fn paint_ramp(t: f32, n: i32) -> vec4<f32> {
     return paint_color(n - 1);
 }
 
-fn paint_repeat(t: f32) -> f32 {
-    switch i32(painting.how.z) {
+fn gradient_repeat(t: f32, mode: i32) -> f32 {
+    switch mode {
         case 1: {
             return t - floor(t);
         }
@@ -1980,8 +1980,16 @@ fn fs_background(in: Out) -> @location(0) vec4<f32> {
             color = mix(mix(c[0], c[1], uv.x), mix(c[2], c[3], uv.x), uv.y);
         }
         case 4: {
-            let t = paint_along(in.position.xy) - painting.more.x;
-            color = paint_ramp(paint_repeat(t), i32(painting.how.w));
+            let n = max(i32(painting.more.w), 1);
+            var sum = vec4<f32>(0.0);
+            for (var j = 0; j < n; j++) {
+                for (var i = 0; i < n; i++) {
+                    let at = in.position.xy + vec2<f32>(f32(i), -f32(j)) / f32(n);
+                    let t = gradient_repeat(paint_along(at) - painting.more.x, i32(painting.how.z));
+                    sum += paint_ramp(t, i32(painting.how.w));
+                }
+            }
+            color = sum / f32(n * n);
         }
         default: {}
     }
@@ -1993,6 +2001,7 @@ struct Noising {
     place: vec4<f32>,
     how: vec4<f32>,
     more: vec4<f32>,
+    ramp: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> noising: Noising;
@@ -2031,13 +2040,21 @@ fn noise_sum(at: vec2<f32>, detail: f32) -> f32 {
     return sum;
 }
 
-@fragment
-fn fs_noise(in: Out) -> @location(0) vec4<f32> {
-    let px = vec2<i32>(in.position.xy);
-    let d = vec2<f32>(in.position.x - noising.place.x, noising.place.y - in.position.y);
+fn noise_at(at: vec2<f32>, detail: f32, base: f32) -> f32 {
+    let d = vec2<f32>(at.x - noising.place.x, noising.place.y - at.y);
     let c = cos(noising.how.x);
     let s = sin(noising.how.x);
     let turned = vec2<f32>(c * d.x + s * d.y, c * d.y - s * d.x);
+    var n = noise_sum(turned * noising.place.zw, detail);
+    if noise_has(NOISE_INVERTED) {
+        n = -n;
+    }
+    return base + 0.5 * (n * noising.more.x + noising.how.w);
+}
+
+@fragment
+fn fs_noise(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
     var detail = noising.how.y;
     if noise_has(NOISE_DETAIL_MAP) {
         detail *= textureLoad(noise_detail, px, 0).a;
@@ -2046,16 +2063,20 @@ fn fs_noise(in: Out) -> @location(0) vec4<f32> {
     if noise_has(NOISE_LEVEL_MAP) {
         base = textureLoad(noise_level, px, 0).a;
     }
-    var n = noise_sum(turned * noising.place.zw, detail);
-    if noise_has(NOISE_INVERTED) {
-        n = -n;
+    if i32(noising.more.z) != 1 {
+        let v = noise_at(in.position.xy, detail, base);
+        return mix(noising.colors[0], noising.colors[1], v);
     }
-    let v = base + 0.5 * (n * noising.more.x + noising.how.w);
-    var color = mix(noising.colors[0], noising.colors[1], v);
-    if i32(noising.more.z) == 1 {
-        color = paint_ramp(v, i32(noising.more.w));
+    let n = max(i32(noising.ramp.z), 1);
+    var sum = vec4<f32>(0.0);
+    for (var j = 0; j < n; j++) {
+        for (var i = 0; i < n; i++) {
+            let at = in.position.xy + vec2<f32>(f32(i), -f32(j)) / f32(n);
+            let v = noise_at(at, detail, base) - noising.ramp.x;
+            sum += paint_ramp(gradient_repeat(v, i32(noising.ramp.y)), i32(noising.more.w));
+        }
     }
-    return color;
+    return sum / f32(n * n);
 }
 
 struct Vignetting {

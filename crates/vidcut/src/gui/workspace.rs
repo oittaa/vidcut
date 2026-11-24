@@ -358,7 +358,7 @@ impl Workspace {
                 }
                 live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
                 live::GuiChange::Window(w) => self.effects_page.window = w,
-                live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
+                live::GuiChange::Nodes(nodes, active) => self.pick_nodes(nodes, active)?,
                 live::GuiChange::Element(e) => self.effects_page.element = e,
                 live::GuiChange::GradeNodes(nodes, current) => {
                     self.pick_grade_nodes(nodes, current)?
@@ -490,6 +490,7 @@ impl Workspace {
                 (Page::Color, GradeLevel::Timeline) | (Page::Cut, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
+            node: self.effects_page.picked().map(str::to_owned),
             element: self.effects_page.element,
             grade_nodes: match page {
                 Page::Color => self.effects_page.picked_grade().to_vec(),

@@ -10,9 +10,9 @@ use crate::model::{
     EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming,
     GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite, ImageFormat, Mask,
     Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern, Picture,
-    PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool,
-    TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, SubPixel, TextPlus,
+    Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -674,6 +674,7 @@ fn background_checked(b: &Background) -> Result<Background> {
         stops,
         offset: b.offset.filter(|v| *v != 0.0),
         repeat: b.repeat.filter(|r| *r != GradientRepeat::default()),
+        sub_pixel: b.sub_pixel.filter(|s| *s != SubPixel::default()),
         image: b.image,
     })
 }
@@ -711,6 +712,11 @@ fn noise_checked(f: &FastNoise) -> Result<FastNoise> {
     let why = "a fast noise's color is four numbers, each from -1000000 to 1000000";
     colors_checked([f.color1, f.color2].into_iter().flatten(), why)?;
     let stops = stops_checked(&f.stops)?;
+    within(
+        f.offset,
+        Background::OFFSETS,
+        "a gradient's offset is from -1000000 to 1000000",
+    )?;
     image_checked(&f.image)?;
     Ok(FastNoise {
         center: f.center.filter(|p| *p != Mask::MIDDLE),
@@ -726,6 +732,9 @@ fn noise_checked(f: &FastNoise) -> Result<FastNoise> {
         color1: f.color1.filter(|c| *c != FastNoise::COLOR1),
         color2: f.color2.filter(|c| *c != FastNoise::COLOR2),
         stops,
+        offset: f.offset.filter(|v| *v != 0.0),
+        repeat: f.repeat.filter(|r| *r != GradientRepeat::default()),
+        sub_pixel: f.sub_pixel.filter(|s| *s != SubPixel::default()),
         ..f.clone()
     })
 }

@@ -6,7 +6,7 @@ use crate::model::{
     Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
     GradientStop, GradientType, ImageFormat, JoinStyle, Mask, MaskChannel, Merge, MergeEdges,
     MergeOperator, MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime,
-    ShadingElement, TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
+    ShadingElement, SubPixel, TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -546,6 +546,10 @@ impl Background {
     pub fn repeats(&self) -> GradientRepeat {
         self.repeat.unwrap_or_default()
     }
+
+    pub fn samples(&self) -> SubPixel {
+        self.sub_pixel.unwrap_or_default()
+    }
 }
 
 impl Default for FastNoise {
@@ -567,6 +571,9 @@ impl Default for FastNoise {
             color1: None,
             color2: None,
             stops: Vec::new(),
+            offset: None,
+            repeat: None,
+            sub_pixel: None,
             image: ImageFormat::default(),
         }
     }
@@ -635,6 +642,18 @@ impl FastNoise {
         }
     }
 
+    pub fn shift(&self) -> f64 {
+        self.offset.unwrap_or(0.0)
+    }
+
+    pub fn repeats(&self) -> GradientRepeat {
+        self.repeat.unwrap_or_default()
+    }
+
+    pub fn samples(&self) -> SubPixel {
+        self.sub_pixel.unwrap_or_default()
+    }
+
     pub fn color_values(second: bool) -> [EffectValue; 4] {
         use EffectValue as V;
         match second {
@@ -693,6 +712,36 @@ impl GradientType {
             GradientType::Cross => "Cross",
             GradientType::Radial => "Radial",
             GradientType::Angle => "Angle",
+        }
+    }
+}
+
+impl SubPixel {
+    pub const ALL: [SubPixel; 5] = [
+        SubPixel::One,
+        SubPixel::Two,
+        SubPixel::Three,
+        SubPixel::Four,
+        SubPixel::Five,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SubPixel::One => "1x1",
+            SubPixel::Two => "2x2",
+            SubPixel::Three => "3x3",
+            SubPixel::Four => "4x4",
+            SubPixel::Five => "5x5",
+        }
+    }
+
+    pub fn count(self) -> u32 {
+        match self {
+            SubPixel::One => 1,
+            SubPixel::Two => 2,
+            SubPixel::Three => 3,
+            SubPixel::Four => 4,
+            SubPixel::Five => 5,
         }
     }
 }

@@ -3064,7 +3064,8 @@ The Color tab (pp. 2358–2360):
   - Ping-Pong: the gradient goes back and forth. The place −0.44 shows the color of 0.44.
 - Sub-Pixel sets the samples in each pixel (p. 2360): 1x1, 2x2, 3x3, 4x4 or 5x5. Usual: 1x1.
   - N x N samples in each pixel are averaged. At a hard edge, 3x3 gives a mix of 1/3 and 2/3, and 5x5 a mix of 2/5 and 3/5.
-  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+  - The samples are k / N of a pixel right of the place of the one sample of 1x1, with k from 0 to N − 1. Thus 3x3 moves the mean 1/3 of a pixel to the right, and 5x5 moves it 2/5.
+  - vidcut: the samples also go up by k / N of a pixel. The reads cover the steps across only.
 
 The Effect Mask:
 
@@ -3139,6 +3140,8 @@ The Color tab (p. 2366):
   - Detail 0, Brightness 0.2, Color 1 (1, 0, 0, 1) and Color 2 (0, 0, 1, 1) give (0.4, 0, 0.6, 1).
 - Gradient: the level of the noise picks a color on a gradient bar.
   - The bar, Interpolation Space, Offset, Repeat and Sub-Pixel are as on the Background. There are no Start and End rows.
+  - Offset and Repeat act on the level: the level less Offset gives the color. Sub-Pixel averages the colors of N x N levels in each pixel.
+  - vidcut: Interpolation Space is not built yet ([todo](todo/generator-nodes.md)).
   - Gradient Type: Uni, Linear, Reflect, Square, Cross, Radial or Angle. Usual: Uni.
   - Contrast 10 gives 1.0 at P with the usual bar. Thus the level 2.16584 shows the color of the end stop.
 
@@ -3162,6 +3165,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Ctrl+1 sets the Node Editor back to its usual scale (p. 1310).
+  - In Resolve, Ctrl+1 in a viewer sets the viewer to 100 percent (p. 1290). vidcut has no zoom of the viewer yet. Thus Ctrl+1 acts on the Node Editor from all of the page.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
   - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
 - Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
@@ -3193,6 +3198,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - A drag of a half takes that end of the join. A drop on a knot or a node joins it there. A drop on an empty place parts the join.
 - Select (pp. 1390–1391):
   - A drag on the empty Node Editor selects the nodes in its box. A Ctrl-drag takes them out of the selection.
+  - Measured in Resolve Studio 21.2: after a box select, no node is active. The Inspector shows the header of each selected node, closed.
   - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
 - Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
@@ -3297,6 +3303,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
   - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
+  - Measured in Resolve Studio 21.2: the Center of a Vignette is one row with an X and a Y field. The viewer shows no point for it.
 - Each value has a Keyframe button at its right (p. 1519).
   - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
   - Its arrows go to the keyframes on each side.

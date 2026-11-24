@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::RangeInclusive;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -163,9 +164,8 @@ impl Change {
         }
         let moving: HashSet<&str> = gone.iter().chain(come).map(|(_, v)| self::id(v)).collect();
         for run in &items.runs {
-            let (first, last) = (place(&run.first)?, place(&run.last)?);
-            let by = if forward { run.by } else { -run.by };
-            for x in &mut list[first..=last] {
+            let (span, by) = run.span(place(&run.first)?, place(&run.last)?, forward)?;
+            for x in &mut list[span] {
                 if !moving.contains(id(x)) {
                     shift(x, &run.field, by)?;
                 }
@@ -453,7 +453,10 @@ pub fn shift_json<T: Serialize + DeserializeOwned>(
         .get(field)
         .and_then(Value::as_i64)
         .ok_or(format!("no whole number {field} in {}", id(&v)))?;
-    v[field] = (n + by).into();
+    let shifted = n
+        .checked_add(by)
+        .ok_or(format!("{field} of {} goes out of range", id(&v)))?;
+    v[field] = shifted.into();
     *x = from_json(v)?;
     Ok(())
 }
@@ -478,6 +481,23 @@ fn moved(change: &Change) -> Option<(String, i64)> {
 }
 
 impl Run {
+    fn span(
+        &self,
+        first: usize,
+        last: usize,
+        forward: bool,
+    ) -> Result<(RangeInclusive<usize>, i64), String> {
+        if first > last {
+            return Err(format!("{} comes after {}", self.first, self.last));
+        }
+        let by = match forward {
+            true => Some(self.by),
+            false => self.by.checked_neg(),
+        };
+        let by = by.ok_or(format!("a shift by {} can't be undone", self.by))?;
+        Ok((first..=last, by))
+    }
+
     fn apply(
         &self,
         list: &mut [Value],
@@ -487,8 +507,8 @@ impl Run {
         let at = |id: &str| list.iter().position(|v| self::id(v) == id);
         let first = at(&self.first).ok_or(format!("no {}", self.first))?;
         let last = at(&self.last).ok_or(format!("no {}", self.last))?;
-        let by = if forward { self.by } else { -self.by };
-        for v in &mut list[first..=last] {
+        let (span, by) = self.span(first, last, forward)?;
+        for v in &mut list[span] {
             if moving.contains(id(v)) {
                 continue;
             }
@@ -497,7 +517,12 @@ impl Run {
                 self.field,
                 id(v)
             ))?;
-            v[&self.field] = (n + by).into();
+            let shifted = n.checked_add(by).ok_or(format!(
+                "{} of {} goes out of range",
+                self.field,
+                id(v)
+            ))?;
+            v[&self.field] = shifted.into();
         }
         Ok(())
     }

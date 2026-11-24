@@ -4,8 +4,8 @@ use std::time::Instant;
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP,
-    ARROWS_LEFT_RIGHT, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND,
-    FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
+    ARROWS_LEFT_RIGHT, CARET_DOWN, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT,
+    CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::composition::Corner;
@@ -20,8 +20,9 @@ use vidcut_core::model::{
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
     JoinStyle, Keyframe, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
     NoiseColoring, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime,
-    ShadingElement, Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker,
-    TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
+    Tracker, TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -746,6 +747,18 @@ impl Knob {
     }
 
     fn keyed_value(self, e: &Effect) -> Option<(EffectValue, usize)> {
+        self.value_where(e, |v| !e.keys_of(v).is_empty())
+    }
+
+    fn value_of(self, e: &Effect) -> Option<(EffectValue, usize)> {
+        self.value_where(e, |_| true)
+    }
+
+    fn value_where(
+        self,
+        e: &Effect,
+        take: impl Fn(EffectValue) -> bool,
+    ) -> Option<(EffectValue, usize)> {
         let values = e.values();
         let mut probe = e.clone();
         for value in &values {
@@ -754,7 +767,7 @@ impl Knob {
         let out = self.written(&probe, 0.0);
         values
             .into_iter()
-            .filter(|value| !e.keys_of(*value).is_empty())
+            .filter(|value| take(*value))
             .find_map(|value| {
                 let axes = if value.pair() { 2 } else { 1 };
                 let axis = out.point(value)[..axes].iter().position(|n| !n.is_nan())?;
@@ -1268,9 +1281,7 @@ fn node_effect(n: &Node) -> Option<Effect> {
 fn node_value_of(f: Key, n: &Node) -> Option<EffectValue> {
     match f {
         Key::Node(_, v, _) | Key::Shading(_, _, v, _) => Some(v),
-        Key::Effect(_, k) => node_effect(n)
-            .and_then(|e| k.keyed_value(&e))
-            .map(|(v, _)| v),
+        Key::Effect(_, k) => node_effect(n).and_then(|e| k.value_of(&e)).map(|(v, _)| v),
         _ => None,
     }
 }
@@ -2090,8 +2101,18 @@ fn background_rows(
         );
         let repeat = (b.repeats(), GradientRepeat::default());
         choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+        sub_pixel_row(ui, slot, b.samples(), acts);
     }
     value(ui, acts, V::Blend, "Blend");
+}
+
+fn sub_pixel_row(ui: &mut egui::Ui, slot: usize, now: SubPixel, acts: &mut Vec<Act>) {
+    let all = (
+        &SubPixel::ALL[..],
+        SubPixel::label as fn(SubPixel) -> &'static str,
+    );
+    let now = (now, SubPixel::default());
+    choice_row(ui, (slot, "Sub-Pixel", "sub_pixel"), now, all, acts);
 }
 
 fn noise_rows(
@@ -2145,6 +2166,14 @@ fn noise_rows(
         NoiseColoring::Gradient => {
             let stops = (f.colors(), !f.stops.is_empty());
             gradient_rows(ui, (slot, &n.name), stops, acts);
+            value(ui, acts, V::Offset, "Offset");
+            let repeats = (
+                &GradientRepeat::ALL[..],
+                GradientRepeat::label as fn(GradientRepeat) -> &'static str,
+            );
+            let repeat = (f.repeats(), GradientRepeat::default());
+            choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+            sub_pixel_row(ui, slot, f.samples(), acts);
         }
     }
     value(ui, acts, V::Blend, "Blend");
@@ -2158,6 +2187,9 @@ fn node_folds(
     acts: &mut Vec<Act>,
 ) {
     use EffectValue as V;
+    if let Some(e) = node_effect(n) {
+        effect_folds(ui, i, (slot, &e), acts);
+    }
     let Tool::Merge(m) = &n.tool else {
         return;
     };
@@ -2222,14 +2254,7 @@ fn node_rows(
             let Some(e) = node_effect(n) else {
                 return;
             };
-            match kind {
-                EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (slot, &e, g), acts),
-                EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (slot, &e, m), acts),
-                EffectKind::Glow(g) => glow_rows(ui, i, (slot, &e, g), acts),
-                EffectKind::FilmGrain(g) => grain_rows(ui, i, (slot, &e, g), acts),
-                EffectKind::Vignette(v) => vignette_rows(ui, i, (slot, &e, v), acts),
-                EffectKind::Sharpen(_) => sharpen_rows(ui, i, (slot, &e), acts),
-            }
+            effect_main(ui, i, (slot, &e), acts);
             if matches!(kind, EffectKind::GaussianBlur(_)) {
                 check(
                     ui,
@@ -2552,9 +2577,15 @@ fn operation_rows(
     go
 }
 
-fn node_header(ui: &mut egui::Ui, n: &Node, (active, view): (bool, View<'_>), acts: &mut Vec<Act>) {
+fn node_header(
+    ui: &mut egui::Ui,
+    n: &Node,
+    (active, open, view): (bool, bool, View<'_>),
+    acts: &mut Vec<Act>,
+) {
     let header = ui.horizontal(|ui| {
-        let name = RichText::new(&n.name).strong();
+        let caret = if open { CARET_DOWN } else { CARET_RIGHT };
+        let name = RichText::new(format!("{caret} {}", n.name)).strong();
         let name = if active {
             name.color(theme::colors().accent)
         } else {
@@ -2650,6 +2681,7 @@ impl Workspace {
             }
         }
         let active = self.effects_page.picked().map(str::to_owned);
+        let open = active.is_some();
         let shown: Vec<Node> = picked
             .iter()
             .map(|&k| comp.nodes[k].sampled(source))
@@ -2664,12 +2696,12 @@ impl Workspace {
                 for (&k, n) in picked.iter().zip(&shown) {
                     let mut acts = Vec::new();
                     let on = active.as_deref() == Some(n.name.as_str());
-                    node_header(ui, n, (on, (&keys, &viewed)), &mut acts);
+                    node_header(ui, n, (on, open, (&keys, &viewed)), &mut acts);
                     let slot = node_slot(k);
-                    if n.tool.tracker().is_some() {
+                    if open && n.tool.tracker().is_some() {
                         let node = &comp.nodes[k];
                         self.tracker_section(ui, (&clip, &comp), node, (slot, &mut acts));
-                    } else {
+                    } else if open {
                         let i = &self.inspector;
                         let pictured = comp.mask_picture(&comp.nodes[k]).is_some();
                         rows(ui, (slot, "node"), |ui| {
@@ -4254,7 +4286,11 @@ fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, act
     let shown = k.read(e);
     let dial = k.dial();
     let values = (shown != dial.usual, shown, dial.range);
-    let keys = k.keyed_value(e).and_then(|(v, _)| i.mark_of(n, v));
+    let found = match slot_node(n) {
+        Some(_) => k.value_of(e),
+        None => k.keyed_value(e),
+    };
+    let keys = found.and_then(|(v, _)| i.mark_of(n, v));
     field(
         ui,
         Key::Effect(n, k),
@@ -4306,7 +4342,7 @@ fn border_row(ui: &mut egui::Ui, n: usize, now: Border, acts: &mut Vec<Act>) {
     ui.end_row();
 }
 
-fn gaussian_rows(
+fn gaussian_main(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, e, g): (usize, &Effect, &GaussianBlur),
@@ -4315,28 +4351,37 @@ fn gaussian_rows(
     let gaussian = |ui: &mut egui::Ui, k: GaussianKnob, acts: &mut Vec<Act>| {
         knob(ui, i, (n, Knob::Gaussian(k)), e, acts);
     };
-    rows(ui, (n, "main"), |ui| {
-        label(ui, "Split Horizontal and Vertical", g.split);
-        let mut split = g.split;
-        if ui.checkbox(&mut split, "").clicked() {
-            acts.push(Act::EffectSet(n, json!({ "split": split })));
-        }
-        if reset(ui, g.split) {
-            acts.push(Act::EffectSet(n, json!({ "split": false })));
-        }
-        ui.end_row();
-        let strengths: &[GaussianKnob] = if g.split {
-            &[
-                GaussianKnob::HorizontalStrength,
-                GaussianKnob::VerticalStrength,
-            ]
-        } else {
-            &[GaussianKnob::Strength]
-        };
-        for &k in strengths {
-            gaussian(ui, k, acts);
-        }
-    });
+    label(ui, "Split Horizontal and Vertical", g.split);
+    let mut split = g.split;
+    if ui.checkbox(&mut split, "").clicked() {
+        acts.push(Act::EffectSet(n, json!({ "split": split })));
+    }
+    if reset(ui, g.split) {
+        acts.push(Act::EffectSet(n, json!({ "split": false })));
+    }
+    ui.end_row();
+    let strengths: &[GaussianKnob] = if g.split {
+        &[
+            GaussianKnob::HorizontalStrength,
+            GaussianKnob::VerticalStrength,
+        ]
+    } else {
+        &[GaussianKnob::Strength]
+    };
+    for &k in strengths {
+        gaussian(ui, k, acts);
+    }
+}
+
+fn gaussian_folds(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, g): (usize, &Effect, &GaussianBlur),
+    acts: &mut Vec<Act>,
+) {
+    let gaussian = |ui: &mut egui::Ui, k: GaussianKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Gaussian(k)), e, acts);
+    };
     fold(ui, (n, "Horizontal Channel Adjustment"), |ui| {
         for c in 0..CHANNELS.len() {
             gaussian(ui, GaussianKnob::Horizontal(c), acts);
@@ -4360,7 +4405,7 @@ fn cell_label(s: CellShape) -> &'static str {
     }
 }
 
-fn mosaic_rows(
+fn mosaic_main(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, e, m): (usize, &Effect, &MosaicBlur),
@@ -4369,25 +4414,34 @@ fn mosaic_rows(
     let mosaic = |ui: &mut egui::Ui, k: MosaicKnob, acts: &mut Vec<Act>| {
         knob(ui, i, (n, Knob::Mosaic(k)), e, acts);
     };
-    rows(ui, (n, "main"), |ui| {
-        mosaic(ui, MosaicKnob::Frequency, acts);
-        mosaic(ui, MosaicKnob::Smooth, acts);
-        let now = m.shape();
-        label(ui, "Cell Shape", now != CellShape::default());
-        dialog::switch(ui, |ui| {
-            for s in CellShape::ALL {
-                if ui.selectable_label(s == now, cell_label(s)).clicked() && s != now {
-                    acts.push(Act::EffectSet(n, json!({ "cell_shape": s })));
-                }
+    mosaic(ui, MosaicKnob::Frequency, acts);
+    mosaic(ui, MosaicKnob::Smooth, acts);
+    let now = m.shape();
+    label(ui, "Cell Shape", now != CellShape::default());
+    dialog::switch(ui, |ui| {
+        for s in CellShape::ALL {
+            if ui.selectable_label(s == now, cell_label(s)).clicked() && s != now {
+                acts.push(Act::EffectSet(n, json!({ "cell_shape": s })));
             }
-        });
-        if reset(ui, now != CellShape::default()) {
-            let s = CellShape::default();
-            acts.push(Act::EffectSet(n, json!({ "cell_shape": s })));
         }
-        ui.end_row();
-        mosaic(ui, MosaicKnob::Aliasing, acts);
     });
+    if reset(ui, now != CellShape::default()) {
+        let s = CellShape::default();
+        acts.push(Act::EffectSet(n, json!({ "cell_shape": s })));
+    }
+    ui.end_row();
+    mosaic(ui, MosaicKnob::Aliasing, acts);
+}
+
+fn mosaic_folds(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, m): (usize, &Effect, &MosaicBlur),
+    acts: &mut Vec<Act>,
+) {
+    let mosaic = |ui: &mut egui::Ui, k: MosaicKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Mosaic(k)), e, acts);
+    };
     fold(ui, (n, "Advanced Controls"), |ui| {
         for k in [
             MosaicKnob::XOffset,
@@ -4471,7 +4525,7 @@ fn glow_framing_label(f: GlowFraming) -> &'static str {
     }
 }
 
-fn glow_rows(
+fn glow_main(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, e, g): (usize, &Effect, &Glow),
@@ -4480,24 +4534,33 @@ fn glow_rows(
     let glow = |ui: &mut egui::Ui, k: GlowKnob, acts: &mut Vec<Act>| {
         knob(ui, i, (n, Knob::Glow(k)), e, acts);
     };
-    rows(ui, (n, "main"), |ui| {
-        choice_row(
-            ui,
-            (n, "Select Output", "output"),
-            (g.shows(), GlowOutput::default()),
-            (&GlowOutput::ALL, glow_output_label),
-            acts,
-        );
-        choice_row(
-            ui,
-            (n, "Input Alpha", "input_alpha"),
-            (g.alpha(), GlowAlpha::default()),
-            (&GlowAlpha::ALL, glow_alpha_label),
-            acts,
-        );
-        glow(ui, GlowKnob::Threshold, acts);
-        glow(ui, GlowKnob::AlphaThreshold, acts);
-    });
+    choice_row(
+        ui,
+        (n, "Select Output", "output"),
+        (g.shows(), GlowOutput::default()),
+        (&GlowOutput::ALL, glow_output_label),
+        acts,
+    );
+    choice_row(
+        ui,
+        (n, "Input Alpha", "input_alpha"),
+        (g.alpha(), GlowAlpha::default()),
+        (&GlowAlpha::ALL, glow_alpha_label),
+        acts,
+    );
+    glow(ui, GlowKnob::Threshold, acts);
+    glow(ui, GlowKnob::AlphaThreshold, acts);
+}
+
+fn glow_folds(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, g): (usize, &Effect, &Glow),
+    acts: &mut Vec<Act>,
+) {
+    let glow = |ui: &mut egui::Ui, k: GlowKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Glow(k)), e, acts);
+    };
     fold(ui, (n, "Shape And Spread"), |ui| {
         glow(ui, GlowKnob::Spread, acts);
         glow(ui, GlowKnob::Ratio, acts);
@@ -4609,7 +4672,7 @@ fn grain_composite_label(c: GrainComposite) -> &'static str {
     }
 }
 
-fn grain_rows(
+fn grain_main(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, e, g): (usize, &Effect, &FilmGrain),
@@ -4618,30 +4681,39 @@ fn grain_rows(
     let grain = |ui: &mut egui::Ui, k: GrainKnob, acts: &mut Vec<Act>| {
         knob(ui, i, (n, Knob::Grain(k)), e, acts);
     };
-    rows(ui, (n, "main"), |ui| {
-        choice_row(
-            ui,
-            (n, "Film Grain Presets", "preset"),
-            (g.preset(), GrainPreset::S1At16),
-            (&GrainPreset::ALL, grain_preset_label),
-            acts,
-        );
-        choice_row(
-            ui,
-            (n, "Composite Type", "grain_composite"),
-            (g.over(), GrainComposite::default()),
-            (&GrainComposite::ALL, grain_composite_label),
-            acts,
-        );
-        grain(ui, GrainKnob::Opacity, acts);
-        check(
-            ui,
-            (n, "Grain Only", g.grain_only, false),
-            "grain_only",
-            acts,
-        );
-        check(ui, (n, "Freeze", g.freeze, false), "freeze", acts);
-    });
+    choice_row(
+        ui,
+        (n, "Film Grain Presets", "preset"),
+        (g.preset(), GrainPreset::S1At16),
+        (&GrainPreset::ALL, grain_preset_label),
+        acts,
+    );
+    choice_row(
+        ui,
+        (n, "Composite Type", "grain_composite"),
+        (g.over(), GrainComposite::default()),
+        (&GrainComposite::ALL, grain_composite_label),
+        acts,
+    );
+    grain(ui, GrainKnob::Opacity, acts);
+    check(
+        ui,
+        (n, "Grain Only", g.grain_only, false),
+        "grain_only",
+        acts,
+    );
+    check(ui, (n, "Freeze", g.freeze, false), "freeze", acts);
+}
+
+fn grain_folds(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, g): (usize, &Effect, &FilmGrain),
+    acts: &mut Vec<Act>,
+) {
+    let grain = |ui: &mut egui::Ui, k: GrainKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Grain(k)), e, acts);
+    };
     fold(ui, (n, "Grain Params"), |ui| {
         for k in [
             GrainKnob::Texture,
@@ -4695,7 +4767,39 @@ fn tint_bytes(color: [f64; 3]) -> [u8; 3] {
     color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
-fn vignette_rows(
+fn vignette_center(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, v): (usize, &Effect, &Vignette),
+    acts: &mut Vec<Act>,
+) {
+    let knobs = [VignetteKnob::CenterX, VignetteKnob::CenterY].map(Knob::Vignette);
+    let set = v.middle() != Vignette::MIDDLE;
+    label(ui, "Center", set);
+    ui.horizontal(|ui| {
+        for k in knobs {
+            let range = k.dial().range;
+            drag(
+                ui,
+                Key::Effect(n, k),
+                i,
+                (k.read(e), range),
+                &Look::default(),
+                acts,
+            );
+        }
+        let keys = knobs[0].value_of(e).and_then(|(v, _)| i.mark_of(n, v));
+        if let Some(keys) = keys {
+            key_acts(ui, Key::Effect(n, knobs[0]), &keys, acts);
+        }
+    });
+    if reset(ui, set) {
+        acts.push(Act::EffectSet(n, json!({ "center": Vignette::MIDDLE })));
+    }
+    ui.end_row();
+}
+
+fn vignette_main(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, e, v): (usize, &Effect, &Vignette),
@@ -4705,98 +4809,124 @@ fn vignette_rows(
         knob(ui, i, (n, Knob::Vignette(k)), e, acts);
     };
     let advanced = v.mode() == VignetteMode::Advanced;
-    rows(ui, (n, "main"), |ui| {
-        let mode = v.mode();
-        label(ui, "Operating Mode", mode != VignetteMode::default());
-        dialog::switch(ui, |ui| {
-            for m in VignetteMode::ALL {
-                if ui
-                    .selectable_label(m == mode, vignette_mode_label(m))
-                    .clicked()
-                    && m != mode
-                {
-                    acts.push(Act::EffectSet(n, json!({ "operating_mode": m })));
-                }
+    let mode = v.mode();
+    label(ui, "Operating Mode", mode != VignetteMode::default());
+    dialog::switch(ui, |ui| {
+        for m in VignetteMode::ALL {
+            if ui
+                .selectable_label(m == mode, vignette_mode_label(m))
+                .clicked()
+                && m != mode
+            {
+                acts.push(Act::EffectSet(n, json!({ "operating_mode": m })));
             }
-        });
-        if reset(ui, mode != VignetteMode::default()) {
-            let m = VignetteMode::default();
-            acts.push(Act::EffectSet(n, json!({ "operating_mode": m })));
-        }
-        ui.end_row();
-        if advanced {
-            let shape = v.shape();
-            label(ui, "Border Shape", shape != VignetteShape::default());
-            egui::ComboBox::from_id_salt(("inspector-vignette-shape", n))
-                .selected_text(vignette_shape_label(shape))
-                .show_ui(ui, |ui| {
-                    for s in VignetteShape::ALL {
-                        let name = vignette_shape_label(s);
-                        if ui.selectable_label(s == shape, name).clicked() && s != shape {
-                            acts.push(Act::EffectSet(n, json!({ "border_shape": s })));
-                        }
-                    }
-                });
-            if reset(ui, shape != VignetteShape::default()) {
-                let s = VignetteShape::default();
-                acts.push(Act::EffectSet(n, json!({ "border_shape": s })));
-            }
-            ui.end_row();
-        }
-        vignette(ui, VignetteKnob::Size, acts);
-        if advanced {
-            vignette(ui, VignetteKnob::Rotation, acts);
-        }
-        vignette(ui, VignetteKnob::Anamorphism, acts);
-        if advanced {
-            vignette(ui, VignetteKnob::CenterX, acts);
-            vignette(ui, VignetteKnob::CenterY, acts);
-        }
-        vignette(ui, VignetteKnob::Softness, acts);
-        if advanced {
-            vignette(ui, VignetteKnob::Transparency, acts);
-        }
-        let stored = tint_bytes(v.tint());
-        let held = i.tinted.as_ref().filter(|t| t.effect == n);
-        let mut rgb = held.map_or(stored, |t| t.to);
-        let tinted = v.tint() != Vignette::BLACK;
-        label(ui, "Color", tinted);
-        if ui.color_edit_button_srgb(&mut rgb).changed() {
-            acts.push(Act::Tint(n, stored, rgb));
-        }
-        if reset(ui, tinted) {
-            let black = Vignette::BLACK;
-            acts.push(Act::EffectSet(n, json!({ "color": black })));
-        }
-        ui.end_row();
-        if advanced {
-            let now = v.mixing();
-            label(ui, "Composite Type", now != Vignette::MIXING);
-            egui::ComboBox::from_id_salt(("inspector-vignette-mode", n))
-                .selected_text(blend_label(now))
-                .show_ui(ui, |ui| {
-                    for m in BlendMode::ALL {
-                        if ui.selectable_label(m == now, blend_label(m)).clicked() && m != now {
-                            acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
-                        }
-                    }
-                });
-            if reset(ui, now != Vignette::MIXING) {
-                let m = Vignette::MIXING;
-                acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
-            }
-            ui.end_row();
         }
     });
+    if reset(ui, mode != VignetteMode::default()) {
+        let m = VignetteMode::default();
+        acts.push(Act::EffectSet(n, json!({ "operating_mode": m })));
+    }
+    ui.end_row();
+    if advanced {
+        let shape = v.shape();
+        label(ui, "Border Shape", shape != VignetteShape::default());
+        egui::ComboBox::from_id_salt(("inspector-vignette-shape", n))
+            .selected_text(vignette_shape_label(shape))
+            .show_ui(ui, |ui| {
+                for s in VignetteShape::ALL {
+                    let name = vignette_shape_label(s);
+                    if ui.selectable_label(s == shape, name).clicked() && s != shape {
+                        acts.push(Act::EffectSet(n, json!({ "border_shape": s })));
+                    }
+                }
+            });
+        if reset(ui, shape != VignetteShape::default()) {
+            let s = VignetteShape::default();
+            acts.push(Act::EffectSet(n, json!({ "border_shape": s })));
+        }
+        ui.end_row();
+    }
+    vignette(ui, VignetteKnob::Size, acts);
+    if advanced {
+        vignette(ui, VignetteKnob::Rotation, acts);
+    }
+    vignette(ui, VignetteKnob::Anamorphism, acts);
+    if advanced && slot_node(n).is_some() {
+        vignette_center(ui, i, (n, e, v), acts);
+    } else if advanced {
+        vignette(ui, VignetteKnob::CenterX, acts);
+        vignette(ui, VignetteKnob::CenterY, acts);
+    }
+    vignette(ui, VignetteKnob::Softness, acts);
+    if advanced {
+        vignette(ui, VignetteKnob::Transparency, acts);
+    }
+    let stored = tint_bytes(v.tint());
+    let held = i.tinted.as_ref().filter(|t| t.effect == n);
+    let mut rgb = held.map_or(stored, |t| t.to);
+    let tinted = v.tint() != Vignette::BLACK;
+    label(ui, "Color", tinted);
+    if ui.color_edit_button_srgb(&mut rgb).changed() {
+        acts.push(Act::Tint(n, stored, rgb));
+    }
+    if reset(ui, tinted) {
+        let black = Vignette::BLACK;
+        acts.push(Act::EffectSet(n, json!({ "color": black })));
+    }
+    ui.end_row();
+    if advanced {
+        let now = v.mixing();
+        label(ui, "Composite Type", now != Vignette::MIXING);
+        egui::ComboBox::from_id_salt(("inspector-vignette-mode", n))
+            .selected_text(blend_label(now))
+            .show_ui(ui, |ui| {
+                for m in BlendMode::ALL {
+                    if ui.selectable_label(m == now, blend_label(m)).clicked() && m != now {
+                        acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
+                    }
+                }
+            });
+        if reset(ui, now != Vignette::MIXING) {
+            let m = Vignette::MIXING;
+            acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
+        }
+        ui.end_row();
+    }
 }
 
-fn sharpen_rows(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts: &mut Vec<Act>) {
+fn effect_main(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts: &mut Vec<Act>) {
+    match &e.kind {
+        EffectKind::GaussianBlur(g) => gaussian_main(ui, i, (n, e, g), acts),
+        EffectKind::MosaicBlur(m) => mosaic_main(ui, i, (n, e, m), acts),
+        EffectKind::Glow(g) => glow_main(ui, i, (n, e, g), acts),
+        EffectKind::FilmGrain(g) => grain_main(ui, i, (n, e, g), acts),
+        EffectKind::Vignette(v) => vignette_main(ui, i, (n, e, v), acts),
+        EffectKind::Sharpen(_) => sharpen_main(ui, i, (n, e), acts),
+    }
+}
+
+fn effect_folds(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts: &mut Vec<Act>) {
+    match &e.kind {
+        EffectKind::GaussianBlur(g) => gaussian_folds(ui, i, (n, e, g), acts),
+        EffectKind::MosaicBlur(m) => mosaic_folds(ui, i, (n, e, m), acts),
+        EffectKind::Glow(g) => glow_folds(ui, i, (n, e, g), acts),
+        EffectKind::FilmGrain(g) => grain_folds(ui, i, (n, e, g), acts),
+        EffectKind::Vignette(_) => {}
+        EffectKind::Sharpen(_) => sharpen_folds(ui, i, (n, e), acts),
+    }
+}
+
+fn sharpen_main(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts: &mut Vec<Act>) {
     let sharpen = |ui: &mut egui::Ui, k: SharpenKnob, acts: &mut Vec<Act>| {
         knob(ui, i, (n, Knob::Sharpen(k)), e, acts);
     };
-    rows(ui, (n, "main"), |ui| {
-        sharpen(ui, SharpenKnob::Amount, acts);
-    });
+    sharpen(ui, SharpenKnob::Amount, acts);
+}
+
+fn sharpen_folds(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts: &mut Vec<Act>) {
+    let sharpen = |ui: &mut egui::Ui, k: SharpenKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Sharpen(k)), e, acts);
+    };
     fold(ui, (n, "Detail Levels"), |ui| {
         sharpen(ui, SharpenKnob::Size, acts);
         sharpen(ui, SharpenKnob::Fine, acts);
@@ -4973,14 +5103,8 @@ fn effect_block(
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, open);
     state.set_open(open);
     let (toggle, header, _) = state.show_header(ui, header).body(|ui| {
-        match &e.kind {
-            EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
-            EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
-            EffectKind::Glow(g) => glow_rows(ui, i, (n, e, g), acts),
-            EffectKind::FilmGrain(g) => grain_rows(ui, i, (n, e, g), acts),
-            EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
-            EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
-        }
+        rows(ui, (n, "main"), |ui| effect_main(ui, i, (n, e), acts));
+        effect_folds(ui, i, (n, e), acts);
         fold(ui, (n, "Global Blend"), |ui| {
             knob(ui, i, (n, Knob::Blend), e, acts);
             check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);

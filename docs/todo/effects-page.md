@@ -20,12 +20,11 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - vidcut always uses Merge.
 - **Border Style of a rectangle:** the joins, the ends, Position and Length ([spec](../spec.md#the-masks)). vidcut has none.
 - **Fit Mask of a picture on an effect mask** (p. 2465, [spec](../spec.md#the-masks)): Crop, Stretch, Inside, Width, Height and Outside. It needs pictures of other sizes, as the Image tab of the generators gives ([todo](generator-nodes.md)).
-- **The active node after a box select:** measured: Resolve then has no active node, and the Inspector shows the headers closed. vidcut makes the last node active.
+  - The reads of Resolve Studio 21.2 are in section M17 R4c of `fixtures/nodes/NOTES.md` in the test data.
 - **A delete of a viewed node:** measured: Resolve puts the node on its input in that viewer ([spec](../spec.md#the-effects-page)). vidcut empties the viewer.
-- **The Center of a Vignette:** measured: one row with an X and a Y field, and no point in the viewer. vidcut shows Center X and Center Y in two rows.
 - **Page keys that vidcut does not have:**
   - Shift+Space opens Select Tool (p. 1386).
-  - = and − zoom the viewer (p. 1290). Ctrl+1 sets the scale of the Node Editor (p. 1310).
+  - = and − zoom the viewer, and Ctrl+1 in a viewer sets it to 100 percent (p. 1290).
   - Ctrl+F is Find (p. 1421).
   - Ctrl+L locks a node (p. 1424). Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
 - **The render range** (pp. 1294, 1297, [spec](../spec.md#the-effects-page)):
