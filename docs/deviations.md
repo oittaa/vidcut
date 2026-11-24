@@ -1519,3 +1519,32 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A blur must cover each face of a clip, and the user must not draw each one.
   - Text is the next thing that people hide: names, addresses, documents and screens.
   - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).
+
+## X174. Auto Color uses the legacy method
+
+- **Resolve:**
+  - By default, Auto Color uses the DaVinci Neural Engine (pp. 771, 3128).
+  - Use Legacy Auto Color in the Color panel of the User Preferences selects the earlier method (pp. 117, 3129).
+  - Measured: with the preference on, the A button and Color > Auto Color use the earlier method.
+  - The Auto Color button of the Cut page viewer Tools stays on the neural method ([spec §8.25](spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
+- **vidcut:**
+  - Each Auto Color uses the legacy method: `grade.auto_color`, the A button, Color > Auto Color and the viewer Tools.
+  - There is no preference.
+  - The legacy method is the default until a machine-learning method is good enough ([todo](todo/auto-color.md)).
+  - That method then becomes the default. The legacy method then stays as a Use Legacy Auto Color preference, as in Resolve.
+- **Why:**
+  - The weights of the neural network are not available.
+  - The legacy method is measured. Its rules are in spec §8.25.
+
+## X175. Individual clips render at the frame rate of the timeline
+
+- **Resolve:**
+  - With Individual clips, each clip renders at its own frame rate (p. 4114).
+  - Measured in Resolve Studio 21.2, on a 24 fps timeline, with `interlaced-tff.mov` (1080i 25, 2 s):
+    - The file name is `interlaced-tff00000001.mp4`.
+    - An EXR render gives 100 frames, numbered 1 to 100.
+- **vidcut:**
+  - Each clip renders at the frame rate of the timeline.
+  - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
+- **Why:**
+  - Not built yet ([todo](todo/export-file-tab.md)).

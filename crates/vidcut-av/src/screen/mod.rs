@@ -68,25 +68,90 @@ pub struct Gpu {
     composing_in: wgpu::RenderPipeline,
     composing_out: wgpu::RenderPipeline,
     blank: wgpu::TextureView,
+    shader: wgpu::ShaderModule,
+    can: Can,
+    #[cfg(windows)]
+    d3d11_shared: std::sync::Mutex<D3d11Pool>,
+    cuda: OnceLock<Result<CudaDevice, String>>,
+    gate: Option<Arc<Gate>>,
+    encoders: OnceLock<out::Encoders>,
+    held: held::Pipes,
+    light: OnceLock<light::Pipes>,
+    luts: OnceLock<lut::Pipes>,
+    scope: OnceLock<scope::Pipes>,
+    blur: OnceLock<blur::Pipes>,
+    vignette: OnceLock<vignette::Pipes>,
+    sharpen: OnceLock<sharpen::Pipes>,
+}
+
+struct Can {
     wide: bool,
     shares: bool,
     dma_buf: bool,
     d3d11: bool,
     #[cfg(windows)]
     p010: bool,
-    #[cfg(windows)]
-    d3d11_shared: std::sync::Mutex<D3d11Pool>,
     metal: bool,
-    cuda: OnceLock<Result<CudaDevice, String>>,
-    gate: Option<Arc<Gate>>,
-    encoders: out::Encoders,
-    held: held::Pipes,
-    light: OnceLock<light::Pipes>,
-    luts: OnceLock<lut::Pipes>,
-    scope: OnceLock<scope::Pipes>,
-    blur: blur::Pipes,
-    vignette: OnceLock<vignette::Pipes>,
-    sharpen: OnceLock<sharpen::Pipes>,
+}
+
+impl Can {
+    fn of(device: &wgpu::Device) -> Self {
+        Self {
+            wide: device
+                .features()
+                .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
+            shares: shared::possible(device),
+            dma_buf: device
+                .features()
+                .contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
+            d3d11: device.features().contains(
+                wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32 | wgpu::Features::TEXTURE_FORMAT_NV12,
+            ),
+            #[cfg(windows)]
+            p010: device
+                .features()
+                .contains(wgpu::Features::TEXTURE_FORMAT_P010),
+            // SAFETY: wgpu's own device, only asked what it is.
+            #[cfg(target_os = "macos")]
+            metal: unsafe { device.as_hal::<wgpu::hal::api::Metal>() }.is_some(),
+            #[cfg(not(target_os = "macos"))]
+            metal: false,
+        }
+    }
+
+    fn pictures(&self, device: &wgpu::Device) -> crate::hw::GpuPictures {
+        let cudas = crate::gpus::in_use().and_then(|g| g.uuid());
+        shown_from_gpu(&Takes {
+            shares: self.shares,
+            wide: self.wide,
+            on_cudas_gpu: cudas.is_some() && cudas == shared::uuid(device),
+            dma_buf: self.dma_buf,
+            d3d11: self.d3d11,
+            metal: self.metal,
+        })
+        .into_iter()
+        .flat_map(|kind| Layout::ALL.map(|layout| (kind, layout)))
+        .filter(|&(kind, layout)| self.imports(kind, layout))
+        .collect()
+    }
+
+    fn imports(&self, kind: Kind, layout: Layout) -> bool {
+        match kind {
+            Kind::Nvdec => nvdec_bytes(self, layout).is_ok(),
+            #[cfg(target_os = "linux")]
+            Kind::Vaapi => vaapi_formats(self, layout).is_ok(),
+            #[cfg(windows)]
+            Kind::D3d11va => d3d11_formats(self, layout).is_ok(),
+            #[cfg(target_os = "macos")]
+            Kind::VideoToolbox => videotoolbox_formats(self, layout).is_ok(),
+            Kind::Vulkan => vulkan_layout(self, layout).is_ok(),
+            _ => false,
+        }
+    }
+}
+
+pub fn gpu_pictures(device: &wgpu::Device) -> crate::hw::GpuPictures {
+    Can::of(device).pictures(device)
 }
 
 struct Drawing {
@@ -340,6 +405,16 @@ pub fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
 impl Gpu {
     fn luts(&self) -> &lut::Pipes {
         self.luts.get_or_init(|| lut::Pipes::new(self))
+    }
+
+    fn encoders(&self) -> &out::Encoders {
+        self.encoders
+            .get_or_init(|| out::Encoders::new(&self.device, &self.shader))
+    }
+
+    fn blur(&self) -> &blur::Pipes {
+        self.blur
+            .get_or_init(|| blur::Pipes::new(&self.device, &self.shader))
     }
 
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
@@ -688,35 +763,18 @@ impl Gpu {
             composing_in,
             composing_out,
             blank,
-            wide: device
-                .features()
-                .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
-            shares: shared::possible(device),
-            dma_buf: device
-                .features()
-                .contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
-            d3d11: device.features().contains(
-                wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32 | wgpu::Features::TEXTURE_FORMAT_NV12,
-            ),
-            #[cfg(windows)]
-            p010: device
-                .features()
-                .contains(wgpu::Features::TEXTURE_FORMAT_P010),
+            shader,
+            can: Can::of(device),
             #[cfg(windows)]
             d3d11_shared: std::sync::Mutex::default(),
-            // SAFETY: wgpu's own device, only asked what it is.
-            #[cfg(target_os = "macos")]
-            metal: unsafe { device.as_hal::<wgpu::hal::api::Metal>() }.is_some(),
-            #[cfg(not(target_os = "macos"))]
-            metal: false,
             cuda: OnceLock::new(),
             gate: None,
-            encoders: out::Encoders::new(device, &shader),
+            encoders: OnceLock::new(),
             held: held::Pipes::new(device),
             light: OnceLock::new(),
             luts: OnceLock::new(),
             scope: OnceLock::new(),
-            blur: blur::Pipes::new(device, &shader),
+            blur: OnceLock::new(),
             vignette: OnceLock::new(),
             sharpen: OnceLock::new(),
         }
@@ -746,33 +804,7 @@ impl Gpu {
     }
 
     pub fn gpu_pictures(&self) -> crate::hw::GpuPictures {
-        let cudas = crate::gpus::in_use().and_then(|g| g.uuid());
-        shown_from_gpu(&Takes {
-            shares: self.shares,
-            wide: self.wide,
-            on_cudas_gpu: cudas.is_some() && cudas == shared::uuid(&self.device),
-            dma_buf: self.dma_buf,
-            d3d11: self.d3d11,
-            metal: self.metal,
-        })
-        .into_iter()
-        .flat_map(|kind| Layout::ALL.map(|layout| (kind, layout)))
-        .filter(|&(kind, layout)| self.imports(kind, layout))
-        .collect()
-    }
-
-    fn imports(&self, kind: Kind, layout: Layout) -> bool {
-        match kind {
-            Kind::Nvdec => nvdec_bytes(self, layout).is_ok(),
-            #[cfg(target_os = "linux")]
-            Kind::Vaapi => vaapi_formats(self, layout).is_ok(),
-            #[cfg(windows)]
-            Kind::D3d11va => d3d11_formats(self, layout).is_ok(),
-            #[cfg(target_os = "macos")]
-            Kind::VideoToolbox => videotoolbox_formats(self, layout).is_ok(),
-            Kind::Vulkan => vulkan_layout(self, layout).is_ok(),
-            _ => false,
-        }
+        self.can.pictures(&self.device)
     }
 
     #[cfg(any(target_os = "linux", windows))]
@@ -2673,7 +2705,7 @@ impl Slot {
             (None, None) => u32::from(picture.alpha_plane()),
             (None, Some(_)) => 0,
         };
-        let bytes = params_of(picture, size, gpu.wide, cover, how, (halvings, alpha));
+        let bytes = params_of(picture, size, gpu.can.wide, cover, how, (halvings, alpha));
         gpu.queue.write_buffer(params, 0, &bytes);
         let params: &wgpu::Buffer = params;
         let plain = Program::default();
@@ -3032,10 +3064,10 @@ impl Slot {
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), String> {
         use wgpu::hal::api::Vulkan;
-        if !gpu.dma_buf {
+        if !gpu.can.dma_buf {
             return Err("the display's device imports no DMA-BUFs".into());
         }
-        let (one, two) = vaapi_formats(gpu, picture.layout())?;
+        let (one, two) = vaapi_formats(&gpu.can, picture.layout())?;
         let drm = crate::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
         let planes = drm.planes();
         let [y, uv, ..] = planes[..] else {
@@ -3154,10 +3186,10 @@ impl Slot {
     #[cfg(windows)]
     fn import_d3d11(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         use ash::vk::{AccessFlags, ImageLayout};
-        if !gpu.d3d11 {
+        if !gpu.can.d3d11 {
             return Err("the display's device imports no Direct3D 11 textures".into());
         }
-        let formats = d3d11_formats(gpu, picture.layout())?;
+        let formats = d3d11_formats(&gpu.can, picture.layout())?;
         let frame = picture.frame();
         let mut pool = gpu.d3d11_shared.lock().unwrap_or_else(|e| e.into_inner());
         let (image, new) = d3d11_shared_for(gpu, &mut pool, picture, formats)?;
@@ -3198,10 +3230,10 @@ impl Slot {
 
     #[cfg(any(target_os = "linux", windows))]
     fn import_vulkan(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
-        if !gpu.shares {
+        if !gpu.can.shares {
             return Err("the display's device imports no Vulkan memory".into());
         }
-        vulkan_layout(gpu, picture.layout())?;
+        vulkan_layout(&gpu.can, picture.layout())?;
         let frame = picture.frame();
         let identity = crate::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
         let stage = self.reading_stage();
@@ -3247,10 +3279,10 @@ impl Slot {
         unsafe extern "C" {
             fn CVPixelBufferGetIOSurface(buffer: *mut std::ffi::c_void) -> *const IOSurfaceRef;
         }
-        if !gpu.metal {
+        if !gpu.can.metal {
             return Err("the display's device isn't Metal".into());
         }
-        let formats = videotoolbox_formats(gpu, picture.layout())?;
+        let formats = videotoolbox_formats(&gpu.can, picture.layout())?;
         // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
         let surface = unsafe {
             let buffer = (*picture.frame().as_ptr()).data[3].cast();
@@ -3296,7 +3328,7 @@ impl Slot {
     ) -> Result<bool, String> {
         let cuda = gpu.cuda()?;
         let layout = picture.layout();
-        let bytes = nvdec_bytes(gpu, layout)?;
+        let bytes = nvdec_bytes(&gpu.can, layout)?;
         let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
         let (cw, ch) = chroma_size(layout, picture.width(), picture.height());
         let (cw, ch) = (u64::from(cw), u64::from(ch));
@@ -3365,7 +3397,7 @@ impl Slot {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
         let (cw, ch) = chroma_size(layout, w, h);
-        let wide = gpu.wide && sixteen(layout);
+        let wide = gpu.can.wide && sixteen(layout);
         let alpha = picture.alpha_plane();
         let matte = picture.matte().map(|m| (m.width(), m.height()));
         let key = (layout, w, h, wide, alpha, matte);
@@ -3482,7 +3514,7 @@ impl Slot {
             return self.write_rgb(gpu, picture.frame(), false, encoder);
         }
         let (cw, ch) = chroma_size(layout, w, h);
-        let wide = gpu.wide && sixteen(layout);
+        let wide = gpu.can.wide && sixteen(layout);
         let planes = self.planes.as_ref().expect("made for it");
         let frame = picture.frame();
         crate::copies::up(frame);
@@ -3953,10 +3985,10 @@ fn share_d3d11(
     })
 }
 
-fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
+fn nvdec_bytes(can: &Can, layout: Layout) -> Result<u64, String> {
     match layout {
         Layout::Nv12 => Ok(1),
-        Layout::P010 | Layout::P210 if gpu.wide => Ok(2),
+        Layout::P010 | Layout::P210 if can.wide => Ok(2),
         Layout::P010 | Layout::P210 => Err(format!("no 16-bit textures for {layout:?}")),
         Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => {
             Err(format!("{layout:?} pictures aren't NVDEC's"))
@@ -3974,12 +4006,12 @@ fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
 
 #[cfg(target_os = "linux")]
 fn vaapi_formats(
-    gpu: &Gpu,
+    can: &Can,
     layout: Layout,
 ) -> Result<(wgpu::TextureFormat, wgpu::TextureFormat), String> {
     match layout {
         Layout::Nv12 => Ok((wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm)),
-        Layout::P010 if gpu.wide => Ok((
+        Layout::P010 if can.wide => Ok((
             wgpu::TextureFormat::R16Unorm,
             wgpu::TextureFormat::Rg16Unorm,
         )),
@@ -4003,7 +4035,7 @@ fn vaapi_formats(
 
 #[cfg(windows)]
 fn d3d11_formats(
-    gpu: &Gpu,
+    can: &Can,
     layout: Layout,
 ) -> Result<
     (
@@ -4019,7 +4051,7 @@ fn d3d11_formats(
             wgpu::TextureFormat::R8Unorm,
             wgpu::TextureFormat::Rg8Unorm,
         )),
-        Layout::P010 if gpu.wide && gpu.p010 => Ok((
+        Layout::P010 if can.wide && can.p010 => Ok((
             wgpu::TextureFormat::P010,
             wgpu::TextureFormat::R16Unorm,
             wgpu::TextureFormat::Rg16Unorm,
@@ -4044,7 +4076,7 @@ fn d3d11_formats(
 
 #[cfg(target_os = "macos")]
 fn videotoolbox_formats(
-    gpu: &Gpu,
+    can: &Can,
     layout: Layout,
 ) -> Result<&'static [(objc2_metal::MTLPixelFormat, wgpu::TextureFormat)], String> {
     use objc2_metal::MTLPixelFormat;
@@ -4054,11 +4086,11 @@ fn videotoolbox_formats(
             (MTLPixelFormat::R8Unorm, F::R8Unorm),
             (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
         ]),
-        Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => Ok(&[
+        Layout::P010 | Layout::P210 | Layout::P416 if can.wide => Ok(&[
             (MTLPixelFormat::R16Unorm, F::R16Unorm),
             (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
         ]),
-        Layout::Ayuv64 if gpu.wide => Ok(&[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)]),
+        Layout::Ayuv64 if can.wide => Ok(&[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)]),
         Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64 => {
             Err(format!("no 16-bit textures for {layout:?}"))
         }
@@ -4076,9 +4108,9 @@ fn videotoolbox_formats(
     }
 }
 
-fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
+fn vulkan_layout(can: &Can, layout: Layout) -> Result<(), String> {
     match layout {
-        Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => Ok(()),
+        Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if can.wide => Ok(()),
         Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
             Err("no 16-bit textures for 10- and 12-bit planes".into())
         }

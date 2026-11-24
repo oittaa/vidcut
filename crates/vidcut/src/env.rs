@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use vidcut_core::analysis::{
     AudioLevels, Detections, Look, Loudness, PictureStats, SoundMatch, Tracked, VoiceActivity,
 };
+use vidcut_core::auto_color::Balance;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Measured;
 use vidcut_core::editor::GeneratedProxy;
@@ -130,6 +131,8 @@ static HEARD: Mutex<Lru<String, Arc<Speech>, HEARD_KEPT>> = Mutex::new(Lru::new(
 static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::new());
 const LOUD_KEPT: usize = 4096;
 static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
+const BALANCES_KEPT: usize = 16;
+static BALANCES: Mutex<Lru<String, Balance, BALANCES_KEPT>> = Mutex::new(Lru::new());
 
 fn loud_key(plan: &RenderPlan) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
@@ -412,6 +415,32 @@ impl Env for AvEnv {
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )
+    }
+
+    fn auto_balance(&self, plan: &RenderPlan) -> Result<Balance> {
+        let lock = || BALANCES.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = vidcut_core::fingerprint::digest(&serde_json::to_vec(plan).unwrap_or_default());
+        if let Some(v) = lock().get(&key) {
+            return Ok(*v);
+        }
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the picture changed while Auto Color read it; run it again",
+            ));
+        }
+        let piece = plan
+            .video
+            .first()
+            .ok_or_else(|| Error::invalid("there is no picture at the playhead"))?;
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let size = (plan.width, plan.height);
+        let colors = (plan.colors, None, None);
+        let pixels =
+            vidcut_av::export::still::floats(piece, plan.fps, size, colors, decoder.as_ref())
+                .map_err(av_error)?;
+        let balance = vidcut_core::auto_color::balance(pixels);
+        lock().insert(key, balance);
+        Ok(balance)
     }
 
     fn voice_isolation(&self, download: bool) -> Result<()> {

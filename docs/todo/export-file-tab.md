@@ -22,7 +22,7 @@
 
 **Measured, not built:**
 
-- Individual clips render each clip at its own frame rate (p. 4114). vidcut renders each clip at the frame rate of the timeline.
+- Individual clips render each clip at its own frame rate (p. 4114). vidcut renders each clip at the frame rate of the timeline ([X175](../deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
   - In the measurement, `interlaced-tff.mov` (1080i 25, 2 s) gave `interlaced-tff00000001.mp4`, and 100 EXR frames numbered 1 to 100.
 - The Video tab rows of Individual clips: Render timeline effects and Render at source resolution (p. 4114).
 - The Preserved Path row, which shows the folders that the source path gives.
