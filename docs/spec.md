@@ -4139,6 +4139,56 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - **vidcut:** it writes the `GeneratorReference.1` form. It reads both forms.
   - Transform, Crop, Composite and Retime/Scaling effects export with the same metadata keys as on a regular video clip.
 
+### 8.25 Auto Color (pp. 117, 771, 3128–3129; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Color section of the Cut page viewer Tools has one control, Auto Color (p. 771).
+  - Auto Color balances the blacks and the whites of the current clip. It uses the frame at the playhead (pp. 771, 3128).
+  - On the Color page, the A button of the Primaries palette and Color > Auto Color (Option-Shift-C) do it (p. 3129).
+  - Auto Color uses the DaVinci Neural Engine. It is made for Rec. 709 at a gamma of 2.4 (p. 3128).
+  - Use Legacy Auto Color in the Color panel of the User Preferences sets the A button to the earlier method (pp. 117, 3129).
+  - The earlier method neutralizes the RGB balance of the darkest and of the brightest levels (p. 3129).
+  - Then it sets Master Lift and Master Gain to reach 0 and 100 percent (p. 3129).
+- **The result**, measured with float renders and 65-point table exports:
+  - The result is one node with one tool, Auto Color. The CDL of the clip stays the identity.
+  - The tool holds six numbers E and three numbers W.
+  - The tool can go off and on again. Off, the clip has no change, within 1.5e-5.
+  - The change is not one curve for each channel.
+  - Each pixel x = (r, g, b) goes through these steps:
+    1. v = E0 x + E1.
+    2. v = sign(v) |v|^E2, for each channel.
+    3. y = 0.299 r + 0.587 g + 0.114 b of v. Then v = y + (1 + E3)(v − y).
+    4. v = E4 v.
+    5. v = E5 + (1 − E5) v.
+    6. Channel c becomes v_c × mean(W) / W_c.
+  - Steps 3 to 5 can go in any order. No other order of the steps fits.
+  - The renders fit these steps within 7.0e-7, also outside 0..1. Thus there is no clamp.
+- **The analysis** that makes E and W:
+  - E0, E1 and E3 are multiples of 1/1024 or of 1/4096.
+  - A flat gray of 0.5 gets E5 = −1.0. A ramp from 0 to 1 gets E0 = 0.928 and E1 = 0.055, which compress it.
+  - No stretch of the levels gives these values. With the manual, this agrees with a trained network. Its weights are not available. Thus vidcut cannot match the analysis.
+  - The same picture at 1920 × 1080 and at 3840 × 2160 gives the same values within 0.004.
+  - At 588 × 260, 30 black and 30 white pixels change W. At the larger sizes, they do not.
+- **Use Legacy Auto Color**, measured:
+  - With the preference on, Color > Auto Color (Alt+Shift+C) gives the earlier method.
+  - The A button and the script command stay on the neural method with the preference on. This is against p. 117.
+  - The result is one node with Lift and Gain of red, green, blue and the master. Gamma and Offset keep their usual values.
+  - Each channel of the source picture uses its own values only.
+  - For each channel, b = floor(99 × clamp(v, 0, 1)) of each pixel. k is 19.25 % of the pixels.
+  - B is the mean of the k smallest b, divided by 99. W is the mean of the k largest b, divided by 99.
+  - The black point is lo = B. The white point is hi = W + (1 − B) / 99.
+  - The stored Lift is −lo / (1 − lo), but −2 at least. The Lift field shows half of it. The Gain is 1 / hi.
+  - The master gives lo = 0.299 lo_R + 0.587 lo_G + 0.114 lo_B, and the same for hi. The error is 5.5e-4.
+  - These rules give the ramps and the test pictures within 0.4 / 99. They give flat pictures and pictures of two equal halves exactly.
+  - Not matched: the levels 0.1, 0.5 and 0.7 come out 0.196 / 99 higher than floor(99 v).
+  - Not matched: pictures with two levels at 10 % and 90 % of the pixels fit a share of 25 %.
+  - Not matched: a clip at Zoom 0.5, with black bars, gets the Lift 0.01 on each channel.
+  - On a clip with Gain and Offset, all values of Lift and Gain are new. The Offset stays.
+  - The analysis then sees the output of the node with the Offset, and with Lift and Gain at their usual values.
+  - 1920 × 1080 and 3840 × 2160 give the same points for most values. 588 × 260 differs by up to 0.0016.
+- An OpenTimelineIO export holds no grade of a clip. Its clip metadata is empty. Auto Color itself in the file is not measured.
+- vidcut has no Auto Color yet ([todo](todo/auto-color.md)).
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
