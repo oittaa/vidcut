@@ -1261,19 +1261,21 @@ fn paced<'a>(
     cancel: &'a AtomicBool,
     progress: &'a mut dyn FnMut(Progress),
 ) -> impl FnMut(Progress) + 'a {
-    let mut since: Option<(Instant, u8, i64, i64)> = None;
+    let mut last: Option<(u8, i64, Instant)> = None;
     move |p: Progress| {
         if let Some(fps) = limit.filter(|_| !p.measuring) {
-            let (start, first) = match since {
-                Some((start, pass, first, last)) if pass == p.pass && p.frames >= last => {
-                    (start, first)
+            let now = Instant::now();
+            let due = match last {
+                Some((pass, frames, at)) if pass == p.pass && p.frames >= frames => {
+                    let gap = (p.frames - frames) as f64 / f64::from(fps.get());
+                    (at + Duration::from_secs_f64(gap)).max(now)
                 }
-                _ => (Instant::now(), p.frames),
+                _ => now,
             };
-            since = Some((start, p.pass, first, p.frames));
-            let due = Duration::from_secs_f64((p.frames - first) as f64 / f64::from(fps.get()));
+            last = Some((p.pass, p.frames, due));
             while !cancel.load(Ordering::Relaxed)
-                && let Some(wait) = due.checked_sub(start.elapsed()).filter(|w| !w.is_zero())
+                && let Some(wait) =
+                    (due.checked_duration_since(Instant::now())).filter(|w| !w.is_zero())
             {
                 std::thread::sleep(wait.min(PACE_STEP));
             }

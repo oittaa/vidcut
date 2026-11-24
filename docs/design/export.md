@@ -58,6 +58,8 @@ flowchart TD
   - Before an export, the GUI asks when a clip of the timeline uses removed media (`ask_offline`). Cancel stops the export.
 - **Render Speed:** `paced` wraps the progress of `run_decoding_on`. It waits before it reports a frame that is early for `render_speed`. Why: the progress comes once for each frame, in each path of the encode.
   - The time starts at the first frame of each pass. Thus the setup of the encoders gives no frames at full speed.
+  - Each frame is due one interval of the limit after the frame before. A frame that is late is due at once, and the next frame counts from it.
+  - Thus a slow stretch gives no frames at full speed after it.
   - It waits in short steps (`PACE_STEP`) and stops when the export is cancelled.
   - A count that goes down starts a new pass, and the time starts again.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Upscale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
