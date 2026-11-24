@@ -4417,7 +4417,8 @@ pub enum Request {
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
-    /// buttons. Answers what `gui.state` does.
+    /// buttons, or `select_tool` (a tool to add on the effects page).
+    /// Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -5790,6 +5791,9 @@ pub enum GuiPanel {
     /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
     /// Swap, the ease and Reset.
     Tools,
+    /// The Select Tool window of the effects page: it finds a tool by its
+    /// name or its kind, and adds it as a click in the Effects Library does.
+    SelectTool,
 }
 
 /// Media tab sort orders.

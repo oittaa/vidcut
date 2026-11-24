@@ -26,7 +26,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - vidcut joins only an empty input, and only a mask to an effect mask input.
 - **A delete of a viewed node:** measured: Resolve puts the node on its input in that viewer ([spec](../spec.md#the-effects-page)). vidcut empties the viewer.
 - **Page keys that vidcut does not have:**
-  - Shift+Space opens Select Tool (p. 1386).
   - = and − zoom the viewer, and Ctrl+1 in a viewer sets it to 100 percent (p. 1290).
   - Ctrl+F is Find (p. 1421).
   - Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
