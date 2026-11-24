@@ -24,7 +24,8 @@ pub enum Container {
     Ogg,
     /// Image sequences: one file for each frame, without sound. The output
     /// `out.tif` gives `out00000000.tif` and so on. The number is the frame
-    /// count of the record timecode, unless `video.first_frame` is set.
+    /// count of the record timecode, unless `video.first_frame` is set. With
+    /// `per_clip`, it is the source frame.
     Tiff,
     Exr,
 }
@@ -412,12 +413,14 @@ pub struct VideoSettings {
     /// `premultiplied`.
     #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
     pub alpha_mode: AlphaOut,
-    /// The digits of the frame number in the name of a TIFF or OpenEXR file,
-    /// from 1 to 18. Unset: 8.
+    /// The digits of the frame number in the name of a TIFF or OpenEXR file
+    /// and of the frame count in per-clip names, from 1 to 18. Unset: 8. An
+    /// export of one movie file refuses it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename_digits: Option<u8>,
     /// The number of the first TIFF or OpenEXR file. With `per_clip`, each
-    /// clip starts at it. Unset: the frame count of the record timecode.
+    /// clip starts at it. Unset: the frame count of the record timecode, and
+    /// with `per_clip` the source frame of the clip's first frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_frame: Option<u32>,
     /// The Compression Level of an OpenEXR with DWAA or DWAB, from 0 to 300.
@@ -1161,11 +1164,8 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if v.hdr_metadata.dolby_vision() && !matches!(v.codec, V::Hevc | V::Av1) {
             return Err(Error::usage("Dolby Vision needs HEVC or AV1"));
         }
-        if !s.container.image_sequence() && (v.filename_digits.is_some() || v.first_frame.is_some())
-        {
-            return Err(Error::usage(
-                "video.filename_digits and video.first_frame are for TIFF and OpenEXR",
-            ));
+        if !s.container.image_sequence() && v.first_frame.is_some() {
+            return Err(Error::usage("video.first_frame is for TIFF and OpenEXR"));
         }
         if let Some(d) = v
             .filename_digits

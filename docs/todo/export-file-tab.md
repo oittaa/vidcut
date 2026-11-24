@@ -1,0 +1,33 @@
+# The rows of the File tab
+
+**When:** after a measurement of the items below. Each measurement waits for the owner's OK.
+
+**Why:** [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the measured file names of each row alone. vidcut builds a row or a combination only when its output is measured.
+
+**Runs that settle what vidcut does not build:**
+
+- The frame count of other clips. The measured clips start at source frame 0 and have no source timecode. Runs, with MP4 and EXR:
+  - A clip that starts at source frame 10.
+  - A source file with the start timecode 01:00:00:00.
+- Place clips in separate folders gives `Event__0001_0001`. The last number is the place of the clip. Run: a clip on V2 with separate folders, to find what the first number is.
+- The order of the parts when rows combine. vidcut refuses these combinations. Runs:
+  - File subfolder `sub`, Place clips in separate folders and Preserve 1 From tail, all together.
+  - File suffix `_x` with Use unique filenames Suffix.
+  - Use unique filenames with Source name.
+  - EXR with Source name, File suffix, Use unique filenames, and Add source frame count off, one at a time.
+- Render speed: what each number of the menu does. The menu has 100 and Maximum. Run: the render time of one clip at 25, 100 and Maximum.
+- Preserve 2 with After head. vidcut refuses After head with more than 1 level.
+- Preserve 1 with After head on macOS. vidcut refuses After head on a path with no drive letter.
+- Replace existing files in place with an image-sequence source.
+
+**Measured, not built:**
+
+- Individual clips render each clip at its own frame rate (p. 4114). vidcut renders each clip at the frame rate of the timeline ([X175](../deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
+  - In the measurement, `interlaced-tff.mov` (1080i 25, 2 s) gave `interlaced-tff00000001.mp4`, and 100 EXR frames numbered 1 to 100.
+- The Video tab rows of Individual clips: Render timeline effects and Render at source resolution (p. 4114).
+- The Preserved Path row, which shows the folders that the source path gives.
+
+**Rows with no run yet:**
+
+- Use commercial workflow and the rows that it shows (p. 4126).
+- Single clip: Filename uses Timeline name, File suffix, File subfolder, Render without timecode, and Start timeline timecode at.

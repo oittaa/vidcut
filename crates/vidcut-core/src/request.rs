@@ -5017,9 +5017,42 @@ pub struct ExportParams {
     /// Shortcut for `video.encoder`.
     #[serde(default)]
     pub encoder: Option<EncoderChoice>,
-    /// Per-clip file name template: `{index}`, `{index:03}`, `{name}`, `{clip}`, `{media}`.
+    /// Per-clip file name: text with `{source}` (the name of the clip's
+    /// source file), `{index}`, `{index:03}`, `{name}`, `{clip}` and
+    /// `{media}`. Default: `{source}`. The frame count and `suffix` follow
+    /// it.
     #[serde(default)]
     pub name: Option<String>,
+    /// Name each per-clip file after its source file, with no `name`,
+    /// frame count or `suffix`. Not with an image sequence.
+    #[serde(default)]
+    pub source_names: bool,
+    /// Per-clip text at the end of each name. Not with `unique` or an image
+    /// sequence.
+    #[serde(default)]
+    pub suffix: Option<String>,
+    /// Leave the frame count out of the per-clip names. The count is the
+    /// source frame of the clip's first frame, with `video.filename_digits`
+    /// digits (8 when unset). An image sequence numbers its frames from it.
+    /// Not with an image sequence.
+    #[serde(default)]
+    pub no_frame_count: bool,
+    /// Put the clip's track and its place on the track (`V1-0001`) before
+    /// or after each per-clip name, in place of the frame count. Not with
+    /// `suffix`, `source_names` or an image sequence.
+    #[serde(default)]
+    pub unique: Option<UniqueAs>,
+    /// A folder in `output` for the per-clip files. Not with
+    /// `source_levels`.
+    #[serde(default)]
+    pub subfolder: Option<String>,
+    /// The number of folders of each clip's source path to make again in
+    /// `output`. 0 makes none.
+    #[serde(default)]
+    pub source_levels: u32,
+    /// How `source_levels` counts. Default: `tail`.
+    #[serde(default)]
+    pub levels_from: LevelsFrom,
     /// Replace existing output files.
     #[serde(default)]
     pub overwrite: bool,
@@ -5060,6 +5093,28 @@ pub enum FindSpeech {
     Sound,
     /// All of the audio, the silences too.
     None,
+}
+
+/// Where `unique` puts the track and the place of a clip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UniqueAs {
+    /// `V1-0001_name`.
+    Prefix,
+    /// `name_V1-0001`.
+    Suffix,
+}
+
+/// How `source_levels` counts the folders of a source path.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LevelsFrom {
+    /// The last folders: 1 keeps the folder that holds the file.
+    #[default]
+    Tail,
+    /// All the folders but the drive. It takes only 1 level, on a path
+    /// with a drive letter.
+    Head,
 }
 
 /// How subtitle tracks go out with an export.

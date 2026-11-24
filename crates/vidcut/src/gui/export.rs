@@ -9,7 +9,9 @@ use vidcut_core::export::{
     AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
     ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
 };
-use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
+use vidcut_core::request::{
+    FindSpeech, ImportMode, LevelsFrom, SubtitleFormat, SubtitlesAs, UniqueAs,
+};
 use vidcut_core::{Envelope, Error, Response};
 
 use super::export_page::{AddChoice, QueueStep};
@@ -316,6 +318,13 @@ pub(super) struct Render {
     pub(super) range: String,
     pub(super) per_clip: bool,
     pub(super) template: String,
+    pub(super) source_names: bool,
+    suffix: String,
+    frame_count: bool,
+    unique: Option<UniqueAs>,
+    subfolder: String,
+    source_levels: u32,
+    levels_from: LevelsFrom,
     pub(super) name: String,
     pub(super) folder: String,
     pub(super) overwrite: bool,
@@ -563,7 +572,14 @@ impl Render {
             stashed_video: None,
             range: String::new(),
             per_clip: false,
-            template: "{index:03}-{name}".into(),
+            template: CLIP_NAME.into(),
+            source_names: false,
+            suffix: String::new(),
+            frame_count: true,
+            unique: None,
+            subfolder: String::new(),
+            source_levels: 0,
+            levels_from: LevelsFrom::Tail,
             name,
             folder,
             overwrite: false,
@@ -603,6 +619,35 @@ impl Render {
         }
     }
 
+    fn clip_names(&self, p: &mut Value) {
+        p["per_clip"] = json!(true);
+        if self.source_names {
+            p["source_names"] = json!(true);
+        } else {
+            if self.template != CLIP_NAME {
+                p["name"] = json!(self.template);
+            }
+            if !self.suffix.is_empty() {
+                p["suffix"] = json!(self.suffix);
+            }
+            if !self.frame_count {
+                p["no_frame_count"] = json!(true);
+            }
+        }
+        if let Some(how) = self.unique {
+            p["unique"] = json!(how);
+        }
+        if !self.subfolder.trim().is_empty() {
+            p["subfolder"] = json!(self.subfolder.trim());
+        }
+        if self.source_levels > 0 {
+            p["source_levels"] = json!(self.source_levels);
+            if self.levels_from != LevelsFrom::Tail {
+                p["levels_from"] = json!(self.levels_from);
+            }
+        }
+    }
+
     pub(super) fn params(&self) -> Value {
         let path = self.output();
         let output = path.to_string_lossy();
@@ -621,14 +666,19 @@ impl Render {
         if !self.per_clip && ext == Some(settings.container) {
             base.container = settings.container;
         }
+        if !self.per_clip
+            && !settings.container.image_sequence()
+            && let Some(v) = settings.video.as_mut()
+        {
+            v.filename_digits = None;
+        }
         let set = overrides(&base, &settings);
         if !set.is_empty() {
             p["set"] = json!(set);
         }
         p["range"] = json!(self.range);
         if self.per_clip {
-            p["per_clip"] = json!(true);
-            p["name"] = json!(self.template);
+            self.clip_names(&mut p);
         }
         if self.overwrite {
             p["overwrite"] = json!(true);
@@ -3119,13 +3169,72 @@ pub(super) fn audio_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value, audio: (
     });
 }
 
+pub(super) const CLIP_NAME: &str = "{source}";
+
+fn clip_name_rows(ui: &mut egui::Ui, d: &mut Render) {
+    super::dialog::row(ui, "Filename Uses", |ui| {
+        super::dialog::switch(ui, |ui| {
+            ui.selectable_value(&mut d.source_names, false, "Custom Name");
+            ui.selectable_value(&mut d.source_names, true, "Source Name");
+        })
+    });
+    if !d.source_names {
+        super::dialog::row(ui, "Custom Name", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut d.template).desired_width(220.0))
+        });
+        super::dialog::row(ui, "File Suffix", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut d.suffix).desired_width(220.0))
+        });
+    }
+    super::dialog::row(ui, "Unique Names", |ui| {
+        let mut on = d.unique.is_some();
+        if ui.add(egui::Checkbox::without_text(&mut on)).changed() {
+            d.unique = on.then_some(UniqueAs::Prefix);
+        }
+    });
+    if let Some(how) = &mut d.unique {
+        super::dialog::row(ui, "Unique Name As", |ui| {
+            super::dialog::switch(ui, |ui| {
+                ui.selectable_value(how, UniqueAs::Prefix, "Prefix");
+                ui.selectable_value(how, UniqueAs::Suffix, "Suffix");
+            })
+        });
+    }
+    if !d.source_names {
+        super::dialog::row(ui, "Source Frame Count", |ui| {
+            ui.add(egui::Checkbox::without_text(&mut d.frame_count))
+        });
+    }
+    super::dialog::row(ui, "File Subfolder", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut d.subfolder).desired_width(220.0))
+    });
+}
+
+fn clip_folder_rows(ui: &mut egui::Ui, d: &mut Render) {
+    super::dialog::row(ui, "Source Folder Levels", |ui| {
+        ui.add(egui::DragValue::new(&mut d.source_levels).range(0..=99))
+    });
+    if d.source_levels > 0 {
+        super::dialog::row(ui, "Count Levels", |ui| {
+            super::dialog::switch(ui, |ui| {
+                ui.selectable_value(&mut d.levels_from, LevelsFrom::Head, "After Head");
+                ui.selectable_value(&mut d.levels_from, LevelsFrom::Tail, "From Tail");
+            })
+        });
+    }
+}
+
 pub(super) fn file_tab(ui: &mut egui::Ui, d: &mut Render) {
     super::dialog::form(ui, "export-file", |ui| {
+        if d.per_clip {
+            clip_name_rows(ui, d);
+        }
+        let per_clip = d.per_clip;
         if let Some(v) = d
             .settings
             .video
             .as_mut()
-            .filter(|v| v.image_bits().is_some())
+            .filter(|v| per_clip || v.image_bits().is_some())
         {
             use vidcut_core::export::{FILENAME_DIGIT_COUNTS, FILENAME_DIGITS};
             super::dialog::row(ui, "Filename Digits", |ui| {
@@ -3137,10 +3246,17 @@ pub(super) fn file_tab(ui: &mut egui::Ui, d: &mut Render) {
                     v.filename_digits = Some(digits);
                 }
             });
+        }
+        if let Some(v) = d
+            .settings
+            .video
+            .as_mut()
+            .filter(|v| v.image_bits().is_some())
+        {
             super::dialog::row(ui, "First Frame", |ui| {
                 let mut own = v.first_frame.is_some();
                 if ui.add(egui::Checkbox::without_text(&mut own)).changed() {
-                    v.first_frame = own.then_some(0);
+                    v.first_frame = own.then_some(1);
                 }
                 if let Some(first) = &mut v.first_frame {
                     ui.add(egui::DragValue::new(first));
@@ -3150,6 +3266,9 @@ pub(super) fn file_tab(ui: &mut egui::Ui, d: &mut Render) {
         super::dialog::row(ui, "Replace Files", |ui| {
             ui.add(egui::Checkbox::without_text(&mut d.overwrite))
         });
+        if d.per_clip {
+            clip_folder_rows(ui, d);
+        }
     });
 }
 

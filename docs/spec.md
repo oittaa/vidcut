@@ -4809,6 +4809,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - **In vidcut:**
     - `out.tif` gives `out00000000.tif`, `out00000001.tif` and so on. `video.filename_digits` sets the digits, from 1 to 18.
     - The first number is the start timecode plus the first frame of the export, as a frame count.
+    - With `per_clip`, the first number is the source frame of the clip's first frame.
     - `video.first_frame` sets the first number. With `per_clip`, each clip starts at it.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
     - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1`, `_zip16`, `_piz`, `_dwaa` or `_dwab`. `_zip16` is ZIP.
@@ -4839,6 +4840,34 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - File Name shows the name of the file. Location has Browse (p. 4113).
   - Render is Single clip or Individual clips (p. 4114). Single clip renders the range into one file. Individual clips renders one file for each clip.
   - The Video, Audio and File tabs hold the other settings (pp. 4115–4127). Advanced Settings and Subtitle Settings are closed by default (measured).
+- **File tab** (pp. 4125–4127; measured with MP4 and EXR):
+  - Single clip: Filename uses (Custom name or Timeline name), Custom name, File suffix and File subfolder.
+  - Then Use 8 digits in the filename, Each clip starts at frame 1 (off), Render without timecode (off) and Start timeline timecode at 01:00:00:00 (off).
+  - Then Replace existing files in place (greyed with MP4) and Render speed (Maximum). With EXR and Single clip, the tab is empty.
+  - Individual clips: Filename uses (Custom name or Source name), Custom name ("Untitled") and File suffix.
+  - Then Use unique filenames (off), Add source frame count to filename (on) and File subfolder.
+  - Then Use 8 digits, Each clip starts at frame 1 (off), and Replace existing files in place (greyed with MP4, off with EXR).
+  - Then Place clips in separate folders (off), Preserve source directory levels (on) with Preserve 0 and From tail, and Preserved Path (greyed).
+  - Then Use commercial workflow (off) and Render speed (Maximum).
+  - With Source name, File Name reads "SourceName". Custom name, File suffix and Add source frame count go away. Use unique filenames stays.
+- **File names** (Individual clips; measured with MP4 and EXR, clips with no source timecode that start at source frame 0):
+  - The defaults give the source name and the source frame count in 8 digits: `m-red00000000.mp4`.
+  - At Add, Custom name changes from "Untitled" to a Source Name tag.
+  - A clip that is used two times gives the same name. The second render writes over the first, with no prompt.
+  - Source name gives `m-red.mp4`. Add source frame count off gives the same name.
+  - File suffix `_x` gives `m-red00000000_x.mp4`.
+  - Use unique filenames adds the row "Add a unique name as", with Prefix (picked) and Suffix.
+  - Prefix gives `V1-0001_m-red.mp4`, and Suffix gives `m-red_V1-0001.mp4`. The number is the place of the clip on its track. The frame count goes.
+  - File subfolder `sub` gives `sub\m-red00000000.mp4`.
+  - Place clips in separate folders gives `Event__0001_0001\m-red00000000.mp4`, then `Event__0001_0002` and so on.
+  - Preserve source directory levels 0 makes no folders. After an Add with 0, the box is off again.
+  - Preserve 1 with From tail (picked) keeps the folder that holds the source file: `stills\m-red00000000.mp4`.
+  - Preserve 1 with After head keeps all the folders but the drive: `Users\…\stills\m-red00000000.mp4`.
+  - An EXR names each frame by its source frame, in 8 digits: `m-red00000000.exr` to `m-red00000095.exr`.
+  - 4 digits with Each clip starts at frame 1 gives `m-red0001.exr` to `m-red0096.exr`.
+  - Replace existing files in place, with a movie source, writes the frames as usual. The source does not change.
+  - Render speed has 1, 2, 5, 10, 25, 50, 75, 100 and Maximum.
+  - Individual clips adds Render timeline effects and Render at source resolution to the Video tab.
 - **Range** (pp. 4128–4129):
   - The Render menu has Entire Timeline and In/Out Range.
   - I and O set the In and the Out. IN and OUT show the first and the last frame. DURATION counts the frames (p. 4129).
@@ -4891,7 +4920,19 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A job that failed shows "Failed:" and the error, in red.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
-  - Individual clips names the files with a template. The File tab has Filename Digits and First Frame for image sequences, and Replace Files.
+  - With Individual clips, the File tab has Filename Uses, Custom Name, File Suffix, Unique Names, Source Frame Count and File Subfolder.
+  - Then Filename Digits, First Frame for image sequences, Replace Files, Source Folder Levels and Count Levels.
+  - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `source_levels` and `levels_from`.
+  - The Custom Name takes `{source}` and the other parts of `name`. It is `{source}` by default.
+  - The frame count is the source frame of the clip's first frame. Filename Digits sets its digits, also for a movie. It is 8 by default.
+  - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
+  - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
+  - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
+  - The rows go together only as measured. An export refuses File Subfolder with Source Folder Levels, and File Suffix with Unique Names.
+  - It also refuses Unique Names with Source Name. With an image sequence, it refuses Source Name, File Suffix, Unique Names and no frame count.
+  - Count Levels After Head takes only 1 level, on a path with a drive letter.
+  - With Single clip, the File tab has Filename Digits and First Frame for image sequences, and Replace Files.
+  - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts

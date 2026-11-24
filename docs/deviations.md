@@ -1536,3 +1536,16 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The weights of the neural network are not available.
   - The legacy method is measured. Its rules are in spec §8.25.
+
+## X175. Individual clips render at the frame rate of the timeline
+
+- **Resolve:**
+  - With Individual clips, each clip renders at its own frame rate (p. 4114).
+  - Measured in Resolve Studio 21.2, on a 24 fps timeline, with `interlaced-tff.mov` (1080i 25, 2 s):
+    - The file name is `interlaced-tff00000001.mp4`.
+    - An EXR render gives 100 frames, numbered 1 to 100.
+- **vidcut:**
+  - Each clip renders at the frame rate of the timeline.
+  - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
+- **Why:**
+  - Not built yet ([todo](todo/export-file-tab.md)).
