@@ -179,3 +179,11 @@ url = "https://www.gutenberg.org/files/2000/2000-0.txt"
 license = "Project Gutenberg: 'Public domain in the USA.', https://www.gutenberg.org/ebooks/2000"
 purpose = "the text quijote-es reads, the one LibriVox links for that reading: Gutenberg's Don Quijote, both parts, UTF-8 with a byte order mark, CRLF, 2226045 bytes. Section 36 is the first part's Capítulo L, lines 17190-17418, 2460 words with its heading: transcription's reference text in Spanish. Not compared word for word with the reading"
 sha256 = "392270e534c66988d6e949ba0f9a64117969fde0f2aebbc6efef3314e23e4385"
+
+[[clip]]
+name = "mts-1080i-fields"
+file = "00007.mts"
+url = "https://archive.org/download/scm-10794-mtstestfile/00007.mts"
+license = "CC BY-SA 3.0, dean, Seattle Community Media, https://archive.org/details/scm-10794-mtstestfile"
+purpose = "1080i 29.97 H.264 in MPEG-TS, top field first, coded in fields: a packet and a timestamp for each field, and no rate in the header. The probe must give 30000/1001, not 60000/1001"
+sha256 = "65d14615ceebe15e2fa832d35335c0940bc2f00f55c4eac52d7ba6199ae925cc"

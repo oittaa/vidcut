@@ -245,11 +245,15 @@ Frame rate of a file:
 - For a file that states no rate, `measured_rate` gets the rate from the timestamps of the frames.
   - An image sequence is not measured. Its rate is the rate that it is opened with.
   - It opens the file again, and reads from the start. Why: other steps of `probe` read packets from the first input.
-  - It reads the packets of the first `MEASURED_SECS` of the video, and `REORDERED_FRAMES` packets more.
-  - Why the packets more: a frame out of order comes at most that many packets late in H.264 and HEVC.
+  - It reads the packets of the first `MEASURED_SECS` of the video, and the packets of `REORDERED_FRAMES` frames more.
+  - Why the frames more: a frame out of order comes at most that many frames late in H.264 and HEVC.
   - A video packet with no timestamp stops the measurement, and the rate of FFmpeg stays. Thus a file with no timestamps is not read to its end.
   - The rate is the number of frames in that span, divided by the length of the span.
   - Why that length: a timestamp in milliseconds then moves the rate by less than half the step from 24 to 23.976 fps.
+  - `fields_of` gives the fields of a packet, as FFmpeg's own rate step does. Two fields are one frame.
+    - For a codec with fields (`AV_CODEC_PROP_FIELDS`), a packet has the fields that its parser gives: `repeat_pict` plus 1.
+    - Each other packet has 2 fields.
+    - Why: an H.264 stream that is coded in fields has a packet and a timestamp for each field. Thus a count of packets gives two times the rate.
   - `Input::rate_of` makes the fraction from these whole numbers with `av_reduce`. Why: a fraction from a decimal number can get very large terms.
   - Both rates of the stream (`avg_frame_rate`, `r_frame_rate`) get the measured rate. Thus the file shows a constant rate.
 - `Input::open` does both steps for the other readers.
