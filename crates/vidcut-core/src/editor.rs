@@ -5005,18 +5005,12 @@ fn mutate(
             ops::grade::printer(p, &of, n, (*color, *points), &lights)?;
             Value::Null
         }
-        Request::GradeAutoColor { clip, node, at, on } => {
+        Request::GradeAutoColor { clip, node, at } => {
             let of = grade_of(p, clip, false, playhead)?;
             let n = node.unwrap_or(1);
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
-            let step = match on {
-                Some(on) => ops::grade::AutoStep::Shown(*on),
-                None => {
-                    let plan = auto_color_plan(p, &of, n, at)?;
-                    ops::grade::AutoStep::Analysed(env.auto_balance(&plan)?)
-                }
-            };
-            ops::grade::auto_color(p, &of, (n, at), step)?;
+            let plan = auto_color_plan(p, &of, n, at)?;
+            ops::grade::auto_color(p, &of, (n, at), env.auto_balance(&plan)?)?;
             Value::Null
         }
         Request::GradeAdd {
@@ -8254,13 +8248,7 @@ fn track_start(
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
 pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
-    let Request::GradeAutoColor {
-        clip,
-        node,
-        at,
-        on: None,
-    } = request
-    else {
+    let Request::GradeAutoColor { clip, node, at } = request else {
         return Vec::new();
     };
     let of = grade_of(p, clip, false, playhead);

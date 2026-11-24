@@ -4497,23 +4497,6 @@ pub struct Corrector {
     /// Where the Highlight range of the Log mode starts, below 1. Usual:
     /// 0.55.
     pub high_range: f64,
-    /// What Auto Color keeps for its toggle. Left out until Auto Color runs
-    /// on this corrector.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_color: Option<AutoColor>,
-}
-
-/// The Lift and Gain that Auto Color keeps for its toggle. On, `lift` and
-/// `gain` of the corrector hold the result of Auto Color, and these hold the
-/// values that it replaced. Off, it is the other way round.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct AutoColor {
-    /// The corrector shows the result of Auto Color.
-    pub on: bool,
-    /// The Lift that does not show now: red, green, blue and the master.
-    pub lift: [f64; 4],
-    /// The Gain that does not show now: red, green, blue and the master.
-    pub gain: [f64; 4],
 }
 
 impl Default for Corrector {
@@ -4539,7 +4522,6 @@ impl Default for Corrector {
             log_highlight: [0.0; 3],
             low_range: 0.333,
             high_range: 0.55,
-            auto_color: None,
         }
     }
 }

@@ -3654,7 +3654,7 @@ impl Live {
             },
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
-            | Request::GradeAutoColor { on: None, .. }
+            | Request::GradeAutoColor { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
@@ -5721,7 +5721,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::SubtitlesTimeWords { .. }
         | Request::ClipNormalize { .. }
         | Request::EditDetectSceneCuts { .. }
-        | Request::GradeAutoColor { on: None, .. }
+        | Request::GradeAutoColor { .. }
         | Request::MotionFind { .. }
         | Request::MotionTrack { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }

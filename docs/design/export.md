@@ -855,7 +855,6 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
   - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
   - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`.
-  - `AutoColor` in the corrector keeps the Lift and Gain that do not show. `AutoStep::Shown` swaps them with the shown values.
 - `Grading::of` changes the values of a corrector into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
   - The new white is at 6500 K minus Temp, in CIE 1960 uv. `ISOTEMPERATURE` is the table of Robertson (1968). `white_xyz` reads it linearly in mired.

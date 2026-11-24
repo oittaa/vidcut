@@ -788,7 +788,7 @@ impl Workspace {
             }
         }
         ui.separator();
-        self.auto_color_button(ui, clip.as_ref());
+        self.auto_color_button(ui, clip.as_ref().map(|(id, _)| id.as_str()));
         let Some(tool) = self.timeline.picture_grab.tool else {
             return;
         };
@@ -851,19 +851,13 @@ impl Workspace {
         }
     }
 
-    fn auto_color_button(&mut self, ui: &mut egui::Ui, clip: Option<&(String, Picture)>) {
-        let kept = clip.and_then(|(_, p)| p.grade.as_ref()?.corrector(1)?.auto_color.clone());
-        let lit = kept.as_ref().is_some_and(|a| a.on);
-        let b = egui::Button::selectable(lit, "Auto Color");
+    fn auto_color_button(&mut self, ui: &mut egui::Ui, clip: Option<&str>) {
+        let b = egui::Button::new("Auto Color");
         if ui.add_enabled(clip.is_some(), b).clicked()
-            && let Some((id, _)) = clip
+            && let Some(id) = clip
         {
-            let mut params = json!({ "clip": id, "node": 1 });
-            if kept.is_some() {
-                params["on"] = json!(!lit);
-            }
             self.end_picture_wheel();
-            self.send("grade.auto_color", params);
+            self.send("grade.auto_color", json!({ "clip": id, "node": 1 }));
         }
     }
 

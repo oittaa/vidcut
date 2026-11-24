@@ -530,7 +530,7 @@ The bar and the Jobs button:
 - A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
 - The A button of the Primaries palette, Color > Auto Color and its key send `grade.auto_color` with the current node and the playhead (`Workspace::auto_color`).
-  - The Auto Color button of the viewer Tools sends node 1 (`Workspace::auto_color_button`). Its click sends `on` when the corrector has a kept result.
+  - The Auto Color button of the viewer Tools sends node 1 (`Workspace::auto_color_button`).
   - `Live::measuring` renders the frame on a worker thread first. The edit then reads the result from `BALANCES`.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
 - The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.

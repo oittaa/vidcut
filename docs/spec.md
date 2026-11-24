@@ -4192,18 +4192,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - **vidcut** uses the legacy method above for each Auto Color ([X174](deviations.md#x174-auto-color-uses-the-legacy-method)).
   - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
   - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
-  - The Auto Color button of the viewer Tools works on node 1.
+  - The Auto Color button of the viewer Tools runs it on node 1. The button does not stay lit ([todo](todo/auto-color.md)).
   - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
     - The Lift and Gain of that corrector are at their usual values.
     - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
-  - The corrector keeps the Lift and Gain that the result replaces.
-    - `on: false` shows the kept values again, and keeps the result. `on: true` shows the result again.
-    - A new analysis on a corrector that shows a result replaces only the result.
-    - A Reset of the Primaries palette removes the kept values.
-  - The Auto Color button of the viewer Tools is lit while the result shows.
-    - A click turns the result off, or on again. With no kept result, a click runs the analysis.
+  - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does. Undo takes it back.
   - The grade of the timeline has no Auto Color.
-  - An OpenTimelineIO file of vidcut keeps the result and the kept values in the vidcut metadata ([todo](todo/auto-color.md)).
+  - An OpenTimelineIO file of vidcut keeps the result in the vidcut metadata of the grade.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

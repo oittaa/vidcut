@@ -182,7 +182,6 @@ impl Corrector {
             log_highlight: mixed(&self.log_highlight, &to.log_highlight, w),
             low_range: one(self.low_range, to.low_range),
             high_range: one(self.high_range, to.high_range),
-            auto_color: self.auto_color.clone(),
         }
     }
 }
@@ -211,10 +210,6 @@ impl Corrector {
             log_highlight: moved(&self.log_highlight, &was.log_highlight, &now.log_highlight),
             low_range: one(self.low_range, was.low_range, now.low_range),
             high_range: one(self.high_range, was.high_range, now.high_range),
-            auto_color: match was.auto_color == now.auto_color {
-                true => self.auto_color.clone(),
-                false => now.auto_color.clone(),
-            },
         }
     }
 }
