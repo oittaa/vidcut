@@ -1017,7 +1017,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &[],
         "Close Up",
         Some(
-            "Puts a copy of the clip under the playhead on a track above, at twice              the size, in sync. Use it to make a closer shot from a wide one.",
+            "Puts a zoomed-in copy of the clip under the playhead on a track above, \
+             in sync. Use it to make a closer shot from a wide one.",
         ),
     ),
     own(

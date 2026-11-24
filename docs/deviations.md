@@ -1497,7 +1497,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The manual says that the Close Up edit of the Cut page does a face detection (p. 699). It puts a face that it finds in the frame.
-    - Measured in Resolve Studio 21.2, it did not move a person off the middle ([spec §7.2](spec.md#72-edit-functions)).
+    - In one measured clip, it did not move a person off the middle. One clip does not show the rule ([todo](todo/close-up.md)).
   - On the Media page, Analyze Clips for People finds faces to make People keywords (p. 418).
   - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
     - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).

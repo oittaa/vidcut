@@ -902,8 +902,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - It stops at the end of the clip.
   - **The copy:**
     - At each timeline frame, it shows the same source frame as the clip.
-    - It has no sound. Its Zoom is 2.0, its Position is in the middle, and it has no keyframes.
-    - The manual says about 150%, and a face detection that puts a face in the frame. In the measurements, the Zoom was 2.0, and a person off the middle stayed off the middle.
+    - It has no sound and no keyframes.
+    - The manual says about 150%, and a face detection that puts a face in the frame.
+    - One measured 1280×720 clip gave Zoom 2.0 and Position 0. A person off the middle stayed off the middle.
+    - The rule for the zoom and the faces is not measured yet ([todo](todo/close-up.md)).
   - **Track:** the first video track above the highest track with a clip in the range, as for Place On Top (D24). It never fills a free lower track.
     - Each new video track also makes one empty audio track.
   - **After the edit,** the timeline marks clear, and the playhead goes to the end of the copy.
@@ -911,9 +913,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With no clip at the frame, nothing changes, and no message shows.
   - It has no default key. The manual names no key for it.
   - vidcut: the Out frame is in the copy, as in the other edits (D16). Resolve leaves it out ([gotchas](gotchas.md#resolves-edits)).
+  - vidcut: until that measurement, the copy has Zoom 2.0 and the usual picture.
   - vidcut: these cases are not measured:
     - **A range past the end of the clip:** it stops at the end of the clip.
-    - **A clip with its own Zoom, Position, effects or grade:** the copy has the usual picture at Zoom 2.0, with no effects and no grade.
+    - **A clip with its own Zoom, Position, effects or grade:** the copy has the usual picture, with no effects and no grade.
     - **A generator, a title or a compound clip:** it is copied in the same way.
     - **A disabled clip, or a clip on a hidden track:** it does not count. The clip below it counts.
 
