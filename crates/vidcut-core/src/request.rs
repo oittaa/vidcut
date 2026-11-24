@@ -4406,8 +4406,8 @@ pub enum Request {
     /// Close the GUI.
     #[serde(rename = "gui.quit")]
     GuiQuit {},
-    /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs`, `mixer`, `preferences`, `history` (the undo history),
+    /// Open a window for the person at the GUI: `quick_export`, `jobs`,
+    /// `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts, and what each upscaler and Retime
     /// Process does), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
