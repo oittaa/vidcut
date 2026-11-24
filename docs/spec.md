@@ -3762,6 +3762,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
   - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. A current node that is not selected stays. The last corrector then becomes the current node.
+  - vidcut: with selected points of a curve window, these keys delete the points and no node ([§8.23](#823-windows-pp-32653279)).
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
@@ -4261,8 +4262,15 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box. A dashed box with 8 handles stays around them.
     - A drag of a selected point moves all the selected points and the box.
     - A drag of a side handle scales the selected points about the opposite side.
-    - Delete with two selected points removed one of them. A second Delete removed nothing.
-  - vidcut: Shift and a drag box are not there yet ([todo](todo/color-page.md)).
+    - Delete with two selected points removed one of them. A second Delete removed nothing. This is a fault of Resolve ([gotchas](gotchas.md#resolves-edits)).
+  - vidcut: Shift and a drag from any place on the current curve draw a dashed box. The points in the box are selected while the drag goes on.
+    - The selected points are blue. A dashed box with 8 square handles is around them, in the axes of the frame.
+    - A drag of a selected point moves the selected points with their Bezier handles.
+    - A drag of a side handle scales the selected points and their handles about the opposite side.
+    - A drag of a corner handle scales them about the opposite corner. Not measured in Resolve.
+    - Delete and Shift+Backspace remove each selected point, as p. 3274 says. They then remove no node.
+    - A click or a drag outside the selected points and the handles clears the selection. So does a change of the window, the node or the palette. Not measured in Resolve.
+    - `grade.window.set` with `points` gives the same results to a script.
   - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
   - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
     - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
@@ -4297,7 +4305,6 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: an added, removed or converted window changes the window list of each keyframe.
   - vidcut: the Window palette and the viewer show the windows of the keyframe that a change goes to.
     - Not measured: the outline in the viewer of Resolve between two keyframes.
-  - The Shift box comes later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 
