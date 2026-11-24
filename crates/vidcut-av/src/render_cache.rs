@@ -36,7 +36,7 @@ pub fn slow(gpu: Option<&crate::hw::GpuDecoder>, path: &Path, codec: &str) -> bo
     let Some(id) = ffmpeg::codec::decoder::find_by_name(codec).map(|c| c.id()) else {
         return false;
     };
-    let input = crate::export::video::input_of(path, None);
+    let input = crate::export::video::input_of(path, None, None);
     !crate::decode::gpu_takes(id, gpu, || crate::decode::h264_open_gop(&input))
 }
 
@@ -139,7 +139,7 @@ fn write_made(file: &Path, made: Vec<Origins>) -> std::io::Result<()> {
 }
 
 pub(crate) fn kept(input: &Input) -> Option<Arc<[Arc<Cached>]>> {
-    let Input::File(path) = input else {
+    let Input::File { path, .. } = input else {
         return None;
     };
     if path.extension().is_none_or(|e| e != FILE) {

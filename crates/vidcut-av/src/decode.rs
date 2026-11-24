@@ -211,7 +211,10 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Input {
-    File(PathBuf),
+    File {
+        path: PathBuf,
+        rate: Option<(i32, i32)>,
+    },
     Sequence {
         pattern: PathBuf,
         first: u64,
@@ -220,11 +223,33 @@ pub enum Input {
 }
 
 impl Input {
+    pub fn file(path: &Path) -> Self {
+        Input::File {
+            path: path.to_path_buf(),
+            rate: None,
+        }
+    }
+
     pub fn path(&self) -> &Path {
         match self {
-            Input::File(p) => p,
+            Input::File { path, .. } => path,
             Input::Sequence { pattern, .. } => pattern,
         }
+    }
+
+    pub fn rate(&self) -> Option<ffmpeg::Rational> {
+        let (num, den) = match self {
+            Input::File { rate, .. } => (*rate)?,
+            Input::Sequence { rate, .. } => *rate,
+        };
+        (num > 0 && den > 0).then_some(ffmpeg::Rational(num, den))
+    }
+
+    pub fn rate_of(num: i64, den: i64) -> (i32, i32) {
+        let mut rate = (0, 0);
+        // SAFETY: av_reduce writes only the two integers that it is given.
+        unsafe { ffmpeg::ffi::av_reduce(&mut rate.0, &mut rate.1, num, den, i64::from(i32::MAX)) };
+        rate
     }
 
     pub fn open(&self) -> Result<format::context::Input> {
@@ -236,7 +261,7 @@ impl Input {
     pub fn open_header(&self) -> Result<format::context::Input> {
         crate::init();
         match self {
-            Input::File(p) => open_file_header(p),
+            Input::File { path, .. } => open_file_header(path),
             Input::Sequence {
                 pattern,
                 first,
@@ -679,7 +704,11 @@ fn remembered(source: &Input, scan: impl FnOnce(&Input) -> Option<bool>) -> bool
     let known = || KNOWN.lock().unwrap_or_else(|e| e.into_inner());
     let meta = std::fs::metadata(source.path()).ok();
     let mtime = meta.as_ref().and_then(|m| m.modified().ok());
-    let key = format!("{source:?}|{:?}|{mtime:?}", meta.map(|m| m.len()));
+    let key = format!(
+        "{}|{:?}|{mtime:?}",
+        source.path().display(),
+        meta.map(|m| m.len())
+    );
     let kept = known().get(&key).copied();
     if let Some(open) = kept {
         return open;
@@ -921,7 +950,7 @@ pub fn stream_rotation(params: &codec::Parameters) -> u16 {
 
 impl VideoReader {
     pub fn open(path: &Path) -> Result<Self> {
-        Self::open_input(&Input::File(path.to_path_buf()))
+        Self::open_input(&Input::file(path))
     }
 
     pub fn open_input(source: &Input) -> Result<Self> {
@@ -1200,8 +1229,7 @@ impl VideoReader {
     }
 
     pub fn frame_rate(&self) -> Option<ffmpeg::Rational> {
-        let r = self.input.stream(self.stream)?.avg_frame_rate();
-        (r.numerator() > 0 && r.denominator() > 0).then_some(r)
+        self.source.rate()
     }
 
     pub fn first_props(&self) -> Option<FrameProps> {
@@ -1501,7 +1529,7 @@ mod tests {
     fn held(name: &str, open: bool) -> (std::thread::JoinHandle<bool>, Arc<Barrier>) {
         let barrier = Arc::new(Barrier::new(2));
         let at = barrier.clone();
-        let source = Input::File(name.into());
+        let source = Input::file(name.as_ref());
         let thread = std::thread::spawn(move || {
             remembered(&source, |_| {
                 at.wait();
@@ -1515,7 +1543,7 @@ mod tests {
 
     fn meanwhile(name: &str, open: bool) -> Result<bool, mpsc::RecvTimeoutError> {
         let (tx, rx) = mpsc::channel();
-        let source = Input::File(name.into());
+        let source = Input::file(name.as_ref());
         std::thread::spawn(move || tx.send(remembered(&source, |_| Some(open))));
         rx.recv_timeout(std::time::Duration::from_secs(30))
     }

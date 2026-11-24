@@ -25,7 +25,7 @@ fn main() {
     println!("FFmpeg {}", vidcut_av::ffmpeg_version());
     for path in std::env::args().skip(1) {
         println!("{path}");
-        check(&Input::File(path.into()));
+        check(&Input::file(path.as_ref()));
     }
 }
 

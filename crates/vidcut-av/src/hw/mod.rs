@@ -597,9 +597,8 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     for gpu in GpuDecoder::all() {
         for (codec, id, clip) in &clips {
             let open_gop = || {
-                clip.as_ref().is_ok_and(|p| {
-                    crate::decode::h264_open_gop(&crate::decode::Input::File(p.clone()))
-                })
+                clip.as_ref()
+                    .is_ok_and(|p| crate::decode::h264_open_gop(&crate::decode::Input::file(p)))
             };
             let result = match (clip, gpu.why_not(*id, open_gop)) {
                 (Err(e), _) => Err(format!("no test clip: {e}")),
@@ -667,7 +666,7 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind
 }
 
 fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
-    let input = crate::decode::Input::File(path.to_path_buf());
+    let input = crate::decode::Input::file(path);
     let mut reader = crate::decode::VideoReader::open_on(&input, gpu)?;
     let mut frames = 0;
     while reader.next_frame()?.is_some() {
