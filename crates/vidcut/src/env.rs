@@ -351,7 +351,7 @@ impl Env for AvEnv {
             &dir.join(&sequence.pattern),
             sequence.first,
             sequence.count,
-            (rate.num() as i32, rate.den() as i32),
+            vidcut_av::decode::Input::rate_of(rate.num(), rate.den()),
         )
         .map_err(|e| Error::media(e.to_string()))?;
         probed.info = convert(&info)?;
