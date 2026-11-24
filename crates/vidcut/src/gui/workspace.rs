@@ -1728,20 +1728,14 @@ impl Workspace {
             (false, Action::MarkOut, Action::GoToOut),
         ] {
             if fired.pressed(mark) {
-                match self.effects_page.page {
-                    Page::Export => self.export_mark(is_in),
-                    _ => self.mark(is_in),
-                }
+                self.mark(is_in);
             }
             if fired.pressed(go) {
                 self.go_to_mark(is_in);
             }
         }
         if fired.pressed(Action::ClearMarks) {
-            match self.effects_page.page {
-                Page::Export => self.export_clear_marks(),
-                _ => self.clear_marks(),
-            }
+            self.clear_marks();
         }
 
         for (action, method) in [
@@ -1987,6 +1981,10 @@ impl Workspace {
     }
 
     pub(super) fn mark(&self, is_in: bool) {
+        if self.effects_page.page == Page::Export {
+            self.export_mark(is_in);
+            return;
+        }
         if self.hover.is_none() && self.snap.viewer == ViewerMode::SourceTape {
             let order = self.tape_order();
             if order.is_empty() {
@@ -2089,6 +2087,10 @@ impl Workspace {
     }
 
     pub(super) fn clear_marks(&self) {
+        if self.effects_page.page == Page::Export {
+            self.export_clear_marks();
+            return;
+        }
         if self.snap.viewer == ViewerMode::SourceTape {
             let media = self.snap.source_at().map(|(m, _)| m.to_string());
             self.send("tape.marks.clear", json!({ "media": media }));
