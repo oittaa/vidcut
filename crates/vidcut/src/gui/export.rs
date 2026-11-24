@@ -666,6 +666,12 @@ impl Render {
         if !self.per_clip && ext == Some(settings.container) {
             base.container = settings.container;
         }
+        if !self.per_clip
+            && !settings.container.image_sequence()
+            && let Some(v) = settings.video.as_mut()
+        {
+            v.filename_digits = None;
+        }
         let set = overrides(&base, &settings);
         if !set.is_empty() {
             p["set"] = json!(set);

@@ -840,6 +840,19 @@ pub fn prepare(
         settings.video = None;
     }
     validate(&settings)?;
+    if !params.per_clip
+        && !settings.container.image_sequence()
+        && settings
+            .video
+            .as_ref()
+            .is_some_and(|v| v.filename_digits.is_some())
+    {
+        return Err(Error::usage(format!(
+            "video.filename_digits is for per_clip and for TIFF and OpenEXR: one .{} file has no \
+             frame number in its name",
+            settings.container.extension()
+        )));
+    }
 
     let end = p.end();
     if end == 0 {

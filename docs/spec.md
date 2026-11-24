@@ -4911,6 +4911,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `source_levels` and `levels_from`.
   - The Custom Name takes `{source}` and the other parts of `name`. It is `{source}` by default.
   - The frame count is the source frame of the clip's first frame. Filename Digits sets its digits, also for a movie. It is 8 by default.
+  - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
   - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
   - The rows go together only as measured. An export refuses File Subfolder with Source Folder Levels, and File Suffix with Unique Names.

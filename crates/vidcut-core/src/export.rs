@@ -414,7 +414,8 @@ pub struct VideoSettings {
     #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
     pub alpha_mode: AlphaOut,
     /// The digits of the frame number in the name of a TIFF or OpenEXR file
-    /// and of the frame count in per-clip names, from 1 to 18. Unset: 8.
+    /// and of the frame count in per-clip names, from 1 to 18. Unset: 8. An
+    /// export of one movie file refuses it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename_digits: Option<u8>,
     /// The number of the first TIFF or OpenEXR file. With `per_clip`, each
