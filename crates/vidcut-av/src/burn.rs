@@ -1789,6 +1789,7 @@ fn block(
         let big = Typeset {
             size: size * pop as f32,
             wrap: width as f32 * 4.0,
+            align: Align::Center,
             stroke: look.stroke.map(|s| Edge {
                 width: s.width * pop as f32,
                 ..s
