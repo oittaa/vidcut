@@ -3227,8 +3227,11 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
     - A viewed mask shows as a white shape on black.
     - The size of the picture shows at the top right of the viewer.
     - The viewers are not in the undo history. Undo of a delete does not put the node back in the viewer.
-    - A delete of a viewed Blur put the node on its input in that viewer. A delete of a viewed mask with no input left its viewer empty.
-    - vidcut: a delete of a viewed node empties its viewer ([todo](todo/effects-page.md)).
+    - A delete of a viewed node puts the node on its input in that viewer. On a mask, this is the node on its Effect Mask input. With no such node, the viewer is empty.
+      - A delete of a viewed Blur put the node on its input in that viewer. A delete of a viewed Merge put its Background node there.
+      - A delete of a viewed Rectangle with an Ellipse on its Effect Mask put the Ellipse there. A delete of a viewed mask with no input left its viewer empty.
+      - In Background6 → Blur1 → Blur2, a delete of Blur1 and Blur2 together put Background6 in the viewer of Blur2.
+      - A delete of a node in the two viewers put its input in both.
     - A change to another page and back keeps the viewers.
 - Two dots at the bottom left of a node put the node in a viewer (pp. 1290, 1392–1393). Measured in Resolve Studio 21.2:
   - The left dot is the left viewer. A white dot shows that the node is in that viewer.
@@ -3308,6 +3311,10 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - Alt-click (Option on a Mac) on a selected node makes it the active node. The selection stays (p. 1391).
   - A click on the empty Node Editor selects none (p. 1391).
 - A click on a tool in the Effects Library adds it after the active node (p. 1287).
+- Shift+Space opens the Select Tool window (p. 1386).
+  - The typed text finds the tools by their name or by their kind, for example "mask".
+  - Up and Down pick a tool. Return or the main button adds it as a click in the Effects Library does.
+  - The window keeps the text for the next time. Thus Shift+Space and Return add the same tool again.
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
   - A switch at the left of the header turns a tool on and off. It is the same as Pass Through (p. 1424).

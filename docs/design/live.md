@@ -327,6 +327,9 @@ The bar and the Jobs button:
   - `merge_spots` gives the handles of a Merge, with the center and the arrows before the line and the ring. Its center and its arrows (`Grip::Across`, `Grip::Up`) move the Center by the move of the pointer (`merge_moved`). A mask's center goes to the pointer.
   - A Center that follows a tracker pattern shows its handles. A drag of them moves nothing and sends nothing (`pinned`).
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
+  - The Select Tool window (`GuiPanel::SelectTool`) adds its tool in the same way. `found_tools` puts the names that start with the text first.
+    - While the window is open, its Find box keeps the keyboard focus. `Workspace::asking` stops the keys of the page behind it.
+    - The arrow keys scroll the list to the selected tool.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
   - The keys of `Panel::Effects` work only on the page: Pass Through, Lock, Rename, Original Size and the keyframe steps of the active node.
   - They also jump to the ends of the source and of the clip.
