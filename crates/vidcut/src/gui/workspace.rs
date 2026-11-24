@@ -1522,6 +1522,7 @@ impl Workspace {
         }
         self.sync_clips_keys(ctx);
         if self.asking() {
+            let buttons = self.export.asking(&self.snap.jobs);
             ctx.input_mut(|i| {
                 i.events.retain(|e| match e {
                     egui::Event::Key {
@@ -1530,6 +1531,11 @@ impl Workspace {
                         modifiers,
                         ..
                     } => !modifiers.any(),
+                    egui::Event::Key {
+                        key: Key::Enter | Key::Space,
+                        modifiers,
+                        ..
+                    } => buttons && !modifiers.any(),
                     egui::Event::Key { .. }
                     | egui::Event::Text(_)
                     | egui::Event::Copy
