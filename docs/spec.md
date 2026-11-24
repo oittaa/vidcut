@@ -1830,7 +1830,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - An OpenTimelineIO export writes a tool that is off at its usual values.
     - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
     - Dynamic Zoom has no switch (X70).
-    - Auto Color comes after them ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
+    - The Color tool comes after them ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
 - **Transform** (p. 767):
   - A drag inside the box of the clip moves it.
   - A drag on a corner resizes it in proportion. A drag on a side stretches or squeezes it in one direction.
@@ -4362,18 +4362,30 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Node 1 keeps the Auto Color tool. The red dot turns white.
     - The switch on gives back the result.
   - The reset icon removes the Auto Color tool from node 1, also one that the A button added.
+- **Where the Auto Color tool acts in the node**, measured with float renders:
+  - The tool acts first, on the picture that comes into the node.
+  - With Offset 35 on the same node, the result is the result of the tool plus the Offset, within 3.0e-7.
+  - With Gain 2 and Lum Mix 0 on the same node, the result is 2 times the result of the tool, within 2.4e-7.
+  - Color > Reset > Selected Node Grade removes the tool.
 - An OpenTimelineIO export holds no grade of a clip and nothing of Auto Color. The files before and after the A button are the same.
 - **vidcut** uses the legacy method above for each Auto Color ([X174](deviations.md#x174-auto-color-uses-the-legacy-method)).
   - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
   - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
-  - The Auto Color button of the viewer Tools runs it on node 1. The button does not stay lit.
-    - It is greyed out on a title or a generator, which takes no grade.
-  - The viewer Tools have no Color tool with a switch and a reset ([todo](todo/auto-color.md)).
-  - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
+    - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
     - The Lift and Gain of that corrector are at their usual values.
     - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
     - Transitions do not change it. A clip or a track that is off still gives its frame.
-  - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does.
+    - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does.
+  - The Color tool of the viewer Tools has a switch, an Auto Color button and Reset. They work on node 1.
+    - The Color tool is greyed out on a title or a generator, which takes no grade.
+    - Auto Color puts the result into the Auto Color tool of the node (`grade.auto_color` with `tool`). The button does not stay lit.
+    - The tool is a Lift and a Gain of its own, with a Lum Mix of 100. The Lift and Gain of the node stay.
+    - The node shows the badge of the Auto Color tool.
+    - The switch turns the tool off and on (`grade.set` with `auto_color_on`). Without the tool, the switch is greyed out.
+    - Off, the tool keeps its values, and Auto Color and Reset are greyed out.
+    - Reset removes the tool (`grade.clear` with `auto_color`). A reset of the whole node also removes it. A reset of the Primaries keeps it.
+    - The Color button has a red dot while node 1 has the tool. The dot is white while the switch is off.
+    - The tool acts first, on the picture that comes into the node, as in Resolve. Its analysis reads that picture.
   - Each run is one undo step. Redo gives it back.
   - The grade of the timeline has no Auto Color.
   - An OpenTimelineIO file of vidcut keeps the result in the vidcut metadata of the grade.

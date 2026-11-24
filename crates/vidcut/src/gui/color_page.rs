@@ -50,6 +50,8 @@ const LOG_BADGE: [&str; 4] = ["contrast", "log_shadow", "log_midtone", "log_high
 
 const NO_BADGE: [&str; 3] = ["pivot", "low_range", "high_range"];
 
+const AUTO_BADGE: &str = "auto_color";
+
 pub(super) const SWITCHING: [(SwitchingClips, &str); 4] = [
     (SwitchingClips::LastAdjusted, "Last Adjusted Node"),
     (SwitchingClips::First, "First Node"),
@@ -292,7 +294,8 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         .flat_map(|v| differences(&usual, v).into_iter().map(|(k, _)| k))
         .collect();
     let log = |k: &String| LOG_BADGE.contains(&k.as_str());
-    let primary = |k: &String| !log(k) && !NO_BADGE.contains(&k.as_str());
+    let auto = |k: &String| k == AUTO_BADGE;
+    let primary = |k: &String| !log(k) && !auto(k) && !NO_BADGE.contains(&k.as_str());
     [
         (
             changed.iter().any(primary),
@@ -300,6 +303,7 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
             "Primaries",
         ),
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
+        (changed.iter().any(auto), icon::MAGIC_WAND, "Auto Color"),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
         (
             std::iter::once((&d.key, &d.key_input))

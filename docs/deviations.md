@@ -1528,6 +1528,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Auto Color button of the Cut page viewer Tools stays on the neural method ([spec §8.25](spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
 - **vidcut:**
   - Each Auto Color uses the legacy method: `grade.auto_color`, the A button, Color > Auto Color and the viewer Tools.
+  - The Auto Color tool of the viewer Tools holds a legacy Lift and Gain. The neural tool of Resolve holds the numbers E and W of spec §8.25.
   - There is no preference.
   - The legacy method is the default until a machine-learning method is good enough ([todo](todo/auto-color.md)).
   - That method then becomes the default. The legacy method then stays as a Use Legacy Auto Color preference, as in Resolve.
