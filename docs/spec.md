@@ -4809,7 +4809,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - **In vidcut:**
     - `out.tif` gives `out00000000.tif`, `out00000001.tif` and so on. `video.filename_digits` sets the digits, from 1 to 18.
     - The first number is the start timecode plus the first frame of the export, as a frame count.
-    - With `per_clip`, the first number is the source frame of the clip's first frame.
+    - With `per_clip`, the first number is the source timecode of the clip's first frame, as a frame count.
     - `video.first_frame` sets the first number. With `per_clip`, each clip starts at it.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
     - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1`, `_zip16`, `_piz`, `_dwaa` or `_dwab`. `_zip16` is ZIP.
@@ -4850,8 +4850,14 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Then Place clips in separate folders (off), Preserve source directory levels (on) with Preserve 0 and From tail, and Preserved Path (greyed).
   - Then Use commercial workflow (off) and Render speed (Maximum).
   - With Source name, File Name reads "SourceName". Custom name, File suffix and Add source frame count go away. Use unique filenames stays.
-- **File names** (Individual clips; measured with MP4 and EXR, clips with no source timecode that start at source frame 0):
+- **File names** (Individual clips; measured with MP4 and EXR, in a 24 fps timeline unless a line names the rate):
   - The defaults give the source name and the source frame count in 8 digits: `m-red00000000.mp4`.
+  - The count is the source timecode of the first frame of the clip, as a frame count. A clip from source frame 10 gives `m-red00000010.mp4`.
+  - A 24 fps source with the start timecode 01:00:00:00 gives `…00086400.mp4` from source frame 0, and `…00086410.mp4` from frame 10.
+  - A name that ends in a digit gets `_` before the count: `…_o0_00086400.mp4`.
+  - An EXR counts up from that frame: `00086400` to `00086423` for 24 frames.
+  - A 25 fps source with the start timecode 01:00:00:00 gives `…00090000.mp4` from source frame 0 and from frame 10. This is a fault ([gotchas](gotchas.md#resolves-renders)).
+  - `interlaced-tff.mov` (1080i 25, no timecode) gives counts that no rule explains: `00000001` from source frame 0 and from frame 9. In a 25 fps timeline, it gives `00000001` from 0 and `00000007` from 5.
   - At Add, Custom name changes from "Untitled" to a Source Name tag.
   - A clip that is used two times gives the same name. The second render writes over the first, with no prompt.
   - Source name gives `m-red.mp4`. Add source frame count off gives the same name.
@@ -4942,7 +4948,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Then Filename Digits, First Frame for image sequences, Replace Files, Source Folder Levels and Count Levels.
   - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `source_levels` and `levels_from`.
   - The Custom Name takes `{source}` and the other parts of `name`. It is `{source}` by default.
-  - The frame count is the source frame of the clip's first frame. Filename Digits sets its digits, also for a movie. It is 8 by default.
+  - The frame count is the source timecode of the clip's first frame, as a frame count at the rate of the source. Filename Digits sets its digits, also for a movie. It is 8 by default.
+  - In the name of a movie, a name that ends in a digit gets `_` before the frame count. An image sequence does not get it.
+  - A source at a rate that is not the rate of the timeline gets the count of its first frame too.
   - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
   - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
