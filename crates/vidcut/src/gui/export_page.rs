@@ -108,10 +108,30 @@ impl Workspace {
 
     pub(super) fn export_mark(&self, is_in: bool) {
         let frame = self.snap.timeline.position;
-        let (key, value) = match is_in {
-            true => ("in", frame),
-            false => ("out", frame + 1),
+        let (key, value) = match (is_in, self.clip_under(frame)) {
+            (true, Some((a, _))) => ("in", a),
+            (false, Some((_, b))) => ("out", b),
+            (true, None) => ("in", frame),
+            (false, None) => ("out", frame + 1),
         };
+        self.mark_in_out(key, value);
+    }
+
+    fn clip_under(&self, frame: i64) -> Option<(i64, i64)> {
+        if !self.export.render.as_ref().is_some_and(|d| d.per_clip) {
+            return None;
+        }
+        let p = self.project()?;
+        let mut under = p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(|c| !c.is_block() && c.start <= frame && frame < c.end());
+        let c = under.next()?;
+        under.next().is_none().then(|| (c.start, c.end()))
+    }
+
+    pub(super) fn mark_in_out(&self, key: &str, value: i64) {
         if !self.render_whole() {
             self.send("marks.set", json!({ key: value }));
             return;
@@ -121,6 +141,14 @@ impl Workspace {
             { "method": "timeline.set", "params": { "render": RenderRange::InOut } },
         ]);
         self.send("apply", json!({ "commands": commands }));
+    }
+
+    pub(super) fn export_clear_marks(&self) {
+        let Some(p) = self.project() else { return };
+        if self.render_whole() && p.marks.mark_in.is_none() && p.marks.mark_out.is_none() {
+            return;
+        }
+        self.send("timeline.set", json!({ "render": RenderRange::Entire }));
     }
 
     pub(super) fn render_range_menu(&mut self, ui: &mut egui::Ui) -> egui::Response {

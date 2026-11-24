@@ -4877,6 +4877,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: each timeline keeps its own choice.
   - Measured: the In and the Out of the Cut page show on the page, and Render reads In/Out Range. Entire Timeline also clears them on the Cut page.
   - Measured: I on the timeline of the page, with Entire Timeline picked, switches Render to In/Out Range.
+  - Measured: O alone does the same. IN then reads the start of the timeline.
+  - Measured: Alt+X on the page clears the marks and switches Render to Entire Timeline.
+  - Measured: I on the Cut page switches Render from Entire Timeline to In/Out Range.
+  - Measured: with Single clip, I and O go at the playhead.
+  - Measured: with Individual clips, they snap to the clip under the playhead. I goes to its first frame, and O to its last frame.
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -4910,7 +4915,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The range of each timeline is the `render` of `timeline.set`: `entire` or `in_out`. A new timeline renders the entire timeline.
   - In/Out Range uses the marks that are set. Without an In, it starts at the start of the timeline. Without an Out, it goes to the end.
   - `entire` also clears the marks of the timeline.
-  - On the page, I and O switch Entire Timeline to In/Out Range, in one undo step with the mark ([todo](todo/export-page-checks.md)).
+  - On the page, I and O switch Entire Timeline to In/Out Range, in one undo step with the mark.
+  - With Individual clips, I and O on the page go to the first and the last frame of the clip under the playhead.
+  - With no clip or with two or more clips under the playhead, they go at the playhead ([todo](todo/export-page-checks.md)).
+  - On the page, Alt+X sets Entire Timeline, which clears the marks.
+  - On the Cut page, I switches Entire Timeline to In/Out Range, in one undo step with the mark.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The queue is `render.add`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
