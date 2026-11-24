@@ -1089,6 +1089,11 @@ The masks:
   - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
   - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
 - The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
+  - Clipping Mode None also makes the mask beyond the picture. `blur::mask_pads` adds pixels at each side that the soft edge reaches from the shape.
+  - The reach is the sum of the taps of the passes (`blur::soft_reach`). The added pixels are in two textures of `Worked`. `fs_mask_join` reads them at their offset.
+  - Why: the replicate border then acts only beyond the reach, where no tap of a pixel of the picture goes.
+  - The added pixels stop at the largest texture of the device. Beyond them, the replicate border acts.
+  - A shape that is not in the reach of an edge adds no pixels. Clipping Mode Frame adds none.
 - `fs_mask_join` joins the mask to the masks before it by the Merge paint mode: n + i × (1 − c).
   - c is the shape after Invert, and n is c × Level. i is the masks before it.
 - `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.

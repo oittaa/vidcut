@@ -312,6 +312,9 @@ The bar and the Jobs button:
   - The last node of `EffectsPage::nodes` is the active node. After a box select, `gui.nodes` with `active` false leaves no active node (`EffectsPage::loose`). The Inspector then shows only the header of each node.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
+  - The header of a locked node (`Node::locked`) shows its rows disabled. `comp.set` refuses a change of its values, and `comp.key` and `comp.reset` refuse the node.
+    - A drag in the viewer does not take its handles or the boxes of its patterns.
+    - The `motion` requests refuse a locked Tracker (`ops::motion::unlocked`).
   - An effect tool uses the rows of the effect sections. `effect_main` adds its rows to the one grid of the node, and `effect_folds` puts its folds below that grid.
   - A value of an effect tool has its Keyframe button also before its first keyframe (`Knob::value_of`).
   - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
@@ -324,8 +327,11 @@ The bar and the Jobs button:
   - `merge_spots` gives the handles of a Merge, with the center and the arrows before the line and the ring. Its center and its arrows (`Grip::Across`, `Grip::Up`) move the Center by the move of the pointer (`merge_moved`). A mask's center goes to the pointer.
   - A Center that follows a tracker pattern shows its handles. A drag of them moves nothing and sends nothing (`pinned`).
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
+  - The Select Tool window (`GuiPanel::SelectTool`) adds its tool in the same way. `found_tools` puts the names that start with the text first.
+    - While the window is open, its Find box keeps the keyboard focus. `Workspace::asking` stops the keys of the page behind it.
+    - The arrow keys scroll the list to the selected tool.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
-  - The keys of `Panel::Effects` work only on the page: Pass Through, Rename, Original Size and the keyframe steps of the active node.
+  - The keys of `Panel::Effects` work only on the page: Pass Through, Lock, Rename, Original Size and the keyframe steps of the active node.
   - They also jump to the ends of the source and of the clip.
   - A key of `Panel::Effects` wins over the same key of `Panel::App`. Thus Shift+Left goes to the start of the source, not one second back.
   - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.

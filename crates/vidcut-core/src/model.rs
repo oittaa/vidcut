@@ -4678,6 +4678,11 @@ pub struct Node {
     /// in, and a mask passes on the masks that come in. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pass_through: bool,
+    /// On, the values of the node do not change. `comp.set` then takes
+    /// only `place`, `pass_through` and `locked`. `comp.key`, `comp.reset`
+    /// and the `motion` requests refuse the node. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 (the
     /// picture on its `input`) to 1 (all of the tool). Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5154,16 +5159,18 @@ pub struct GradientStop {
 }
 
 /// The picture of a `fast_noise` node: smooth noise, colored by two colors
-/// or by a gradient. Its level is 0.5 with no noise, and it is not clamped.
+/// or by a gradient. Its level is 0.5 with no noise, or 0 with
+/// `discontinuous`, and it is not clamped.
 /// A color is `[r, g, b, a]`, each from -1000000 to 1000000. A field left
 /// out is at its usual value. Its numbers can have keyframes, in the `keys`
 /// of its node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FastNoise {
-    /// On, the noise has hard lines along some of its contours. Usual: off.
+    /// On, each layer of the noise is its absolute value, with hard lines
+    /// along some of its contours. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub discontinuous: bool,
-    /// On, the noise changes sign before `contrast` and `brightness`. Usual: off.
+    /// On, the level before `brightness` is taken from 1. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inverted: bool,
     /// The middle of the noise, `[x, y]` as fractions of the picture from
@@ -5630,15 +5637,17 @@ pub enum BlurFilter {
     FastGaussian,
 }
 
-/// What a `blur` takes from beyond the edges of the picture.
+/// What a `blur` takes from beyond the edges of the picture, and where a
+/// mask is made.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BlurClipping {
-    /// Clear black. The edges of the picture fade.
+    /// Clear black, so the edges of a blurred picture fade. A mask is also
+    /// made beyond the picture.
     None,
-    /// The pixels of the edge, repeated.
+    /// The pixels of the edge, repeated. Not for a mask.
     Domain,
-    /// The pixels of the edge, repeated.
+    /// The pixels of the edge, repeated. A mask is made in the picture only.
     #[default]
     Frame,
 }
@@ -5720,6 +5729,12 @@ pub struct Mask {
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,
+    /// Where it is made: `none` or `frame`. `none` also makes it beyond the
+    /// picture, so the soft edge of a part outside reaches in. `frame` makes
+    /// it in the picture only, and its soft edge repeats the edge pixels.
+    /// Usual: `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipping: Option<BlurClipping>,
     /// The corners of a `polygon`, in their order. Each is `[x, y]` from its
     /// middle: x as a fraction of the width of the picture, and y as a
     /// fraction of its height, up. From 3 to 128 of them. With fewer, it
