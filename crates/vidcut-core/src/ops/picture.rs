@@ -9,9 +9,9 @@ use crate::model::{
     CellShape, Clip, CompositeMode, Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
     EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming,
     GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite, ImageFormat, Mask,
-    Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern, Picture,
-    PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, SubPixel, TextPlus,
-    Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode,
+    MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern,
+    Picture, PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, SubPixel,
+    TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode,
     VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
@@ -602,6 +602,9 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
     Ok(Node {
         tool,
         blend: n.blend.filter(|v| *v != 1.0),
+        mask_channel: n.mask_channel.filter(|c| *c != MaskChannel::default()),
+        mask_range: n.mask_range.filter(|r| *r != Node::MASK_RANGE),
+        mask_clip: n.mask_clip.filter(|c| *c != [true; 2]),
         ..n.clone()
     })
 }
