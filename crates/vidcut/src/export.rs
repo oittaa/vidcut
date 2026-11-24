@@ -687,11 +687,7 @@ fn clip_path(params: &ExportParams, settings: &ExportSettings, c: &ClipName) -> 
         true => source.to_string(),
         false => file_name(params.name.as_deref().unwrap_or("{source}"), c, &source),
     };
-    if !params.source_names
-        && !params.no_frame_count
-        && params.unique.is_none()
-        && !settings.container.image_sequence()
-    {
+    if !params.source_names && !params.no_frame_count && !settings.container.image_sequence() {
         let digits = settings.video.as_ref().and_then(|v| v.filename_digits);
         let digits = usize::from(digits.unwrap_or(FILENAME_DIGITS));
         if stem.ends_with(|ch: char| ch.is_ascii_digit()) {
@@ -699,20 +695,20 @@ fn clip_path(params: &ExportParams, settings: &ExportSettings, c: &ClipName) -> 
         }
         stem.push_str(&padded_frame(c.count.max(0) as u64, digits));
     }
+    if let Some(suffix) = params.suffix.as_deref().filter(|_| !params.source_names) {
+        stem.push_str(suffix);
+    }
     stem = match params.unique {
         Some(UniqueAs::Prefix) => format!("{}_{stem}", c.place),
         Some(UniqueAs::Suffix) => format!("{stem}_{}", c.place),
         None => stem,
     };
-    if let Some(suffix) = params.suffix.as_deref().filter(|_| !params.source_names) {
-        stem.push_str(suffix);
-    }
     let mut dir = params.output.clone();
+    let from = c.source.parent().unwrap_or(Path::new(""));
+    dir.push(kept_levels(from, params.source_levels, params.levels_from)?);
     if let Some(sub) = params.subfolder.as_deref() {
         dir.push(sub.trim());
     }
-    let from = c.source.parent().unwrap_or(Path::new(""));
-    dir.push(kept_levels(from, params.source_levels, params.levels_from)?);
     Ok(dir.join(format!(
         "{}.{}",
         sanitize(&stem),
@@ -739,13 +735,13 @@ fn kept_levels(dir: &Path, levels: u32, from: LevelsFrom) -> Result<PathBuf> {
             let disk = dir.components().next().is_some_and(|c| {
                 matches!(c, Component::Prefix(p) if matches!(p.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
             });
-            if n != 1 || !disk {
+            if !disk {
                 return Err(Error::usage(format!(
-                    "{}: levels_from head takes only 1 level, on a path with a drive letter",
+                    "{}: levels_from head needs a path with a drive letter",
                     dir.display()
                 )));
             }
-            Ok(names.iter().collect())
+            Ok(names[(n - 1).min(names.len())..].iter().collect())
         }
     }
 }
@@ -765,22 +761,10 @@ fn check_clip_names(params: &ExportParams) -> Result<()> {
              levels_from are for per_clip",
         ));
     }
-    let apart = [
-        (
-            params.subfolder.is_some() && params.source_levels > 0,
-            "subfolder and source_levels",
-        ),
-        (
-            params.suffix.is_some() && params.unique.is_some(),
-            "suffix and unique",
-        ),
-        (
-            params.source_names && params.unique.is_some(),
-            "source_names and unique",
-        ),
-    ];
-    if let Some((_, both)) = apart.iter().find(|(on, _)| *on) {
-        return Err(Error::usage(format!("vidcut does not combine {both} yet")));
+    if params.source_names && params.unique.is_some() {
+        return Err(Error::usage(
+            "vidcut does not combine source_names and unique yet",
+        ));
     }
     if let Some(sub) = params.subfolder.as_deref() {
         let plain = Path::new(sub.trim())

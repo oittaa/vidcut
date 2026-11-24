@@ -5027,8 +5027,8 @@ pub struct ExportParams {
     /// frame count or `suffix`. Not with an image sequence.
     #[serde(default)]
     pub source_names: bool,
-    /// Per-clip text at the end of each name. Not with `unique` or an image
-    /// sequence.
+    /// Per-clip text after the name and its frame count. A `unique` suffix
+    /// goes after it. Not with an image sequence.
     #[serde(default)]
     pub suffix: Option<String>,
     /// Leave the frame count out of the per-clip names. The count is the
@@ -5039,12 +5039,12 @@ pub struct ExportParams {
     #[serde(default)]
     pub no_frame_count: bool,
     /// Put the clip's track and its place on the track (`V1-0001`) before
-    /// or after each per-clip name, in place of the frame count. Not with
-    /// `suffix`, `source_names` or an image sequence.
+    /// each per-clip name, or after its `suffix`. The frame count stays.
+    /// Not with `source_names` or an image sequence.
     #[serde(default)]
     pub unique: Option<UniqueAs>,
-    /// A folder in `output` for the per-clip files. Not with
-    /// `source_levels`.
+    /// A folder for the per-clip files, in the folders that
+    /// `source_levels` makes.
     #[serde(default)]
     pub subfolder: Option<String>,
     /// The number of folders of each clip's source path to make again in
@@ -5113,8 +5113,9 @@ pub enum LevelsFrom {
     /// The last folders: 1 keeps the folder that holds the file.
     #[default]
     Tail,
-    /// All the folders but the drive. It takes only 1 level, on a path
-    /// with a drive letter.
+    /// The folders after the first levels of the path, with the drive as
+    /// level 1: 1 keeps all the folders, 2 also drops the first folder.
+    /// Only on a path with a drive letter.
     Head,
 }
 
