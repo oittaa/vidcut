@@ -1438,6 +1438,7 @@ impl Workspace {
             || self.key_editor.asking()
             || self.sync_clips.open
             || self.preferences.capturing()
+            || self.select_tool_open()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {

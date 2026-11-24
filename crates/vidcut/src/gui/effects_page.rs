@@ -1224,6 +1224,7 @@ impl Workspace {
         }
         let mut open = true;
         let mut add = None;
+        let mut changed = false;
         let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let (up, down, enter) = ctx.input(|i| {
             (
@@ -1239,8 +1240,8 @@ impl Workspace {
                         .desired_width(260.0)
                         .show(ui);
                     let edit = output.response;
+                    edit.request_focus();
                     if s.focus {
-                        edit.request_focus();
                         let mut state = output.state;
                         let all = egui::text::CCursorRange::two(
                             egui::text::CCursor::new(0),
@@ -1252,6 +1253,7 @@ impl Workspace {
                     }
                     if edit.changed() {
                         s.at = 0;
+                        changed = true;
                     }
                 });
             });
@@ -1263,11 +1265,21 @@ impl Workspace {
             if up {
                 s.at = s.at.saturating_sub(1);
             }
+            let room = ui.spacing();
+            let text = ui.text_style_height(&egui::TextStyle::Body);
+            let row = room.interact_size.y.max(text + 2.0 * room.button_padding.y);
+            let rows = LIBRARY.iter().map(|(_, t)| t.len()).sum::<usize>() as f32;
+            let height = rows * row + (rows - 1.0) * room.item_spacing.y;
             egui::ScrollArea::vertical()
-                .max_height(240.0)
+                .min_scrolled_height(height)
+                .max_height(height)
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for (k, tool) in found.iter().enumerate() {
                         let row = ui.selectable_label(k == s.at, tool.label());
+                        if k == s.at && (up || down || changed) {
+                            row.scroll_to_me(None);
+                        }
                         if row.clicked() {
                             s.at = k;
                         }
