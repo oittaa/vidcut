@@ -644,6 +644,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - vidcut does not change a locked track:
     - A clip in the range on a locked track refuses the request, with a message.
     - A cue on a locked subtitle track stays whole.
+- **Redo does not give back the legacy Auto Color.**
+  - Use Legacy Auto Color is on. Two clicks on the A button of the Primaries palette, then one Ctrl+Z, take back both results.
+  - Ctrl+Shift+Z then gives nothing back. The Edit menu shows Redo.
+  - vidcut: each run of Auto Color is one undo step, and Redo gives it back.
 
 ## Resolve's renders
 

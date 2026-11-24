@@ -448,6 +448,7 @@ pub fn describe_at(
         "grade.set" => format!("Change the grade of {}", d.clips("clips")),
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
+        "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
         "grade.paste" if d.flag("timeline") => "Paste a node into the timeline grade".into(),
         "grade.paste" => format!("Paste a node into the grade of {}", d.clips("clips")),
         "grade.add"

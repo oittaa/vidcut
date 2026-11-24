@@ -2931,6 +2931,25 @@ pub enum Request {
         /// for a quarter point.
         points: f64,
     },
+    /// Auto Color: balance the blacks and the whites of a clip from one
+    /// frame. The analysis reads that frame after the corrector, with its
+    /// Lift and Gain at their usual values. Each channel gets its black
+    /// point from the darkest pixels and its white point from the brightest.
+    /// The master gets the luma of these points. New Lift and Gain of red,
+    /// green, blue and the master map them to 0 and 1, in place of all
+    /// earlier Lift and Gain values. Undo takes them back.
+    #[serde(rename = "grade.auto_color")]
+    GradeAutoColor {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame that the analysis reads, and whose keyframe changes.
+        /// Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
     /// Add a corrector to the grade of a clip, or with `timeline` to the
     /// timeline grade, as `add` says. The new node gets the next number.
     /// Returns its `node` number.
@@ -4420,9 +4439,9 @@ pub enum Request {
     /// tab's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
-    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
-    /// buttons, or `select_tool` (a tool to add on the effects page).
-    /// Answers what `gui.state` does.
+    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom, Auto
+    /// Color and their buttons, or `select_tool` (a tool to add on the
+    /// effects page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
