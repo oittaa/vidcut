@@ -20,7 +20,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - The Soft Edge of vidcut repeats the edge pixels of the mask, as Frame does. None makes the mask beyond the frame.
 - **Paint Mode of a mask:** it has 11 modes, and Merge is the usual mode (p. 2474). The spec gives the measured forms ([spec](../spec.md#the-masks)).
   - Replace follows the manual: the areas where the new mask is 0 keep the input mask (p. 2465, [gotchas](../gotchas.md#resolves-fusion-page)).
-  - vidcut always uses Merge, as n + i × (1 − n). Resolve gives n + i × (1 − c), with c = n / Level. The two differ at a Level below 1.
+  - vidcut always uses Merge.
 - **Border Style of a rectangle:** the joins, the ends, Position and Length ([spec](../spec.md#the-masks)). vidcut has none.
 - **A drop on a node:**
   - When the main input is joined, Resolve joins the next free input. That can be the effect mask input (p. 1395). The spec gives the measured drops ([spec](../spec.md#edits)).
