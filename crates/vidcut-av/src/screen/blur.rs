@@ -676,7 +676,7 @@ fn mask_made<'a>(
     let most = gpu.device.limits().max_texture_dimension_2d;
     let mut kept: Option<usize> = None;
     if let (Some(p), Some(view)) = (&masks.picture, picture) {
-        let picked = (&gpu.blur.picture_mask, &picture_bytes(p)[..]);
+        let picked = (&gpu.blur().picture_mask, &picture_bytes(p)[..]);
         draw_step(gpu, picked, Views::same(view), &room[0].view, encoder);
         kept = Some(0);
     }
