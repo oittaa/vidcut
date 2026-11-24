@@ -1085,7 +1085,8 @@ The masks:
   - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
   - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
 - The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
-- `fs_mask_join` gives the mask its Invert and its Level, then adds the masks before it: a + b − a × b.
+- `fs_mask_join` joins the mask to the masks before it by the Merge paint mode: n + i × (1 − c).
+  - c is the shape after Invert, and n is c × Level. i is the masks before it.
 - `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.
 
 The boxes:
