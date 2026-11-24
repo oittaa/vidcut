@@ -439,6 +439,16 @@ When they draw:
 - With no wish, the draw drops the textures (`Shots::settle`).
 - The cost is about one small pass for each grade pass and three for each corrector, at the size of a thumbnail.
 
+## The pipelines
+
+- `Gpu::new` makes the pipelines of the draw.
+- The other pipelines are made at their first use:
+  - The writes for the encoders (`Gpu::encoders`).
+  - The effects, the windows and the grades (`Gpu::blur`).
+  - The LUTs, the light meter, the scopes, the vignette and the sharpening.
+- Why: a window that does not export and shows no effect does not make them. Thus it shows sooner.
+- The GUI has one `Gpu` for the viewer and the cells. The viewer thread makes it ([playback](playback.md#the-viewer-thread)).
+
 ## Why
 
 - The GPU goes first wherever it gives correct results (AGENTS.md rule 9).

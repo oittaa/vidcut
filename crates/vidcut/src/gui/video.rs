@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -74,6 +74,7 @@ impl Shared {
 
 pub struct Viewer {
     shared: Arc<Shared>,
+    gpu: Arc<OnceLock<Gpu>>,
     gpu_pictures: vidcut_av::hw::GpuPictures,
     thread: Option<JoinHandle<()>>,
     texture: Option<(u64, egui::TextureId)>,
@@ -101,8 +102,7 @@ impl Viewer {
             }),
             wake: Condvar::new(),
         });
-        let gpu = Gpu::new(&render.device, &render.queue).behind(gate);
-        let gpu_pictures = gpu.gpu_pictures();
+        let gpu_pictures = vidcut_av::screen::gpu_pictures(&render.device);
         let info = render.adapter.get_info();
         vidcut_av::player::set_viewer_gpu(vidcut_av::gpus::adapter_id(
             info.vendor,
@@ -126,15 +126,22 @@ impl Viewer {
                 .trim()
                 .to_string();
         }
-        let s = shared.clone();
+        let gpu = Arc::new(OnceLock::new());
+        let (s, made) = (shared.clone(), gpu.clone());
+        let (device, queue) = (render.device.clone(), render.queue.clone());
         let thread = crate::threads::spawn(
             "vidcut-viewer",
             crate::threads::Work::Interactive,
-            move || run(&s, &gpu, &repaint),
+            move || {
+                let gpu = made.get_or_init(|| Gpu::new(&device, &queue).behind(gate));
+                repaint();
+                run(&s, gpu, &repaint)
+            },
         )
         .ok();
         Self {
             shared,
+            gpu,
             gpu_pictures,
             thread,
             texture: None,
@@ -145,6 +152,10 @@ impl Viewer {
 
     pub fn gpu_pictures(&self) -> vidcut_av::hw::GpuPictures {
         self.gpu_pictures.clone()
+    }
+
+    pub fn gpu(&self) -> Arc<OnceLock<Gpu>> {
+        self.gpu.clone()
     }
 
     pub fn stats(&self) -> Option<PlayerStats> {

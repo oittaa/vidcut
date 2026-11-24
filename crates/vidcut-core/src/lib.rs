@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod auto_color;
 pub mod catalog;
 pub mod change;
 pub mod composition;

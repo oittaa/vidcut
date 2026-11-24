@@ -214,7 +214,7 @@ impl App {
             );
         }
         let mut ws = Workspace::new(handle);
-        ws.screens = Some(super::cells::Screens::new(&render));
+        ws.screens = Some(super::cells::Screens::new(&render, viewer.gpu()));
         let info = render.adapter.get_info();
         ws.display = Some(format!("{} ({:?})", info.name, info.backend));
         Ok(Self {
