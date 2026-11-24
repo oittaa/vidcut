@@ -431,7 +431,7 @@ The bar and the Jobs button:
 
 **Pictures.**
 
-- T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop and Dynamic Zoom.
+- T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop, Dynamic Zoom and Auto Color.
 - `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
 - `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_upscale`.
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
@@ -538,6 +538,9 @@ The bar and the Jobs button:
 - The dial under a wheel adds the same amount to each value of the wheel (p. 3145).
 - A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
+- The A button of the Primaries palette, Color > Auto Color and its key send `grade.auto_color` with the current node and the playhead (`Workspace::auto_color`).
+  - The Auto Color button of the viewer Tools sends node 1 (`Workspace::auto_color_button`).
+  - `Live::measuring` renders the frame on a worker thread first. The edit then reads the result from `BALANCES`.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
 - The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.
   - It has a ruler, a Master track and a track for each corrector and each Key Mixer. A click or a drag in the ruler moves the playhead.

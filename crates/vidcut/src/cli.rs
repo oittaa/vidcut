@@ -100,6 +100,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
     ("grade.printer", &["color", "clips"]),
+    ("grade.auto_color", &["clip"]),
     ("grade.add", &["add", "clip"]),
     ("grade.remove", &["node", "clip"]),
     ("grade.connect", &["node", "clip"]),

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use eframe::egui;
@@ -197,23 +197,23 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
 
 pub struct Screens {
     render: RenderState,
-    gpu: Gpu,
+    gpu: Arc<OnceLock<Gpu>>,
     screens: Vec<Screen>,
     textures: Vec<Option<egui::TextureId>>,
 }
 
 impl Screens {
-    pub fn new(render: &RenderState) -> Self {
+    pub fn new(render: &RenderState, gpu: Arc<OnceLock<Gpu>>) -> Self {
         Self {
             render: render.clone(),
-            gpu: Gpu::new(&render.device, &render.queue),
+            gpu,
             screens: Vec::new(),
             textures: Vec::new(),
         }
     }
 
     pub fn gpu_pictures(&self) -> vidcut_av::hw::GpuPictures {
-        self.gpu.gpu_pictures()
+        vidcut_av::screen::gpu_pictures(&self.render.device)
     }
 
     pub fn draw(
@@ -222,12 +222,13 @@ impl Screens {
         (picture, placed): (&Arc<Picture>, &[Vec<Placed>]),
         size: [u32; 2],
     ) -> Option<egui::TextureId> {
+        let gpu = self.gpu.get()?;
         if self.screens.len() <= i {
             self.screens.resize_with(i + 1, Screen::new);
             self.textures.resize(i + 1, None);
         }
         let drawn = self.screens[i].draw(
-            &self.gpu,
+            gpu,
             Some(picture),
             &[],
             (placed, &[], None),

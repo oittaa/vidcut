@@ -589,7 +589,7 @@ impl Screen {
         for (i, (plane, m)) in layout.planes.iter().zip(&self.encoded.made).enumerate() {
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut encoding"),
-                layout: &gpu.encoders.layout,
+                layout: &gpu.encoders().layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 9,
@@ -606,7 +606,7 @@ impl Screen {
                 (None, Some(t)) => (t, plane.format),
                 (None, None) => return Err(Error::Invalid("a plane has nowhere to go".into())),
             };
-            let pipeline = gpu.encoders.pipeline(format)?;
+            let pipeline = gpu.encoders().pipeline(format)?;
             let view = texture.create_view(&Default::default());
             {
                 let mut pass = begin(&mut encoder, &view, Some(wgpu::Color::TRANSPARENT));
@@ -800,7 +800,7 @@ fn surface_textures(gpu: &Gpu, f: &frame::Video, planes: &[Plane]) -> Result<Vec
     use objc2_metal::{MTLPixelFormat, MTLTextureUsage};
     use wgpu::TextureFormat as F;
     const WHAT: &str = "handing a frame to the encoder";
-    if !gpu.metal {
+    if !gpu.can.metal {
         return Err(Error::Invalid("the GPU isn't Metal".into()));
     }
     let surface = crate::metal::surface(f, WHAT)?;

@@ -12,9 +12,9 @@ use crate::model::{
     BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel,
     EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
-    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges, MergeOperator,
-    Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType, Place,
-    ReferenceTime, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
+    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
+    MergeOperator, Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType,
+    Place, ReferenceTime, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
     TitleStyle, ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode,
     VignetteShape, WindowKind, ZoomBox,
 };
@@ -2932,6 +2932,25 @@ pub enum Request {
         /// for a quarter point.
         points: f64,
     },
+    /// Auto Color: balance the blacks and the whites of a clip from one
+    /// frame. The analysis reads that frame after the corrector, with its
+    /// Lift and Gain at their usual values. Each channel gets its black
+    /// point from the darkest pixels and its white point from the brightest.
+    /// The master gets the luma of these points. New Lift and Gain of red,
+    /// green, blue and the master map them to 0 and 1, in place of all
+    /// earlier Lift and Gain values. Undo takes them back.
+    #[serde(rename = "grade.auto_color")]
+    GradeAutoColor {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame that the analysis reads, and whose keyframe changes.
+        /// Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
     /// Add a corrector to the grade of a clip, or with `timeline` to the
     /// timeline grade, as `add` says. The new node gets the next number.
     /// Returns its `node` number.
@@ -3401,7 +3420,8 @@ pub enum Request {
     /// With `after` a node other than a mask, a tool goes into the picture's
     /// way after it, and each node that took that picture takes the new tool.
     /// With `after` a node that has an effect mask, a mask goes on it, after
-    /// the masks that are there. With `after` a mask, a mask goes after it
+    /// the masks that are there. A picture there is joined to nothing then.
+    /// With `after` a mask, a mask goes after it
     /// in its chain, and each mask input that took that mask takes the new
     /// mask. A tool that makes its own picture, as `text_plus`,
     /// `background` or `fast_noise`, with `after` a node other than a mask
@@ -3434,8 +3454,10 @@ pub enum Request {
     /// Join the output of node `from` to an input of `node`, in place of
     /// what was there, or with no `from`, leave that input empty. The
     /// `input` and the `foreground` take any node other than a mask. The
-    /// `effect_mask`, the `detail_map` and the `brightness_map` take a
-    /// mask. A join that makes a loop is an error.
+    /// `effect_mask` of a tool takes a mask or any other node: a picture
+    /// there gives the mask from one of its channels. The `effect_mask` of
+    /// a mask, the `detail_map` and the `brightness_map` take a mask. A
+    /// join that makes a loop is an error.
     #[serde(rename = "comp.connect")]
     CompConnect {
         clip: ClipRef,
@@ -3455,9 +3477,10 @@ pub enum Request {
         to: String,
     },
     /// Take a node out of a clip's composition. The nodes on each side join
-    /// up: what took its picture takes the picture that came into it, and
-    /// what took its mask takes the masks that came into it. The masks on
-    /// its effect mask stay, joined to nothing.
+    /// up: what took the output of a tool takes the node on its `input`,
+    /// and what took the output of a mask takes the node on its
+    /// `effect_mask`, where that input takes that node. The masks on the
+    /// effect mask of a tool stay, joined to nothing.
     #[serde(rename = "comp.remove")]
     CompRemove { clip: ClipRef, node: String },
     /// Put copies of nodes, with their values and keyframes, into the
@@ -4417,9 +4440,9 @@ pub enum Request {
     /// tab's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
-    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
-    /// buttons, or `select_tool` (a tool to add on the effects page).
-    /// Answers what `gui.state` does.
+    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom, Auto
+    /// Color and their buttons, or `select_tool` (a tool to add on the
+    /// effects page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -6246,6 +6269,18 @@ pub struct NodeChange {
     /// changes nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiply_by_mask: Option<bool>,
+    /// With a picture on the effect mask input of a tool: the channel of
+    /// the picture that gives the mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_channel: Option<MaskChannel>,
+    /// With a picture on the effect mask input of a tool: `[low, high]`,
+    /// low at most high. The mask is (level - low) / (high - low).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_range: Option<[f64; 2]>,
+    /// With a picture on the effect mask input of a tool: `[black, white]`.
+    /// White on keeps the mask at 1 at most.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_clip: Option<[bool; 2]>,
     /// Its place in the node editor, `[x, y]` in node widths and heights.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<[f64; 2]>,
