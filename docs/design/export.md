@@ -37,7 +37,7 @@ flowchart TD
 
 - **Settings:** `settings`, a `preset`, or the default preset of the extension.
   - `set` changes fields (`apply_overrides`). `encoder` sets the video encoder. The extension sets the container.
-  - A `null` in `set` takes the field out, and the field gets its default. Why: the Export dialog sends `null` for a field that its preset has and the dialog does not.
+  - A `null` in `set` takes the field out, and the field gets its default. Why: the Export page sends `null` for a field that its preset has and the dialog does not.
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
   - A preset's name is any text that is not empty. The file holds the name.
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
@@ -81,7 +81,7 @@ Colors:
   - It keeps the mastering display and the light that the user gives. The report says this.
   - Without given light, the choice says that the output frames give it (`metadata::FROM_OUTPUT`). The plan shows this.
   - An asked HDR10+ or Dolby Vision gets a line that says that the grade drops it (`metadata::GRADED_DROPS`).
-  - The report, the job details and a line beside the metadata menu of the export window show that line (`graded_drops`).
+  - The report, the job details and a line beside the metadata menu of the Export page show that line (`graded_drops`).
 - Before the export, `export::choose_colors` measures the light of those output frames (`export::output_light`).
   - `output_light` draws each frame as the encode does (`frames_of`). It uses the same decoder, draw, grades, LUTs and burned subtitles.
   - It uses the sizes of the export and the pixel format of the first encoder (`encode::resolve_video`).
@@ -98,7 +98,7 @@ The plan:
 
 - `export.plan` measures nothing. It returns `export::describe`, with `auto` from `export::auto_picks`.
 - `export::auto_picks` sets each automatic setting (encoder, passes, bit depth, range, metadata) back to auto, one at a time. `choose_output` and `encode::resolve_video` then choose it again.
-  - Why: the "auto (…)" of the Export dialog names what auto picks, whatever the user chose instead.
+  - Why: the "auto (…)" of the Export page names what auto picks, whatever the user chose instead.
 - The plan reads the GPU encoders whenever GPU acceleration is on. Why: auto can pick one while the CPU is chosen.
 
 ## Choosing an encoder
@@ -115,7 +115,7 @@ The plan:
 - With Dolby Vision, `auto` has only the CPU's candidates.
 - Quality or bitrate, profile and depth become the options of each encoder. `bit_depth` 10, `main10` or HDR give 10 bits.
 - Only the first candidate that vidcut can use gets the `speed`. Why: encoders name their speeds differently.
-- The encoder records the speed and profile that it takes (`Chosen`). `export.plan` returns them, and the Export dialog shows them.
+- The encoder records the speed and profile that it takes (`Chosen`). `export.plan` returns them, and the Export page shows them.
 
 **Two passes** (spec D45):
 
@@ -419,10 +419,10 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - `Level::centered` gives one factor for both axes and centers the picture. It takes the smaller factor, so that the whole picture fits.
   - 1281 x 720 into 1282 x 720 has the factor 1. Thus the picture moves by half a pixel and has half a pixel of black at each side.
   - The draw is the shader of the layers (`fs`), with the export's kernel for a change of size (`RESIZE`, `WIDENS`). Colors outside 0 to 1 stay between the two `Wide` pictures.
-- `VideoSettings::rounded` gives the `Rounded` that the export plan, the Export dialog and the report show.
+- `VideoSettings::rounded` gives the `Rounded` that the export plan, the Export page and the report show.
 - An encoder can round a side by itself. av1_nvenc does this.
   - `rounded_by_encoder` reads the finished file when a side is odd. A difference goes in the report.
-  - The plan and the Export dialog cannot show this. Why: only the file tells the size.
+  - The plan and the Export page cannot show this. Why: only the file tells the size.
 
 ## Sound
 
@@ -492,8 +492,11 @@ Voice Isolation:
 - GUI media exports are `background`.
 - Quick Export lists the presets marked `quick_export`. It sends one with `overwrite` and no range.
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
-- The Export dialog ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)) starts from a preset. It sends the changes as `set` overrides, with a range, per-clip names and `overwrite`.
-- The dialog shows `export.plan` as its params change.
+- The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
+  - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
+  - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
+  - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
+  - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
 
 Cancel:
 

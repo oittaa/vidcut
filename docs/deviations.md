@@ -39,14 +39,14 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube, Vimeo and TikTok.
   - TikTok is one preset, 1080×1920, with no menu.
   - It has no HyperDeck, Presentations, Dropbox or Replay.
-  - The Export dialog also shows the live plan, and gives the export as a shell command.
+  - The Export page also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
   - Create Subtitles from Audio is a job too. It downloads its models as a job.
   - No progress dialog opens. Jobs shows the progress of each job, and can cancel it.
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
-  - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
+  - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export page has H.264 for other needs.
   - The two TikTok resolutions are not measured yet.
 
 ## X9. OpenTimelineIO interchange
@@ -1233,7 +1233,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - Export Alpha works with DNxHR 444 (p. 4093).
 - **vidcut:**
-  - `video.alpha` refuses DNxHR 444. The Export dialog does not show Export Alpha for it.
+  - `video.alpha` refuses DNxHR 444. The Export page does not show Export Alpha for it.
 - **Why:**
   - The FFmpeg encoder `dnxhd` cannot write alpha.
 

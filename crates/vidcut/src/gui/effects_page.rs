@@ -877,6 +877,10 @@ impl Workspace {
         if page != Page::Effects {
             self.effects_page.leave();
         }
+        match page == Page::Export {
+            true => self.enter_export_page(),
+            false => self.leave_export_page(),
+        }
         self.effects_page.graded = None;
         self.effects_page.window_name = None;
         self.effects_page.page = page;

@@ -273,17 +273,11 @@ impl Workspace {
 
     pub fn show_panel(&mut self, panel: vidcut_core::request::GuiPanel, ctx: &egui::Context) {
         use vidcut_core::request::GuiPanel;
-        if self.project().is_none()
-            && matches!(
-                panel,
-                GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer
-            )
-        {
+        if self.project().is_none() && matches!(panel, GuiPanel::QuickExport | GuiPanel::Mixer) {
             return;
         }
         match panel {
             GuiPanel::QuickExport => self.open_quick_export(ctx),
-            GuiPanel::Export => self.open_export(ctx),
             GuiPanel::Jobs => self.export.show_jobs = true,
             GuiPanel::Mixer => self.show_mixer = true,
             GuiPanel::KeyframeTray => self.key_tray = true,
@@ -340,14 +334,16 @@ impl Workspace {
                     self.target = (t != vidcut_core::ops::MAIN).then_some(t)
                 }
                 live::GuiChange::Timeline(o) => self.set_timeline_options(&o)?,
-                live::GuiChange::Show(
-                    GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer,
-                ) if self.project().is_none() => {
+                live::GuiChange::Show(GuiPanel::QuickExport | GuiPanel::Mixer)
+                    if self.project().is_none() =>
+                {
                     return Err("Open a project first".into());
                 }
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Close(panel) => self.close_panel(panel),
-                live::GuiChange::Page(Page::Effects | Page::Color) if self.project().is_none() => {
+                live::GuiChange::Page(Page::Effects | Page::Color | Page::Export)
+                    if self.project().is_none() =>
+                {
                     return Err("Open a project first".into());
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
@@ -379,7 +375,6 @@ impl Workspace {
         use vidcut_core::request::GuiPanel;
         match panel {
             GuiPanel::QuickExport => self.export.close_quick(),
-            GuiPanel::Export => self.export.close_dialog(),
             GuiPanel::Jobs => self.export.show_jobs = false,
             GuiPanel::Mixer => self.show_mixer = false,
             GuiPanel::KeyframeTray => self.key_tray = false,
@@ -437,11 +432,10 @@ impl Workspace {
 
     pub fn gui_state(&self) -> live::GuiState {
         use vidcut_core::request::GuiPanel;
-        let (quick, dialog) = self.export.windows();
+        let quick = self.export.quick_open();
         let tool = self.timeline.picture_grab.tool;
         let open = [
             (GuiPanel::QuickExport, quick),
-            (GuiPanel::Export, dialog),
             (GuiPanel::Jobs, self.export.show_jobs),
             (GuiPanel::Mixer, self.show_mixer),
             (GuiPanel::KeyframeTray, self.key_tray),
@@ -487,18 +481,18 @@ impl Workspace {
             clip: match (page, self.effects_page.grading) {
                 (Page::Effects, _) => self.effects_clip(),
                 (Page::Color, GradeLevel::Clip) => self.color_clip(),
-                (Page::Color, GradeLevel::Timeline) | (Page::Cut, _) => None,
+                (Page::Color, GradeLevel::Timeline) | (Page::Cut | Page::Export, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
             node: self.effects_page.picked().map(str::to_owned),
             element: self.effects_page.element,
             grade_nodes: match page {
                 Page::Color => self.effects_page.picked_grade().to_vec(),
-                Page::Effects | Page::Cut => Vec::new(),
+                Page::Effects | Page::Cut | Page::Export => Vec::new(),
             },
             grade_node: match page {
                 Page::Color => self.effects_page.grade_nodes.last().copied(),
-                Page::Effects | Page::Cut => None,
+                Page::Effects | Page::Cut | Page::Export => None,
             },
             node_zoom: self.node_zoom(),
             node_list: self.effects_page.grade_list,
@@ -1305,6 +1299,7 @@ impl Workspace {
                             (Page::Cut, "Cut"),
                             (Page::Effects, "Effects"),
                             (Page::Color, "Color"),
+                            (Page::Export, "Export"),
                         ] {
                             let on = ws.effects_page.page == page;
                             if ui.selectable_label(on, text).clicked() && !on {
@@ -2228,6 +2223,13 @@ impl Workspace {
             }
             return;
         }
+        if self.effects_page.page == Page::Export {
+            self.export_page_ui(ui);
+            if let Some(tiles) = &mut self.tiles {
+                tiles.end_frame();
+            }
+            return;
+        }
         let frame = theme::card(panel);
         let spacing = ctx.global_style().spacing.clone();
         let chrome =
@@ -2399,7 +2401,7 @@ enum Status {
 
 const NOTICE_FADE: f64 = 1.0;
 
-const BOTTOM_SHARE: f32 = 0.6;
+pub(super) const BOTTOM_SHARE: f32 = 0.6;
 
 fn recent_projects() -> Vec<PathBuf> {
     std::fs::read_to_string(crate::paths::state_dir().join("recent.json"))

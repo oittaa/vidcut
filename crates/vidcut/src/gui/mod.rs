@@ -12,6 +12,7 @@ mod effect_browser;
 mod effects_page;
 mod equalizer;
 pub mod export;
+mod export_page;
 mod file_manager;
 mod fillers;
 mod folders;
