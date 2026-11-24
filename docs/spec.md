@@ -4940,7 +4940,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `source_levels` and `levels_from`.
   - The Custom Name takes `{source}` and the other parts of `name`. It is `{source}` by default.
   - The frame count is the source timecode of the clip's first frame, as a frame count at the rate of the source. Filename Digits sets its digits, also for a movie. It is 8 by default.
-  - A name that ends in a digit gets `_` before the frame count.
+  - In the name of a movie, a name that ends in a digit gets `_` before the frame count. An image sequence does not get it.
   - A source at a rate that is not the rate of the timeline gets the count of its first frame too.
   - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
