@@ -1,4 +1,4 @@
-pub const AUTO_LEVELS: usize = 100;
+const AUTO_LEVELS: usize = 100;
 
 const AUTO_STEPS: f64 = 99.0;
 
@@ -8,13 +8,22 @@ const AUTO_LIFT_LEAST: f64 = -2.0;
 
 const AUTO_LUMA: [f64; 3] = [0.299, 0.587, 0.114];
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Levels {
-    pub counts: [[u64; AUTO_LEVELS]; 3],
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Balance {
+    pub lift: [f64; 4],
+    pub gain: [f64; 4],
+}
+
+pub fn balance(pixels: impl IntoIterator<Item = [f32; 3]>) -> Balance {
+    legacy(&Levels::of(pixels))
+}
+
+struct Levels {
+    counts: [[u64; AUTO_LEVELS]; 3],
 }
 
 impl Levels {
-    pub fn of(pixels: impl IntoIterator<Item = [f32; 3]>) -> Self {
+    fn of(pixels: impl IntoIterator<Item = [f32; 3]>) -> Self {
         let mut counts = [[0; AUTO_LEVELS]; 3];
         for px in pixels {
             for (c, v) in px.into_iter().enumerate() {
@@ -33,13 +42,7 @@ fn step(v: f32) -> usize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Balance {
-    pub lift: [f64; 4],
-    pub gain: [f64; 4],
-}
-
-pub fn legacy(levels: &Levels) -> Balance {
+fn legacy(levels: &Levels) -> Balance {
     let points = levels.counts.map(|c| points(&c));
     let weighted = |pick: fn(&(f64, f64)) -> f64| -> f64 {
         points.iter().zip(AUTO_LUMA).map(|(p, w)| w * pick(p)).sum()

@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use vidcut_core::analysis::{
     AudioLevels, Detections, Look, Loudness, PictureStats, SoundMatch, Tracked, VoiceActivity,
 };
-use vidcut_core::auto_color::Levels;
+use vidcut_core::auto_color::Balance;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Measured;
 use vidcut_core::editor::GeneratedProxy;
@@ -131,8 +131,8 @@ static HEARD: Mutex<Lru<String, Arc<Speech>, HEARD_KEPT>> = Mutex::new(Lru::new(
 static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::new());
 const LOUD_KEPT: usize = 4096;
 static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
-const STILLS_KEPT: usize = 16;
-static STILLS: Mutex<Lru<String, Arc<Levels>, STILLS_KEPT>> = Mutex::new(Lru::new());
+const BALANCES_KEPT: usize = 16;
+static BALANCES: Mutex<Lru<String, Balance, BALANCES_KEPT>> = Mutex::new(Lru::new());
 
 fn loud_key(plan: &RenderPlan) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
@@ -417,11 +417,11 @@ impl Env for AvEnv {
         )
     }
 
-    fn still_levels(&self, plan: &RenderPlan) -> Result<Arc<Levels>> {
-        let lock = || STILLS.lock().unwrap_or_else(PoisonError::into_inner);
+    fn auto_balance(&self, plan: &RenderPlan) -> Result<Balance> {
+        let lock = || BALANCES.lock().unwrap_or_else(PoisonError::into_inner);
         let key = vidcut_core::fingerprint::digest(&serde_json::to_vec(plan).unwrap_or_default());
         if let Some(v) = lock().get(&key) {
-            return Ok(v.clone());
+            return Ok(*v);
         }
         if self.heard_only {
             return Err(Error::conflict(
@@ -438,9 +438,9 @@ impl Env for AvEnv {
         let pixels =
             vidcut_av::export::still::floats(piece, plan.fps, size, colors, decoder.as_ref())
                 .map_err(av_error)?;
-        let levels = Arc::new(Levels::of(pixels));
-        lock().insert(key, levels.clone());
-        Ok(levels)
+        let balance = vidcut_core::auto_color::balance(pixels);
+        lock().insert(key, balance);
+        Ok(balance)
     }
 
     fn voice_isolation(&self, download: bool) -> Result<()> {

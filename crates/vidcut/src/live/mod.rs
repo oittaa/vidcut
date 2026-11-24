@@ -2083,7 +2083,7 @@ impl Live {
             return Some(plain(move || {
                 use vidcut_core::Env;
                 for plan in &looks {
-                    AvEnv::new().still_levels(plan)?;
+                    AvEnv::new().auto_balance(plan)?;
                 }
                 Ok(())
             }));

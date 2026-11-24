@@ -137,7 +137,7 @@ pub trait Env {
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
-    fn still_levels(&self, plan: &RenderPlan) -> Result<Arc<crate::auto_color::Levels>> {
+    fn auto_balance(&self, plan: &RenderPlan) -> Result<crate::auto_color::Balance> {
         let _ = plan;
         Err(Error::usage(
             "Auto Color reads the picture in the vidcut program",
@@ -5013,8 +5013,7 @@ fn mutate(
                 Some(on) => ops::grade::AutoStep::Shown(*on),
                 None => {
                     let plan = auto_color_plan(p, &of, n, at)?;
-                    let levels = env.still_levels(&plan)?;
-                    ops::grade::AutoStep::Analysed(crate::auto_color::legacy(&levels))
+                    ops::grade::AutoStep::Analysed(env.auto_balance(&plan)?)
                 }
             };
             ops::grade::auto_color(p, &of, (n, at), step)?;

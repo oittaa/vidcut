@@ -852,8 +852,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
 - `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
   - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
-  - `Env::still_levels` renders that frame in float (`still::floats`) and counts the levels of each channel (`auto_color::Levels`). `STILLS` keeps the counts of recent plans.
-  - `auto_color::legacy` makes the Lift and Gain from the counts. `ops::grade::auto_color` writes them with `GradeNode::change_at`.
+  - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
+  - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
+  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`.
   - `AutoColor` in the corrector keeps the Lift and Gain that do not show. `AutoStep::Shown` swaps them with the shown values.
 - `Grading::of` changes the values of a corrector into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
