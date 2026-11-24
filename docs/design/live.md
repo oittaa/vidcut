@@ -315,6 +315,8 @@ The bar and the Jobs button:
   - The header of a locked node (`Node::locked`) shows its rows disabled. `comp.set` refuses a change of its values, and `comp.key` and `comp.reset` refuse the node.
     - A drag in the viewer does not take its handles or the boxes of its patterns.
     - The `motion` requests refuse a locked Tracker (`ops::motion::unlocked`).
+  - An effect tool uses the rows of the effect sections. `effect_main` adds its rows to the one grid of the node, and `effect_folds` puts its folds below that grid.
+  - A value of an effect tool has its Keyframe button also before its first keyframe (`Knob::value_of`).
   - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
 - `Workspace::node_handles` draws the handles of each selected mask with `show_view_controls` on, and of each selected Merge.
   - For a selected Background with Type Gradient, it draws Start and End (`Grip::Start`, `Grip::End`) and the line between them.
@@ -326,7 +328,7 @@ The bar and the Jobs button:
   - A Center that follows a tracker pattern shows its handles. A drag of them moves nothing and sends nothing (`pinned`).
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
-  - The keys of `Panel::Effects` work only on the page: Pass Through, Lock, Rename and the keyframe steps of the active node.
+  - The keys of `Panel::Effects` work only on the page: Pass Through, Lock, Rename, Original Size and the keyframe steps of the active node.
   - They also jump to the ends of the source and of the clip.
   - A key of `Panel::Effects` wins over the same key of `Panel::App`. Thus Shift+Left goes to the start of the source, not one second back.
   - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.
