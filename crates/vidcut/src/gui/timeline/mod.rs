@@ -3884,6 +3884,7 @@ impl Workspace {
         let Some(mut s) = self.timeline.section_dialog.take() else {
             return;
         };
+        let asking = self.asked;
         let mut open = true;
         let mut done = false;
         super::dialog::window(ctx, "Set Speed Change", &mut open, |ui| {
@@ -3899,7 +3900,7 @@ impl Workspace {
             });
             super::dialog::footer(ui, |ui| {
                 let set = super::dialog::main_button(ui, "Set", true)
-                    || ui.input(|i| i.key_pressed(Key::Enter));
+                    || (!asking && ui.input(|i| i.key_pressed(Key::Enter)));
                 if set {
                     self.set_section(&s, s.percent);
                     done = true;
@@ -3929,6 +3930,7 @@ impl Workspace {
         let Some(mut d) = self.timeline.speed_dialog.take() else {
             return;
         };
+        let asking = self.asked;
         let clips = self.snap.selection.clips.clone();
         let pictured = self.pictured(&clips);
         let mut open = !clips.is_empty();
@@ -3980,7 +3982,7 @@ impl Workspace {
             });
             super::dialog::footer(ui, |ui| {
                 let change = super::dialog::main_button(ui, "Change", true)
-                    || ui.input(|i| i.key_pressed(Key::Enter));
+                    || (!asking && ui.input(|i| i.key_pressed(Key::Enter)));
                 if change {
                     let retimed: Vec<String> = self.project().map_or(Vec::new(), |p| {
                         pictured

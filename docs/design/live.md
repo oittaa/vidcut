@@ -894,6 +894,9 @@ Order:
 - Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
+- `Workspace::ui` keeps `Workspace::asking` in `Workspace::asked` before `Workspace::keys`. Normalize Audio Levels, Set Speed Change and Change Clip Speed apply at Enter only while `Workspace::asked` is false.
+  - Why: `Workspace::keys` returns while a widget has the focus, before it removes the keys of a question. A question that gives its button the focus thus keeps Enter, and Enter presses that button.
+  - The question closes in the same frame, before the timeline panel draws these windows. Thus they read the value from the start of the frame.
 
 The Keyboard Customization window:
 
