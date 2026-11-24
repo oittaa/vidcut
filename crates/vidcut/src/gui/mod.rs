@@ -1,4 +1,5 @@
 mod app;
+mod attributes;
 mod bar;
 mod cache_manager;
 mod cells;

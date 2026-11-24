@@ -62,6 +62,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("track.remove", &["track"]),
     ("track.set", &["track"]),
     ("clip.set", &["clips"]),
+    ("clip.paste_attributes", &["clips"]),
+    ("clip.remove_attributes", &["clips"]),
     ("keyframes.list", &["clips"]),
     ("keyframes.add", &["clips"]),
     ("keyframes.set", &["clips"]),

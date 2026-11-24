@@ -1865,6 +1865,41 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// Paste Attributes (Alt+V): give `clips` the chosen `attributes` of a
+    /// copied clip. `copied` is a clip as `edit.copy` returns it, and `from`
+    /// is a clip of the timeline. Default: the first clip of the GUI's
+    /// clipboard. Each attribute takes the place of the clip's own, with its
+    /// keyframes. A clip takes only what it can have: a clip with no sound
+    /// takes no volume, and a clip with no source takes no speed.
+    #[serde(rename = "clip.paste_attributes")]
+    ClipPasteAttributes {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<ClipRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        copied: Option<Box<crate::model::TrackClip>>,
+        attributes: Vec<ClipAttribute>,
+        /// Where the keyframes go in each clip. Default: `maintain`.
+        #[serde(default)]
+        keyframes: KeyTiming,
+        /// With `speed`: the length of each clip changes with its speed,
+        /// and the clips after it move (Ripple Sequence). Without, each clip
+        /// keeps its length.
+        #[serde(default)]
+        ripple: bool,
+    },
+    /// Remove Attributes: give the chosen `attributes` of `clips` their
+    /// usual values, with no keyframes.
+    #[serde(rename = "clip.remove_attributes")]
+    ClipRemoveAttributes {
+        clips: OneOrMany<ClipRef>,
+        attributes: Vec<ClipAttribute>,
+        /// With `speed`: the length of each clip changes with its speed,
+        /// and the clips after it move (Ripple Sequence). Without, each clip
+        /// keeps its length.
+        #[serde(default)]
+        ripple: bool,
+    },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
     /// that their level reaches `target`. Each clip is measured over the
     /// sound it plays, as the export mixes it, without its volume and its
@@ -5093,6 +5128,78 @@ pub enum FindSpeech {
     Sound,
     /// All of the audio, the silences too.
     None,
+}
+
+/// A part of a clip that `clip.paste_attributes` and
+/// `clip.remove_attributes` change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipAttribute {
+    /// Its own Clip Color.
+    ClipColor,
+    /// The Composite Mode.
+    CompositeMode,
+    /// The Opacity and its keyframes.
+    Opacity,
+    /// The Position and its keyframes.
+    Position,
+    /// The Rotation Angle and its keyframes.
+    Rotation,
+    /// The Anchor Point and its keyframes.
+    Anchor,
+    /// The Pitch and its keyframes.
+    Pitch,
+    /// The Yaw and its keyframes.
+    Yaw,
+    /// The Zoom X and its keyframes.
+    ZoomX,
+    /// The Zoom Y and its keyframes.
+    ZoomY,
+    /// The Crop Left and its keyframes.
+    CropLeft,
+    /// The Crop Right and its keyframes.
+    CropRight,
+    /// The Crop Top and its keyframes.
+    CropTop,
+    /// The Crop Bottom and its keyframes.
+    CropBottom,
+    /// The Crop Softness and its keyframes.
+    CropSoftness,
+    /// The vertical flip.
+    FlipVertical,
+    /// The horizontal flip.
+    FlipHorizontal,
+    /// The Retime Process.
+    RetimeProcess,
+    /// The effects on the picture, with their keyframes.
+    VideoEffects,
+    /// The grade of the Color page, with its keyframes.
+    Grade,
+    /// The composition of the Effects page.
+    Composition,
+    /// The volume and its keyframes.
+    Volume,
+    /// The compressor and Noise Reduction.
+    AudioEffects,
+    /// The equalizer.
+    Equalizer,
+    /// The speed (Retime Effects). A speed with keyframes does not paste.
+    Speed,
+    /// Voice Isolation. Only `clip.remove_attributes` takes it.
+    VoiceIsolation,
+    /// The Dialogue Leveler. Only `clip.remove_attributes` takes it.
+    DialogueLeveler,
+}
+
+/// Where `clip.paste_attributes` puts the keyframes in each clip.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyTiming {
+    /// The same frames from the start of the clip (Maintain Timing).
+    #[default]
+    Maintain,
+    /// The same part of the length of the clip (Stretch to Fit).
+    Stretch,
 }
 
 /// Where `unique` puts the track and the place of a clip.

@@ -4298,6 +4298,38 @@ fn mutate(
             }
             Value::Null
         }
+        Request::ClipPasteAttributes {
+            clips,
+            from,
+            copied,
+            attributes,
+            keyframes,
+            ripple,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let source = match (from, copied) {
+                (Some(r), None) => {
+                    let id = resolve_clip(p, r, playhead)?;
+                    p.clip(&id).cloned().expect("resolved")
+                }
+                (None, Some(t)) => t.clip.clone(),
+                (None, None) => return Err(Error::invalid("no clip is copied")),
+                (Some(_), Some(_)) => {
+                    return Err(Error::usage("give `from` or `copied`, not both"));
+                }
+            };
+            ops::attributes::paste(p, &source, &ids, attributes, *keyframes, *ripple)?;
+            Value::Null
+        }
+        Request::ClipRemoveAttributes {
+            clips,
+            attributes,
+            ripple,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::attributes::remove(p, &ids, attributes, *ripple)?;
+            Value::Null
+        }
         Request::ClipNormalize {
             clips,
             mode,

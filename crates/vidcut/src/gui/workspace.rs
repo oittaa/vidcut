@@ -1146,6 +1146,24 @@ impl Workspace {
                 ui.add_enabled_ui(self.snap.project.is_some() && !export, |ui| {
                     ui.menu_button("History", |ui| self.history_menu(ui));
                 });
+                ui.separator();
+                let clips = self.snap.selection.clips.clone();
+                let pasted = !clips.is_empty() && self.snap.copied_clip.is_some();
+                let paste = egui::Button::new("Paste Attributes…").shortcut_text(
+                    (self.snap.bindings)
+                        .first(Action::PasteAttributes)
+                        .unwrap_or_default(),
+                );
+                if ui.add_enabled(pasted && !export, paste).clicked() {
+                    self.open_paste_attributes(clips.clone());
+                }
+                let remove = egui::Button::new("Remove Attributes…");
+                if ui
+                    .add_enabled(!clips.is_empty() && !export, remove)
+                    .clicked()
+                {
+                    self.open_remove_attributes(clips);
+                }
                 ui.menu_button("Edit Options", |ui| {
                     let mut on = self.snap.decompose_on_edit;
                     if ui
@@ -1608,6 +1626,9 @@ impl Workspace {
         }
         if fired.pressed(Action::Paste) && !self.paste_editor_keys() {
             self.send("edit.paste", json!({}));
+        }
+        if fired.pressed(Action::PasteAttributes) && !self.snap.selection.clips.is_empty() {
+            self.open_paste_attributes(self.snap.selection.clips.clone());
         }
 
         let dynamic = self.timeline.dynamic.is_some();

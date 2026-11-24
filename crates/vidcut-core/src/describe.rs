@@ -297,6 +297,8 @@ pub fn describe_at(
         "track.set" => d.track_set(),
         "clip.set" => d.clip_set(),
         "clip.normalize" => format!("Normalize the audio levels of {}", d.clips("clips")),
+        "clip.paste_attributes" => format!("Paste Attributes to {}", d.clips("clips")),
+        "clip.remove_attributes" => format!("Remove Attributes of {}", d.clips("clips")),
         "keyframes.add" => format!(
             "{} keyframe on {} at {}{}",
             set::title_case(&d.key_param()),

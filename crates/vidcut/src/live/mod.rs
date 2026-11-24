@@ -608,6 +608,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: 0,
+        copied_clip: None,
         key_clipboard: 0,
         node_clipboard: false,
         window_clipboard: None,
@@ -710,6 +711,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
+        copied_clip: None,
+        copies: 0,
         compound_clipboard: Vec::new(),
         key_clipboard: Vec::new(),
         node_clipboard: None,
@@ -1020,6 +1023,8 @@ struct Live {
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
+    copied_clip: Option<Arc<snapshot::CopiedClip>>,
+    copies: u64,
     compound_clipboard: Vec<vidcut_core::model::Compound>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
     node_clipboard: Option<vidcut_core::request::CopiedNode>,
@@ -1721,6 +1726,7 @@ impl Live {
             selection: self.selection.clone(),
             pool: self.pool.clone(),
             clipboard: self.clipboard.len(),
+            copied_clip: self.copied_clip.clone(),
             key_clipboard: self.key_clipboard.len(),
             node_clipboard: self.node_clipboard.is_some(),
             window_clipboard: (self.window_clipboard.as_ref()).map(|w| w.shape.kind()),
@@ -3992,6 +3998,17 @@ impl Live {
         self.edit_at(envelope, origin, playhead, Handed::new())
     }
 
+    fn copied(&mut self) -> Option<Arc<CopiedClip>> {
+        let first = &self.clipboard.first()?.clip;
+        let p = self.project.as_ref()?.project();
+        self.copies += 1;
+        Some(Arc::new(CopiedClip {
+            name: p.clip_name(first).unwrap_or_default(),
+            picked: vidcut_core::ops::attributes::picked_at_open(first),
+            copy: self.copies,
+        }))
+    }
+
     fn edit_at(
         &mut self,
         mut envelope: Envelope,
@@ -4018,6 +4035,14 @@ impl Live {
                 } else {
                     return Err(Error::usage("the clipboard is empty"));
                 }
+            }
+            Request::ClipPasteAttributes { from, copied, .. }
+                if from.is_none() && copied.is_none() =>
+            {
+                let Some(first) = self.clipboard.first() else {
+                    return Err(Error::usage("the clipboard has no clip"));
+                };
+                *copied = Some(Box::new(first.clone()));
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
@@ -4141,6 +4166,7 @@ impl Live {
                     self.clipboard_fps = serde_json::from_value(r.result["fps"].clone()).ok();
                     if let Ok(clips) = serde_json::from_value(r.result["clips"].clone()) {
                         self.clipboard = clips;
+                        self.copied_clip = self.copied();
                         self.compound_clipboard =
                             serde_json::from_value(r.result["compounds"].clone())
                                 .unwrap_or_default();
@@ -4149,6 +4175,7 @@ impl Live {
                     } else if let Ok(cues) = serde_json::from_value(r.result["cues"].clone()) {
                         self.cue_clipboard = cues;
                         self.clipboard.clear();
+                        self.copied_clip = None;
                         self.compound_clipboard.clear();
                         self.key_clipboard.clear();
                     }
@@ -4167,6 +4194,7 @@ impl Live {
                     if let Ok(keys) = serde_json::from_value(r.result["keyframes"].clone()) {
                         self.key_clipboard = keys;
                         self.clipboard.clear();
+                        self.copied_clip = None;
                         self.compound_clipboard.clear();
                         self.cue_clipboard.clear();
                     }

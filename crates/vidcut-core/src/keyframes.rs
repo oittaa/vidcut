@@ -821,6 +821,46 @@ impl Picture {
         }
     }
 
+    pub fn take_channel(&mut self, from: &Picture, v: PictureValue) {
+        write_plain(self, v, plain_of(from, v));
+        let (from_keys, from_y) = parts(from)[v as usize];
+        let (keys, y) = parts_mut(self, v);
+        keys.clone_from(from_keys);
+        if let (Some(y), Some(from_y)) = (y, from_y) {
+            y.clone_from(from_y);
+        }
+    }
+
+    pub fn take_axis(&mut self, from: &Picture, v: PictureValue, axis: usize) {
+        let mut plain = plain_of(self, v);
+        plain[axis] = plain_of(from, v)[axis];
+        let mut shape = from.keys_of(v).to_vec();
+        for k in self.keys_of(v) {
+            if !shape.iter().any(|s| s.frame == k.frame) {
+                shape.push(*k);
+            }
+        }
+        shape.sort_by_key(|k| k.frame);
+        let values: Vec<[f64; 2]> = (shape.iter())
+            .map(|k| {
+                let mut value = self.channel_at(v, k.frame as f64);
+                value[axis] = from.channel_at(v, k.frame as f64)[axis];
+                value
+            })
+            .collect();
+        write_plain(self, v, plain);
+        let (keys, y) = parts_mut(self, v);
+        *keys = (shape.into_iter().zip(&values))
+            .map(|(k, value)| Keyframe {
+                value: value[0],
+                ..k
+            })
+            .collect();
+        if let Some(y) = y {
+            *y = values.iter().map(|value| value[1]).collect();
+        }
+    }
+
     pub fn adopt(&self, frame: f64) -> Picture {
         let mut p = self.clone();
         for v in PictureValue::ALL {
