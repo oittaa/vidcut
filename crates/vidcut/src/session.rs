@@ -39,7 +39,8 @@ fn models_check(id: &str, download: bool) -> Result<Value> {
         )));
     }
     let dir = crate::paths::models_dir();
-    let inspected = vidcut_av::models::inspect(model, &dir, download)
+    let gpu = crate::preferences::gpu_acceleration();
+    let inspected = vidcut_av::models::inspect(model, &dir, download, gpu)
         .map_err(|e| export::av_error(&e, ErrorCode::Media, String::new()))?;
     let found = &inspected.found;
     let differences = catalog::differences(model, found);
@@ -271,6 +272,31 @@ pub fn run_with(
         Request::KeysReset { action } => {
             answer(crate::preferences::keys_reset(*action, envelope.dry_run)?)
         }
+        Request::KeysSets {} => answer(crate::preferences::keys_sets()?),
+        Request::KeysUse { set } => answer(crate::preferences::keys_use(set, envelope.dry_run)?),
+        Request::KeysSave { name, overwrite } => answer(crate::preferences::keys_save(
+            name,
+            *overwrite,
+            envelope.dry_run,
+        )?),
+        Request::KeysDelete { name } => {
+            answer(crate::preferences::keys_delete(name, envelope.dry_run)?)
+        }
+        Request::KeysExport { set, path } => answer(crate::preferences::keys_export(
+            set,
+            path,
+            envelope.dry_run,
+        )?),
+        Request::KeysImport {
+            path,
+            name,
+            overwrite,
+        } => answer(crate::preferences::keys_import(
+            path,
+            name.as_deref(),
+            *overwrite,
+            envelope.dry_run,
+        )?),
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
             *service,
             key.as_deref(),
@@ -304,12 +330,24 @@ pub fn run_with(
             parade,
             vectorscope,
             scale,
+            video_levels,
+            waveform_mode,
+            waveform_red,
+            waveform_green,
+            waveform_blue,
+            parade_mode,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
                 parade: *parade,
                 vectorscope: *vectorscope,
                 scale: *scale,
+                video_levels: *video_levels,
+                waveform_mode: *waveform_mode,
+                waveform_red: *waveform_red,
+                waveform_green: *waveform_green,
+                waveform_blue: *waveform_blue,
+                parade_mode: *parade_mode,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }

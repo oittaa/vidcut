@@ -22,6 +22,7 @@ impl Workspace {
     }
 
     pub(super) fn leave_export_page(&mut self) {
+        self.export.edit_wanted = None;
         if let Some(mode) = self.export.viewer_before.take() {
             self.send("viewer.set", json!({ "mode": mode }));
         }
