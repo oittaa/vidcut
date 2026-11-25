@@ -4336,7 +4336,8 @@ pub enum Request {
     /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
     /// `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`). `set` names the set that the keys in force come
-    /// from, and `changed` tells if they differ from it. A set file that
+    /// from, and `changed` tells if they differ from it. Each set of yours
+    /// has a `base`: the built-in set that it changes. A set file that
     /// can't be read is left out and listed in `refused` with why.
     #[serde(rename = "keys.sets")]
     KeysSets {},
@@ -4363,16 +4364,21 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(with = "Option<std::collections::BTreeMap<String, Vec<String>>>")]
         keys: Option<crate::shortcuts::Custom>,
+        /// The set that the keys come from, as `keys.sets` names it. Without
+        /// it, the set in force. The new set keeps that set's `base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
     },
     /// Delete one of your key sets. Built-in sets can't be deleted. When the
     /// set is in force, vidcut's own set is put in force.
     #[serde(rename = "keys.delete")]
     KeysDelete { name: String },
     /// Write a key set to a key file, for another computer or another
-    /// editor (`keys.import`). The first line names the set that the file
-    /// changes. Then each command whose keys differ has a line like
+    /// editor (`keys.import`). The first line names the set's `base`. Then
+    /// each command whose keys differ from the base has a line like
     /// `editUndo := Ctrl+Z`. An action without such a command has a line
-    /// like `#vidcut ducking := Alt+D`. A file at the path is replaced.
+    /// like `#vidcut ducking := Alt+D`. A built-in set gives only the first
+    /// line. A file at the path is replaced.
     #[serde(rename = "keys.export")]
     KeysExport {
         /// The set's name, as `keys.sets` gives it.

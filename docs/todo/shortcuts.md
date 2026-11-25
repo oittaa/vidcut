@@ -4,11 +4,13 @@
 
 The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
 
-**Key files to measure:**
+**A key file that gives one key to two commands:**
 
-- Case 27 of shortcuts-resolve-runs.md: how Resolve reads a key file that vidcut writes.
-- Does Resolve read Esc and Ins, the comment lines of vidcut, and a key that another command has?
-- Which import line does Resolve write for a preset that it saved from another built-in preset?
+- Resolve imports such a file with no question. Both commands keep the key, with a warning mark on each row (case 27 of shortcuts-resolve-runs.md).
+- vidcut gives the key to the command of the file. Another action of that level loses the key.
+- A file that gives one key to two commands of one level fails the import.
+- To do: keep the key on both commands, with a warning mark on each row.
+- To do: the action of a press of such a key, after case 28 of shortcuts-resolve-runs.md.
 
 **Meta in the sets of other editors:**
 

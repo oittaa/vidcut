@@ -814,6 +814,15 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 
+## Resolve's key files
+
+These facts come from measurements in Resolve Studio 21.2 on Windows.
+
+- **An exported key file has CR CR LF line ends.**
+  - Export Preset wrote three lines, with CR CR LF after the first two. The last line has no line end.
+  - Resolve reads key files with LF line ends.
+  - vidcut writes LF line ends. It reads each line without its CR characters ([spec §11](spec.md#11-keyboard-shortcuts)).
+
 ## Resolve's Fusion page
 
 These facts come from measurements in Resolve Studio 21.2, by hand.
