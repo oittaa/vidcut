@@ -410,6 +410,7 @@ The bar and the Jobs button:
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
 - A double-click on a title in the viewer starts a `Typing` (`Workspace::title_typing`). It edits the text of the Title section in place.
   - `burn::title_letters` gives the box of each letter from the layout of the title as it is drawn. `Laid` puts the boxes on the viewer. The caret, the selection and the clicks use them.
+  - `Letters` holds the stretch and the turn of each block. Thus the caret and the selection fit a title with Zoom X and Zoom Y apart.
   - `rich::edited` changes the markup for a change of the letters that show. A typed letter takes the style of the letter before it, or at the start of a line the style of the letter after it.
   - Why: the markup holds the styles, and the user edits the letters that show.
   - The `Typing` holds the keyboard focus. Thus the keys of the viewer and the timeline do not act while the user types.

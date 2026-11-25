@@ -74,9 +74,9 @@ pub struct TitleLook {
     /// `[x, y]` as fractions of the picture. Usual: the kind's place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
-    /// From 1/4 to 4. Usual: 1.
+    /// `[x, y]` across and down, each from 1/4 to 4. Usual: `[1, 1]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
     /// Degrees turned counterclockwise. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,

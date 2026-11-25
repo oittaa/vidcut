@@ -559,8 +559,7 @@ fn angle_of(v: Vec2) -> f32 {
     (-v.y).atan2(v.x)
 }
 
-fn zoom_text(p: &Picture) -> String {
-    let [zx, zy] = p.scale();
+pub(super) fn zoom_text([zx, zy]: [f64; 2]) -> String {
     if zx == zy {
         format!("{:.0}%", zx * 100.0)
     } else {
@@ -1384,12 +1383,12 @@ impl Workspace {
         let g = &self.timeline.picture_grab;
         let readout = match (&g.held, &g.wheel) {
             (Some(h), _) => match h.hold {
-                Hold::Corner | Hold::Stretch(_) => Some(zoom_text(&h.now)),
+                Hold::Corner | Hold::Stretch(_) => Some(zoom_text(h.now.scale())),
                 Hold::Turn => Some(turn_text(&h.now)),
                 _ => None,
             },
             (None, Some(w)) if w.now.turn() != w.start.turn() => Some(turn_text(&w.now)),
-            (None, Some(w)) if w.now.scale() != w.start.scale() => Some(zoom_text(&w.now)),
+            (None, Some(w)) if w.now.scale() != w.start.scale() => Some(zoom_text(w.now.scale())),
             (None, _) => None,
         };
         if let Some(text) = readout {

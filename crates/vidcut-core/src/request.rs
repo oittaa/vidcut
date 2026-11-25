@@ -2010,7 +2010,7 @@ pub enum Request {
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. On a
     /// title, position, zoom and rotation are those of its text, and a
-    /// scroll's text takes only position. A title's zoom is one number. The
+    /// scroll's text takes only position. The
     /// handles of its position keys bend its path. The other values of a
     /// title are those of its clip's picture. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
@@ -2680,9 +2680,10 @@ pub enum Request {
         /// usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
-        /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
+        /// How much larger its text is drawn, from 1/4 to 4: one number for
+        /// both ways, or `[x, y]` across and down. Default: 1.
         #[serde(default)]
-        zoom: Option<f64>,
+        zoom: Option<OneOrMany<f64>>,
         /// Degrees turned counterclockwise. Default: 0.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2733,10 +2734,14 @@ pub enum Request {
         /// from -3 to 5 down, or `[]` for the kind's usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
-        /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
-        /// size.
+        /// How much larger its text is drawn, from 1/4 to 4: one number for
+        /// both ways, or `[x, y]` across and down. 1 for the usual size.
         #[serde(default)]
-        zoom: Option<f64>,
+        zoom: Option<OneOrMany<f64>>,
+        /// The Zoom link: on or off. Off, Zoom X and Zoom Y change apart in
+        /// the Title section. It changes no zoom.
+        #[serde(default)]
+        zoom_link: Option<bool>,
         /// Degrees turned counterclockwise; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2744,8 +2749,8 @@ pub enum Request {
         /// opacity goes to the clip's Composite.
         #[serde(default)]
         look: Option<String>,
-        /// The line of a lower third that takes `anchor`, `position`, `zoom`
-        /// and `rotation`. The two lines then go apart. Without it, the two
+        /// The line of a lower third that takes `anchor`, `position`, `zoom`,
+        /// `zoom_link` and `rotation`. The two lines then go apart. Without it, the two
         /// lines take `position`, `zoom` and `rotation` together until they
         /// go apart, then the lower line alone. Not with `kind` or `look`.
         #[serde(default)]
@@ -6024,8 +6029,8 @@ pub enum KeyParam {
     /// lower third: both lines together, or the lower line when the lines
     /// are apart.
     TextPosition,
-    /// The zoom of a title's text, one number. On a lower third: as
-    /// `text_position`.
+    /// The zoom of a title's text, x and y, one keyframe for both. On a
+    /// lower third: as `text_position`.
     TextZoom,
     /// The rotation of a title's text in degrees. On a lower third: as
     /// `text_position`.

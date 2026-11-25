@@ -9,7 +9,7 @@ use vidcut_core::model::{
 use vidcut_core::request::KeyParam;
 
 use super::export::Ask;
-use super::inspector::{KeyClick, key_buttons, mark, next_key};
+use super::inspector::{KeyClick, key_buttons, link_toggle, mark, next_key};
 use super::looks::{Parts, Picker, ShapeFields, TextFields, Usual, kept_plain, plain};
 use super::subtitles::{filled, font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
@@ -21,7 +21,8 @@ struct LineFields {
     anchor: Option<TitleAnchor>,
     across: String,
     down: String,
-    zoom: String,
+    zoom: [String; 2],
+    link: bool,
     rotation: String,
 }
 
@@ -75,9 +76,35 @@ impl LineFields {
             anchor: t.anchor,
             across: x.shown(t.position.map(|p| p[0])),
             down: y.shown(t.position.map(|p| p[1])),
-            zoom: percent(t.zoom),
+            zoom: [0, 1].map(|i| percent(t.zoom.map(|z| z[i]))),
+            link: t.zoom_link != Some(false),
             rotation: plain(t.rotation),
         }
+    }
+
+    fn zoom_row(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.label("Zoom");
+        let linked = self.link;
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            let axis = |ui: &mut egui::Ui, f: &mut Self, i: usize| {
+                let edit = egui::TextEdit::singleline(&mut f.zoom[i])
+                    .hint_text("100%")
+                    .desired_width(100.0);
+                let typed = ui.add(edit).changed();
+                if typed && linked {
+                    f.zoom[1 - i] = f.zoom[i].clone();
+                }
+                typed
+            };
+            changed |= axis(ui, self, 0);
+            if link_toggle(ui, linked) {
+                self.link = !linked;
+                changed = true;
+            }
+            changed |= axis(ui, self, 1);
+        });
+        changed
     }
 
     fn of_upper(t: &Title, size: [f64; 2]) -> Self {
@@ -279,8 +306,13 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
         zoom: if scroll {
             None
         } else {
-            kept(&f.zoom, stored.zoom, "zoom")?
+            let axis = |i: usize| kept(&f.zoom[i], stored.zoom.map(|z| z[i]), "zoom");
+            match (axis(0)?, axis(1)?) {
+                (None, None) => None,
+                (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
+            }
         },
+        zoom_link: (!scroll && !f.link).then_some(false),
         rotation: if scroll {
             None
         } else if f.rotation.trim().is_empty() {
@@ -325,6 +357,8 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         position_handles: stored.position_handles.clone(),
         zoom: lower.zoom,
         zoom_keys: stored.zoom_keys.clone(),
+        zoom_y: stored.zoom_y.clone(),
+        zoom_link: lower.zoom_link,
         rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
         upper: (lines && apart).then_some(upper),
@@ -376,12 +410,16 @@ fn line_changes(params: &mut Value, t: &Title, stored: &Title, part: TitlePart) 
     if t.zoom != stored.zoom {
         params["zoom"] = json!(t.scale());
     }
+    if t.zoom_link != stored.zoom_link {
+        params["zoom_link"] = json!(t.zoom_link != Some(false));
+    }
     if t.rotation != stored.rotation {
         params["rotation"] = json!(t.turn());
     }
     t.anchor != stored.anchor
         || t.position != stored.position
         || t.zoom != stored.zoom
+        || t.zoom_link != stored.zoom_link
         || t.rotation != stored.rotation
 }
 
@@ -848,7 +886,7 @@ impl Workspace {
                         };
                         moved |= row(ui, "Y", &mut f.down, hint);
                         ui.end_row();
-                        moved |= row(ui, "Zoom", &mut f.zoom, "100%");
+                        moved |= f.zoom_row(ui);
                         keys(ui, PictureValue::Zoom, line);
                         ui.end_row();
                         moved |= row(ui, "Rotation", &mut f.rotation, "0°");

@@ -3807,12 +3807,16 @@ fn pair_row(
 }
 
 fn link_button(ui: &mut egui::Ui, lit: bool, acts: &mut Vec<Act>) {
+    if link_toggle(ui, lit) {
+        acts.push(Act::Link(!lit));
+    }
+}
+
+pub(super) fn link_toggle(ui: &mut egui::Ui, lit: bool) -> bool {
     let icon = if lit { LINK_SIMPLE } else { LINK_SIMPLE_BREAK };
     let b = ui.add(egui::Button::selectable(lit, icon));
     b.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, lit, "Link Zoom"));
-    if b.clicked() {
-        acts.push(Act::Link(!lit));
-    }
+    b.clicked()
 }
 
 fn keyed_look(off: bool) -> Look<'static> {

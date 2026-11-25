@@ -1210,14 +1210,6 @@ fn save(p: &mut Project, id: &str, text: bool, picture: &Picture) -> Result<()> 
         c.picture = super::picture::checked(picture)?;
         return Ok(());
     };
-    if picture
-        .zoom_keys
-        .iter()
-        .zip(&picture.zoom_y)
-        .any(|(k, y)| k.value != *y)
-    {
-        return Err(Error::invalid("a title's zoom is one number"));
-    }
     t.take_picture(picture);
     c.title = Some(super::titles::checked(&t)?);
     Ok(())

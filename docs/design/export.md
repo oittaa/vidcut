@@ -622,6 +622,11 @@ Cancel:
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - `lay_out` takes a `Typeset`: the text, its layers and its `Rules`. `Rules::Title` gives the size, the line gap, the tracking and the seat of a title. `Rules::Plain` gives the line gap of a subtitle.
   - Why: each kind of text has its own measured rules, and one engine shapes and draws them all.
+  - A block lays out its text at its Zoom Y. A block with another Zoom X is then stretched across about its pivot, by `TitleBlock::stretch`.
+    - `turned` does the stretch and the turn in one step. It maps each pixel of the result back to the drawing.
+    - A stretch below 1 takes the mean of several samples across each pixel. Thus thin strokes do not drop out.
+    - A turned block is first cut to the part that the stretch puts in the frame (`inside`).
+    - Why: a title with equal axes draws as with one zoom.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Typeset`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
     - The `drop` field of `Typeset` brings the top of the box down to where the upper line starts.
