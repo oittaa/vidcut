@@ -224,7 +224,7 @@ flowchart TD
   - The CPU sends each frame of the working size. The kernels make the gray picture and the pyramid.
   - The pyramids of the frame before and of the current frame stay on the GPU.
   - One workgroup takes each cell of the `GRID`. It finds the best corner of the cell, follows it to the next frame, and follows it back.
-    - The threads of the workgroup share the window of the Lucas–Kanade method. Each sum of the window is one reduction in workgroup memory.
+    - The threads of the workgroup share the window of the Lucasâ€“Kanade method. Each sum of the window is one reduction in workgroup memory.
   - One readback gives the corners, their moves and the sums of the repeat test.
   - `fitted` then runs on the CPU, with the corners in the order of the cells.
     - Why on the CPU: it is a small part of the work. The same code fits the corners of both paths.
