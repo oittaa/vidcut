@@ -241,7 +241,9 @@ flowchart TD
   - Why frames of the file: a trim, a split, a slip or a speed change keeps the correction of each frame. A frame outside the analysis takes the correction of the nearest end.
 - The render:
   - `Placed::steadied` gives the map of the frame that the clock shows (`FileClock`).
-  - `place::Placing` chains it after the map of the transform (`chain`). Thus the correction moves the cropped picture before its transform, and the picture is sampled once.
+  - `place::Placing` chains it after the map of the transform (`chain`). Thus the picture is sampled once.
+  - The edges of the picture and of its crop use the map before the correction (`Level::area`). Thus the correction moves the source inside the area of the picture, and the picture never shows past that area.
+    - Why: the correction refers back to the source (spec, p. 295). The transform then places the steadied picture as it places any other picture.
   - `Placed::hold` keeps only the map of the held frame. Thus the key of one frame of the render cache stays small.
   - A made frame of a Retime Process keeps its placement. Thus its `Id` holds the keyframe position when the clip is stabilized (`placed_now`, [playback](playback.md)).
 - In a GUI, `Live::measuring` measures first (`editor::stabilize_looks`), as a job of kind `stabilize`. Headless, `work_first` measures on `vidcut-stabilize`.

@@ -188,7 +188,7 @@ impl Shown {
     }
 
     fn back(&self, l: &Level, p: Pos2) -> [f64; 2] {
-        apply(&l.back, self.frame_at(p))
+        apply(l.area(), self.frame_at(p))
     }
 
     fn end(&self, e: Boxed) -> &Level {
@@ -263,8 +263,8 @@ impl Shown {
 
     fn inside(&self, p: Pos2, margin: f32) -> bool {
         let at = self.frame_at(p);
-        let [u, v] = apply(&self.level.back, at);
-        let [du, dv] = slopes(&self.level.back, at);
+        let [u, v] = apply(self.level.area(), at);
+        let [du, dv] = slopes(self.level.area(), at);
         let per = |d: f64| f64::from(margin / self.scale.x) * d;
         let (mu, mv) = (per(du), per(dv));
         let [u0, v0, u1, v1] = self.level.shown;
@@ -1100,7 +1100,7 @@ impl Workspace {
             }
             Hold::Crop(side) => {
                 let at = s.frame_at(to);
-                let [u, v] = apply(&s.level.back, at);
+                let [u, v] = apply(s.level.area(), at);
                 let [cx, cy, cw, ch] = s.within;
                 let (u, v) = ((u - cx) / cw, (v - cy) / ch);
                 let k = &mut next.now.crop;

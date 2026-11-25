@@ -14,7 +14,7 @@ struct Params {
     part: vec4<f32>,
     site: vec4<f32>,
     shrunk: vec4<f32>,
-    levels: array<vec4<f32>, 5u>,
+    levels: array<vec4<f32>, 7u>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -385,9 +385,16 @@ fn sample_shown(px: vec2<f32>) -> vec4<f32> {
     }
     let row0 = p.levels[0];
     let row1 = p.levels[1];
-    let edge = cut(row0, row1, p.levels[2], px);
+    var edge = cut(row0, row1, p.levels[2], px);
+    var at = edge.xy;
+    if p.levels[4].w > 0.5 {
+        let area = cut(p.levels[5], p.levels[6], p.levels[2], px);
+        let source = cut(row0, row1, vec4<f32>(0.0, 0.0, 1.0, 1.0), px);
+        edge = vec3<f32>(source.xy, area.z * source.z);
+        at = area.xy;
+    }
     let uv = edge.xy;
-    let soft = faded_edge(p.levels[3], p.levels[4], edge.xy);
+    let soft = faded_edge(p.levels[3], p.levels[4], at);
     let cover = edge.z * soft;
     let tilt = dot(vec3<f32>(px, 1.0), vec3<f32>(row0.w, row1.w, 1.0));
     var across = vec2<f32>(0.0);
