@@ -1149,8 +1149,9 @@ The masks:
   - Why: the replicate border then acts only beyond the reach, where no tap of a pixel of the picture goes.
   - The added pixels stop at the largest texture of the device. Beyond them, the replicate border acts.
   - A shape that is not in the reach of an edge adds no pixels. Clipping Mode Frame adds none.
-- `fs_mask_join` joins the mask to the masks before it by the Merge paint mode: n + i × (1 − c).
+- `fs_mask_join` joins the mask to the masks before it by its Paint Mode, with the forms of `PaintMode`. Merge is n + i × (1 − c).
   - c is the shape after Invert, and n is c × Level. i is the masks before it.
+  - The first mask has no masks before it. `blur::mask_made` gives it Copy, so it is its own shape n.
 - `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.
 
 The boxes:
