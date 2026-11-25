@@ -5372,6 +5372,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on the pencil puts the settings of the job in the Render Settings. The timeline gets the range of the job (p. 4132).
   - Measured: the pencil of a job of another timeline opens that timeline. The pencil of a job of the entire timeline sets Entire Timeline.
   - Update Job then shows at the bottom of the Render Settings. It changes the job (p. 4132).
+  - Measured: during an edit, the bottom row has Cancel, Update Job and Add New Job, from left to right. It takes the place of Add to Render Queue.
+  - Measured: Cancel ends the edit. The job does not change, and the Render Settings keep the changes.
   - Measured: Update Job keeps the status of the job. A completed job stays completed.
   - Measured: after Update Job, no job is edited, and the job stays selected.
   - Add New Job adds a job with the changes, and the first job does not change (p. 4132).
@@ -5412,7 +5414,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
   - The pencil of a job puts its settings in the Render Settings. `gui.page` with `edit_job` does the same.
   - The timeline of the job opens. A job of the whole timeline sets Entire Timeline. A job of a part sets the marks of its range and In/Out Range.
-  - Update Job and Add New Job then take the place of Add to Render Queue. The pencil of the job shows that it is picked.
+  - Cancel, Update Job and Add New Job then take the place of Add to Render Queue. The pencil of the job shows that it is picked.
+  - Cancel ends the edit. The job does not change, and the Render Settings keep the changes. `edit_job` with `""` does the same.
   - Update Job is `render.update`. The job keeps its place, its name and its status. Add New Job is `render.add`.
   - Each of them asks first about files that are there, as Add does. After each of them, no job is edited.
   - Update Job keeps the job selected. Add New Job selects the new job.

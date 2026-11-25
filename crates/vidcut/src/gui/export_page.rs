@@ -260,6 +260,7 @@ impl Workspace {
         let editing = self.export.editing.clone();
         let mut add = false;
         let mut update = false;
+        let mut cancel = false;
         egui::Panel::bottom("render-settings-footer")
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
@@ -269,10 +270,11 @@ impl Workspace {
                 super::dialog::footer(ui, |ui| {
                     match editing.is_some() {
                         true => {
-                            update = super::dialog::main_button(ui, "Update Job", ready);
                             add = ui
                                 .add_enabled(ready, egui::Button::new("Add New Job"))
                                 .clicked();
+                            update = super::dialog::main_button(ui, "Update Job", ready);
+                            cancel = ui.button("Cancel").clicked();
                         }
                         false => add = super::dialog::main_button(ui, "Add to Render Queue", ready),
                     }
@@ -407,6 +409,10 @@ impl Workspace {
         }
         if update && let Some(job) = editing {
             self.start_render(&ctx, &mut d, Some(Update { job, next: None }));
+        }
+        if cancel {
+            self.export.editing = None;
+            self.export.leave_edit = None;
         }
         self.export.render = Some(d);
     }
