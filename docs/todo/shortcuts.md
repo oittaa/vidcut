@@ -19,16 +19,10 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **Key sets and panels:**
 
-- Keys per panel. One key does different things in different panels (pp. 123–124).
-  - Only the Transcription window has its own level.
+- The Keyframes tab and the keyframe tray take Copy, Cut, Paste and Delete while they have the focus, through the application actions. A level of their own would let the user give them other keys (pp. 123–124).
 
 **Keys that move the clip selection:**
 
 - Ctrl+Left, Ctrl+Right, Ctrl+Up and Ctrl+Down move the clip selection in the manual (pp. 825, 900).
 - The manual does not tell which clip counts as previous or above.
 - To do: measure that rule, then build the four keys.
-
-**Effects Search:**
-
-- Shift+Space is Effects Search on the Cut page (p. 1144).
-- vidcut has no Effects Search.

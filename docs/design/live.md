@@ -422,6 +422,7 @@ The bar and the Jobs button:
   - `keyframes::split` adds a key between two keys. On a curved part, it cuts the Bezier curve at the key, and the shape stays.
 - The Transitions tab (`transition_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Transition`) drops as `edit.dissolve` on an edit, and as `edit.transition` on a transition.
 - The Effects tab (`effect_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Effect`) drops as `effects.add` on the clip under the pointer.
+- The Effects Search window (`GuiPanel::EffectsSearch`, `Workspace::effects_search_window`) finds a card of `effect_browser::GROUPS` by its name or its group. It sends `effects.add` for the first clip of `Workspace::pictured_selection`.
 - A hovered card previews with `Handle::preview_free_title`: the core adds the title at the playhead to its copy of the project (`FreeTitle`).
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.
@@ -928,6 +929,7 @@ Order:
 - The windows and panels take their keys first: `TranscriptionUi::take_keys`, `Workspace::sync_clips_keys`, `Workspace::history_keys`, `Workspace::sync_numbers` and `Workspace::multi_numbers`.
 - `TranscriptionUi::take_keys` also reads `Panel::Transcription`. Thus a key can have one action in that window and another action in the main window.
 - Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
+- Delete, Lift, Select all and Select nothing act on the Media Pool when `Workspace::pool_takes_keys` is true. A press in the Media tab sets `Workspace::pool_focus`, and the page must show the Media tab.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
 - `Workspace::ui` keeps `Workspace::asking` in `Workspace::asked` before `Workspace::keys`. Normalize Audio Levels, Set Speed Change and Change Clip Speed apply at Enter only while `Workspace::asked` is false.

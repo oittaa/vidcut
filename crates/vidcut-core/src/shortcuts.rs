@@ -223,6 +223,7 @@ actions! {
     Undo "undo",
     Redo "redo",
     Import "import",
+    EffectsSearch "effects_search",
     NewBin "new_bin",
     NewTimeline "new_timeline",
     Preferences "preferences",
@@ -1535,6 +1536,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some("While Ripple Delete Silence is open, it redoes a change to its stripes or settings."),
     ),
     own(App, Action::Import, &["Ctrl+I"], "Import media", None),
+    own(
+        App,
+        Action::EffectsSearch,
+        &["Shift+Space"],
+        "Effects Search",
+        Some("Adds an effect, found by its name or group, to the selected clip."),
+    ),
     own(
         Nodes,
         Action::PassThrough,
