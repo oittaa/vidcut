@@ -99,6 +99,7 @@ pub struct Workspace {
     pub(super) inspector: super::inspector::Inspector,
     pub(super) title_thumbs: super::title_browser::Thumbs,
     pub(super) effects_tab: EffectsTab,
+    pub(super) effects_search: super::effects_search::EffectsSearch,
     pub(super) looks: super::looks::Looks,
     pub(super) scrub: Option<(PlayerId, i64)>,
     pub(super) recent: Vec<PathBuf>,
@@ -207,6 +208,7 @@ impl Workspace {
             inspector: Default::default(),
             title_thumbs: Default::default(),
             effects_tab: Default::default(),
+            effects_search: Default::default(),
             looks: Default::default(),
             scrub: None,
             recent: recent_projects(),
@@ -278,7 +280,10 @@ impl Workspace {
         if self.project().is_none()
             && matches!(
                 panel,
-                GuiPanel::QuickExport | GuiPanel::Mixer | GuiPanel::SelectTool
+                GuiPanel::QuickExport
+                    | GuiPanel::Mixer
+                    | GuiPanel::SelectTool
+                    | GuiPanel::EffectsSearch
             )
         {
             return;
@@ -320,6 +325,7 @@ impl Workspace {
             GuiPanel::ColorTool => self.show_color_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
             GuiPanel::SelectTool => self.open_select_tool(),
+            GuiPanel::EffectsSearch => self.open_effects_search(),
         }
     }
 
@@ -440,6 +446,7 @@ impl Workspace {
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
             GuiPanel::SelectTool => self.close_select_tool(),
+            GuiPanel::EffectsSearch => self.close_effects_search(),
         }
     }
 
@@ -487,6 +494,7 @@ impl Workspace {
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
             (GuiPanel::SelectTool, self.select_tool_open()),
+            (GuiPanel::EffectsSearch, self.effects_search_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
@@ -1488,6 +1496,7 @@ impl Workspace {
             || self.sync_clips.open
             || self.preferences.capturing()
             || self.select_tool_open()
+            || self.effects_search_open()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {
@@ -1606,6 +1615,9 @@ impl Workspace {
             self.effects_keys(&fired, &input);
             self.undo_keys(&fired);
             return;
+        }
+        if fired.struck(Action::EffectsSearch) {
+            self.open_effects_search();
         }
         let viewer = self.snap.viewer;
         let id = PlayerId::of(viewer);
@@ -2253,6 +2265,7 @@ impl Workspace {
         self.clip_info_window(&ctx);
         self.cache_manager_window(&ctx);
         self.sync_clips_window(&ctx);
+        self.effects_search_window(&ctx);
         self.attributes_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {

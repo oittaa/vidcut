@@ -416,6 +416,7 @@ The bar and the Jobs button:
   - `keyframes::split` adds a key between two keys. On a curved part, it cuts the Bezier curve at the key, and the shape stays.
 - The Transitions tab (`transition_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Transition`) drops as `edit.dissolve` on an edit, and as `edit.transition` on a transition.
 - The Effects tab (`effect_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Effect`) drops as `effects.add` on the clip under the pointer.
+- The Effects Search window (`GuiPanel::EffectsSearch`, `Workspace::effects_search_window`) finds a card of `effect_browser::GROUPS` by its name or its group. It sends `effects.add` for the first clip of `Workspace::pictured_selection`.
 - A hovered card previews with `Handle::preview_free_title`: the core adds the title at the playhead to its copy of the project (`FreeTitle`).
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.

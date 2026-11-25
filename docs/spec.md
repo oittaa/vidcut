@@ -1970,6 +1970,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
+  - Shift+Space opens the Effects Search window on the Cut, Edit, Color and Fairlight pages (p. 1144). A click on an effect there adds it to the selected clip.
+  - vidcut: Effects Search finds an effect by its name or its group, as the search of the Effects tab does (p. 1144). The names that start with the text come first.
+  - vidcut: a click on an effect adds it to the first selected clip with a picture, as the double-click does. Then the window closes.
+  - vidcut: Up and Down pick an effect, and Return adds it.
+  - vidcut: with no selected clip that has a picture, the window shows a warning and adds nothing.
+  - vidcut: on the Effects page, Shift+Space opens the Select Tool window, and Effects Search does not open.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
   - vidcut: `effects.add` refuses a generator. A drag of a card onto a generator does nothing, and the double-click and Add to Selected Clips skip it.
 - **Inspector** (vidcut, X70):
