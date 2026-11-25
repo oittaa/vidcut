@@ -31,6 +31,10 @@ pub struct RenderPlan {
     /// The ducking of audio lanes (decision D76).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ducking: Vec<Ducking>,
+    /// The tracks whose lanes are mixed together before the plan's mix,
+    /// for their equalizers. Left out when no track has one heard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buses: Vec<Bus>,
     /// Timeline range this plan renders, `[start, end)`.
     pub range: (i64, i64),
     /// A name for the output (per-clip exports: the clip's name).
@@ -80,6 +84,17 @@ fn colors_in(p: &Project, plan: &RenderPlan) -> Option<Hdr> {
         crate::export::color::PictureKind { hdr, depth: 0 }
     });
     share.mostly_hdr().then(|| share.transfer())
+}
+
+/// A track's lanes, mixed before the plan's mix, and what the mix of them
+/// goes through, in order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Bus {
+    /// The lanes of the plan's `audio` that it mixes: its track's.
+    pub lanes: Vec<usize>,
+    /// The equalizer of its track, then those of the tracks that hold it
+    /// in compound clips.
+    pub equalizers: Vec<crate::model::TrackEqualizer>,
 }
 
 /// A ducked track's lanes, and the sounds that dip them.
@@ -2293,9 +2308,11 @@ struct Inner {
     nests: Vec<Nest>,
     shown: Shown,
     fades: Vec<Fading>,
+    equalizers: Vec<crate::model::TrackEqualizer>,
 }
 
 type Within = Vec<Inner>;
+type PlannedAudio = (Vec<Vec<AudioPiece>>, Vec<LaneTrack>, Vec<Bus>);
 
 pub const NESTED: usize = 8;
 
@@ -2628,6 +2645,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             nests: vec![Nest::default(); t.clips.len()],
             shown: EVERY_FRAME,
             fades: Vec::new(),
+            equalizers: Vec::new(),
         })
         .collect();
     let mut opened = 0;
@@ -2748,12 +2766,20 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         },
                     };
                     let fades: Vec<Fading> = w.fades.iter().chain(&fading).copied().collect();
+                    let equalizers = t
+                        .equalizer
+                        .iter()
+                        .filter(|e| e.heard())
+                        .chain(&w.equalizers)
+                        .cloned()
+                        .collect();
                     inner.push((
                         v,
                         Inner {
                             nests,
                             shown,
                             fades,
+                            equalizers,
                         },
                     ));
                 }
@@ -2763,6 +2789,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 nests: host_within,
                 shown: w.shown,
                 fades: w.fades.clone(),
+                equalizers: w.equalizers.clone(),
             });
             for (v, chains) in inner {
                 tracks.push(v);
@@ -3362,7 +3389,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     };
     let s = &p.flat_settings();
     let video = planned_video(p, within, (a, b))?;
-    let (audio, lanes) = planned_audio(p, within, (a, b))?;
+    let (audio, lanes, buses) = planned_audio(p, within, (a, b))?;
     let ducking = crate::duck::planned(p, &lanes, a, b);
     let plan = RenderPlan {
         fps: s.fps,
@@ -3374,6 +3401,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         video,
         audio,
         ducking,
+        buses,
         range: (a, b),
         name: "timeline".into(),
         colors: None,
@@ -3904,11 +3932,7 @@ impl<'a> Span<'a> {
     }
 }
 
-fn planned_audio(
-    p: &Project,
-    within: Option<&Within>,
-    (a, b): (i64, i64),
-) -> Result<(Vec<Vec<AudioPiece>>, Vec<LaneTrack>)> {
+fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Result<PlannedAudio> {
     let pool = p.pool();
     let s = &p.flat_settings();
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
@@ -3916,6 +3940,7 @@ fn planned_audio(
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
     let mut lanes = Vec::new();
+    let mut buses = Vec::new();
     for (ti, track) in p.tracks.iter().enumerate() {
         if !track.in_mix(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
@@ -4017,6 +4042,7 @@ fn planned_audio(
                 *t = y;
             }
         }
+        let first_lane = audio.len();
         for (mut lane, t) in two {
             push_audio(
                 &mut lane,
@@ -4035,9 +4061,22 @@ fn planned_audio(
                 });
             }
         }
+        let equalizers: Vec<_> = track
+            .equalizer
+            .iter()
+            .filter(|e| e.heard())
+            .chain(held.map_or(&[][..], |i| i.equalizers.as_slice()))
+            .cloned()
+            .collect();
+        if !equalizers.is_empty() && audio.len() > first_lane {
+            buses.push(Bus {
+                lanes: (first_lane..audio.len()).collect(),
+                equalizers,
+            });
+        }
     }
 
-    Ok((audio, lanes))
+    Ok((audio, lanes, buses))
 }
 
 fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
@@ -4320,6 +4359,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.volume_db = 0.0;
         t.voice_isolation = None;
         t.duck = None;
+        t.equalizer = None;
         for x in &mut t.clips {
             x.enabled = true;
             if let Some(s) = x.audio.as_mut() {
@@ -4521,6 +4561,7 @@ fn tape_plan(
         video,
         audio: vec![lane],
         ducking: Vec::new(),
+        buses: Vec::new(),
         range: (0, frames),
         name: "tape".into(),
         colors: None,
@@ -4573,6 +4614,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
         video: vec![VideoPiece::black(end)],
         audio,
         ducking: Vec::new(),
+        buses: Vec::new(),
         range: (0, end),
         name: "places".into(),
         colors: None,

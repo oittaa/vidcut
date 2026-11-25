@@ -1144,6 +1144,9 @@ fn export_with(
         if let Some(d) = &t.duck {
             meta["duck"] = json!(d);
         }
+        if let Some(e) = &t.equalizer {
+            meta["equalizer"] = json!(e);
+        }
         if !t.render_cache {
             meta["render_cache"] = json!(false);
         }
@@ -1823,6 +1826,7 @@ pub struct ImportedTrack {
     pub volume_db: f64,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub duck: Option<crate::model::Duck>,
+    pub equalizer: Option<crate::model::TrackEqualizer>,
     pub video_enabled: bool,
     pub render_cache: bool,
     pub name: Option<String>,
@@ -1847,6 +1851,9 @@ impl ImportedTrack {
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
             voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
             duck: serde_json::from_value(meta["duck"].clone()).ok(),
+            equalizer: serde_json::from_value(meta["equalizer"].clone())
+                .ok()
+                .filter(|e| crate::equalizer::track::problem(e).is_none()),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             render_cache: meta["render_cache"].as_bool().unwrap_or(true),
             name: match meta.get("name") {
@@ -3035,12 +3042,17 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     })
 }
 
-pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+fn track_kept(
+    p: &Project,
+    span: Option<(i64, i64)>,
+    what: &str,
+    heard: fn(&crate::model::Track) -> bool,
+) -> Option<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let named: Vec<String> = p
         .tracks
         .iter()
-        .filter(|t| t.duck.as_ref().is_some_and(|d| d.on))
+        .filter(|t| heard(t))
         .filter(|t| {
             t.clips
                 .iter()
@@ -3050,9 +3062,21 @@ pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> 
         .collect();
     (!named.is_empty()).then(|| {
         format!(
-            "Ducking stays in vidcut's own metadata, so other editors won't hear it: {}",
+            "{what} stays in vidcut's own metadata, so other editors won't hear it: {}",
             named.join(", ")
         )
+    })
+}
+
+pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "Ducking", |t| {
+        t.duck.as_ref().is_some_and(|d| d.on)
+    })
+}
+
+pub fn unheard_track_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "The track equalizer", |t| {
+        t.equalizer.as_ref().is_some_and(|e| e.heard())
     })
 }
 

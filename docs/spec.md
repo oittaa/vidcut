@@ -4931,6 +4931,77 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The line is what the ducking takes from the track.
     - Both use one dB scale, from 0 dB at the top.
     - With Detect at Sound level, a second line shows the threshold.
+- **Track equalizer** (pp. 3938, 3949–3952):
+  - Each channel strip of the Mixer has an equalizer of six bands. A small graph on the strip shows its curve (p. 3949).
+  - The manual says that the small graph bypasses the equalizer, and opens its window with a double click (p. 3949).
+  - The equalizer comes after the FX and the Dynamics, and before the pan and the fader (p. 3938).
+  - The window has a switch, a reset button, the Equalizer Type, a preset menu and a Gain fader after the bands (p. 3950).
+  - The Equalizer Type is Earth, the native curve and the default, or Air, Ice or Fire, the curves of three classic desks (p. 3950).
+  - The graph has a numbered handle for each band that is on. A drag on a handle changes its frequency and gain (p. 3950).
+  - Bands 1 and 6 are off by default (p. 3951):
+    - Band 1 has Low Shelf, Bell, High Shelf and High Pass. Band 6 has Low Pass, Low Shelf, Bell and High Shelf.
+    - The pass filters have slopes from 6 to 24 dB per octave.
+  - Bands 2 to 5 are on by default. They have Low Shelf, Bell, Notch and High Shelf (p. 3951).
+  - The L, ML, MH and H buttons keep the frequency of a band in one range (p. 3952).
+  - The gain goes from −20 to 20 dB. Only the Bell and the shelves use it (pp. 3951–3952).
+  - The Q goes from 0.3 to 10.3. A Bell uses it. With the Type Fire, the other filters use it too (p. 3952).
+  - The Fairlight page of Resolve Studio 21.2 gives these values (measured):
+    - Band 1 is a High Pass at 70 Hz, and band 6 is a Low Pass at 22000 Hz. Both have the slope 12 of 6, 12, 18 and 24.
+    - Band 2 is a Low Shelf at 118 Hz, and band 5 is a High Shelf at 6048 Hz. Both have the Q 2.3.
+    - Bands 3 and 4 are Bell filters at 240 and 1223 Hz with the Q 1.1.
+    - The window shows a frequency of 1000 Hz or more in kHz, with one decimal. Thus 1223 Hz shows as 1.2K.
+    - The ranges are L 30 to 399 Hz, ML 100 to 1500 Hz, MH 450 to 8000 Hz and H 1400 to 22000 Hz.
+    - A typed frequency goes from 20 to 22000 Hz. Outside the range of its band, it moves the band to the range that holds it.
+    - A typed gain or Q outside its range goes to the nearest limit.
+    - Earth, Air and Ice show no Q for a shelf. Fire shows it. A Notch shows no gain and no Q.
+    - The strip of a track shows FX, DY and EQ in this order.
+  - A preset file of the window keeps the Q as a whole step n from 15 to 164 (measured):
+    - The window shows (n − 10) / 15, with one decimal.
+    - A new Bell has the step 26, and a new shelf has the step 45.
+    - A typed Q goes to a near step. The typed values 0.5, 1.1 and 4.0 gave the steps 18, 26 and 70.
+  - Renders of white noise at 48 kHz give these filters, to −150 dB (measured):
+    - Each filter is a biquad filter of the Audio EQ Cookbook. Its frequency is prewarped as in the Cookbook.
+    - A Bell has the typed gain times 1 with Earth and Air, 10/9 with Ice and 50/37 with Fire.
+    - The width w of a Bell is n / 30, or n / 24 with Ice.
+    - Let x be π times the frequency, divided by the sample rate.
+    - The Cookbook Q of the Bell is then tan(x) / (2 (tan(x) − tan(x (1 − 1 / (2w))))). Thus the Q is w at low frequencies.
+    - A Notch is the same with all four Types. It is a Bell of width 30 that cuts to 1/20 of the level (−26.0 dB).
+    - A Low Shelf has two zeros at its frequency. Its two poles are at its frequency divided by the square root of its gain.
+    - A High Shelf has two zeros at its frequency, and two poles at its frequency times the square root of its gain.
+    - A cut of a shelf is the inverse of the boost of the same size.
+    - The zeros and the poles of a shelf have the same Q:
+      - Earth: Q 0.707 and the typed gain.
+      - Air: Q 0.5 and the typed gain. A High Shelf is at 7/8 of the typed frequency.
+      - Ice: Q 0.5 and 20/17 of the typed gain. A Low Shelf is at 1.15 times the typed frequency, and a High Shelf at 1/1.15 times.
+      - Fire: Q 0.43 + 0.004667 n. The gain is 40/33 of the typed gain on a Low Shelf and 8/7 on a High Shelf.
+    - Earth, Air and Ice have one pass filter of the second order. They do not use the slope:
+      - Earth: Q 0.707 for a High Pass and for a Low Pass.
+      - Air: Q 0.85 for a High Pass and 0.4 for a Low Pass.
+      - Ice: Q 0.95 for a High Pass and 0.9 for a Low Pass.
+    - Fire uses the slope. Its High Pass has the Q 0.95, and its Low Pass has the Q 0.707:
+      - Each 12 dB per octave of the slope is one filter of the second order.
+      - The slopes 6 and 18 add one filter of the first order.
+    - The Gain fader of the window adds its gain at all frequencies.
+    - The renders have gains of −12 to 12 dB, and frequencies of 50 to 16000 Hz.
+  - An OTIO export of Resolve Studio 21.2 writes no track equalizer. Its tracks have only `Locked`, `SoloOn`, `Audio Type` and `Channels` (measured).
+  - vidcut: the bands start at the measured values. A new Bell has the Q 16/15, and a new shelf has 7/3. The window shows 1.1 and 2.3.
+  - vidcut: `track.set` sets `equalizer`. A track starts with none. `{}` turns on a flat one, and null takes it off with the usual values.
+  - vidcut: the strip of a track in the Mixer has a small graph of the curve. A click on it switches the equalizer on or off.
+  - vidcut: a double click on the small graph opens the Equalizer window. Its first click also switches the equalizer.
+  - vidcut: `gui.show` with `equalizer` and a `track` opens the Equalizer window of that track.
+  - vidcut: the window has the switch, the Type, the graph and a row for each band.
+    - A row has the switch, the filter, the frequency, the gain, the Q and the slope of a pass filter.
+    - The Q shows only where it changes the sound. The slope shows only with Fire.
+    - A change applies at once. A drag on a handle or on a field makes one change when it stops.
+    - Reset and Close are at the bottom of the window.
+  - vidcut uses the measured filters. The step of a Q is 15 times the Q, plus 10. It is not rounded to a whole step.
+  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-equalizer.md)):
+    - The Low Pass of Fire at the slopes 6 and 18 adds a filter of the first order, as its High Pass does.
+    - Other sample rates use the same rules.
+  - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
+  - vidcut: the equalizer of a track that holds a compound clip also works on the sound of the compound clip.
+  - vidcut: the meter of a track with an equalizer shows the sound after the equalizer.
+  - vidcut: an OTIO file keeps the track equalizer in the metadata of vidcut. Its export tells that other editors do not hear it.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
@@ -4985,10 +5056,6 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Band 1: Lo-Shelf, Bell, Notch, Hi-Shelf and Hi-Pass.
     - Bands 2 to 5: Lo-Shelf, Bell, Notch and Hi-Shelf.
     - Band 6: Lo-Pass, Lo-Shelf, Bell, Notch and Hi-Shelf.
-  - The equalizer of a mixer track has these values (pp. 3950–3952):
-    - The gain goes from −20 to 20 dB, and the Q from 0.3 to 10.3.
-    - Bands 1 and 6 are off by default, and bands 2 to 5 are on.
-    - The pass filters have slopes from 6 to 24 dB per octave.
   - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip.
   - On the Cut page of Resolve Studio 21.2, the Equalizer is a section of the Audio tab of the Inspector (measured):
     - It has a switch at the left of its name, a reset button, the graph and the bands 1 to 6.

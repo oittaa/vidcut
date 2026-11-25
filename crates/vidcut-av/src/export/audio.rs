@@ -4,7 +4,8 @@ use std::sync::Arc;
 use vidcut_core::compressor::Dynamics;
 use vidcut_core::equalizer::Filter;
 use vidcut_core::leveler::Leveler;
-use vidcut_core::render::{AudioPiece, Dip, Ducking, Fade};
+use vidcut_core::model::{Equalizer, TrackEqualizer};
+use vidcut_core::render::{AudioPiece, Bus, Dip, Ducking, Fade};
 
 use super::ahead::Ahead;
 use crate::denoise::Denoiser;
@@ -614,7 +615,7 @@ struct Lane {
     scratch: Vec<f32>,
     trim: f32,
     isolator: Option<Isolator>,
-    filter: Option<Filter>,
+    filter: Option<Filter<Equalizer>>,
     leveler: Option<Leveler>,
     dynamics: Option<Dynamics>,
     denoiser: Option<Denoiser>,
@@ -1046,8 +1047,40 @@ fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
     }
 }
 
+struct Mixed {
+    lanes: Vec<usize>,
+    filters: Vec<Filter<TrackEqualizer>>,
+    sum: Vec<f32>,
+}
+
+impl Mixed {
+    fn of(bus: &Bus, rate: u32, channels: u16) -> Self {
+        Self {
+            lanes: bus.lanes.clone(),
+            filters: bus
+                .equalizers
+                .iter()
+                .map(|e| Filter::new(e, rate, channels))
+                .collect(),
+            sum: Vec::new(),
+        }
+    }
+
+    fn same(&self, bus: &Bus) -> bool {
+        self.lanes == bus.lanes
+            && self.filters.len() == bus.equalizers.len()
+            && self
+                .filters
+                .iter()
+                .zip(&bus.equalizers)
+                .all(|(f, e)| f.settings() == e)
+    }
+}
+
 pub struct AudioMix {
     lanes: Vec<Lane>,
+    buses: Vec<Mixed>,
+    bus_of: Vec<Option<usize>>,
     rate: u32,
     channels: u16,
     gain: f32,
@@ -1058,6 +1091,8 @@ impl AudioMix {
         let declick = i64::from(rate) * i64::from(declick_ms) / 1000;
         Self {
             lanes: lanes.iter().map(|l| Lane::new(l, declick)).collect(),
+            buses: Vec::new(),
+            bus_of: vec![None; lanes.len()],
             rate,
             channels,
             gain: 1.0,
@@ -1067,6 +1102,36 @@ impl AudioMix {
     pub fn ducked(mut self, ducking: &[Ducking]) -> Self {
         self.duck(ducking);
         self
+    }
+
+    pub fn bused(mut self, buses: &[Bus]) -> Self {
+        self.bus(buses);
+        self
+    }
+
+    fn bus(&mut self, buses: &[Bus]) {
+        let mut old = std::mem::take(&mut self.buses);
+        self.buses = buses
+            .iter()
+            .map(|b| match old.iter().position(|m| m.same(b)) {
+                Some(i) => old.swap_remove(i),
+                None => Mixed::of(b, self.rate, self.channels),
+            })
+            .collect();
+        self.bus_of = vec![None; self.lanes.len()];
+        for (i, bus) in self.buses.iter().enumerate() {
+            for &lane in &bus.lanes {
+                if let Some(slot) = self.bus_of.get_mut(lane) {
+                    *slot = Some(i);
+                }
+            }
+        }
+    }
+
+    fn clear_buses(&mut self) {
+        for filter in self.buses.iter_mut().flat_map(|b| &mut b.filters) {
+            filter.clear();
+        }
     }
 
     fn duck(&mut self, ducking: &[Ducking]) {
@@ -1107,14 +1172,22 @@ impl AudioMix {
         for lane in &mut self.lanes {
             lane.seek(sample);
         }
+        self.clear_buses();
     }
 
     pub fn unheard(&mut self) -> Option<String> {
         self.lanes.iter_mut().find_map(|l| l.unheard.take())
     }
 
-    pub fn replan(&mut self, lanes: &[Vec<AudioPiece>], ducking: &[Ducking], sample: i64) {
+    pub fn replan(
+        &mut self,
+        lanes: &[Vec<AudioPiece>],
+        ducking: &[Ducking],
+        buses: &[Bus],
+        sample: i64,
+    ) {
         let declick = self.lanes.first().map_or(0, |l| l.declick);
+        let at = self.lanes.first().map(|l| l.at);
         let mut old: Vec<Option<SourceAudio>> =
             self.lanes.iter_mut().map(|l| l.source.take()).collect();
         self.lanes = lanes
@@ -1127,21 +1200,43 @@ impl AudioMix {
             })
             .collect();
         self.duck(ducking);
-        self.seek(sample);
+        self.bus(buses);
+        for lane in &mut self.lanes {
+            lane.seek(sample);
+        }
+        if at != Some(sample) {
+            self.clear_buses();
+        }
     }
 
-    pub fn read_metered(&mut self, n: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+    fn mix(&mut self, n: usize, mut peaks: Option<&mut [f32]>) -> Result<Vec<f32>> {
         let ch = usize::from(self.channels);
         let mut out = vec![0.0f32; n * ch];
-        let mut lane_out = vec![0.0f32; n * ch];
-        let mut peaks = vec![0.0f32; self.lanes.len() * ch];
-        for (lane, peaks) in self.lanes.iter_mut().zip(peaks.chunks_mut(ch)) {
-            lane_out.fill(0.0);
-            lane.mix_into(&mut lane_out, self.rate, self.channels)?;
-            for (frame, mixed) in lane_out.chunks(ch).zip(out.chunks_mut(ch)) {
-                for ((s, m), p) in frame.iter().zip(mixed.iter_mut()).zip(peaks.iter_mut()) {
-                    *m += s;
-                    *p = p.max(s.abs());
+        let mut lane_out = vec![0.0f32; if peaks.is_some() { n * ch } else { 0 }];
+        for bus in &mut self.buses {
+            bus.sum.clear();
+            bus.sum.resize(n * ch, 0.0);
+        }
+        for (i, lane) in self.lanes.iter_mut().enumerate() {
+            match (self.bus_of.get(i).copied().flatten(), peaks.as_deref_mut()) {
+                (Some(b), _) => lane.mix_into(&mut self.buses[b].sum, self.rate, self.channels)?,
+                (None, None) => lane.mix_into(&mut out, self.rate, self.channels)?,
+                (None, Some(peaks)) => {
+                    lane_out.fill(0.0);
+                    lane.mix_into(&mut lane_out, self.rate, self.channels)?;
+                    add_peaked(&lane_out, &mut out, &mut peaks[i * ch..(i + 1) * ch]);
+                }
+            }
+        }
+        for bus in &mut self.buses {
+            for filter in &mut bus.filters {
+                filter.run(&mut bus.sum);
+            }
+            let mut peak = vec![0.0f32; ch];
+            add_peaked(&bus.sum, &mut out, &mut peak);
+            if let Some(peaks) = peaks.as_deref_mut() {
+                for &lane in &bus.lanes {
+                    peaks[lane * ch..(lane + 1) * ch].copy_from_slice(&peak);
                 }
             }
         }
@@ -1150,20 +1245,27 @@ impl AudioMix {
                 *s *= self.gain;
             }
         }
+        Ok(out)
+    }
+
+    pub fn read_metered(&mut self, n: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+        let mut peaks = vec![0.0f32; self.lanes.len() * usize::from(self.channels)];
+        let out = self.mix(n, Some(&mut peaks))?;
         Ok((out, peaks))
     }
 
     pub fn read(&mut self, n: usize) -> Result<Vec<f32>> {
-        let mut out = vec![0.0f32; n * usize::from(self.channels)];
-        for lane in &mut self.lanes {
-            lane.mix_into(&mut out, self.rate, self.channels)?;
+        self.mix(n, None)
+    }
+}
+
+fn add_peaked(from: &[f32], into: &mut [f32], peaks: &mut [f32]) {
+    let ch = peaks.len().max(1);
+    for (frame, mixed) in from.chunks(ch).zip(into.chunks_mut(ch)) {
+        for ((s, m), p) in frame.iter().zip(mixed.iter_mut()).zip(peaks.iter_mut()) {
+            *m += s;
+            *p = p.max(s.abs());
         }
-        if self.gain != 1.0 {
-            for s in &mut out {
-                *s *= self.gain;
-            }
-        }
-        Ok(out)
     }
 }
 

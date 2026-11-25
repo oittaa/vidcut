@@ -1707,7 +1707,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation, ducking, equalizer). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1746,6 +1746,16 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         duck: Option<Option<DuckSet>>,
+        /// The track's equalizer: each field given replaces its own. A
+        /// track starts with none, and its sound plays as with the
+        /// equalizer off. `{}` turns it on, flat. null takes it off with
+        /// the usual values.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        equalizer: Option<Option<TrackEqualizerSet>>,
         /// Download what this computer doesn't have yet: Voice Isolation's
         /// model, or the speech detector of ducking by speech, each checked
         /// against its SHA-256. Without it, a missing file is an error that
@@ -4864,10 +4874,16 @@ pub enum Request {
     /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
     /// Dynamic Zoom, Color and their buttons, `title_text` (the text of the
     /// selected title, or of the topmost title at the playhead, to edit in
-    /// place in the viewer), or `select_tool` (a tool to add on the effects
-    /// page). Answers what `gui.state` does.
+    /// place in the viewer), `select_tool` (a tool to add on the effects
+    /// page), or `equalizer` (the Equalizer window of `track`). Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.show")]
-    GuiShow { panel: GuiPanel },
+    GuiShow {
+        panel: GuiPanel,
+        /// The track of the `equalizer` window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<String>,
+    },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
@@ -6523,6 +6539,9 @@ pub enum GuiPanel {
     /// The Effects Search window: it finds an effect by its name or its group,
     /// and adds it to the first selected clip with a picture.
     EffectsSearch,
+    /// The Equalizer window of a track with sound: the switch, the Type,
+    /// the curve and the bands of its equalizer.
+    Equalizer,
 }
 
 /// Media tab sort orders.
@@ -8008,22 +8027,56 @@ pub struct EqBandSet {
     /// On or off. Off keeps its values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
-    /// Its filter. Band 1 has `lo_shelf`, `bell`, `notch`, `hi_shelf` and
-    /// `hi_pass`. Band 6 has `lo_pass`, `lo_shelf`, `bell`, `notch` and
-    /// `hi_shelf`. Bands 2 to 5 have `lo_shelf`, `bell`, `notch` and
-    /// `hi_shelf`.
+    /// Its filter. On a clip, band 1 has `lo_shelf`, `bell`, `notch`,
+    /// `hi_shelf` and `hi_pass`, and band 6 has `lo_pass`, `lo_shelf`,
+    /// `bell`, `notch` and `hi_shelf`. On a track, band 1 has `lo_shelf`,
+    /// `bell`, `hi_shelf` and `hi_pass`, and band 6 has `lo_pass`,
+    /// `lo_shelf`, `bell` and `hi_shelf`. Bands 2 to 5 have `lo_shelf`,
+    /// `bell`, `notch` and `hi_shelf`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<crate::model::EqKind>,
     /// Its frequency in Hz, from 20 to 22000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freq: Option<f64>,
-    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
-    /// `hi_shelf` use it.
+    /// Its gain in dB: on a clip from -70 to 24, on a track from -20 to
+    /// 20. Only `bell`, `lo_shelf` and `hi_shelf` use it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain: Option<f64>,
-    /// Its width, from 0.3 to 100. Only `bell` uses it.
+    /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// `bell` uses it, and on a track of the `fire` type the shelves too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub q: Option<f64>,
+}
+
+/// A change to a track's equalizer: each field given replaces its own, and
+/// the rest stay as they are. A new one is flat, of the `earth` type, and
+/// on unless `on` is false. Band 1 is a `hi_pass` at 70 Hz and band 6 a
+/// `lo_pass` at 22000 Hz, both off, with slopes of 12 dB per octave. Band 2
+/// is a `lo_shelf` at 118 Hz, bands 3 and 4 are `bell` filters at 240 and
+/// 1223 Hz with Q 16/15, and band 5 is a `hi_shelf` at 6048 Hz. The shelves
+/// have Q 7/3.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackEqualizerSet {
+    /// The switch. Off keeps the bands, and the sound plays without them.
+    /// On brings them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The response curve of all the bands: `earth`, `air`, `ice` or
+    /// `fire`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<crate::model::EqType>,
+    /// The bands to change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bands: Vec<EqBandSet>,
+    /// The slope of band 1 as a `hi_pass` filter, in dB per octave: 6,
+    /// 12, 18 or 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hi_pass_slope: Option<u32>,
+    /// The slope of band 6 as a `lo_pass` filter, in dB per octave: 6,
+    /// 12, 18 or 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lo_pass_slope: Option<u32>,
 }
 
 fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -8692,6 +8745,7 @@ mod tests {
             request,
             Request::GuiShow {
                 panel: GuiPanel::Keyframes,
+                track: None,
             }
         );
     }

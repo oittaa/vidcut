@@ -184,6 +184,7 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
                 }],
                 audio: Vec::new(),
                 ducking: Vec::new(),
+                buses: Vec::new(),
                 range: (0, 1),
                 name: "still".into(),
                 colors: vidcut_core::render::timeline_colors(p),

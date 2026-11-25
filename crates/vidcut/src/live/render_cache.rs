@@ -777,6 +777,7 @@ mod tests {
             video: vec![VideoPiece::black(frames)],
             audio: Vec::new(),
             ducking: Vec::new(),
+            buses: Vec::new(),
             range: (0, frames),
             name: "plan".into(),
             colors: None,
