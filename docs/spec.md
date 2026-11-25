@@ -744,10 +744,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Measured: 10-bit has a line each 128, 12-bit each 512, Percentage each 10, and mV each 100.
   - Measured: HDR has lines at 0, 1, 10, 100, 1000 and 10000 nits on the PQ curve.
   - Measured: HDR also has dashed lines with no label between those lines.
-    - The figure on p. 3092 shows them at 26, 203 and 2000 nits, to the precision of the figure. vidcut draws them there.
-    - The exact nits are not measured in Resolve.
-  - On an HLG timeline, HDR uses the nits of the HLG curve. This is not measured in Resolve.
-    - vidcut draws no dashed lines on an HLG timeline.
+    - Measured: the dashed lines are at 26, 203 and 2000 nits. The figure on p. 3092 shows them there too.
+  - Measured: HDR is the same scale on a Rec.2100 ST2084, a Rec.2100 HLG and a Rec.709 timeline. It uses the PQ curve.
+    - The manual says that without color management, the HDR scale always shows HDR levels (p. 256).
   - The same menu has Video Level Scopes and Data Level Scopes (p. 3095). Data Level Scopes is the default (measured).
     - Video Level Scopes changes only what the scopes show. The monitor and the export do not change (p. 3095).
     - The figure on p. 3095 shows full-range white at code 940 of the 10-bit scale with Video Level Scopes.
