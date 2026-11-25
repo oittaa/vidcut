@@ -728,8 +728,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - It has the modes RGB and YRGB (p. 3104). Waveform Scale Style also sets its scale (p. 3093).
     - vidcut: it has one band for each channel, from top to bottom. Each band fills the area under its curve in its color.
     - vidcut: the labels of the scale are at the top. Video Level Scopes moves its values as in the Waveform.
-    - vidcut: a bin with four times the mean count fills its band. Resolve's Gain slider sets the height (p. 3104).
-    - vidcut: Histogram Options in the scopes menu sets the mode. RGB is the default. The default of Resolve is not measured.
+    - The height of a bin is linear in its share of the pixels. At the default Gain, a bin with 1/64 of the pixels fills its band (measured in Resolve Studio 21.2).
+    - A taller bin is cut at the top of its band. The Gain slider sets the height (p. 3104).
+    - vidcut: a bin is one column of the scope. The count of bins in Resolve is not measured.
+    - RGB is the default (measured). vidcut: Histogram Options in the scopes menu sets the mode.
   - The CIE Chromaticity scope plots the chromaticity of the picture in a CIE 1931 xy graph or a CIE 1976 uv graph (pp. 3099–3100, 3104).
     - It shows the horseshoe of the visible colors, the black body locus, a triangle of the gamut and its white point (pp. 3099–3100).
     - A label names the gamut, with the coordinates of its red, green, blue and white (p. 3099).

@@ -25,7 +25,7 @@ const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
 
-const HISTOGRAM_PEAK: u64 = 4;
+const HISTOGRAM_SHARE: u64 = 64;
 
 const PARAMS: usize = 1040;
 
@@ -489,7 +489,7 @@ fn params(
         Scope::Vectorscope | Scope::Chromaticity => size.0.min(size.1),
     };
     let full = match scope {
-        Scope::Histogram => pixels * HISTOGRAM_PEAK / u64::from(columns.max(1)),
+        Scope::Histogram => pixels / HISTOGRAM_SHARE,
         _ => pixels / u64::from(columns.max(1)) / FULL_AT,
     }
     .max(1);
