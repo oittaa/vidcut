@@ -2203,7 +2203,7 @@ fn upright_block(
     let (w, h) = (f64::from(width), f64::from(height));
     let zoom = block.zoom;
     let pixel = h / f64::from(timeline.max(1));
-    let exact = h * t.text_fraction() * zoom;
+    let exact = h * t.text_fraction(timeline) * zoom;
     let drawn = match t.kind {
         TitleKind::Scroll => exact,
         TitleKind::Text | TitleKind::LowerThird => Title::whole_size(exact, pixel * zoom),
@@ -2230,7 +2230,7 @@ fn upright_block(
         }),
         tracking: t.style.tracking.unwrap_or(0.0) as f32,
         case: t.style.case.unwrap_or_default(),
-        wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
+        wrap: ((w * Title::SAFE * zoom).max(exact) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,
             TitleAlign::Middle => Align::Center,
