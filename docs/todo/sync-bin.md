@@ -47,6 +47,8 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - The Cinema Viewer with P.
 - Record how a cut chooses an angle.
 - Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.
+  - `tests/media-manifest.toml` has three phones at one event: `jiku-gt090912-phone0`, `-phone2` and `-phone3`.
+  - The offsets of the phones are in [JikuMVD-SynchronizationGroundTruth](https://github.com/protyposis/JikuMVD-SynchronizationGroundTruth).
 - A marker is the sync point when the user sets one.
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
@@ -55,3 +57,4 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - Several selected pool items: one try placed one file of two, while the source viewer held that file (measured.md, T1).
   - The playhead on a new track with the Timeline viewer on: one try stopped at the clip's end, past the old timeline end (measured.md, T1).
 - Measure which file tags give the camera name, with files from real cameras. Then `media.add` reads the name.
+  - `tests/media-manifest.toml` has original files of three cameras: `canon-xfavc-c50`, `arriraw-alexa-mini` and `gopro-hero8`.
