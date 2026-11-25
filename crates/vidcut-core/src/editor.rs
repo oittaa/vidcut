@@ -841,9 +841,6 @@ impl Editor {
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
             _ => {}
         }
-        if request.in_queue() {
-            return self.queue(&request, dry_run);
-        }
         let mut working = self.project.clone();
         let mut parts = Vec::new();
         let result = match &request {
@@ -1268,24 +1265,6 @@ impl Editor {
             "the undo step makes another project as JSON"
         );
         Ok((project, history, moved))
-    }
-
-    fn queue(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
-        let mut working = self.project.clone();
-        let result = ops::render::change(&mut working, request)?;
-        let changes = diff(&self.project, &working);
-        if !dry_run {
-            working.rev = self.project.rev + 1;
-            self.project = working;
-        }
-        Ok(Response {
-            rev: self.project.rev,
-            changes,
-            result,
-            dry_run,
-            via: String::new(),
-            warnings: Vec::new(),
-        })
     }
 
     fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {
@@ -6217,6 +6196,7 @@ fn mutate(
             });
             json!({ "media": media, "stream": stream, "start": start, "end": end, "person": person })
         }
+        queued if queued.in_queue() => ops::render::change(p, queued)?,
         other => {
             return Err(Error::internal(format!(
                 "{} is not a mutation",
