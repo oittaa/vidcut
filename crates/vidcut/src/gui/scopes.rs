@@ -2,7 +2,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2
 use eframe::emath::GuiRounding;
 use serde_json::json;
 use vidcut_av::screen::scope::marks;
-use vidcut_core::preferences::{Scope, ScopeScale};
+use vidcut_core::preferences::{ParadeMode, Scope, ScopeScale, WaveformMode};
 
 use super::theme;
 use super::workspace::Workspace;
@@ -57,6 +57,37 @@ impl Workspace {
                 self.send("viewer.scopes", json!({ field(scope): on }));
             }
         }
+        ui.separator();
+        ui.menu_button("Waveform Options", |ui| {
+            let now = self.snap.scopes.waveform_mode;
+            for mode in WaveformMode::ALL {
+                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
+                    self.send("viewer.scopes", json!({ "waveform_mode": mode }));
+                }
+            }
+            ui.separator();
+            let s = self.snap.scopes;
+            ui.add_enabled_ui(now == WaveformMode::Rgb, |ui| {
+                for (name, key, on) in [
+                    ("R", "waveform_red", s.waveform_red),
+                    ("G", "waveform_green", s.waveform_green),
+                    ("B", "waveform_blue", s.waveform_blue),
+                ] {
+                    let mut on = on;
+                    if ui.checkbox(&mut on, name).clicked() {
+                        self.send("viewer.scopes", json!({ key: on }));
+                    }
+                }
+            });
+        });
+        ui.menu_button("Parade Options", |ui| {
+            let now = self.snap.scopes.parade_mode;
+            for mode in ParadeMode::ALL {
+                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
+                    self.send("viewer.scopes", json!({ "parade_mode": mode }));
+                }
+            }
+        });
         ui.menu_button("Waveform Scale Style", |ui| {
             let now = self.snap.scopes.scale;
             for scale in ScopeScale::ALL {
