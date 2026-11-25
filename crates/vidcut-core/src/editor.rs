@@ -8321,8 +8321,9 @@ fn close_up_look(p: &Project, clip: &Clip) -> Option<(Media, Look, [f64; 4])> {
     let sar = (v.sar[0], v.sar[1]);
     let frame = (p.width(), p.height());
     let fit = crate::place::mapped(p.scaling(), (v.width, v.height), sar, v.rotation, frame);
-    let ((first, _), rate) = ops::motion::file_frames(p, clip);
-    let look = subject_look(&media, rate, (first, first + 1));
+    let clock = crate::render::FileClock::of(p, clip);
+    let first = clock.file(clip.source_at(clip.start));
+    let look = subject_look(&media, clock.rate(p.fps().as_f64()), (first, first + 1));
     Some((media, look, fit))
 }
 

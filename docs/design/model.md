@@ -430,8 +430,9 @@ Ranges and resolution:
 
 - `ops::close_up::target` gives the copy: a clone of the clip. `Clip::move_head` moves its start, so it stays in sync.
 - The editor finds the faces on the first frame of the copy with `Env::subjects`. `ops::close_up::framing` turns them into the zoom and the position.
-  - The faces are fractions of the picture. `place::fitted` puts them in the frame.
+  - The faces are fractions of the picture. `place::mapped` puts them in the frame, by the timeline's `Scaling`.
   - In the app, `close_up_looks` gives the frame to the background step that runs the face model first, as for `motion.find`. The edit then reads the found faces from the cache.
+  - Before that, `Workspace::close_up` asks to download the face model when it is not there (`Workspace::ask`), as for `motion.find`. On a frame with no clip, it does not ask.
 - `ops::close_up` puts the copy with that framing on its track.
 - `track_above` gives the track, as for `place_on_top`.
 - The result is a `Placed`, as for Source Overwrite. `playhead_after_edit` seeks to its `playhead`.

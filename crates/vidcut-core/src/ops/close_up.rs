@@ -77,7 +77,7 @@ pub fn framing(faces: &[Found], fit: [f64; 4], [w, h]: [f64; 2], zoom: f64) -> F
     let ([x0, y0], [x1, y1]) = ([low(0), low(1)], [high(2), high(3)]);
     let zoom = zoom.min(1.0 / ((x1 - x0).max(y1 - y0) * ROOM)).max(1.0);
     let place = |lo: f64, hi: f64, size: f64| {
-        let limit = (zoom - 1.0) / 2.0 * size;
+        let limit = ((zoom - 1.0) / 2.0 * size).min(Picture::REACH);
         0.5 + (zoom * (0.5 - (lo + hi) / 2.0)).clamp(-limit, limit)
     };
     Framing {
@@ -91,11 +91,11 @@ pub fn close_up(p: &mut Project, mut clip: Clip, framing: Framing) -> Result<Pla
     let (start, end) = (clip.start, clip.end());
     clip.audio = None;
     clip.effects = None;
-    clip.picture = Some(Picture {
+    clip.picture = super::picture::checked(&Picture {
         zoom: Some([framing.zoom; 2]),
-        position: (framing.position != [0.5; 2]).then_some(framing.position),
+        position: Some(framing.position),
         ..Picture::default()
-    });
+    })?;
     let video = p.tracks_of(TrackKind::Video).len();
     let to = track_above(p, start, end);
     for _ in video..p.tracks_of(TrackKind::Video).len() {

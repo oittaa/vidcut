@@ -5022,7 +5022,7 @@ fn boxed(subject: Subject) -> bool {
 }
 
 fn with_model(method: &str, params: &mut Value) {
-    if method == "motion.find" || method == "motion.track" {
+    if matches!(method, "motion.find" | "motion.track" | "edit.close_up") {
         params["download"] = json!(true);
     }
 }
@@ -6227,7 +6227,11 @@ impl Workspace {
         }
     }
 
-    fn ask(&mut self, asks: Vec<(&'static str, Value)>, subject: Option<(Subject, FindModel)>) {
+    pub(super) fn ask(
+        &mut self,
+        asks: Vec<(&'static str, Value)>,
+        subject: Option<(Subject, FindModel)>,
+    ) {
         if model_needs(subject).is_empty() {
             for (method, params) in asks {
                 self.send(method, params);
