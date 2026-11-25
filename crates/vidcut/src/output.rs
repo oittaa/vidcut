@@ -678,7 +678,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             r.result["path"].as_str().unwrap_or_default()
         ),
         "keys.import" => println!(
-            "added key set {} ({})",
+            "added key set {} and put it in force ({})",
             r.result["imported"].as_str().unwrap_or_default(),
             r.result["path"].as_str().unwrap_or_default()
         ),

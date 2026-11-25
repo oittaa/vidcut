@@ -464,17 +464,27 @@ impl Rules<'_> {
         .unwrap_or(px * self.line())
     }
 
-    fn seated(&self, widest: f32, wrap: f32, lines: f32, above: f32) -> Option<[f32; 2]> {
+    fn seated(
+        &self,
+        ends: &[(f32, f32)],
+        (widest, wrap): (f32, f32),
+        lines: f32,
+        above: f32,
+    ) -> Option<[f32; 2]> {
         let Rules::Title(t) = self else {
             return None;
         };
         let s = t.seat?;
         let pixel = t.pixel;
+        let width = ends
+            .iter()
+            .map(|&(line, freed)| Title::block_width(f64::from(line), f64::from(freed), pixel))
+            .fold(0.0, f64::max);
         let left = t.title.seated_left(
             s.anchor[0],
             f64::from(s.middle),
-            f64::from(widest),
-            f64::from(wrap),
+            width,
+            (f64::from(widest), f64::from(wrap)),
             pixel,
         );
         let edge = ((f64::from(s.edge) / pixel).round() * pixel) as f32;
@@ -1612,7 +1622,19 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
         .filter(|r| Some(r.line_i) != last)
         .map(|r| r.line_height)
         .sum();
-    let seated = look.rules.seated(widest, look.wrap, lines, above);
+    let ends: Vec<(f32, f32)> = runs
+        .iter()
+        .map(|r| {
+            let own = freed.get(r.line_i).copied().unwrap_or(0.0);
+            let end = r
+                .glyphs
+                .last()
+                .filter(|g| g.end == r.text.len())
+                .map_or(0.0, |g| own * g.font_size);
+            (r.line_w, end)
+        })
+        .collect();
+    let seated = look.rules.seated(&ends, (widest, look.wrap), lines, above);
     let exact = seated.map(|at| at.map(|v| v - v.round()));
     let popped = runs.iter().find_map(|run| {
         let (x0, x1) = run
@@ -2203,7 +2225,7 @@ fn upright_block(
     let (w, h) = (f64::from(width), f64::from(height));
     let zoom = block.zoom;
     let pixel = h / f64::from(timeline.max(1));
-    let exact = h * t.text_fraction() * zoom;
+    let exact = h * t.text_fraction(timeline) * zoom;
     let drawn = match t.kind {
         TitleKind::Scroll => exact,
         TitleKind::Text | TitleKind::LowerThird => Title::whole_size(exact, pixel * zoom),
@@ -2230,7 +2252,7 @@ fn upright_block(
         }),
         tracking: t.style.tracking.unwrap_or(0.0) as f32,
         case: t.style.case.unwrap_or_default(),
-        wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
+        wrap: ((w * Title::SAFE * zoom).max(exact) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,
             TitleAlign::Middle => Align::Center,
