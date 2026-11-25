@@ -1158,6 +1158,7 @@ The draw:
   - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`. That picture is register 0.
   - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
   - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
+  - `merge_cover` stops the coverage of Normal and Screen at 1 when `Merging.clamp` is on.
   - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
   - With `Merging.replaces`, the result of `fs_merge` is the foreground that `merge_fore` reads, with no mode.
   - `made_into` draws an `Op::Make`. `fs_background` fills the register with the colors of a `Painting` as they are. The colors are not multiplied by their alpha. Thus a Merge adds them as premultiplied colors ([spec](../spec.md#the-background-tool)). The stops go to the shader in a storage buffer.

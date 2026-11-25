@@ -2317,6 +2317,10 @@ fn node_rows(
                 value(ui, acts, V::BurnIn, "Burn In");
             }
             value(ui, acts, V::Blend, "Blend");
+            if m.mode().has_operator() {
+                let clamp = (slot, "Clamp Coverage", m.clamps(), true);
+                check(ui, clamp, "clamp_coverage", acts);
+            }
             let edges = (
                 &MergeEdges::ALL[..],
                 MergeEdges::label as fn(MergeEdges) -> &'static str,

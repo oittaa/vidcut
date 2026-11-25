@@ -501,6 +501,10 @@ fn merge_bytes(m: &Merging, masked: bool) -> Vec<u8> {
         m.gain,
         m.burn,
         m.blend,
+        flag(m.clamp),
+        0.0,
+        0.0,
+        0.0,
     ])
 }
 
