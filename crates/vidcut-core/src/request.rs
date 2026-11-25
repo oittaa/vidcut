@@ -3107,18 +3107,14 @@ pub enum Request {
         /// for a quarter point.
         points: f64,
     },
-    /// Auto Color: balance the blacks and the whites of a clip from one
-    /// frame. The analysis reads that frame after the corrector, with its
-    /// Lift and Gain at their usual values. Each channel gets its black
-    /// point from the darkest pixels and its white point from the brightest.
-    /// The master gets the luma of these points. New Lift and Gain of red,
-    /// green, blue and the master map them to 0 and 1, in place of all
-    /// earlier Lift and Gain values. Undo takes them back.
-    ///
-    /// With `tool`, the result goes to the Auto Color tool of the corrector
-    /// in place of its Lift and Gain, and the tool turns on. `grade.set`
-    /// with `auto_color_on` turns the tool off and on. `grade.clear` with
-    /// `auto_color` removes it.
+    /// Auto Color: balance the color and exposure of a clip from one
+    /// frame. By default it uses the neural model on the frame entering the
+    /// corrector and writes its result to the Auto Color tool, leaving
+    /// Lift and Gain untouched. With `color.use_legacy_auto_color` on and
+    /// `tool` off, it uses the earlier Lift and Gain method on the frame
+    /// after the corrector with Lift and Gain reset. Undo takes the change
+    /// back. `grade.set` with `auto_color_on` turns the Auto Color tool off
+    /// and on, and `grade.clear` with `auto_color` removes it.
     #[serde(rename = "grade.auto_color")]
     GradeAutoColor {
         #[serde(default, skip_serializing_if = "Option::is_none")]

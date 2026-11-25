@@ -83,6 +83,10 @@ pub struct ColorPrefs {
     /// The thumbnails keep their picture while the timeline plays, and
     /// show the frame again when it stops. Default off.
     pub disable_thumbnail_refresh: bool,
+    /// Use the earlier Lift and Gain method on the Color page Auto
+    /// Color controls (`A` button, Color > Auto Color and scripts without
+    /// `tool`). Default off.
+    pub use_legacy_auto_color: bool,
 }
 
 impl Default for ColorPrefs {
@@ -93,6 +97,7 @@ impl Default for ColorPrefs {
             switching_clips: SwitchingClips::LastAdjusted,
             show_thumbnails: true,
             disable_thumbnail_refresh: false,
+            use_legacy_auto_color: false,
         }
     }
 }
@@ -128,6 +133,8 @@ pub struct ColorPrefsPatch {
     pub show_thumbnails: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_thumbnail_refresh: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_legacy_auto_color: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1412,6 +1419,7 @@ impl Preferences {
             c.show_thumbnails = x.show_thumbnails.unwrap_or(c.show_thumbnails);
             c.disable_thumbnail_refresh =
                 (x.disable_thumbnail_refresh).unwrap_or(c.disable_thumbnail_refresh);
+            c.use_legacy_auto_color = (x.use_legacy_auto_color).unwrap_or(c.use_legacy_auto_color);
         }
         if let Some(folders) = patch.luts.as_ref().and_then(|l| l.folders.as_ref()) {
             p.luts.folders = folders.clone();

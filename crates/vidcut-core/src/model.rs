@@ -5337,22 +5337,22 @@ pub struct Corrector {
     /// Where the Highlight range of the Log mode starts, below 1. Usual:
     /// 0.55.
     pub high_range: f64,
-    /// The Auto Color tool of the viewer Tools. Left out until that tool
-    /// runs on this corrector, and after its reset.
+    /// The Auto Color tool of the node or viewer Tools. Left out until
+    /// Auto Color runs on this corrector, and after its reset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_color: Option<AutoColor>,
 }
 
-/// The Auto Color tool of a corrector: a Lift and a Gain of its own, apart
-/// from the Lift and the Gain of the Primaries palette.
+/// The Auto Color tool of a corrector, with its own exposure, tone and
+/// white balance numbers, apart from the Primaries palette.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AutoColor {
     /// The tool changes the picture. Off, it keeps its values.
     pub on: bool,
-    /// Lift of red, green, blue and the master.
-    pub lift: [f64; 4],
-    /// Gain of red, green, blue and the master.
-    pub gain: [f64; 4],
+    /// Six exposure and tone numbers of the Auto Color tool.
+    pub exposure: [f64; 6],
+    /// Three white balance numbers of the Auto Color tool.
+    pub white: [f64; 3],
 }
 
 impl Default for Corrector {

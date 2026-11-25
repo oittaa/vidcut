@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::auto_color::Balance;
+use crate::auto_color::AutoResult;
 use crate::error::{Error, Result};
 use crate::model::{
     AutoColor, COMBINER_INPUTS, Clip, Corrector, DynamicsProfile, Grade, GradeKey, GradeLink,
@@ -237,6 +237,16 @@ pub fn corrector_checked(g: &Corrector) -> Result<()> {
         return Err(Error::invalid(
             "low_range must be above 0, below high_range, and high_range below 1",
         ));
+    }
+    if let Some(a) = &g.auto_color {
+        finite(&a.exposure, "auto_color.exposure")?;
+        finite(&a.white, "auto_color.white")?;
+        if a.exposure[2] <= 0.0 {
+            return Err(Error::invalid("auto_color gamma must be above 0"));
+        }
+        if a.white.iter().any(|&w| w <= 0.0) {
+            return Err(Error::invalid("auto_color white must be above 0"));
+        }
     }
     Ok(())
 }
@@ -1019,23 +1029,23 @@ pub fn printer(
 pub fn auto_color(
     p: &mut Project,
     of: &GradeOf,
-    (n, at, tool): (u32, Option<i64>, bool),
-    balance: Balance,
+    (n, at): (u32, Option<i64>),
+    result: AutoResult,
 ) -> Result<()> {
     let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
     let profile = p.settings.dynamics_profile;
     edited(p, of, |g| {
         auto_keyed(g, n, frame, profile);
-        changed(g, n, frame, |c| match tool {
-            true => Corrector {
+        changed(g, n, frame, |c| match result {
+            AutoResult::Neural(neural) => Corrector {
                 auto_color: Some(AutoColor {
                     on: true,
-                    lift: balance.lift,
-                    gain: balance.gain,
+                    exposure: neural.exposure,
+                    white: neural.white,
                 }),
                 ..c.clone()
             },
-            false => Corrector {
+            AutoResult::Legacy(balance) => Corrector {
                 lift: balance.lift,
                 gain: balance.gain,
                 ..c.clone()

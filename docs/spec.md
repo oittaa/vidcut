@@ -28,7 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
-- Auto Color, with the legacy method (§8.25, X174)
+- Auto Color, with neural network by default and Use Legacy Auto Color preference (§8.25)
 - stabilization of a clip of a video file (§8.27)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
@@ -4767,24 +4767,26 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - With Gain 2 and Lum Mix 0 on the same node, the result is 2 times the result of the tool, within 2.4e-7.
   - Color > Reset > Selected Node Grade removes the tool.
 - An OpenTimelineIO export holds no grade of a clip and nothing of Auto Color. The files before and after the A button are the same.
-- **vidcut** uses the legacy method above for each Auto Color ([X174](deviations.md#x174-auto-color-uses-the-legacy-method)).
+- **vidcut** matches these rules with its neural Auto Color network by default:
   - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
+  - The network predicts the six E and three W numbers of the Auto Color tool above. It runs on the GPU by default.
   - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
-    - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
-    - The Lift and Gain of that corrector are at their usual values.
+    - The analysis reads one frame of the clip alone, before that corrector.
     - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
     - Transitions do not change it. A clip or a track that is off still gives its frame.
-    - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does.
+    - By default, the result goes into the Auto Color tool of the node (`exposure` and `white`). The Primaries Lift and Gain stay.
+    - With Use Legacy Auto Color on (`color.use_legacy_auto_color`), the legacy method above runs instead and replaces Lift and Gain of the node.
+    - The legacy analysis reads the frame after the corrector with Lift and Gain at their usual values, while Offset stays.
   - The Color tool of the viewer Tools has a switch, an Auto Color button and Reset. They work on node 1.
     - The Color tool is greyed out on a title or a generator, which takes no grade.
-    - Auto Color puts the result into the Auto Color tool of the node (`grade.auto_color` with `tool`). The button does not stay lit.
-    - The tool is a Lift and a Gain of its own, with a Lum Mix of 100. The Lift and Gain of the node stay.
+    - Auto Color puts the neural result into the Auto Color tool (`grade.auto_color` with `tool`), even when Use Legacy Auto Color is on.
+    - The button does not stay lit. The Lift and Gain of the node stay.
     - The node shows the badge of the Auto Color tool.
     - The switch turns the tool off and on (`grade.set` with `auto_color_on`). Without the tool, the switch is greyed out.
     - Off, the tool keeps its values, and Auto Color and Reset are greyed out.
     - Reset removes the tool (`grade.clear` with `auto_color`). A reset of the whole node also removes it. A reset of the Primaries keeps it.
     - The Color button has a red dot while node 1 has the tool. The dot is white while the switch is off.
-    - The tool acts first, on the picture that comes into the node, as in Resolve. Its analysis reads that picture.
+    - The tool acts first, on the picture that comes into the node, in unclamped 32-bit float, as in Resolve.
   - Each run is one undo step. Redo gives it back.
   - The grade of the timeline has no Auto Color.
   - An OpenTimelineIO file of vidcut keeps the result in the vidcut metadata of the grade.

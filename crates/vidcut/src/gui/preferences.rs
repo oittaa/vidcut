@@ -1080,6 +1080,18 @@ fn color(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
                     });
             });
             ui.end_row();
+            let mut legacy = p["use_legacy_auto_color"] == true;
+            label(ui, "Auto Color");
+            if ui
+                .add_enabled(
+                    !busy,
+                    egui::Checkbox::new(&mut legacy, "Use Legacy Auto Color"),
+                )
+                .changed()
+            {
+                *patch = Some(json!({ "color": { "use_legacy_auto_color": legacy } }));
+            }
+            ui.end_row();
         });
         ui.add_space(10.0);
         ui.label(RichText::new("Printer Light Step Calibration").strong());
