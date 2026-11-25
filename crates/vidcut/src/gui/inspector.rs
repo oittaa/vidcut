@@ -2306,9 +2306,16 @@ fn node_rows(
                 let op = (m.operator(), MergeOperator::default());
                 choice_row(ui, (slot, "Operator", "operator"), op, ops, acts);
             }
-            value(ui, acts, V::SubtractiveAdditive, "Subtractive/Additive");
-            value(ui, acts, V::AlphaGain, "Alpha Gain");
-            value(ui, acts, V::BurnIn, "Burn In");
+            let normal = m.mode() == ApplyMode::Normal;
+            if normal {
+                value(ui, acts, V::SubtractiveAdditive, "Subtractive/Additive");
+                value(ui, acts, V::AlphaGain, "Alpha Gain");
+            } else {
+                value(ui, acts, V::AlphaGain, "Gain");
+            }
+            if normal && m.operator() == MergeOperator::Over {
+                value(ui, acts, V::BurnIn, "Burn In");
+            }
             value(ui, acts, V::Blend, "Blend");
             let edges = (
                 &MergeEdges::ALL[..],
