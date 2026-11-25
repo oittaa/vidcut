@@ -31,8 +31,8 @@ pub struct RenderPlan {
     /// The ducking of audio lanes (decision D76).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ducking: Vec<Ducking>,
-    /// The tracks whose lanes are mixed together before the plan's mix,
-    /// for their equalizers. Left out when no track has one heard.
+    /// The mix of each track with sound, before the plan's mix. Left out
+    /// when the plan has no sound.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub buses: Vec<Bus>,
     /// Timeline range this plan renders, `[start, end)`.
@@ -86,15 +86,26 @@ fn colors_in(p: &Project, plan: &RenderPlan) -> Option<Hdr> {
     share.mostly_hdr().then(|| share.transfer())
 }
 
-/// A track's lanes, mixed before the plan's mix, and what the mix of them
-/// goes through, in order.
+/// The mix of a track: its own lanes and the buses of the tracks inside its
+/// compound clips. The mix goes through the track's Dynamics, its
+/// equalizer and its fader, in that order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Bus {
-    /// The lanes of the plan's `audio` that it mixes: its track's.
+    /// The lanes of the plan's `audio` that it mixes: its track's own.
     pub lanes: Vec<usize>,
-    /// The equalizer of its track, then those of the tracks that hold it
-    /// in compound clips.
-    pub equalizers: Vec<crate::model::TrackEqualizer>,
+    /// The earlier bus that it is mixed into: that of the track that holds
+    /// it in a compound clip. Left out for a track of the timeline, which
+    /// goes to the plan's mix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<usize>,
+    /// The Dynamics of its track. Left out when they are not heard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<crate::model::TrackDynamics>,
+    /// The equalizer of its track. Left out when it is not heard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equalizer: Option<crate::model::TrackEqualizer>,
+    /// The fader of its track, in dB.
+    pub gain_db: f64,
 }
 
 /// A ducked track's lanes, and the sounds that dip them.
@@ -1228,7 +1239,7 @@ pub enum AudioPiece {
         leveler: Option<Box<crate::model::DialogueLeveler>>,
         /// Its clip's compressor, left out when it changes nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        compressor: Option<Box<crate::model::Compressor>>,
+        compressor: Option<Box<crate::model::ClipCompressor>>,
         /// Its clip's Noise Reduction, left out when it changes nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         noise_reduction: Option<Box<crate::model::NoiseReduction>>,
@@ -2308,7 +2319,7 @@ struct Inner {
     nests: Vec<Nest>,
     shown: Shown,
     fades: Vec<Fading>,
-    equalizers: Vec<crate::model::TrackEqualizer>,
+    host: Option<usize>,
 }
 
 type Within = Vec<Inner>;
@@ -2645,7 +2656,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             nests: vec![Nest::default(); t.clips.len()],
             shown: EVERY_FRAME,
             fades: Vec::new(),
-            equalizers: Vec::new(),
+            host: None,
         })
         .collect();
     let mut opened = 0;
@@ -2654,8 +2665,11 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             break;
         }
         let (mut tracks, mut placed) = (Vec::new(), Vec::new());
+        let mut moved = Vec::with_capacity(out.tracks.len());
         let fades = edge_fades(&out);
         for (t, w) in out.tracks.iter().zip(&within) {
+            let at = tracks.len();
+            moved.push(at);
             let edges = edges_on(&out, t);
             let (mut host, mut host_within) = (t.clone(), Vec::new());
             host.clips.clear();
@@ -2729,13 +2743,6 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.duck = None;
                     v.muted |= t.muted || (inner_solo && !n.solo);
                     v.solo = t.solo;
-                    v.volume_db = if crate::validate::fader_silent(v.volume_db)
-                        || crate::validate::fader_silent(t.volume_db)
-                    {
-                        -100.0
-                    } else {
-                        v.volume_db + t.volume_db
-                    };
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
                     let laid = inner_layout(&out, n, part);
@@ -2766,20 +2773,13 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         },
                     };
                     let fades: Vec<Fading> = w.fades.iter().chain(&fading).copied().collect();
-                    let equalizers = t
-                        .equalizer
-                        .iter()
-                        .filter(|e| e.heard())
-                        .chain(&w.equalizers)
-                        .cloned()
-                        .collect();
                     inner.push((
                         v,
                         Inner {
                             nests,
                             shown,
                             fades,
-                            equalizers,
+                            host: Some(at),
                         },
                     ));
                 }
@@ -2789,7 +2789,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 nests: host_within,
                 shown: w.shown,
                 fades: w.fades.clone(),
-                equalizers: w.equalizers.clone(),
+                host: w.host.map(|h| moved[h]),
             });
             for (v, chains) in inner {
                 tracks.push(v);
@@ -3941,11 +3941,17 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
     let mut audio = Vec::new();
     let mut lanes = Vec::new();
     let mut buses = Vec::new();
+    let mut bus_of = vec![None; p.tracks.len()];
     for (ti, track) in p.tracks.iter().enumerate() {
         if !track.in_mix(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
         }
         let held = within.and_then(|w| w.get(ti));
+        let chain = hosts(within, ti);
+        let silent_fader = chain
+            .iter()
+            .any(|&i| crate::validate::fader_silent(p.tracks[i].volume_db));
+        let root = chain.last().map_or(track, |&i| &p.tracks[i]);
         let window = held.map_or(EVERY_FRAME, |i| i.shown);
         let around = held.map_or(&[][..], |i| i.fades.as_slice());
         let fades = transitions::playing(p, track, true, |t| transitions::cross_fade(t).is_some());
@@ -4007,7 +4013,6 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                     for (x, y) in split_at_fades(c.runs(x, y), around) {
                         let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
                         if let AudioPiece::Source {
-                            gain_db,
                             silent,
                             joined,
                             fade: f2,
@@ -4016,8 +4021,7 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                             ..
                         } = &mut piece
                         {
-                            *gain_db += track.volume_db;
-                            *silent = crate::validate::fader_silent(track.volume_db);
+                            *silent = silent_fader;
                             *joined =
                                 x > start.max(a) && c.pace().steady(x - 1 - c.start) == Some(1);
                             *f2 = fade(f, x, falling).map(Box::new);
@@ -4057,26 +4061,54 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                 audio.push(lane);
                 lanes.push(LaneTrack {
                     track: track.id.clone(),
-                    volume_db: track.volume_db,
+                    volume_db: root.volume_db,
                 });
             }
         }
-        let equalizers: Vec<_> = track
-            .equalizer
-            .iter()
-            .filter(|e| e.heard())
-            .chain(held.map_or(&[][..], |i| i.equalizers.as_slice()))
-            .cloned()
-            .collect();
-        if !equalizers.is_empty() && audio.len() > first_lane {
-            buses.push(Bus {
-                lanes: (first_lane..audio.len()).collect(),
-                equalizers,
-            });
+        if audio.len() > first_lane {
+            let b = bus_for(p, within, ti, &mut buses, &mut bus_of);
+            buses[b].lanes.extend(first_lane..audio.len());
         }
     }
 
     Ok((audio, lanes, buses))
+}
+
+fn hosts(within: Option<&Within>, ti: usize) -> Vec<usize> {
+    let mut chain = vec![ti];
+    while let Some(h) = within
+        .and_then(|w| w.get(*chain.last().expect("one at least")))
+        .and_then(|i| i.host)
+    {
+        chain.push(h);
+    }
+    chain
+}
+
+fn bus_for(
+    p: &Project,
+    within: Option<&Within>,
+    ti: usize,
+    buses: &mut Vec<Bus>,
+    bus_of: &mut [Option<usize>],
+) -> usize {
+    if let Some(b) = bus_of[ti] {
+        return b;
+    }
+    let into = within
+        .and_then(|w| w.get(ti))
+        .and_then(|i| i.host)
+        .map(|h| bus_for(p, within, h, buses, bus_of));
+    let t = &p.tracks[ti];
+    buses.push(Bus {
+        lanes: Vec::new(),
+        into,
+        dynamics: t.dynamics.filter(crate::model::TrackDynamics::heard),
+        equalizer: t.equalizer.clone().filter(|e| e.heard()),
+        gain_db: t.volume_db,
+    });
+    bus_of[ti] = Some(buses.len() - 1);
+    buses.len() - 1
 }
 
 fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
@@ -4145,7 +4177,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
             .map(Box::new),
         compressor: audio
             .compressor
-            .filter(crate::model::Compressor::heard)
+            .filter(crate::model::ClipCompressor::heard)
             .map(Box::new),
         noise_reduction: audio
             .noise_reduction
@@ -4271,6 +4303,7 @@ fn alone(p: &Project, clip: &str, input: Option<&str>) -> Result<RenderPlan> {
     };
     let mut plan = flatten(&alone, from, to)?;
     plan.audio.clear();
+    plan.buses.clear();
     plan.colors = timeline_colors(p);
     Ok(plan)
 }
@@ -4359,6 +4392,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.volume_db = 0.0;
         t.voice_isolation = None;
         t.duck = None;
+        t.dynamics = None;
         t.equalizer = None;
         for x in &mut t.clips {
             x.enabled = true;

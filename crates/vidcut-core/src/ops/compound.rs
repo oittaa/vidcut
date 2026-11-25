@@ -2384,7 +2384,7 @@ mod tests {
     }
 
     #[test]
-    fn expanded_compound_adds_inner_and_outer_track_volume() {
+    fn expanded_compound_mixes_the_inner_track_into_the_outer_bus() {
         let mut f = Fixture::new(&[]);
         let mut info =
             crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
@@ -2398,14 +2398,12 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         f.ok(req("track.set", json!({"track": "A1", "volume_db": -3.0})));
         let plan = crate::render::flatten(f.editor.project(), 0, 10).unwrap();
-        let crate::render::AudioPiece::Source {
-            gain_db, silent, ..
-        } = &plan.audio[0][0]
-        else {
-            panic!("expected audio source");
-        };
-        assert!(!silent);
-        assert!((gain_db + 9.0).abs() < 1e-9);
+        let buses: Vec<_> = plan
+            .buses
+            .iter()
+            .map(|b| (b.lanes.clone(), b.into, b.gain_db))
+            .collect();
+        assert_eq!(buses, [(vec![], None, -3.0), (vec![0], Some(0), -6.0)]);
     }
 
     #[test]
@@ -2426,14 +2424,10 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         f.ok(req("track.set", json!({"track": "A1", "volume_db": 6.0})));
         let plan = crate::render::flatten(f.editor.project(), 0, 10).unwrap();
-        let crate::render::AudioPiece::Source {
-            gain_db, silent, ..
-        } = &plan.audio[0][0]
-        else {
+        let crate::render::AudioPiece::Source { silent, .. } = &plan.audio[0][0] else {
             panic!("expected audio source");
         };
         assert!(*silent);
-        assert!((gain_db + 100.0).abs() < 1e-9);
     }
 
     #[test]

@@ -809,6 +809,16 @@ Writing:
 - An OTIO file carries the `TrackEqualizer` in the `vidcut` metadata of its track.
 - [export](export.md#sound) tells how it plays.
 
+## Track Dynamics
+
+- A track can carry `TrackDynamics`. They hold `on`, an `Expander`, a `Compressor`, a `Limiter` and `makeup_db`.
+- `Expander` is an Expander or, with `gate`, a Gate.
+- The compressor of a clip is a `ClipCompressor`: a `Compressor` and the `makeup_db` of the clip.
+- `track.set` takes a `TrackDynamicsSet`. Its fields replace their own (`dynamics::patched`).
+- `dynamics::problem` is the check that `validate::violations` and the import of an OTIO file share.
+- An OTIO file carries the `TrackDynamics` in the `vidcut` metadata of its track.
+- [export](export.md#sound) tells how they play.
+
 ## Looks
 
 - Looks are named styles ([spec D71](../spec.md#12-decisions-on-gaps-and-contradictions)). They are not in the project.

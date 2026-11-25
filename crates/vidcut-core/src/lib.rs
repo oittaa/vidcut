@@ -9,6 +9,7 @@ pub mod describe;
 pub mod dirs;
 pub mod disk_cache;
 pub mod duck;
+pub mod dynamics;
 pub mod editor;
 pub mod effect_keys;
 pub mod equalizer;

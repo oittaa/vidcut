@@ -4702,6 +4702,7 @@ fn mutate(
             voice_isolation: None,
             voice_isolation_on: None,
             duck: None,
+            dynamics: None,
             equalizer: None,
             video_enabled: None,
             render_cache: None,
@@ -4756,6 +4757,7 @@ fn mutate(
             voice_isolation,
             voice_isolation_on,
             duck,
+            dynamics,
             equalizer,
             download,
             video_enabled,
@@ -4786,6 +4788,7 @@ fn mutate(
                 voice_isolation,
                 voice_isolation_on: *voice_isolation_on,
                 duck,
+                dynamics: dynamics.clone(),
                 equalizer: equalizer.clone(),
                 video_enabled: *video_enabled,
                 render_cache: *render_cache,
@@ -8131,6 +8134,7 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.render_cache = s.render_cache;
                 track.name = s.name.clone();
                 track.duck = s.duck.clone();
+                track.dynamics = s.dynamics;
                 track.equalizer = s.equalizer.clone();
             }
         }

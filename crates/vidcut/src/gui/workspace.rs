@@ -146,6 +146,7 @@ pub struct Workspace {
         Vec<vidcut_av::models::Need>,
     )>,
     pub(super) ducking: super::ducking::DuckingUi,
+    pub(super) track_dynamics: super::track_dynamics::TrackDynamicsUi,
     pub(super) track_equalizer: super::track_equalizer::TrackEqualizerUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
@@ -256,6 +257,7 @@ impl Workspace {
             isolation: Default::default(),
             models_asking: None,
             ducking: Default::default(),
+            track_dynamics: Default::default(),
             track_equalizer: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
@@ -322,7 +324,7 @@ impl Workspace {
             GuiPanel::ColorTool => self.show_color_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
             GuiPanel::SelectTool => self.open_select_tool(),
-            GuiPanel::Equalizer => {}
+            GuiPanel::Equalizer | GuiPanel::Dynamics => {}
         }
     }
 
@@ -353,6 +355,7 @@ impl Workspace {
                 }
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Equalizer(track) => self.open_track_equalizer(&track)?,
+                live::GuiChange::Dynamics(track) => self.open_track_dynamics(&track)?,
                 live::GuiChange::Close(panel) => self.close_panel(panel),
                 live::GuiChange::Page(Page::Effects | Page::Color | Page::Export)
                     if self.project().is_none() =>
@@ -445,6 +448,7 @@ impl Workspace {
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
             GuiPanel::SelectTool => self.close_select_tool(),
             GuiPanel::Equalizer => self.close_track_equalizer(),
+            GuiPanel::Dynamics => self.close_track_dynamics(),
         }
     }
 
@@ -493,6 +497,7 @@ impl Workspace {
             (GuiPanel::Tools, self.timeline.picture_grab.row),
             (GuiPanel::SelectTool, self.select_tool_open()),
             (GuiPanel::Equalizer, self.track_equalizer_open()),
+            (GuiPanel::Dynamics, self.track_dynamics_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
@@ -2265,6 +2270,7 @@ impl Workspace {
         self.models_prompt(&ctx);
         self.motion_prompt(&ctx);
         self.ducking_windows(&ctx);
+        self.track_dynamics_window(&ctx);
         self.track_equalizer_window(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);

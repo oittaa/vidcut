@@ -122,6 +122,7 @@ pub struct TrackProps {
     pub voice_isolation: Option<f64>,
     pub voice_isolation_on: Option<bool>,
     pub duck: Option<Option<crate::model::Duck>>,
+    pub dynamics: Option<Option<Box<crate::request::TrackDynamicsSet>>>,
     pub equalizer: Option<Option<crate::request::TrackEqualizerSet>>,
     pub video_enabled: Option<bool>,
     pub render_cache: Option<bool>,
@@ -136,6 +137,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(Some(d)) = &props.duck {
         crate::duck::checked(p, id, d)?;
+    }
+    if let Some(Some(set)) = &props.dynamics {
+        crate::dynamics::check(set)?;
     }
     if let Some(Some(set)) = &props.equalizer {
         crate::equalizer::track::check(set)?;
@@ -166,6 +170,12 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     );
     if let Some(d) = &props.duck {
         t.duck = d.clone();
+    }
+    if let Some(change) = &props.dynamics {
+        t.dynamics = change
+            .as_ref()
+            .map(|set| crate::dynamics::patched(t.dynamics.as_ref(), set))
+            .transpose()?;
     }
     if let Some(change) = &props.equalizer {
         t.equalizer = change

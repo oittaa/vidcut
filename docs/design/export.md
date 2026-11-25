@@ -451,7 +451,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - Each channel has its own noise profile, which starts at the first frame of the piece.
   - The profile of a bin follows the lowest level of that bin, and it rises slowly.
 - A piece has the `compressor` of its clip when it changes the sound.
-  - `Dynamics` runs after the equalizer and before the gain and the Pan. It adds no delay.
+  - `Dynamics::clip` runs after the equalizer and before the gain and the Pan. It adds no delay.
   - Each channel gets the same gain, from the highest peak of the channels.
 - A piece has the `leveler` of its clip when the switch and a process of its Dialogue Leveler are on.
   - `Leveler` reads ahead of the piece, as `Isolator` does, so the look ahead adds no delay.
@@ -460,14 +460,20 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 - A piece has the `equalizer` of its clip when it changes the sound.
   - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
   - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
-- A track with a heard equalizer gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track and the equalizers of their mix.
-  - The inner tracks of a compound clip get the equalizers of the tracks that hold it (`Inner`). The filters are linear, so each inner track can run them alone.
-  - `AudioMix::bused` mixes the lanes of each bus apart. A `Filter` for each equalizer runs on that mix. Then the bus goes into the mix of the plan.
-  - Why: one filter follows the sound of the track through its cross fades and its gaps.
-  - The lanes of a bus get its peaks after the equalizers, for the meters.
-  - A seek clears the filters. A new plan at the same sample keeps the filters of a bus that did not change.
+- Each track with sound gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer and its fader.
+  - A piece carries only the gain of its clip. The fader of its track is the `gain_db` of the bus.
+  - The inner tracks of a compound clip get the track that holds it as their `host` (`Inner`).
+  - The bus of an inner track goes `into` the bus of its host. `render::bus_for` makes the bus of a host before the buses that go into it.
+  - A piece is `silent` when a fader in its chain of hosts is at the bottom (`fader_silent`).
+  - `AudioMix::bused` mixes the lanes of each bus apart. `Mixed::process` runs the `Dynamics`, then the `Filter`, then the fader on that mix.
+  - The buses run from the last to the first. Thus each bus gets the mixes of its inner tracks before it runs. A bus with no host goes into the mix of the plan.
+  - Why: the Dynamics are not linear. They must hear the mix of the track, after the faders of its inner tracks.
+  - `Dynamics::track` runs the Expander or Gate, the Compressor and the Limiter in this order, then Make Up. Each module has its own detector.
+  - The lanes of a bus get the peaks of its top bus, after its fader, for the meters.
+  - A seek clears the Dynamics and the filters. A new plan at the same sample keeps the state of a bus that did not change.
 - `Curve` gives the biquad stages of a clip equalizer and of a track equalizer (`equalizer::track`). `Filter` and `response_db` take either.
 - A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
+  - A lane of a bus gets the fader preview of its track after the Dynamics and the equalizer of the bus (`Mixed::process`).
   - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
