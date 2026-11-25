@@ -5146,7 +5146,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - The on-screen keyboard is under the dropdown of the key sets (p. 122):
   - A click on a modifier key turns it on or off. A click on another key selects it.
   - The Active Key list under the keyboard shows the actions of that key with these modifiers, at each level (p. 122). `keys.list` with `key` gives the same list.
-  - A key that has an action with the modifiers that are on has a lighter color.
+  - A key that has an action with the modifiers that are on has a lighter color. The picture on p. 122 shows a diagonal and a number on such a key instead. Not measured (case 24 of shortcuts-resolve-runs.md).
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
   - The keys in force come from one set. The dropdown at the top of the window selects the set, and `keys.use` does the same.
