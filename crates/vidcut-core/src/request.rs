@@ -4673,6 +4673,8 @@ pub enum Request {
     /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
+        /// Left out, no node is selected.
+        #[serde(default)]
         nodes: Vec<String>,
         /// False: no node is active, and the Inspector shows only the
         /// header of each node. A box select in the node editor does this.
@@ -4716,6 +4718,8 @@ pub enum Request {
     /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
+        /// Left out, the list is empty.
+        #[serde(default)]
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
         /// shows it, and a delete of the selected nodes keeps it. With an
