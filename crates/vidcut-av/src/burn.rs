@@ -226,6 +226,11 @@ const RAISED: usize = 4;
 const LOWERED: usize = 8;
 const FULL_SIZE_BIT: u32 = 4;
 const LTSH_HEAD: usize = 4;
+const VDMX_HEAD: usize = 6;
+const VDMX_RATIO: usize = 4;
+const VDMX_GROUP_HEAD: usize = 4;
+const VDMX_ENTRY: usize = 6;
+const VDMX_MOST: u32 = 255;
 
 fn spans<'a>(
     system: &FontSystem,
@@ -435,9 +440,14 @@ impl Rules<'_> {
         match self {
             Rules::Plain { .. } => None,
             Rules::Title(t) => face_of(system, attrs).and_then(|id| {
-                let own = font_heights(system, id, attrs.weight, !t.title.moves())?;
+                if t.title.moves() {
+                    let em = Title::scroll_em(f64::from(px), t.pixel);
+                    let screen = screen_height(system, id, attrs.weight, em)?;
+                    return Some(Title::scroll_gap(screen, t.pixel) as f32);
+                }
+                let own = font_heights(system, id, attrs.weight)?;
                 let zoom = f64::from(t.scale) / t.pixel;
-                Some(t.title.line_gap(own, f64::from(px), t.pixel, zoom) as f32)
+                Some(Title::line_gap(own, f64::from(px), t.pixel, zoom) as f32)
             }),
         }
         .unwrap_or(px * self.line())
@@ -447,7 +457,7 @@ impl Rules<'_> {
         match self {
             Rules::Plain { .. } => None,
             Rules::Title(_) => face_of(system, attrs).and_then(|id| {
-                let [ascent, descent, _] = font_heights(system, id, attrs.weight, true)?;
+                let [ascent, descent, _] = font_heights(system, id, attrs.weight)?;
                 Some(((ascent + descent) * f64::from(px)) as f32)
             }),
         }
@@ -788,7 +798,7 @@ fn text_lines(
         let full = deco.underline_metrics.thickness * span.font_size;
         let ascent = glyphs
             .first()
-            .and_then(|g| font_heights(system, g.font_id, g.font_weight, true))
+            .and_then(|g| font_heights(system, g.font_id, g.font_weight))
             .map_or(deco.ascent, |[ascent, ..]| ascent as f32)
             * span.font_size;
         let mut line = |middle: f32| {
@@ -1125,12 +1135,7 @@ fn with_face_weight<'a>(system: &FontSystem, attrs: Attrs<'a>) -> Attrs<'a> {
     attrs.weight(weight)
 }
 
-fn font_heights(
-    system: &mut FontSystem,
-    id: fontdb::ID,
-    weight: Weight,
-    typo: bool,
-) -> Option<[f64; 3]> {
+fn font_heights(system: &mut FontSystem, id: fontdb::ID, weight: Weight) -> Option<[f64; 3]> {
     use skrifa::raw::TableProvider;
     use skrifa::raw::tables::os2::SelectionFlags;
     let index = system.db().face(id)?.index;
@@ -1141,7 +1146,7 @@ fn font_heights(
     let parts = face
         .os2()
         .ok()
-        .filter(|t| !typo || !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
+        .filter(|t| !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
         .map_or([m.ascent, -m.descent, m.leading], |t| {
             let ascent = f32::from(t.us_win_ascent());
             let descent = f32::from(t.us_win_descent());
@@ -1149,6 +1154,56 @@ fn font_heights(
         });
     let em = f64::from(m.units_per_em);
     Some(parts.map(|part| f64::from(part) / em))
+}
+
+fn screen_height(system: &mut FontSystem, id: fontdb::ID, weight: Weight, em: u32) -> Option<u32> {
+    use skrifa::raw::TableProvider;
+    let index = system.db().face(id)?.index;
+    let font = system.get_font(id, weight)?;
+    let face = skrifa::FontRef::from_index(font.data(), index).ok()?;
+    let listed = face
+        .table_data(skrifa::Tag::new(b"VDMX"))
+        .and_then(|table| vdmx_height(table.as_bytes(), em));
+    if listed.is_some() {
+        return listed;
+    }
+    let os2 = face.os2().ok()?;
+    let units = f64::from(face.head().ok()?.units_per_em());
+    let pixels = |v: u16| (f64::from(v) * f64::from(em) / units + 0.5).floor() as u32;
+    Some(pixels(os2.us_win_ascent()) + pixels(os2.us_win_descent()))
+}
+
+fn vdmx_height(table: &[u8], em: u32) -> Option<u32> {
+    if em >= VDMX_MOST {
+        return None;
+    }
+    let word = |at: usize| {
+        table
+            .get(at..at + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+    };
+    let signed = |at: usize| {
+        table
+            .get(at..at + 2)
+            .map(|b| i16::from_be_bytes([b[0], b[1]]))
+    };
+    let ratios = usize::from(word(VDMX_HEAD - 2)?);
+    let group = (0..ratios).find_map(|i| {
+        let r = table.get(VDMX_HEAD + VDMX_RATIO * i..VDMX_HEAD + VDMX_RATIO * (i + 1))?;
+        let square = r[1..] == [0, 0, 0] || r[1..] == [1, 1, 1];
+        (r[0] != 0 && square).then_some(i)
+    })?;
+    let at = usize::from(word(VDMX_HEAD + VDMX_RATIO * ratios + 2 * group)?);
+    let entries = usize::from(word(at)?);
+    (0..entries).find_map(|i| {
+        let entry = at + VDMX_GROUP_HEAD + VDMX_ENTRY * i;
+        if u32::from(word(entry)?) != em {
+            return None;
+        }
+        let top = i32::from(signed(entry + 2)?);
+        let bottom = i32::from(signed(entry + 4)?);
+        u32::try_from(top - bottom).ok()
+    })
 }
 
 fn letter_x_width(system: &mut FontSystem, attrs: &Attrs<'_>, size: f32) -> Option<f32> {
@@ -1206,7 +1261,7 @@ fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> 
             };
             let m = font.metrics();
             let em = g.font_size / f32::from(m.units_per_em);
-            let own = font_heights(system, g.font_id, g.font_weight, true).filter(|_| seat);
+            let own = font_heights(system, g.font_id, g.font_weight).filter(|_| seat);
             let height = own.map_or((m.ascent - m.descent) * em, |[ascent, descent, _]| {
                 (ascent + descent) as f32 * g.font_size
             });
@@ -1228,7 +1283,7 @@ fn ascents(system: &mut FontSystem, buffer: &Buffer) -> Vec<f32> {
             r.glyphs
                 .iter()
                 .filter_map(|g| {
-                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight, true)?;
+                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight)?;
                     let size = if g.metadata & (RAISED | LOWERED) != 0 {
                         f32::from_bits((g.metadata >> FULL_SIZE_BIT) as u32)
                     } else {

@@ -49,6 +49,7 @@ pub(super) struct Format {
     color_viewer_lut: MonitorLut,
     scopes_lut: MonitorLut,
     dynamics: DynamicsProfile,
+    layers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +94,7 @@ impl Default for Format {
             color_viewer_lut: MonitorLut::VideoMonitor,
             scopes_lut: MonitorLut::None,
             dynamics: DynamicsProfile::default(),
+            layers: vidcut_core::model::Settings::one_layer(),
         }
     }
 }
@@ -132,6 +134,7 @@ impl Format {
             color_viewer_lut: p.settings.color_viewer_lut.clone(),
             scopes_lut: p.settings.scopes_lut.clone(),
             dynamics: p.settings.dynamics_profile,
+            layers: p.settings.node_stack_layers.clone(),
         }
     }
 
@@ -272,6 +275,40 @@ impl Format {
                     }
                 });
                 ui.end_row();
+            });
+    }
+
+    fn edit_layers(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new(ui.scope_id().with("node-stack-layers"))
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                let label = ui.label("Node Stack Layers");
+                let mut count = self.layers.len();
+                egui::ComboBox::from_id_salt("node-stack-layers")
+                    .selected_text(count.to_string())
+                    .show_ui(ui, |ui| {
+                        for n in 1..=vidcut_core::ops::grade::NODE_STACK_LAYERS {
+                            ui.selectable_value(&mut count, n, n.to_string());
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                ui.end_row();
+                let named = |n: usize| vidcut_core::model::Settings::layer_name(n + 1);
+                while self.layers.len() < count {
+                    self.layers.push(named(self.layers.len()));
+                }
+                self.layers.truncate(count);
+                if count < 2 {
+                    return;
+                }
+                for (i, name) in self.layers.iter_mut().enumerate() {
+                    let label = ui.label(format!("Layer {}", i + 1));
+                    let edit = egui::TextEdit::singleline(name).desired_width(120.0);
+                    ui.add(edit).labelled_by(label.id);
+                    ui.end_row();
+                }
             });
     }
 
@@ -837,10 +874,12 @@ impl Workspace {
                 lut_action = format.colors_grid(ui, Some(luts));
                 format.edit_ai(ui);
                 format.edit_dynamics(ui);
+                format.edit_layers(ui);
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let changes = changes(&format, &was);
                     let ok = format.fps().is_some()
+                        && format.layers.iter().all(|n| !n.trim().is_empty())
                         && changes.as_object().is_some_and(|c| !c.is_empty());
                     if ui.add_enabled(ok, egui::Button::new("Apply")).clicked() {
                         apply = Some(changes);
@@ -921,6 +960,9 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.dynamics != was.dynamics {
         set.insert("dynamics_profile".into(), json!(now.dynamics));
+    }
+    if now.layers != was.layers {
+        set.insert("node_stack_layers".into(), json!(now.layers));
     }
     Value::Object(set)
 }

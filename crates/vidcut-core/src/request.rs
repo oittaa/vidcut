@@ -1542,6 +1542,10 @@ pub enum Request {
         ripple: Option<bool>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Where the Transform, Crop and Composite keyframes go. Default:
+        /// `maintain`.
+        #[serde(default)]
+        keyframes: KeyTiming,
         /// Download the model of the Retime Process that the clips then use,
         /// if this computer doesn't have it yet, checked against its SHA-256.
         /// Without it, an export asks for it.
@@ -2958,6 +2962,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// With `at`, each corrector gives the values that the picture gets
         /// at that time, and no keyframes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2984,6 +2992,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the node, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3002,7 +3014,7 @@ pub enum Request {
     /// does, and the nodes and their links stay. With `node` or
     /// `keep_nodes`, the keyframes stay, and the values go back where
     /// `grade.set` changes them. The palette `primaries` keeps the Auto
-    /// Color tool of the corrector.
+    /// Color tool of the corrector. Each acts on one node stack layer.
     #[serde(rename = "grade.clear")]
     GradeClear {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3010,10 +3022,19 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         keep_nodes: bool,
+        /// Reset All Node Stack Layers: each layer of the clip grade goes
+        /// back to one corrector at its usual values, with no keyframes.
+        /// Not with `timeline`, `node`, `keep_nodes` or `layer`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all_layers: bool,
         /// With `node`: only the values of this palette go back. Left out:
         /// all of them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3038,6 +3059,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3066,6 +3091,10 @@ pub enum Request {
     GradeAutoColor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3087,12 +3116,17 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         add: GradeAdd,
         /// The node it goes beside: for `serial`, `before`, `parallel`,
-        /// `layer` and `outside`.
+        /// `layer`, `outside` and `splitter_combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
-        /// Its place in the node editor, for `corrector`.
+        /// Its place in the node editor, for `corrector`, `key_mixer`,
+        /// `splitter` and `combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
         /// The first window of this kind of the new corrector is on.
@@ -3115,6 +3149,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extract: bool,
@@ -3123,10 +3161,12 @@ pub enum Request {
     /// grade) to an input of `node` (0: the output of the grade), in place of
     /// what was there. Without `from`, the input takes nothing. Input 0 of a
     /// corrector is its RGB input, and input 1 is its key input. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. The
-    /// inputs of a key mixer are key inputs. A key on an RGB input is a gray
-    /// picture: R, G and B are the key. A picture on a key input gives its
-    /// Rec. 709 luma as the key. A link that makes a loop is an error.
+    /// an `input` one past the last, or no `input`, adds an input. A
+    /// combiner has inputs 0, 1 and 2: no `input` gives the first input with
+    /// no link. The inputs of a key mixer are key inputs. A key on an RGB
+    /// input is a gray picture: R, G and B are the key. A picture on a key
+    /// input gives its Rec. 709 luma as the key. A splitter gives no key. A
+    /// link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3134,6 +3174,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         /// The input of `node`, from 0. Left out: input 0 of a corrector or
         /// of the output, and a new input of a mixer.
@@ -3145,6 +3189,10 @@ pub enum Request {
         /// Needs `from`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
+        /// The RGB output of the splitter `from`: 0 red, 1 green, 2 blue.
+        /// Left out: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<u8>,
     },
     /// Remove one input with no link from a mixer of the grade of a clip,
     /// or with `timeline` of the timeline grade (Remove One Input). The
@@ -3157,6 +3205,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
     },
     /// Copy the settings of a corrector of the grade of a clip, or with
@@ -3171,6 +3223,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
     },
     /// Give a corrector of the grade of clips, or with `timeline` of the
@@ -3184,6 +3240,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<CopiedNode>,
@@ -3200,6 +3260,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The area for the places of the nodes, `[[x, y], [x, y]]` from
         /// its top left to its bottom right, in node places. The columns go
         /// evenly from its left to its right, and the rows from its top to
@@ -3220,6 +3284,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         with: u32,
     },
@@ -3239,6 +3307,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector or the key mixer, from 1. Left out:
         /// each corrector and each key mixer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3268,6 +3340,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3298,6 +3374,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3324,6 +3404,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3347,6 +3431,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         shape: WindowKind,
@@ -3361,6 +3449,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3425,6 +3517,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3441,6 +3537,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3463,6 +3563,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The window that takes the copy, from 0. Needed without
@@ -3488,6 +3592,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -4164,13 +4272,65 @@ pub enum Request {
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,
     },
-    /// Put default keys back. A default key that another action has now is
-    /// refused, and the refusal names that action.
+    /// Put the keys of the key set in force back (`keys.sets`). A key that
+    /// another action has now is refused, and the refusal names that action.
     #[serde(rename = "keys.reset")]
     KeysReset {
         /// The action, as `keys.list` names it. Without it, every action.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         action: Option<crate::shortcuts::Action>,
+    },
+    /// The key sets (spec §11): vidcut's own keys, and the sets you saved
+    /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
+    /// `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`). `set` names the set that the keys in force come
+    /// from, and `changed` tells if they differ from it. A set file that
+    /// can't be read is left out and listed in `refused` with why.
+    #[serde(rename = "keys.sets")]
+    KeysSets {},
+    /// Put a key set in force. Its keys replace the keys in force, with
+    /// their changes. A running GUI follows at once.
+    #[serde(rename = "keys.use")]
+    KeysUse {
+        /// The set's name, as `keys.sets` gives it; names match whatever
+        /// their case.
+        set: String,
+    },
+    /// Save the keys in force as a key set of yours. That set is then in
+    /// force. Built-in sets can't be replaced.
+    #[serde(rename = "keys.save")]
+    KeysSave {
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
+        name: String,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Delete one of your key sets. Built-in sets can't be deleted. When the
+    /// set is in force, its keys stay in force, as changes to vidcut's own
+    /// keys.
+    #[serde(rename = "keys.delete")]
+    KeysDelete { name: String },
+    /// Write a key set to a file, for another computer (`keys.import`). A
+    /// file at the path is replaced.
+    #[serde(rename = "keys.export")]
+    KeysExport {
+        /// The set's name, as `keys.sets` gives it.
+        set: String,
+        path: PathBuf,
+    },
+    /// Add a key set from a file that `keys.export` wrote. The set is not
+    /// put in force (`keys.use`).
+    #[serde(rename = "keys.import")]
+    KeysImport {
+        path: PathBuf,
+        /// The set's name. Without it, the file's name without its
+        /// extension.
+        #[serde(default)]
+        name: Option<String>,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
     },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
@@ -4666,6 +4826,10 @@ pub enum Request {
         /// The grade that the `color` page shows. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         grade: Option<GradeLevel>,
+        /// The node stack layer of the clip grade that the `color` page
+        /// shows, from 1. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The palette that the `color` page shows. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         palette: Option<GradePalette>,
@@ -4690,6 +4854,8 @@ pub enum Request {
     /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
+        /// Left out, no node is selected.
+        #[serde(default)]
         nodes: Vec<String>,
         /// False: no node is active, and the Inspector shows only the
         /// header of each node. A box select in the node editor does this.
@@ -4733,6 +4899,8 @@ pub enum Request {
     /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
+        /// Left out, the list is empty.
+        #[serde(default)]
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
         /// shows it, and a delete of the selected nodes keeps it. With an
@@ -4761,8 +4929,8 @@ pub enum Request {
     /// What only the GUI keeps: the page, the clip of the effects page, its
     /// nodes selected, its viewers and its playhead (`time`, in frames from
     /// the In), the
-    /// grade of the color page and its nodes selected (`grade_nodes`), the
-    /// edit points selected, the target track, the timeline's zoom and
+    /// grade of the color page, its node stack `layer` and its nodes
+    /// selected (`grade_nodes`), the edit points selected, the target track, the timeline's zoom and
     /// Timeline Options, the windows open, and the selected `jobs` of the
     /// render queue with `job_details`.
     #[serde(rename = "gui.state")]
@@ -5098,6 +5266,14 @@ pub enum GradeAdd {
     Outside,
     /// A key mixer with two inputs that take nothing, at `place`.
     KeyMixer,
+    /// As `serial` after `node`: a splitter, a corrector on each of its
+    /// three outputs, and a combiner that joins the three correctors. The
+    /// returned `node` is the corrector of blue.
+    SplitterCombiner,
+    /// A splitter whose input takes nothing, at `place`.
+    Splitter,
+    /// A combiner whose three inputs take nothing, at `place`.
+    Combiner,
 }
 
 /// The channels of a printer point.
@@ -5297,14 +5473,16 @@ pub enum ClipAttribute {
     DialogueLeveler,
 }
 
-/// Where `clip.paste_attributes` puts the keyframes in each clip.
+/// Where `clip.paste_attributes` and `edit.change_speed` put the keyframes
+/// in each clip.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyTiming {
     /// The same frames from the start of the clip (Maintain Timing).
     #[default]
     Maintain,
-    /// The same part of the length of the clip (Stretch to Fit).
+    /// Stretch to Fit: in a paste, the same part of the length of the clip.
+    /// In a speed change, the same source frames.
     Stretch,
 }
 
@@ -6595,6 +6773,12 @@ pub struct ProjectSet {
     /// from 0 to 10. Usual: 1 and 1.
     #[serde(default)]
     pub dynamics_profile: Option<crate::model::DynamicsProfile>,
+    /// The names of the node stack layers of each clip grade, layer 1
+    /// first: 1 to 8 names, which give the number of layers. A shorter
+    /// list keeps the grades of the layers that it drops. They do not act
+    /// until a longer list gives them back. Usual: `["L1"]`.
+    #[serde(default)]
+    pub node_stack_layers: Option<Vec<String>>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -6818,7 +7002,8 @@ pub struct NodeChange {
     /// the edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside_only: Option<bool>,
-    /// How the corners of the outline of the shading element are drawn.
+    /// How the corners of the outline of the shading element, or the sharp
+    /// corners of a rectangle mask whose edge moves out, are drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join_style: Option<JoinStyle>,
     /// What one border of the shading element goes around.
@@ -7974,6 +8159,12 @@ impl Request {
                 | Self::KeysList {}
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
+                | Self::KeysSets {}
+                | Self::KeysUse { .. }
+                | Self::KeysSave { .. }
+                | Self::KeysDelete { .. }
+                | Self::KeysExport { .. }
+                | Self::KeysImport { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -8069,6 +8260,12 @@ impl Request {
                     | Self::KeysList {}
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
+                    | Self::KeysSets {}
+                    | Self::KeysUse { .. }
+                    | Self::KeysSave { .. }
+                    | Self::KeysDelete { .. }
+                    | Self::KeysExport { .. }
+                    | Self::KeysImport { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }
@@ -8085,6 +8282,8 @@ impl Request {
             }
             Self::MediaAddFolder { path, .. }
             | Self::Probe { path }
+            | Self::KeysExport { path, .. }
+            | Self::KeysImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesImport { path, .. } => path.iter_mut().collect(),
             Self::CacheClear { projects } => projects.iter_mut().collect(),

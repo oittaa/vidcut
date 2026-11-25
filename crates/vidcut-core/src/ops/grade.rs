@@ -3,8 +3,9 @@ use serde_json::{Value, json};
 use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
-    AutoColor, Clip, Corrector, DynamicsProfile, Grade, GradeKey, GradeLink, GradeNode, GradeTool,
-    GradeWindow, KeyInput, KeyMix, KeyOutput, Project, WindowKind,
+    AutoColor, COMBINER_INPUTS, Clip, Corrector, DynamicsProfile, Grade, GradeKey, GradeLink,
+    GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput, Project, SPLIT_OUTPUTS, Track,
+    WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -239,6 +240,13 @@ fn key_input_checked(i: &KeyInput) -> Result<()> {
 fn gives(g: &Grade, l: GradeLink) -> Result<()> {
     let d = g.node(l.node);
     let keyed = d.is_some_and(|d| matches!(d.tool, GradeTool::Corrector(_)) || d.takes_keys());
+    let outputs = d.map_or(1, |d| d.tool.outputs());
+    if l.output > 0 && (l.key || l.output >= outputs) {
+        return Err(Error::invalid(format!(
+            "node {} has no RGB output {}: a splitter has outputs 0, 1 and 2",
+            l.node, l.output
+        )));
+    }
     match (l.key, d) {
         (true, _) if !keyed => Err(Error::invalid(format!(
             "node {} gives out no key: a corrector or a key mixer gives a key",
@@ -260,6 +268,16 @@ fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
     for l in n.links() {
         gives(g, l)?;
     }
+    let keyed = n.key_from.into_iter().chain(match n.takes_keys() {
+        true => n.inputs.iter().flatten().copied().collect(),
+        false => Vec::new(),
+    });
+    if let Some(l) = keyed.into_iter().find(|l| split(g, l.node)) {
+        return Err(Error::invalid(format!(
+            "splitter {} gives no key: link it to an RGB input",
+            l.node
+        )));
+    }
     if n.tool.is_mixer() && (n.key_from.is_some() || !n.key_input.is_usual()) {
         return Err(Error::invalid(format!("mixer {k} has no key input")));
     }
@@ -276,7 +294,25 @@ fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
     key_input_checked(&n.key_input)
 }
 
+fn split(g: &Grade, n: u32) -> bool {
+    g.node(n)
+        .is_some_and(|d| matches!(d.tool, GradeTool::Splitter))
+}
+
 pub fn checked(g: &Grade) -> Result<()> {
+    if g.layers.len() + g.kept_layers.len() >= NODE_STACK_LAYERS {
+        return Err(Error::invalid(format!(
+            "a grade has {NODE_STACK_LAYERS} node stack layers at most"
+        )));
+    }
+    for layer in g.layers.iter().chain(&g.kept_layers) {
+        if !layer.layers.is_empty() || !layer.kept_layers.is_empty() {
+            return Err(Error::invalid(
+                "a node stack layer has no layers of its own",
+            ));
+        }
+        checked(layer)?;
+    }
     if let Some(o) = g.output {
         if o.node > g.last() {
             return Err(no_node(o.node));
@@ -298,6 +334,12 @@ pub fn checked(g: &Grade) -> Result<()> {
                     )));
                 }
                 corrector_checked(c)?;
+            }
+            GradeTool::Splitter if n.inputs.len() != 1 => {
+                return Err(Error::invalid(format!("splitter {k} has one input")));
+            }
+            GradeTool::Combiner if n.inputs.len() != COMBINER_INPUTS => {
+                return Err(Error::invalid(format!("combiner {k} has three inputs")));
             }
             _ if n.inputs.is_empty() => {
                 return Err(Error::invalid(format!("mixer {k} needs an input")));
@@ -347,10 +389,40 @@ pub fn printed(
     })
 }
 
+pub const NODE_STACK_LAYERS: usize = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GradeOf {
     Timeline,
-    Clip(String),
+    Clip(String, usize),
+}
+
+impl GradeOf {
+    pub fn fields(&self, key: &str) -> serde_json::Map<String, Value> {
+        let mut m = serde_json::Map::new();
+        match self {
+            Self::Timeline => {
+                m.insert("timeline".into(), Value::Bool(true));
+            }
+            Self::Clip(id, layer) => {
+                m.insert(key.into(), Value::String(id.clone()));
+                if *layer > 1 {
+                    m.insert("layer".into(), Value::from(*layer));
+                }
+            }
+        }
+        m
+    }
+}
+
+pub fn layer_checked(p: &Project, layer: usize) -> Result<usize> {
+    let count = p.settings.node_stack_layers.len();
+    match (1..=count).contains(&layer) {
+        true => Ok(layer),
+        false => Err(Error::invalid(format!(
+            "the project has {count} node stack layers: give a layer from 1 to {count}"
+        ))),
+    }
 }
 
 fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
@@ -371,7 +443,7 @@ fn no_timeline() -> Error {
 pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
     match of {
         GradeOf::Timeline => Ok(at),
-        GradeOf::Clip(id) => {
+        GradeOf::Clip(id, _) => {
             let (ti, ci) = locate(p, id)?;
             Ok(p.tracks[ti].clips[ci].content_at(at))
         }
@@ -379,44 +451,99 @@ pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
 }
 
 pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
-    let grade = match of {
-        GradeOf::Timeline => {
-            if !p.compound_path.is_empty() {
-                return Err(Error::invalid("a compound clip has no timeline grade"));
-            }
-            p.timeline().ok_or_else(no_timeline)?.grade.as_ref()
-        }
-        GradeOf::Clip(id) => {
-            let (ti, ci) = locate(p, id)?;
-            let c = &p.tracks[ti].clips[ci];
-            grades(p, ti, c)?;
-            c.picture.as_ref().and_then(|pic| pic.grade.as_ref())
-        }
-    };
-    Ok(grade
-        .cloned()
-        .unwrap_or_else(|| Grade::usual(p.frame_size())))
-}
-
-fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
-    checked(grade)?;
-    let grade = (!grade.is_usual(p.frame_size())).then(|| grade.clone());
+    let frame = p.frame_size();
     match of {
         GradeOf::Timeline => {
             if !p.compound_path.is_empty() {
                 return Err(Error::invalid("a compound clip has no timeline grade"));
             }
+            let t = p.timeline().ok_or_else(no_timeline)?;
+            Ok((t.grade.clone()).unwrap_or_else(|| Grade::usual(frame)))
+        }
+        GradeOf::Clip(id, layer) => {
+            let layer = layer_checked(p, *layer)?;
+            Ok(match whole(p, id)? {
+                Some(g) => g.layer(layer, frame),
+                None => Grade::usual(frame),
+            })
+        }
+    }
+}
+
+pub fn whole(p: &Project, id: &str) -> Result<Option<Grade>> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    grades(p, ti, c)?;
+    Ok(c.picture.as_ref().and_then(|pic| pic.grade.clone()))
+}
+
+fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
+    checked(grade)?;
+    let frame = p.frame_size();
+    match of {
+        GradeOf::Timeline => {
+            if !grade.layers.is_empty() || !grade.kept_layers.is_empty() {
+                return Err(Error::invalid(
+                    "the timeline grade has no node stack layers",
+                ));
+            }
+            if !p.compound_path.is_empty() {
+                return Err(Error::invalid("a compound clip has no timeline grade"));
+            }
+            let grade = (!grade.is_usual(frame)).then(|| grade.clone());
             p.timeline_mut().ok_or_else(no_timeline)?.grade = grade;
         }
-        GradeOf::Clip(id) => {
-            let (ti, ci) = locate(p, id)?;
-            let c = &mut p.tracks[ti].clips[ci];
-            let mut picture = c.picture.take().unwrap_or_default();
-            picture.grade = grade;
-            c.picture = (!picture.is_usual()).then_some(picture);
+        GradeOf::Clip(id, layer) => {
+            let layer = layer_checked(p, *layer)?;
+            let was = whole(p, id)?.unwrap_or_else(|| Grade::usual(frame));
+            put_whole(p, id, was.with_layer(layer, grade.layer(1, frame), frame))?;
         }
     }
     Ok(())
+}
+
+fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
+    checked(&grade)?;
+    let grade = (!grade.is_usual(p.frame_size())).then_some(grade);
+    let (ti, ci) = locate(p, id)?;
+    let c = &mut p.tracks[ti].clips[ci];
+    let mut picture = c.picture.take().unwrap_or_default();
+    picture.grade = grade;
+    c.picture = (!picture.is_usual()).then_some(picture);
+    Ok(())
+}
+
+pub fn clear_layers(p: &mut Project, of: &[GradeOf]) -> Result<()> {
+    let frame = p.frame_size();
+    for o in of {
+        let GradeOf::Clip(id, _) = o else {
+            return Err(Error::invalid(
+                "the timeline grade has no node stack layers",
+            ));
+        };
+        if let Some(mut g) = whole(p, id)? {
+            g.reset_layers(frame);
+            put_whole(p, id, g)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn count_layers(p: &mut Project, count: usize) {
+    let frame = p.frame_size();
+    let counted = |tracks: &mut [Track]| {
+        let clips = tracks.iter_mut().flat_map(|t| t.clips.iter_mut());
+        for g in clips.filter_map(|c| c.picture.as_mut()?.grade.as_mut()) {
+            g.counted(count, frame);
+        }
+    };
+    counted(&mut p.tracks);
+    for t in &mut p.timelines {
+        counted(&mut t.tracks);
+    }
+    for k in &mut p.compounds {
+        counted(&mut k.tracks);
+    }
 }
 
 pub(super) fn edited(
@@ -615,6 +742,12 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
             }
             (GradeTool::KeyMixer { .. }, _) => {
                 return Err(Error::invalid(format!("node {n} is a key mixer")));
+            }
+            (GradeTool::Splitter, _) => {
+                return Err(Error::invalid(format!("node {n} is a splitter")));
+            }
+            (GradeTool::Combiner, _) => {
+                return Err(Error::invalid(format!("node {n} is a combiner")));
             }
             (GradeTool::LayerMixer { .. }, GradeMixer::LayerMixer) => d.tool.clone(),
             (_, GradeMixer::LayerMixer) => GradeTool::LayerMixer {
@@ -884,7 +1017,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
     let at = g.node(n).map_or([0.0; 2], |d| d.place);
     let added = g.last() + 1;
     let takers = takers(g, n);
-    let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.is_mixer());
+    let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.takes_inputs());
     let mixer = match (takers.as_slice(), g.output == Some(GradeLink::picture(n))) {
         ([(m, _)], false) => Some(*m).filter(|m| mixes(*m)),
         _ => None,
@@ -911,7 +1044,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
 }
 
 fn oldest_taker(g: &mut Grade, from: GradeLink) -> Option<&mut Option<GradeLink>> {
-    let Grade { nodes, output } = g;
+    let Grade { nodes, output, .. } = g;
     nodes
         .iter_mut()
         .flat_map(|d| d.inputs.iter_mut().chain([&mut d.key_from]))
@@ -1010,6 +1143,15 @@ pub fn add(
     if window.is_some() && kind == GradeAdd::KeyMixer {
         return Err(Error::invalid("a key mixer has no window"));
     }
+    let splits = matches!(
+        kind,
+        GradeAdd::SplitterCombiner | GradeAdd::Splitter | GradeAdd::Combiner
+    );
+    if window.is_some() && splits {
+        return Err(Error::invalid(
+            "give `window` with a corrector: a splitter and a combiner have no window",
+        ));
+    }
     let frame = p.frame_size();
     let mut made = 0;
     edited(p, of, |g| {
@@ -1034,9 +1176,17 @@ fn grown(
         Ok((GradeLink::new(n, d.takes_keys()), d.place))
     };
     let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
+    let single = |g: &Grade, from: GradeLink| match split(g, from.node) {
+        true => Err(Error::invalid(format!(
+            "node {} is a splitter, with three outputs: give a node after it",
+            from.node
+        ))),
+        false => Ok(from),
+    };
     let made = match kind {
         GradeAdd::Serial => {
             let (from, [x, y]) = around(g)?;
+            let from = single(g, from)?;
             shifted(g, x + 1.0);
             if let Some(v) = oldest_taker(g, from) {
                 *v = Some(GradeLink::picture(added));
@@ -1097,6 +1247,44 @@ fn grown(
             g.nodes.push(GradeNode::mixer(tool, vec![None; 2], at));
             added
         }
+        GradeAdd::Splitter => {
+            let at = place.unwrap_or([0.0, below]);
+            g.nodes
+                .push(GradeNode::mixer(GradeTool::Splitter, vec![None], at));
+            added
+        }
+        GradeAdd::Combiner => {
+            let at = place.unwrap_or([0.0, below]);
+            let inputs = vec![None; COMBINER_INPUTS];
+            g.nodes
+                .push(GradeNode::mixer(GradeTool::Combiner, inputs, at));
+            added
+        }
+        GradeAdd::SplitterCombiner => {
+            let (from, [x, y]) = around(g)?;
+            let from = single(g, from)?;
+            for _ in 0..3 {
+                shifted(g, x + 1.0);
+            }
+            let combined = added + 1 + u32::from(SPLIT_OUTPUTS);
+            if let Some(v) = oldest_taker(g, from) {
+                *v = Some(GradeLink::picture(combined));
+            }
+            let tool = GradeTool::Splitter;
+            g.nodes
+                .push(GradeNode::mixer(tool, vec![Some(from)], [x + 1.0, y]));
+            for (out, row) in (0..SPLIT_OUTPUTS).zip([y, y + 1.0, y + 2.0]) {
+                let input = Some(GradeLink::split(added, out));
+                g.nodes
+                    .push(GradeNode::corrector(input, [x + 2.0, row], frame));
+            }
+            let inputs = (1..=u32::from(SPLIT_OUTPUTS))
+                .map(|i| Some(GradeLink::picture(added + i)))
+                .collect();
+            let tool = GradeTool::Combiner;
+            g.nodes.push(GradeNode::mixer(tool, inputs, [x + 3.0, y]));
+            added + u32::from(SPLIT_OUTPUTS)
+        }
     };
     if let Some(w) = window {
         let d = node(g, made)?;
@@ -1155,18 +1343,19 @@ pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
     };
     let mut fed = Vec::new();
     unkeyed(g, n);
-    let picture = Some(GradeLink::picture(n));
+    let picture = |v: &Option<GradeLink>| v.is_some_and(|l| l.leaves_picture_of(n));
     for (d, k) in g.nodes.iter_mut().zip(1..) {
-        let mixer = d.tool.is_mixer();
-        let to = if mixer { None } else { input };
-        for v in d.inputs.iter_mut().filter(|v| **v == picture && k != n) {
+        let passes = matches!(d.tool, GradeTool::Corrector(_) | GradeTool::Splitter);
+        let to = if passes { input } else { None };
+        let joins = d.tool.takes_inputs() && corrector;
+        for v in d.inputs.iter_mut().filter(|v| picture(v) && k != n) {
             *v = to;
-            if mixer && corrector {
+            if joins {
                 fed.push(k);
             }
         }
     }
-    if g.output == picture {
+    if picture(&g.output) {
         g.output = input;
     }
     let mut gone = vec![n];
@@ -1213,7 +1402,7 @@ fn lone_input(g: &Grade, m: u32) -> Option<GradeLink> {
 fn start_of(p: &Project, of: &GradeOf) -> Result<i64> {
     match of {
         GradeOf::Timeline => Ok(0),
-        GradeOf::Clip(id) => {
+        GradeOf::Clip(id, _) => {
             let (ti, ci) = locate(p, id)?;
             let c = &p.tracks[ti].clips[ci];
             Ok(c.content_at(c.start))
@@ -1437,6 +1626,11 @@ pub fn remove_input(p: &mut Project, of: &GradeOf, n: u32) -> Result<()> {
                 "node {n} is a corrector, not a mixer"
             )));
         }
+        if !d.tool.takes_inputs() {
+            return Err(Error::invalid(format!(
+                "node {n} has a fixed number of inputs"
+            )));
+        }
         let empty = d.inputs.iter().rposition(Option::is_none);
         let Some(i) = empty.filter(|_| d.inputs.len() > 1) else {
             return Ok(());
@@ -1453,12 +1647,16 @@ pub fn connect(
     p: &mut Project,
     of: &GradeOf,
     (n, input): (u32, Option<u32>),
-    (from, key): (Option<u32>, bool),
+    (from, key, output): (Option<u32>, bool, Option<u8>),
 ) -> Result<()> {
     if key && from.is_none() {
         return Err(Error::usage("`key` needs `from`"));
     }
-    let from = from.map(|node| GradeLink::new(node, key));
+    if output.is_some() && from.is_none() {
+        return Err(Error::usage("`output` needs `from`"));
+    }
+    let from = from.map(|node| GradeLink::split(node, output.unwrap_or(0)));
+    let from = from.map(|l| GradeLink { key, ..l });
     edited(p, of, |g| {
         let before = g.clone();
         if let Some(f) = from.filter(|f| f.node > g.last()) {
@@ -1492,6 +1690,27 @@ pub fn connect(
                         mix.push(KeyMix::default());
                     }
                 }
+            }
+            GradeTool::Splitter => match input {
+                None | Some(0) => d.inputs[0] = from,
+                Some(_) => {
+                    return Err(Error::invalid(format!("splitter {n} has one input, 0")));
+                }
+            },
+            GradeTool::Combiner => {
+                let i = match input {
+                    Some(i) => i as usize,
+                    None => d.inputs.iter().position(Option::is_none).ok_or_else(|| {
+                        Error::invalid(format!(
+                            "each input of combiner {n} has a link: give `input`"
+                        ))
+                    })?,
+                };
+                let slot = d
+                    .inputs
+                    .get_mut(i)
+                    .ok_or_else(|| Error::invalid(format!("combiner {n} has inputs 0, 1 and 2")))?;
+                *slot = from;
             }
             _ => {
                 linked(&mut d.inputs, (n, input), from)?;

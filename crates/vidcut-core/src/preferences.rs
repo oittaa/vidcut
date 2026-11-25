@@ -28,9 +28,15 @@ pub struct Preferences {
     pub editing: Editing,
     pub color: ColorPrefs,
     pub luts: LutPrefs,
-    /// The keys that differ from the defaults, by action. `keys.list` names
-    /// the actions. An action that is not here has its default keys, and an
-    /// empty list leaves an action with no key. `keys.set` and `keys.reset`
+    /// The key set that the keys in force come from (`keys.sets`). It is
+    /// left out while vidcut's own keys are the set. `keys.use` and
+    /// `keys.save` change it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_set: Option<String>,
+    /// The keys in force that differ from vidcut's own keys, by action.
+    /// `keys.list` names the actions. An empty list leaves an action with no
+    /// key. An action that is not here has its default keys, less the keys
+    /// that an action here has. `keys.set`, `keys.reset` and `keys.use`
     /// change them.
     #[schemars(with = "BTreeMap<String, Vec<String>>")]
     pub keys: crate::shortcuts::Custom,
@@ -705,8 +711,9 @@ pub struct Player {
 #[serde(default, deny_unknown_fields)]
 pub struct Gpu {
     /// Use the GPU to decode, scale and encode: in the preview, exports and
-    /// proxies. Off, all of it runs on the CPU, even when an export names a
-    /// GPU encoder.
+    /// proxies. It also finds people and vehicles, measures the shake and
+    /// transcribes. Off, all of it runs on the CPU, even when an export
+    /// names a GPU encoder.
     pub acceleration: bool,
     /// While `acceleration` is on, decode H.264, HEVC, AV1 and VP9 on the
     /// GPU in the viewer, exports and proxies, and all but H.264 in the

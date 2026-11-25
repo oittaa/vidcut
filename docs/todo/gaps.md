@@ -22,6 +22,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - The Sizing mode and the Sizing track of the Keyframe Editor of the Color page. They key the Sizing palette, which vidcut does not have (pp. 3455, 3460; [§8.22](../spec.md#822-color-page-keyframes-pp-34533465))
 - The keyframe tracks inside a corrector track (pp. 3458–3459)
 - The keyframes of a grade that Apply Grade or a still of the Gallery takes. vidcut has neither (p. 3464)
+- Post Group Node Stack Layer, and Copy Active Layer and the node stack layers of a still of the Gallery. vidcut has no groups and no Gallery (pp. 3400–3401)
 - On the Export page: Estimated File Size, additional outputs, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
 - On the Export page: the Thumbnail timeline, the clip filter and Render This Clip (pp. 4128–4129)
 - In the render queue: the pencil that edits a job, Show All Projects and Review Before Upload (pp. 4130–4132)
