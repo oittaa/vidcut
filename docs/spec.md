@@ -5056,6 +5056,18 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: I near the end of a clip goes to the start of that clip, not to the nearest clip start.
   - Measured: with clips on V1 and V2 under the playhead, I and O snap to the V2 clip. In a gap, they set no mark.
   - Measured: Add to Render Queue leaves the playhead. After a render, the playhead is at the In.
+- **Thumbnail timeline** (pp. 3106–3111, 4097, 4099, 4128–4129):
+  - The Thumbnail timeline is over the timeline of the page. The Clips button hides or shows it (p. 4097; measured).
+  - It matches the Thumbnail timeline of the Color page (p. 4099).
+  - Each clip is one thumbnail with a number, whatever its duration (p. 3106).
+  - The clips are numbered by the place of their first frame, from left to right, on all video tracks (p. 3110).
+  - Above each thumbnail are the clip number, the source timecode of the first frame of the clip and its track (p. 3110).
+  - The thumbnails show the media as it is graded (p. 3109).
+  - Under each thumbnail is the codec by default. A double-click on that text cycles the codec, the clip name and the version (pp. 3110–3111).
+  - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
+  - The clips of a disabled track are not in the Thumbnail timeline (p. 3107).
+  - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
+  - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5139,6 +5151,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Render Speed limits the export to that number of frames in each second. Maximum gives no limit. The menu has the measured numbers.
   - `render_speed` of the settings takes each number from 1. Left out, it is Maximum.
   - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
+  - The Thumbnail timeline is over the timeline of the page. Clips in the toolbar of the timeline hides or shows it. `gui.page` with `clips` does the same.
+  - It has a picture of each clip of the video tracks that are on, in the order of their first frames. Of two clips that start together, the clip of the lower track goes first.
+  - Above each picture are the number of the clip, the source timecode of its first frame and its track.
+  - The picture is the first frame of the source of the clip, with no grade. A clip with no media has no picture.
+  - Under each picture is the codec of the clip, or its name. A double-click on that text changes it for all clips. `clip_label` of `gui.page` sets it.
+  - A clip with no media shows its name in both cases.
+  - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
+  - A click on a picture moves the playhead to the first frame of the clip.
+  - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out after its last frame.
+  - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts

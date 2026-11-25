@@ -4680,6 +4680,14 @@ pub enum Request {
         /// and frame rate, and the audio and the length. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_details: Option<bool>,
+        /// The Thumbnail timeline of the `export` page: a picture of each
+        /// clip of the video tracks, over the timeline. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<bool>,
+        /// The text under each picture of the Thumbnail timeline. Left out,
+        /// it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip_label: Option<ClipLabel>,
         /// The job of the render queue that the Render Settings edit, as its
         /// pencil does: they get the job's settings, and the timeline gets
         /// its range. Update Job then changes the job. `""` stops, and the
@@ -5116,6 +5124,17 @@ pub enum PrinterColor {
     Yellow,
     /// Red, green and blue.
     Master,
+}
+
+/// The text under each picture of the Thumbnail timeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipLabel {
+    /// The codec of the clip's video. A clip with no media shows its name.
+    #[default]
+    Codec,
+    /// The name of the clip.
+    Name,
 }
 
 /// What to export and how.

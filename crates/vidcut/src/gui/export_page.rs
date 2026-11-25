@@ -57,6 +57,15 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))
             });
+        if !self.export.hide_clips {
+            egui::Panel::bottom("export-clips")
+                .resizable(false)
+                .exact_size(super::thumbnail_timeline::CLIPS_HEIGHT)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.thumbnail_timeline(ui))
+                });
+        }
         egui::Panel::right("render-queue")
             .resizable(true)
             .default_size(320.0)

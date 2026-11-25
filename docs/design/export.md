@@ -509,6 +509,7 @@ Voice Isolation:
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
   - On the page, `Workspace::mark` and `Workspace::clear_marks` call `export_mark` and `export_clear_marks`. Thus the keys and the Mark In, Mark Out and Clear buttons of the viewer follow the rules of the page.
   - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
+  - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is a tile of the media pool (`pool_picture`). Why: the tiles already hold the source frames, and a grade of each clip needs a draw of its own.
 
 The render queue:
 

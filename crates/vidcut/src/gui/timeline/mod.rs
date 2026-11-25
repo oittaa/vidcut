@@ -1458,7 +1458,7 @@ impl Workspace {
         let export = self.effects_page.page == vidcut_core::request::Page::Export;
         let row = crate::gui::row::Row {
             left: if export {
-                &[T::Title, T::Render]
+                &[T::Title, T::Render, T::Clips]
             } else {
                 &[T::Title]
             },
@@ -1466,7 +1466,7 @@ impl Workspace {
             right: &[T::Marks, T::ZoomOut, T::ZoomIn, T::Summary],
             leaving: &[T::Marks, T::Summary, T::ZoomOut, T::ZoomIn],
             group: |t| match t {
-                T::Title | T::Render => 0,
+                T::Title | T::Render | T::Clips => 0,
                 T::Marks | T::ZoomOut | T::ZoomIn => 1,
                 T::Summary => 2,
             },
@@ -1475,6 +1475,13 @@ impl Workspace {
             self.fit_row(ui, row, |ws, ui, t| match t {
                 T::Title => ui.label(RichText::new("Timeline").strong()),
                 T::Render => ws.render_range_menu(ui),
+                T::Clips => {
+                    let r = ui.selectable_label(!ws.export.hide_clips, "Clips");
+                    if r.clicked() {
+                        ws.export.hide_clips = !ws.export.hide_clips;
+                    }
+                    r
+                }
                 T::Summary => ui.label(dim(format!(
                     "{} clips, {}",
                     p.tracks.iter().map(|t| t.clips.len()).sum::<usize>(),
@@ -4441,6 +4448,7 @@ fn focus(m: &crate::gui::history::Marks) -> Option<(i64, i64)> {
 enum Toolbar {
     Title,
     Render,
+    Clips,
     Marks,
     ZoomOut,
     ZoomIn,

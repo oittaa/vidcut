@@ -365,6 +365,8 @@ impl Workspace {
                 live::GuiChange::Window(w) => self.effects_page.window = w,
                 live::GuiChange::QueueJobs(jobs) => self.select_queue_jobs(jobs)?,
                 live::GuiChange::JobDetails(on) => self.export.job_details = on,
+                live::GuiChange::Clips(on) => self.export.hide_clips = !on,
+                live::GuiChange::ClipLabel(label) => self.export.clip_label = label,
                 live::GuiChange::EditJob(job) => self.set_edit_job(job)?,
                 live::GuiChange::Nodes(nodes, active) => self.pick_nodes(nodes, active)?,
                 live::GuiChange::Element(e) => self.effects_page.element = e,
@@ -531,6 +533,8 @@ impl Workspace {
                 .collect(),
             jobs: self.export.selected.clone(),
             job_details: self.export.job_details,
+            clips: !self.export.hide_clips,
+            clip_label: self.export.clip_label,
             edit_job: self.export.editing.clone(),
         }
     }
