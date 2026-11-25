@@ -11,6 +11,7 @@ mod dialog;
 mod ducking;
 mod effect_browser;
 mod effects_page;
+mod effects_search;
 mod equalizer;
 pub mod export;
 mod export_page;

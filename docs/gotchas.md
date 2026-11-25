@@ -715,6 +715,16 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Two runs gave the same result.
   - vidcut does not copy this fault. Delete removes each selected point ([spec §8.23](spec.md#823-windows-pp-32653279)).
 
+## Resolve's scopes
+
+These facts come from measurements in Resolve Studio 21.2, on the floating Scopes window.
+
+- **Percentage with Video Level Scopes adds four dashed lines.**
+  - They are at 38.0, 58.1, 75.0 and 83.0 %. These are the PQ places of 26, 203, 1000 and 2000 nits.
+  - Two runs showed them: a 10-step chart in one scope, and SMPTE bars in four scopes.
+  - Data Level Scopes, 10-bit and mV do not show them.
+  - vidcut does not copy this fault. Percentage has no dashed lines (`dashed`).
+
 ## Resolve's renders
 
 These facts come from renders in Resolve Studio 21.2. The picture renders are float, without color management.

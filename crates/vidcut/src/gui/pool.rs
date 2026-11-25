@@ -8,7 +8,7 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Compound, CompoundTarget, Media, Project};
 use vidcut_core::ops::compound;
-use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
+use vidcut_core::request::{Page, PoolMode, PoolSort, ViewerMode};
 use vidcut_core::shortcuts::Action;
 
 use super::clip_info::scene_shot_take;
@@ -515,7 +515,18 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 }
 
 impl Workspace {
+    pub(super) fn pool_takes_keys(&self) -> bool {
+        self.pool_focus
+            && self.left == LeftTab::Pool
+            && !matches!(self.effects_page.page, Page::Effects | Page::Export)
+    }
+
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
+        if self.pool_focus {
+            let top = ui.max_rect();
+            let line = egui::Rect::from_min_size(top.min, egui::vec2(top.width(), 2.0));
+            ui.painter().rect_filled(line, 0.0, theme::colors().accent);
+        }
         self.hover = None;
         self.bins.targets.clear();
         self.bins.area = Some(ui.max_rect());
