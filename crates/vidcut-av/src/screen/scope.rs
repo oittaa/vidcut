@@ -21,7 +21,7 @@ const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
 
-const PARAMS: usize = 208;
+const PARAMS: usize = 224;
 
 const HDR_NITS: [f64; 6] = [0.0, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 
@@ -35,7 +35,7 @@ const VIDEO_MIDDLE: f64 = 512.0 / 1023.0;
 
 const VIDEO_CHROMA: f64 = 896.0 / 1023.0;
 
-const MOST_ROWS: usize = 12;
+const MOST_ROWS: usize = 16;
 
 pub(super) struct Pipes {
     waveform: wgpu::ComputePipeline,
@@ -118,19 +118,37 @@ fn steps(count: u32, label: impl Fn(u32) -> u32) -> Vec<(String, f64)> {
         .collect()
 }
 
-fn levels(scale: ScopeScale) -> Vec<(String, f64)> {
-    match scale {
-        ScopeScale::TenBit => steps(8, |i| (i * 128).min(1023)),
-        ScopeScale::TwelveBit => steps(8, |i| (i * 512).min(4095)),
-        ScopeScale::Percent => steps(10, |i| i * 10),
-        ScopeScale::Millivolts => steps(7, |i| i * 100),
-        ScopeScale::Hdr => nits_marks(&HDR_NITS),
+fn percent(tens: std::ops::RangeInclusive<i32>) -> Vec<(String, f64)> {
+    tens.map(|i| ((i * 10).to_string(), f64::from(i) / 10.0))
+        .collect()
+}
+
+fn on_scale(v: f64, video: bool) -> f64 {
+    match video {
+        true => VIDEO_BLACK + VIDEO_SPAN * v,
+        false => v,
     }
 }
 
-fn dashed(scale: ScopeScale) -> Vec<f64> {
+fn levels(scale: ScopeScale, video: bool) -> Vec<(String, f64)> {
+    let marks = match scale {
+        ScopeScale::TenBit => steps(8, |i| (i * 128).min(1023)),
+        ScopeScale::TwelveBit => steps(8, |i| (i * 512).min(4095)),
+        ScopeScale::Percent if video => percent(-1..=11),
+        ScopeScale::Percent => percent(0..=10),
+        ScopeScale::Millivolts => steps(7, |i| i * 100),
+        ScopeScale::Hdr => nits_marks(&HDR_NITS),
+    };
+    let moves = video && !matches!(scale, ScopeScale::TenBit | ScopeScale::TwelveBit);
+    marks
+        .into_iter()
+        .map(|(label, v)| (label, on_scale(v, moves)))
+        .collect()
+}
+
+fn dashed(scale: ScopeScale, video: bool) -> Vec<f64> {
     match scale {
-        ScopeScale::Hdr => DASHED_NITS.map(pq_code).to_vec(),
+        ScopeScale::Hdr => DASHED_NITS.map(|n| on_scale(pq_code(n), video)).to_vec(),
         _ => Vec::new(),
     }
 }
@@ -195,7 +213,7 @@ fn per_unit((w, h): (u32, u32)) -> f64 {
 
 pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u32)) -> Vec<Mark> {
     match scope {
-        Scope::Waveform | Scope::Parade => levels(prefs.scale)
+        Scope::Waveform | Scope::Parade => levels(prefs.scale, prefs.video_levels)
             .into_iter()
             .map(|(label, v)| Mark {
                 label,
@@ -240,9 +258,15 @@ fn params(
     let (labeled, lines) = match scope {
         Scope::Vectorscope => (0, Vec::new()),
         _ => {
-            let labeled: Vec<f64> = levels(prefs.scale).into_iter().map(|(_, v)| v).collect();
+            let labeled: Vec<f64> = levels(prefs.scale, prefs.video_levels)
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect();
             let count = labeled.len();
-            (count, [labeled, dashed(prefs.scale)].concat())
+            (
+                count,
+                [labeled, dashed(prefs.scale, prefs.video_levels)].concat(),
+            )
         }
     };
     for (row, v) in rows.iter_mut().zip(&lines) {

@@ -411,7 +411,8 @@ The scales (`marks`):
 - The marks come from `ScopeScale` (`levels`): 10-bit codes, 12-bit codes, percent, millivolts or nits. Each scale spans the full range.
 - The nits go through `pq_code` on every timeline (`HDR_NITS`).
 - The HDR scale also has dashed lines with no label (`dashed`). The shader draws a row from index `how.z` on as a dashed line.
-- With `video_levels`, the Waveform and the Parade move each value to the 10-bit codes from 64 to 940 (`shown` in `scope.wgsl`). The marks stay.
+- With `video_levels`, the Waveform and the Parade move each value to the 10-bit codes from 64 to 940 (`shown` in `scope.wgsl`).
+  - The marks of 10-bit and 12-bit stay. The marks of the other scales move the same way (`on_scale`).
 - A change of the scale or of `video_levels` draws each `Plot` again. `Plots::paint` takes the whole `Scopes`.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
 
