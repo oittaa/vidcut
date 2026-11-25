@@ -1103,6 +1103,7 @@ impl Title {
             !u.position_keys.is_empty() || !u.zoom_keys.is_empty() || !u.rotation_keys.is_empty()
         });
         upper
+            || self.has_keys()
             || PictureValue::ALL
                 .into_iter()
                 .any(|v| !self.keys_of(v).is_empty())
@@ -1231,7 +1232,7 @@ impl Title {
         if !self.is_keyed() {
             return self.clone();
         }
-        let mut t = self.clone();
+        let mut t = Keyed::sampled(self, frame);
         t.each_line(|line| {
             let mut picture = line.as_picture().sampled(frame);
             if let Some(at) = line.on_path(frame) {

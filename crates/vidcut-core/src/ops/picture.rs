@@ -469,7 +469,7 @@ fn sharpen_checked(s: &Sharpen) -> Result<Sharpen> {
     })
 }
 
-fn keys_checked<T: Keyed>(
+pub(super) fn keys_checked<T: Keyed>(
     e: &T,
     label: &str,
     plain_checked: impl Fn(&T) -> Result<T>,

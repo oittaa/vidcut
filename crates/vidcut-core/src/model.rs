@@ -3192,6 +3192,18 @@ pub struct Title {
     /// out when the two lines go together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper: Option<TitleLine>,
+    /// Keyframes of the shadow and the background, on the clip's source
+    /// frames, one entry for each value with keyframes, sorted by value:
+    /// `shadow_offset`, `shadow_blur`, `shadow_opacity`,
+    /// `background_outline_width`, `background_width`, `background_height`,
+    /// `background_corner_radius`, `background_center` and
+    /// `background_opacity`. Their numbers are those of `style`. A value takes
+    /// keyframes only while `style` has its part: `shadow`, `background` or
+    /// `shape`. With keyframes, the value at a frame is that curve. A lower
+    /// third keeps them for its whole title. Left out when no value has
+    /// keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<EffectKeys>,
 }
 
 /// One line of a lower third: `upper` or `lower`.
@@ -3464,6 +3476,7 @@ impl TitleShadow {
     pub const OPACITY: f64 = 0.75;
     pub const OFFSET: [f64; 2] = [0.0, 0.0];
     pub const BLUR: f64 = 20.0;
+    pub const BLURS: (f64, f64) = (1.0, 100.0);
     pub const BLUR_PER_PICTURE: f64 = 3370.0;
 
     pub fn is_off(&self) -> bool {
@@ -3554,6 +3567,7 @@ impl Title {
             rotation: None,
             rotation_keys: Vec::new(),
             upper: None,
+            keys: Vec::new(),
         }
     }
 
@@ -6737,7 +6751,9 @@ pub struct EffectKeys {
 /// colors, from `top_left_red` to `bottom_right_alpha`, and `start`, `end`
 /// and `offset` of its gradient. A `fast_noise` has `center`, `detail`,
 /// `brightness`, `contrast`, `scale`, `y_scale`, `angle`, `seethe`,
-/// `seethe_rate` and the four channels of `color1` and `color2`.
+/// `seethe_rate` and the four channels of `color1` and `color2`. A title has
+/// the values of its shadow and its background, from `shadow_offset` to
+/// `background_opacity`. `shadow_offset` and `background_center` are points.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -6879,6 +6895,15 @@ pub enum EffectValue {
     Color2Green,
     Color2Blue,
     Color2Alpha,
+    ShadowOffset,
+    ShadowBlur,
+    ShadowOpacity,
+    BackgroundOutlineWidth,
+    BackgroundWidth,
+    BackgroundHeight,
+    BackgroundCornerRadius,
+    BackgroundCenter,
+    BackgroundOpacity,
 }
 
 /// What an effect does, with its own values.

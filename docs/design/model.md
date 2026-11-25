@@ -574,11 +574,15 @@ Writing:
   - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../spec.md#12-decisions-on-gaps-and-contradictions))
   - `position_keys` with `position_y`, `zoom_keys` with `zoom_y`, and `rotation_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
+  - `keys`: one `EffectKeys` for each value of the shadow and the background with keyframes (`Title::KEYED`)
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - The `Picture` of the clip places the picture that the text is drawn on ([pictures](#pictures)). Its opacity is the opacity of the title.
 - `KeyParam::on_text` tells which values of the `keyframes` requests are those of the text: its position, zoom and rotation, and those of each line. The other values are those of the clip's `Picture`, as on every clip.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
+- `Title` is `Keyed` for the values of its shadow and background, as an `Effect` is. `Title::steps_of` names the values that stay whole. `Title::stepped_at` rounds them for `Keyed::adopted` and for a new key.
+  - `KeyParam::style_value` names these values in the `keyframes` requests. `ops::keyframes` works on them through `Keyed`.
+  - Why: then the keyframe work of the effects serves them, and their numbers stay those of `TitleStyle`.
 - The upper line of a lower third can go apart from its lower line:
   - `Title::upper` holds a `TitleLine`: the anchor, place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
   - Without `Title::upper`, the two lines go together. The point of the upper line is then `Title::UPPER_DROP` below the point of the lower line (`Title::upper_with_lower`).
@@ -750,7 +754,7 @@ Writing:
   - Why: the names in the request are then those of the model. Each name has one field, and thus one text in the schema and in `--help`.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
 - The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
-  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.
+  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect`, a `Node` and a `Title`: read, write, sample, split, hold, scale, retime and retarget.
   - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
   - The functions of `Picture` that work on keyframes do not change the keys of the nodes. Why: the keys are on frames of the file, and a trim or a speed change keeps those frames.
 - `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.

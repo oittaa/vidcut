@@ -5,6 +5,7 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::effect_keys::Keyed as _;
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
@@ -3107,6 +3108,13 @@ fn paced_keys(y: &mut Clip, c: &Clip, k0: i64, first_key: i64) {
             line.move_handles(conv);
             line.take_picture(&picture);
         });
+        for &k in &splits {
+            title.split_keys(k);
+        }
+        title.scale_key_times(&conv, &ratio);
+        for &(at, until) in &holds {
+            title.hold_keys(at, until);
+        }
     }
     if let Some(a) = y.audio.as_mut() {
         for keys in [&mut a.gain_keys, &mut a.pan_keys] {
