@@ -3092,6 +3092,15 @@ The sums use these names:
 The controls of the sums (pp. 2213–2217):
 
 - Apply Mode: Normal. It is one of 27 modes. The manual lists 26 of them. It does not list Hard Mix, which is in the menu (pp. 2213–2215).
+  - The menu has 7 groups, with a line between two groups:
+    - Normal, Screen and Dissolve.
+    - Darken, Multiply, Color Burn, Linear Burn and Darker Color.
+    - Lighten, Color Dodge, Linear Dodge and Lighter Color.
+    - Overlay, Soft Light, Hard Light, Vivid Light, Linear Light, Pin Light and Hard Mix.
+    - Difference and Exclusion.
+    - Hue, Saturation, Color and Luminosity.
+    - Hypotenuse and Geometric.
+  - vidcut: the Apply Mode of a tracker's Merge shows the same groups.
 - Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
 - Blend mixes the background with the result (p. 2217).
