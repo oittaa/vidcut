@@ -709,7 +709,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A drag of the playhead, and frame steps, play the sound under it (D42).
   - Timeline > Audio Scrubbing also switches it.
 - Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
-  - vidcut: the View menu and the header of the viewer turn on the Waveform, the Parade, the Vectorscope and the Histogram, each one by itself.
+  - vidcut: the View menu and the header of the viewer turn on each scope by itself.
   - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
   - The Waveform has the modes Y, CbCr and RGB (p. 3103).
     - Y shows luma. CbCr shows the two color differences over one another. RGB shows red, green and blue over one another (p. 3097).
@@ -730,6 +730,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - vidcut: the labels of the scale are at the top. Video Level Scopes moves its values as in the Waveform.
     - vidcut: a bin with four times the mean count fills its band. Resolve's Gain slider sets the height (p. 3104).
     - vidcut: Histogram Options in the scopes menu sets the mode. RGB is the default. The default of Resolve is not measured.
+  - The CIE Chromaticity scope plots the chromaticity of the picture in a CIE 1931 xy graph or a CIE 1976 uv graph (pp. 3099–3100, 3104).
+    - It shows the horseshoe of the visible colors, the black body locus, a triangle of the gamut and its white point (pp. 3099–3100).
+    - A label names the gamut, with the coordinates of its red, green, blue and white (p. 3099).
+    - The Additional Gamut adds a second triangle (p. 3104). vidcut does not have it ([gaps](todo/gaps.md)).
+    - vidcut: the gamut is that of the timeline: Rec.709 in SDR and Rec.2020 in HDR. The white point is D65.
+    - vidcut: each point of the graph is in the color of its chromaticity. The axes go from 0 to 1, with a line each 0.1, as in the figures on pp. 3100–3101.
+    - vidcut: the horseshoe uses the CIE 1931 2-degree observer from 380 nm to 700 nm. The black body locus goes from 1000 K to 25000 K.
+    - vidcut: CIE Chromaticity Options in the scopes menu sets the graph. CIE 1931 xy is the default. The default of Resolve is not measured.
+    - Not measured in Resolve: the range of the black body locus, the marks of the wavelengths on the horseshoe and the colors of the lines.
   - Waveform Scale Style sets the scale of the Waveform, the Parade and the Histogram (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.

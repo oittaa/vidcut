@@ -156,7 +156,7 @@ pub fn render(
 }
 
 fn scope_size(scope: Scope, (width, height): (Option<u32>, Option<u32>)) -> Result<(u32, u32)> {
-    let square = scope == Scope::Vectorscope;
+    let square = matches!(scope, Scope::Vectorscope | Scope::Chromaticity);
     let (w, h) = match (width, height, square) {
         (Some(w), Some(h), _) => (w, h),
         (Some(w), None, true) => (w, w),

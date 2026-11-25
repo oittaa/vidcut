@@ -1,8 +1,10 @@
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2, vec2};
+use eframe::egui::{self, Align, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2, vec2};
 use eframe::emath::GuiRounding;
 use serde_json::json;
 use vidcut_av::screen::scope::marks;
-use vidcut_core::preferences::{HistogramMode, ParadeMode, Scope, ScopeScale, WaveformMode};
+use vidcut_core::preferences::{
+    ChromaticityMode, HistogramMode, ParadeMode, Scope, ScopeScale, WaveformMode,
+};
 
 use super::theme;
 use super::workspace::Workspace;
@@ -25,6 +27,17 @@ fn field(scope: Scope) -> &'static str {
         Scope::Parade => "parade",
         Scope::Vectorscope => "vectorscope",
         Scope::Histogram => "histogram",
+        Scope::Chromaticity => "chromaticity",
+    }
+}
+
+fn side(v: f32) -> Align {
+    if v <= 0.0 {
+        Align::Min
+    } else if v >= 1.0 {
+        Align::Max
+    } else {
+        Align::Center
     }
 }
 
@@ -41,7 +54,7 @@ fn places(column: Rect, scopes: &[Scope], ppp: f32) -> Vec<(Scope, Rect)> {
                 vec2(column.width(), tall.max(1.0)),
             );
             let rect = match scope {
-                Scope::Vectorscope => Rect::from_center_size(
+                Scope::Vectorscope | Scope::Chromaticity => Rect::from_center_size(
                     cell.center(),
                     egui::Vec2::splat(cell.width().min(cell.height())),
                 ),
@@ -102,6 +115,14 @@ impl Workspace {
             for mode in HistogramMode::ALL {
                 if ui.radio(now == mode, mode.name()).clicked() && now != mode {
                     self.send("viewer.scopes", json!({ "histogram_mode": mode }));
+                }
+            }
+        });
+        ui.menu_button("CIE Chromaticity Options", |ui| {
+            let now = self.snap.scopes.chromaticity_mode;
+            for mode in ChromaticityMode::ALL {
+                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
+                    self.send("viewer.scopes", json!({ "chromaticity_mode": mode }));
                 }
             }
         });
@@ -177,18 +198,16 @@ impl Workspace {
             );
             for mark in marks(scope, (colors, prefs), size.max((1, 1))) {
                 let at = rect.min + vec2(mark.at[0] * rect.width(), mark.at[1] * rect.height());
-                let (at, align) = match scope {
-                    Scope::Vectorscope => {
-                        let out = (at - rect.center()).normalized() * 12.0;
-                        (at + out, Align2::CENTER_CENTER)
-                    }
-                    Scope::Waveform | Scope::Parade => (at + vec2(2.0, 0.0), Align2::LEFT_BOTTOM),
-                    Scope::Histogram => {
-                        let x =
-                            at.x.clamp(rect.left() + MARK_ROOM, rect.right() - MARK_ROOM);
-                        (pos2(x, at.y + 2.0), Align2::CENTER_TOP)
-                    }
+                let at = match scope {
+                    Scope::Vectorscope => at + (at - rect.center()).normalized() * 12.0,
+                    Scope::Waveform | Scope::Parade => at + vec2(2.0, 0.0),
+                    Scope::Histogram => pos2(
+                        at.x.clamp(rect.left() + MARK_ROOM, rect.right() - MARK_ROOM),
+                        at.y + 2.0,
+                    ),
+                    Scope::Chromaticity => at,
                 };
+                let align = Align2([side(mark.align[0]), side(mark.align[1])]);
                 painter.text(at, align, mark.label, font.clone(), dim);
             }
             let (corner, align) = match scope {

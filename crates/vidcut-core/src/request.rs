@@ -3988,11 +3988,11 @@ pub enum Request {
         out: PathBuf,
         scope: crate::preferences::Scope,
         /// Width of the scope, 16 to 4096. Default: 1024, or 512 for the
-        /// vectorscope.
+        /// vectorscope and the chromaticity scope.
         #[serde(default)]
         width: Option<u32>,
         /// Height of the scope, 16 to 4096. Default: half the width, or the
-        /// width for the vectorscope.
+        /// width for the vectorscope and the chromaticity scope.
         #[serde(default)]
         height: Option<u32>,
     },
@@ -4366,9 +4366,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
     },
-    /// The scopes of the viewer: a waveform, a parade, a vectorscope and a
-    /// histogram of its picture, in the timeline color space, and the
-    /// scale of the waveform, the parade and the histogram. Stored in preferences, not the project. A
+    /// The scopes of the viewer: a waveform, a parade, a vectorscope, a
+    /// histogram and a CIE chromaticity scope of its picture, in the
+    /// timeline color space, and the scale of the waveform, the parade and
+    /// the histogram. Stored in preferences, not the project. A
     /// field that is left out stays as it is. With no fields, tells which
     /// scopes are on.
     #[serde(rename = "viewer.scopes")]
@@ -4408,6 +4409,11 @@ pub enum Request {
         /// The bands of the Histogram: `rgb` or `yrgb`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         histogram_mode: Option<crate::preferences::HistogramMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chromaticity: Option<bool>,
+        /// The graph of the CIE Chromaticity scope: `xy` or `uv`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chromaticity_mode: Option<crate::preferences::ChromaticityMode>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).

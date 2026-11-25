@@ -4239,7 +4239,7 @@ fn write_plane(
 }
 
 fn shader() -> &'static str {
-    include_str!("picture.wgsl")
+    concat!(include_str!("transfer.wgsl"), include_str!("picture.wgsl"))
 }
 
 const PER_LEVEL: usize = 7;

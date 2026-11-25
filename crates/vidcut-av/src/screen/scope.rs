@@ -1,11 +1,13 @@
 use vidcut_core::generators::{hlg_code, pq_code};
 use vidcut_core::model::Hdr;
 use vidcut_core::preferences::{
-    HistogramMode, ParadeMode, Scope, ScopeScale, Scopes, WaveformMode,
+    ChromaticityMode, HistogramMode, ParadeMode, Scope, ScopeScale, Scopes, WaveformMode,
 };
 
 use super::{Gpu, TARGET, Target, begin, make_target};
-use crate::color::{Colors, Matrix, shader_colors};
+use crate::color::{
+    Colors, D65, Matrix, shader_colors, timeline_from_xyz, timeline_primaries, timeline_to_xyz,
+};
 
 pub const SMALLEST: u32 = 16;
 
@@ -25,9 +27,107 @@ const FULL_AT: u64 = 16;
 
 const HISTOGRAM_PEAK: u64 = 4;
 
-const PARAMS: usize = 224;
+const PARAMS: usize = 1040;
 
 const SKIN_DEGREES: f64 = 123.0;
+
+const PLOT: [f64; 4] = [0.12, 0.08, 0.92, 0.88];
+
+const CHART_STEP: f64 = 0.2;
+
+const TEXT_AT: [f64; 2] = [0.55, 0.97];
+
+const LABEL_GAP: f64 = 3.0;
+
+const CURVE: usize = 43;
+
+const LOCUS: [[f64; 2]; 65] = [
+    [0.1741, 0.0050],
+    [0.1740, 0.0050],
+    [0.1738, 0.0049],
+    [0.1736, 0.0049],
+    [0.1733, 0.0048],
+    [0.1730, 0.0048],
+    [0.1726, 0.0048],
+    [0.1721, 0.0048],
+    [0.1714, 0.0051],
+    [0.1703, 0.0058],
+    [0.1689, 0.0069],
+    [0.1669, 0.0086],
+    [0.1644, 0.0109],
+    [0.1611, 0.0138],
+    [0.1566, 0.0177],
+    [0.1510, 0.0227],
+    [0.1440, 0.0297],
+    [0.1355, 0.0399],
+    [0.1241, 0.0578],
+    [0.1096, 0.0868],
+    [0.0913, 0.1327],
+    [0.0687, 0.2007],
+    [0.0454, 0.2950],
+    [0.0235, 0.4127],
+    [0.0082, 0.5384],
+    [0.0039, 0.6548],
+    [0.0139, 0.7502],
+    [0.0389, 0.8120],
+    [0.0743, 0.8338],
+    [0.1142, 0.8262],
+    [0.1547, 0.8059],
+    [0.1929, 0.7816],
+    [0.2296, 0.7543],
+    [0.2658, 0.7243],
+    [0.3016, 0.6923],
+    [0.3374, 0.6588],
+    [0.3731, 0.6245],
+    [0.4087, 0.5896],
+    [0.4441, 0.5547],
+    [0.4788, 0.5202],
+    [0.5125, 0.4866],
+    [0.5448, 0.4544],
+    [0.5752, 0.4242],
+    [0.6029, 0.3965],
+    [0.6270, 0.3725],
+    [0.6482, 0.3514],
+    [0.6658, 0.3340],
+    [0.6801, 0.3197],
+    [0.6915, 0.3083],
+    [0.7006, 0.2993],
+    [0.7079, 0.2920],
+    [0.7140, 0.2859],
+    [0.7190, 0.2809],
+    [0.7230, 0.2769],
+    [0.7260, 0.2740],
+    [0.7283, 0.2717],
+    [0.7300, 0.2700],
+    [0.7311, 0.2689],
+    [0.7320, 0.2680],
+    [0.7327, 0.2673],
+    [0.7334, 0.2666],
+    [0.7340, 0.2660],
+    [0.7344, 0.2656],
+    [0.7346, 0.2654],
+    [0.7347, 0.2653],
+];
+
+const PLANCK: [[f64; 2]; 17] = [
+    [0.6527, 0.3445],
+    [0.5857, 0.3931],
+    [0.5267, 0.4133],
+    [0.4770, 0.4137],
+    [0.4369, 0.4041],
+    [0.4053, 0.3907],
+    [0.3804, 0.3767],
+    [0.3451, 0.3516],
+    [0.3221, 0.3318],
+    [0.3135, 0.3236],
+    [0.3064, 0.3165],
+    [0.2952, 0.3048],
+    [0.2806, 0.2883],
+    [0.2718, 0.2776],
+    [0.2637, 0.2673],
+    [0.2565, 0.2576],
+    [0.2525, 0.2522],
+];
 
 const DASHED_NITS: [f64; 3] = [26.0, 203.0, 2000.0];
 
@@ -46,6 +146,7 @@ pub(super) struct Pipes {
     parade: wgpu::ComputePipeline,
     vectorscope: wgpu::ComputePipeline,
     histogram: wgpu::ComputePipeline,
+    chromaticity: wgpu::ComputePipeline,
     painting: wgpu::RenderPipeline,
 }
 
@@ -53,7 +154,9 @@ impl Pipes {
     pub(super) fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("vidcut scope"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("scope.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(include_str!("transfer.wgsl"), include_str!("scope.wgsl")).into(),
+            ),
         });
         let gather = |entry| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -95,6 +198,7 @@ impl Pipes {
             parade: gather("parade"),
             vectorscope: gather("vectorscope"),
             histogram: gather("histogram"),
+            chromaticity: gather("chromaticity"),
             painting,
         }
     }
@@ -105,6 +209,7 @@ impl Pipes {
             Scope::Parade => &self.parade,
             Scope::Vectorscope => &self.vectorscope,
             Scope::Histogram => &self.histogram,
+            Scope::Chromaticity => &self.chromaticity,
         }
     }
 }
@@ -113,6 +218,7 @@ impl Pipes {
 pub struct Mark {
     pub label: String,
     pub at: [f32; 2],
+    pub align: [f32; 2],
 }
 
 fn nits_marks(nits: &[f64], code: fn(f64) -> f64) -> Vec<(String, f64)> {
@@ -150,7 +256,7 @@ fn sections(scope: Scope, prefs: Scopes) -> u32 {
         Scope::Parade if prefs.parade_mode == ParadeMode::Yrgb => 4,
         Scope::Histogram if prefs.histogram_mode == HistogramMode::Yrgb => 4,
         Scope::Parade | Scope::Histogram => 3,
-        Scope::Waveform | Scope::Vectorscope => 1,
+        Scope::Waveform | Scope::Vectorscope | Scope::Chromaticity => 1,
     }
 }
 
@@ -159,6 +265,97 @@ fn planes(scope: Scope, prefs: Scopes) -> u32 {
         (Scope::Waveform, WaveformMode::Rgb) => 3,
         _ => 1,
     }
+}
+
+fn chart_xy(prefs: Scopes, [x, y]: [f64; 2]) -> [f64; 2] {
+    match prefs.chromaticity_mode {
+        ChromaticityMode::Xy => [x, y],
+        ChromaticityMode::Uv => {
+            let d = -2.0 * x + 12.0 * y + 3.0;
+            [4.0 * x / d, 9.0 * y / d]
+        }
+    }
+}
+
+fn plot_rect((w, h): (u32, u32)) -> [f64; 4] {
+    let (w, h) = (f64::from(w), f64::from(h));
+    [PLOT[0] * w, PLOT[1] * h, PLOT[2] * w, PLOT[3] * h]
+}
+
+fn on_chart(rect: [f64; 4], [u, v]: [f64; 2]) -> [f64; 2] {
+    [
+        rect[0] + u * (rect[2] - rect[0]),
+        rect[3] - v * (rect[3] - rect[1]),
+    ]
+}
+
+fn gamut_name(colors: Option<Hdr>) -> &'static str {
+    match colors {
+        Some(_) => "Rec.2020",
+        None => "Rec.709",
+    }
+}
+
+fn curve_points(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<[f64; 2]> {
+    let rect = plot_rect(size);
+    let gamut = timeline_primaries(colors).map(|(x, y)| [x, y]);
+    LOCUS
+        .iter()
+        .chain(&PLANCK)
+        .chain(&gamut)
+        .chain([&[D65.0, D65.1]])
+        .map(|&p| on_chart(rect, chart_xy(prefs, p)))
+        .collect()
+}
+
+fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark> {
+    let rect = plot_rect(size);
+    let (w, h) = (f64::from(size.0), f64::from(size.1));
+    let mark = |label: String, [x, y]: [f64; 2], align: [f32; 2]| Mark {
+        label,
+        at: [(x / w) as f32, (y / h) as f32],
+        align,
+    };
+    let mut marks = Vec::new();
+    for i in 0..=5 {
+        let v = f64::from(i) * CHART_STEP;
+        let label = match i {
+            0 => "0".to_string(),
+            _ => format!("{v:.1}"),
+        };
+        let below = [on_chart(rect, [v, 0.0])[0], rect[3] + LABEL_GAP];
+        marks.push(mark(label.clone(), below, [0.5, 0.0]));
+        if i > 0 {
+            let left = [rect[0] - LABEL_GAP, on_chart(rect, [0.0, v])[1]];
+            marks.push(mark(label, left, [1.0, 0.5]));
+        }
+    }
+    let (across, up) = match prefs.chromaticity_mode {
+        ChromaticityMode::Xy => ("X", "Y"),
+        ChromaticityMode::Uv => ("U", "V"),
+    };
+    let corner = [rect[2] + LABEL_GAP, rect[3] - LABEL_GAP];
+    marks.push(mark(across.to_string(), corner, [0.0, 1.0]));
+    let top = [rect[0] + LABEL_GAP, rect[1] - LABEL_GAP];
+    marks.push(mark(up.to_string(), top, [0.0, 1.0]));
+    let name = gamut_name(colors);
+    let gamut = timeline_primaries(colors);
+    let green = on_chart(rect, chart_xy(prefs, [gamut[1].0, gamut[1].1]));
+    let beside = [green[0] - LABEL_GAP, green[1] - LABEL_GAP];
+    marks.push(mark(name.to_string(), beside, [1.0, 1.0]));
+    let coordinates = |(x, y): (f64, f64)| {
+        let [u, v] = chart_xy(prefs, [x, y]);
+        format!("{u:.4}, {v:.4}")
+    };
+    let text = format!(
+        "{name} (D65)\nR: {}\nG: {}\nB: {}\nW: {}",
+        coordinates(gamut[0]),
+        coordinates(gamut[1]),
+        coordinates(gamut[2]),
+        coordinates(D65),
+    );
+    marks.push(mark(text, on_chart(rect, TEXT_AT), [0.0, 0.0]));
+    marks
 }
 
 fn from_top(v: f64) -> f64 {
@@ -211,6 +408,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
             .map(|(label, v)| Mark {
                 label,
                 at: [0.0, from_top(v) as f32],
+                align: [0.0, 1.0],
             })
             .collect(),
         Scope::Histogram => levels(prefs.scale, colors)
@@ -218,8 +416,10 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
             .map(|(label, v)| Mark {
                 label,
                 at: [v as f32, 0.0],
+                align: [0.5, 0.0],
             })
             .collect(),
+        Scope::Chromaticity => chart_marks(colors, prefs, size),
         Scope::Vectorscope => {
             let unit = per_unit(size);
             hue_points(colors)
@@ -230,6 +430,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                         (0.5 + x * unit / f64::from(size.0)) as f32,
                         (0.5 + y * unit / f64::from(size.1)) as f32,
                     ],
+                    align: [0.5, 0.5],
                 })
                 .collect()
         }
@@ -249,7 +450,7 @@ fn params(
     let columns = match scope {
         Scope::Waveform | Scope::Histogram => size.0,
         Scope::Parade => size.0 / sections(scope, prefs),
-        Scope::Vectorscope => size.0.min(size.1),
+        Scope::Vectorscope | Scope::Chromaticity => size.0.min(size.1),
     };
     let full = match scope {
         Scope::Histogram => pixels * HISTOGRAM_PEAK / u64::from(columns.max(1)),
@@ -260,7 +461,7 @@ fn params(
     let n = |v: u32| v.to_le_bytes();
     let mut rows = [f(-1.0); MOST_ROWS];
     let (labeled, lines) = match scope {
-        Scope::Vectorscope => (0, Vec::new()),
+        Scope::Vectorscope | Scope::Chromaticity => (0, Vec::new()),
         _ => {
             let labeled: Vec<f64> = levels(prefs.scale, colors)
                 .into_iter()
@@ -294,6 +495,7 @@ fn params(
         Scope::Waveform => prefs.waveform_mode as u32,
         Scope::Parade => prefs.parade_mode as u32,
         Scope::Histogram => prefs.histogram_mode as u32,
+        Scope::Chromaticity => prefs.chromaticity_mode as u32,
         Scope::Vectorscope => 0,
     };
     let channels = [
@@ -310,6 +512,7 @@ fn params(
         Scope::Parade => 1,
         Scope::Vectorscope => 2,
         Scope::Histogram => 3,
+        Scope::Chromaticity => 4,
     };
     let mut bytes = vec![
         n(canvas.0),
@@ -347,6 +550,30 @@ fn params(
     ]);
     let skin = SKIN_DEGREES.to_radians();
     bytes.extend([f(skin.cos()), f(-skin.sin()), f(0.0), f(0.0)]);
+    bytes.extend(plot_rect(size).map(f));
+    for row in timeline_to_xyz(colors)
+        .iter()
+        .chain(&timeline_from_xyz(colors))
+    {
+        bytes.extend([f(row[0]), f(row[1]), f(row[2]), f(0.0)]);
+    }
+    let transfer = match colors {
+        None => 0,
+        Some(Hdr::Pq) => 1,
+        Some(Hdr::Hlg) => 2,
+    };
+    bytes.extend([
+        n(transfer),
+        n(LOCUS.len() as u32),
+        n(PLANCK.len() as u32),
+        n(0),
+    ]);
+    let mut curve = vec![f(0.0); CURVE * 4];
+    for (slot, p) in curve.chunks_mut(2).zip(curve_points(colors, prefs, size)) {
+        slot[0] = f(p[0]);
+        slot[1] = f(p[1]);
+    }
+    bytes.extend(curve);
     bytes
         .try_into()
         .expect("the fields of the scope's parameters")
