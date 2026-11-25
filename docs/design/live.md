@@ -413,6 +413,8 @@ The bar and the Jobs button:
   - `rich::edited` changes the markup for a change of the letters that show. A typed letter takes the style of the letter before it, or at the start of a line the style of the letter after it.
   - Why: the markup holds the styles, and the user edits the letters that show.
   - The `Typing` holds the keyboard focus. Thus the keys of the viewer and the timeline do not act while the user types.
+  - When the edit ends, `Typing::passed` gives the text before each step. `commit_title_form` sends each as its own `titles.set`, then the last text.
+  - Why: each step of the edit is then one undo step, as in Resolve.
 - `key_buttons` draws the Keyframe buttons of the Title section. Their ease menus offer `keyframes::eases` and send `keyframes.set`. The check mark comes from `Title::position_ease` on Position, else from `keyframes::ease_of`.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.

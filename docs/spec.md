@@ -1894,6 +1894,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Editing** (pp. 763–764, 1176):
   - A double-click on the text of a title in the viewer edits the text there.
   - The text is edited in place, inside a plain outline. Typing changes the Rich Text field of the Inspector at once (measured in Resolve Studio 21.2).
+  - These are measurements in Resolve Studio 21.2, by mouse and keyboard:
+    - The double-click selects no text. The caret goes to the letter boundary nearest to the pointer.
+    - The outline is white and 1 pixel wide. It turns with the title.
+    - Up and Down go to the line above or below. On a title of one line, they do nothing.
+    - Ctrl+Z undoes the last burst of typing. After a click outside the title, each Ctrl+Z undoes one burst.
+    - Esc keeps the change and stays in the edit. The caret goes to the start. Only a click outside the title ends the edit.
+    - A double-click on a lower third edits only the line under the pointer, inside an outline of that line.
+    - A Scroll has no edit in place. Its text changes only in the Inspector.
   - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
@@ -1901,7 +1909,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
     - The double-click puts the caret at the pointer. A click or a drag in the text moves the caret or selects letters.
     - A typed letter takes the style of the letter before it. At the start of a line, it takes the style of the letter after it.
-    - The edit ends with Esc or a click outside the title. Then one `titles.set` puts the change in.
+    - Esc or a click outside the title keeps the change and ends the edit. Then each step of the edit goes in as its own `titles.set`.
+    - A word typed without a pause is one step. A space, a deletion and a paste are each a step of their own.
+    - vidcut edits the two lines of a lower third as one text, inside one outline. vidcut also edits a Scroll in place.
     - `gui.show` with `title_text` starts the edit, and `gui.close` ends it.
   - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
   - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).

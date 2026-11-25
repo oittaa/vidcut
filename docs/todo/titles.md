@@ -30,3 +30,11 @@
 - **Fallback font:** a letter that the font does not have comes from another font.
   - In Arial at size 192, `Ⅷ` moves the words down by 35 pixels in vidcut and 9 pixels in Resolve. `Ⓐ` moves them 33 pixels in vidcut and 0 in Resolve.
   - The two programs draw these letters in different fonts. Find which font Resolve takes.
+
+## Edit in place
+
+- **Lower third:** Resolve edits only the line under the pointer, inside an outline of that line.
+  - Each line of Resolve's lower third has its own Rich Text. vidcut keeps the two lines in one text.
+- **Tab:** in Resolve, Tab types a tab character. Measure the width of a tab in a title, then let Tab type it.
+- **Spell check:** Resolve draws a red wavy line under the words that its spell check does not know. vidcut has no spell check.
+- **Bursts:** measure what ends one burst of typing in Resolve: a pause, a space or another key.
