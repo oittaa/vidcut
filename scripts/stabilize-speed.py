@@ -5,11 +5,12 @@ whole clip and prints the frames a second of the analysis, the zoom, and the
 motion and the shake of the picture before and after. Each timed run starts
 with no analysis in the cache, so it reads and measures every frame again.
 
-    python3 scripts/stabilize-speed.py [--modes M,M] [--runs N] [--json FILE] CLIP...
+    python3 scripts/stabilize-speed.py [--modes M,M] [--runs N] [--seconds S] [--json FILE] CLIP...
 
 Needs a release build (`cargo build --release -p vidcut`). The modes are
 translation, similarity and perspective (default: all three). With --runs N,
-it prints the median of N timed runs. One untimed run of each clip comes
+it prints the median of N timed runs. With --seconds S, it uses only the
+first S seconds of each clip. One untimed run of each clip comes
 first, so that the decoder and the disk are ready. The time includes the
 start of vidcut and the decode of each frame, with the GPU settings of this
 computer. The projects and their cache go to a temporary folder.
@@ -55,12 +56,13 @@ def video(path):
     return result(["probe", str(path)])["info"]["video"]
 
 
-def project(work, n, clip, env):
+def project(work, n, clip, env, seconds):
     path = str(work / f"p{n}.vidcut")
     v = video(clip)
     run(["--headless", "project", "create", path, "--fps", str(v["fps"]), "--width", str(v["width"]), "--height", str(v["height"])], env)
     run(["--headless", "-p", path, "media", "add", str(clip)], env)
-    run(["--headless", "-p", path, "edit", "append", "m1"], env)
+    span = ["--range", f"0s..+{seconds}s"] if seconds and seconds < v["duration"] else []
+    run(["--headless", "-p", path, "edit", "append", "m1", *span], env)
     return path, v
 
 
@@ -82,6 +84,7 @@ def main():
     ask.add_argument("clips", nargs="+", type=Path)
     ask.add_argument("--modes", default=",".join(MODES))
     ask.add_argument("--runs", type=int, default=1)
+    ask.add_argument("--seconds", type=float)
     ask.add_argument("--json", type=Path)
     a = ask.parse_args()
     modes = a.modes.split(",")
@@ -98,7 +101,7 @@ def main():
         cache = work / "cache"
         env = dict(os.environ, XDG_CACHE_HOME=str(cache))
         for n, clip in enumerate(a.clips):
-            path, v = project(work, n, clip, env)
+            path, v = project(work, n, clip, env, a.seconds)
             frames = stabilize(path, modes[0], env, cache)[1]["frames"]
             print(f"{clip.name}: {v['width']}x{v['height']}, {v['fps']} fps, {frames} frames")
             for mode in modes:

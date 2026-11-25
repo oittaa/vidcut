@@ -47,17 +47,15 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - From the `[subjects] gpu` lines, it prints the GPU time for each picture, each stage and the slowest layers.
 - The finds and their cache go to a temporary folder. Thus each run measures again.
 
-**Stabilize speed:** `python3 scripts/stabilize-speed.py [--modes M,M] [--runs N] [--json FILE] CLIP…` (release build).
+**Stabilize speed:** `python3 scripts/stabilize-speed.py [--modes M,M] [--runs N] [--seconds S] [--json FILE] CLIP…` (release build).
 
 - For each clip and each mode, it runs `picture.stabilize` on the whole clip.
 - It prints the frames a second of the analysis, the zoom, and the `motion` and the `shake` before and after.
 - Before each timed run, it removes the analysis from its cache. Thus each run reads and measures every frame again.
 - An untimed run of each clip comes first. Thus the decoder and the disk are ready.
 - The time includes the start of vidcut and the decode, with the GPU settings of this computer.
-- `--runs N` prints the median of N runs. `--json FILE` writes each result.
+- `--runs N` prints the median of N runs. `--seconds S` uses only the first S seconds of each clip. `--json FILE` writes each result.
 - The projects and their cache go to a temporary folder.
-- `CLIP=FILE` and `RANGE=A..B` time another clip.
-- It needs the model file. `vidcut models check retinaface-r34 --download` gets it.
 
 **Face check:** `uv run scripts/face-check.py [SIZE]` (release build).
 
