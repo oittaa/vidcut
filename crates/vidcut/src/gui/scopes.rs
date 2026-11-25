@@ -1,5 +1,10 @@
-use eframe::egui::{self, Align, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2, vec2};
+use eframe::egui::{
+    self, Align, Align2, Color32, CornerRadius, FontId, PopupCloseBehavior, Pos2, Rect, Sense,
+    pos2, vec2,
+};
 use eframe::emath::GuiRounding;
+use egui_phosphor::regular as icon;
+use serde::Serialize;
 use serde_json::json;
 use vidcut_av::screen::scope::marks;
 use vidcut_core::preferences::{
@@ -20,6 +25,14 @@ const GAP: f32 = 4.0;
 const MARK_FONT: f32 = 10.0;
 
 const MARK_ROOM: f32 = 12.0;
+
+const OPTIONS_SIDE: f32 = 16.0;
+
+const OPTIONS_ICON: f32 = 12.0;
+
+fn options_name(scope: Scope) -> String {
+    format!("{} Options", scope.name())
+}
 
 fn field(scope: Scope) -> &'static str {
     match scope {
@@ -74,58 +87,9 @@ impl Workspace {
             }
         }
         ui.separator();
-        ui.menu_button("Waveform Options", |ui| {
-            let now = self.snap.scopes.waveform_mode;
-            for mode in WaveformMode::ALL {
-                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
-                    self.send("viewer.scopes", json!({ "waveform_mode": mode }));
-                }
-            }
-            ui.separator();
-            let s = self.snap.scopes;
-            ui.add_enabled_ui(now == WaveformMode::Rgb, |ui| {
-                for (name, key, on) in [
-                    ("R", "waveform_red", s.waveform_red),
-                    ("G", "waveform_green", s.waveform_green),
-                    ("B", "waveform_blue", s.waveform_blue),
-                ] {
-                    let mut on = on;
-                    if ui.checkbox(&mut on, name).clicked() {
-                        self.send("viewer.scopes", json!({ key: on }));
-                    }
-                }
-            });
-        });
-        ui.menu_button("Parade Options", |ui| {
-            let now = self.snap.scopes.parade_mode;
-            for mode in ParadeMode::ALL {
-                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
-                    self.send("viewer.scopes", json!({ "parade_mode": mode }));
-                }
-            }
-        });
-        ui.menu_button("Vectorscope Options", |ui| {
-            let mut on = self.snap.scopes.skin_tone;
-            if ui.checkbox(&mut on, "Show Skin Tone Indicator").clicked() {
-                self.send("viewer.scopes", json!({ "skin_tone": on }));
-            }
-        });
-        ui.menu_button("Histogram Options", |ui| {
-            let now = self.snap.scopes.histogram_mode;
-            for mode in HistogramMode::ALL {
-                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
-                    self.send("viewer.scopes", json!({ "histogram_mode": mode }));
-                }
-            }
-        });
-        ui.menu_button("CIE Chromaticity Options", |ui| {
-            let now = self.snap.scopes.chromaticity_mode;
-            for mode in ChromaticityMode::ALL {
-                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
-                    self.send("viewer.scopes", json!({ "chromaticity_mode": mode }));
-                }
-            }
-        });
+        for scope in Scope::ALL {
+            ui.menu_button(options_name(scope), |ui| self.scope_options(ui, scope));
+        }
         ui.menu_button("Waveform Scale Style", |ui| {
             let now = self.snap.scopes.scale;
             for scale in ScopeScale::ALL {
@@ -141,6 +105,86 @@ impl Workspace {
                 }
             }
         });
+    }
+
+    fn choose<T: Copy + PartialEq + Serialize>(
+        &self,
+        ui: &mut egui::Ui,
+        key: &str,
+        now: T,
+        (all, name): (&[T], fn(T) -> &'static str),
+    ) {
+        for &choice in all {
+            if ui.radio(now == choice, name(choice)).clicked() && now != choice {
+                self.send("viewer.scopes", json!({ key: choice }));
+            }
+        }
+    }
+
+    fn scope_options(&self, ui: &mut egui::Ui, scope: Scope) {
+        let s = self.snap.scopes;
+        match scope {
+            Scope::Waveform => {
+                let modes = (&WaveformMode::ALL[..], WaveformMode::name as fn(_) -> _);
+                self.choose(ui, "waveform_mode", s.waveform_mode, modes);
+                ui.separator();
+                ui.add_enabled_ui(s.waveform_mode == WaveformMode::Rgb, |ui| {
+                    for (name, key, on) in [
+                        ("R", "waveform_red", s.waveform_red),
+                        ("G", "waveform_green", s.waveform_green),
+                        ("B", "waveform_blue", s.waveform_blue),
+                    ] {
+                        let mut on = on;
+                        if ui.checkbox(&mut on, name).clicked() {
+                            self.send("viewer.scopes", json!({ key: on }));
+                        }
+                    }
+                });
+            }
+            Scope::Parade => {
+                let modes = (&ParadeMode::ALL[..], ParadeMode::name as fn(_) -> _);
+                self.choose(ui, "parade_mode", s.parade_mode, modes);
+            }
+            Scope::Vectorscope => {
+                let mut on = s.skin_tone;
+                if ui.checkbox(&mut on, "Show Skin Tone Indicator").clicked() {
+                    self.send("viewer.scopes", json!({ "skin_tone": on }));
+                }
+            }
+            Scope::Histogram => {
+                let modes = (&HistogramMode::ALL[..], HistogramMode::name as fn(_) -> _);
+                self.choose(ui, "histogram_mode", s.histogram_mode, modes);
+            }
+            Scope::Chromaticity => {
+                let modes = (
+                    &ChromaticityMode::ALL[..],
+                    ChromaticityMode::name as fn(_) -> _,
+                );
+                self.choose(ui, "chromaticity_mode", s.chromaticity_mode, modes);
+            }
+        }
+    }
+
+    fn options_button(&self, ui: &egui::Ui, scope: Scope, button: Rect) {
+        let id = ui.scope_id().with(("scope options", field(scope)));
+        let response = ui
+            .interact(button, id, Sense::click())
+            .on_hover_text(options_name(scope));
+        let colors = theme::colors();
+        let tint = match response.hovered() {
+            true => colors.text,
+            false => colors.text_dim,
+        };
+        ui.painter_at(button).text(
+            button.center(),
+            Align2::CENTER_CENTER,
+            icon::SLIDERS_HORIZONTAL,
+            FontId::proportional(OPTIONS_ICON),
+            tint,
+        );
+        egui::Popup::from_toggle_button_response(&response)
+            .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| self.scope_options(ui, scope));
     }
 
     pub(super) fn scope_column(
@@ -220,11 +264,17 @@ impl Workspace {
                     painter.text(pos2(at.x, y), align, line, font.clone(), color);
                 }
             }
-            let (corner, align) = match scope {
-                Scope::Histogram => (rect.right_bottom() + vec2(-3.0, -2.0), Align2::RIGHT_BOTTOM),
-                _ => (rect.right_top() + vec2(-3.0, 2.0), Align2::RIGHT_TOP),
+            let corner = match scope {
+                Scope::Histogram => Align2::RIGHT_BOTTOM,
+                _ => Align2::RIGHT_TOP,
             };
-            painter.text(corner, align, scope.name(), font.clone(), dim);
+            let button = corner.align_size_within_rect(
+                vec2(OPTIONS_SIDE, OPTIONS_SIDE),
+                rect.shrink2(vec2(2.0, 1.0)),
+            );
+            let name = pos2(button.left() - 1.0, button.center().y);
+            painter.text(name, Align2::RIGHT_CENTER, scope.name(), font.clone(), dim);
+            self.options_button(ui, scope, button);
         }
     }
 }

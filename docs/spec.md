@@ -729,7 +729,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Y shows luma. CbCr shows the two color differences over one another. RGB shows red, green and blue over one another (p. 3097).
     - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
   - The Parade has the modes RGB, YRGB and YCbCr (p. 3102). It shows the graphs of a mode side by side.
-  - vidcut: Waveform Options and Parade Options in the scopes menu set the modes. `viewer.scopes` sets them too.
+  - The Option button of each scope opens the options of that scope (p. 3102). A click outside the options closes them.
+    - vidcut: the button is at the corner of the scope, at the right of its name.
+    - vidcut: the scopes menu also has the options of each scope, in a submenu for each scope.
+  - vidcut: Waveform Options and Parade Options set the modes. `viewer.scopes` sets them too.
   - RGB is the default of the Waveform and of the Parade. R, G and B are on (measured in Resolve Studio 21.2).
   - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
     - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
@@ -737,7 +740,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The Vectorscope has Show Skin Tone Indicator (p. 3103). It shows a line at the traditional In-phase angle, a guide for average skin tone.
     - The line goes from the center to the circle, at 123.14 degrees counterclockwise from the Cb axis (measured in Resolve Studio 21.2).
     - Its color is dark gray (63, 63, 63) with the Graticule slider at the middle. It is off by default (measured).
-    - vidcut: Vectorscope Options in the scopes menu turns it on. `viewer.scopes` with `skin_tone` turns it on too.
+    - vidcut: Vectorscope Options turns it on. `viewer.scopes` with `skin_tone` turns it on too.
   - The Histogram shows how many pixels have each value, from black at the left to white at the right (p. 3099).
     - It has the modes RGB and YRGB (p. 3104). Waveform Scale Style also sets its scale (p. 3093).
     - vidcut: it has one band for each channel, from top to bottom. Each band fills the area under its curve in its color.
@@ -746,7 +749,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The height of a bin is linear in its share of the pixels. At the default Gain, a bin with 1/64 of the pixels fills its band (measured in Resolve Studio 21.2).
     - A taller bin is cut at the top of its band. The Gain slider sets the height (p. 3104).
     - vidcut: a bin is one column of the scope. The count of bins in Resolve is not measured.
-    - RGB is the default (measured). vidcut: Histogram Options in the scopes menu sets the mode.
+    - RGB is the default (measured). vidcut: Histogram Options sets the mode.
   - The CIE Chromaticity scope plots the chromaticity of the picture in a CIE 1931 xy graph or a CIE 1976 uv graph (pp. 3099–3100, 3104).
     - It shows the horseshoe of the visible colors, the black body locus, a triangle of the gamut and its white point (pp. 3099–3100).
     - A label names the gamut, with the coordinates of its red, green, blue and white (p. 3099).
@@ -767,7 +770,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Measured in a graph with a side of 1270 px: the ticks of the horseshoe are about 12 px long. The ticks of the axes are 14 px long.
     - Measured at that size: the circle has a radius of 6 px.
     - vidcut: these lengths are in proportion to the side of the graph. The radius of the circle is 2 px or more.
-    - CIE 1931 xy is the default (measured). vidcut: CIE Chromaticity Options in the scopes menu sets the graph.
+    - CIE 1931 xy is the default (measured). vidcut: CIE Chromaticity Options sets the graph.
     - Not measured in Resolve: the gamut on a Rec.2100 HLG timeline, and the lengths at other sizes.
   - Waveform Scale Style sets the scale of the Waveform, the Parade and the Histogram (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
