@@ -9,6 +9,7 @@ struct Params {
     hues: array<vec4<f32>, 3>,
     how: vec4<u32>,
     parts: vec4<u32>,
+    skin: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -192,6 +193,13 @@ fn on_graticule(p: vec2<f32>) -> bool {
     }
     if far < circle && (d.x == 0.0 || d.y == 0.0) {
         return true;
+    }
+    if params.parts.w == 1u {
+        let along = dot(d, params.skin.xy);
+        let off = abs(d.x * params.skin.y - d.y * params.skin.x);
+        if along > 0.0 && along < circle && off < 0.75 {
+            return true;
+        }
     }
     let half_box = params.chroma.w;
     for (var i = 0u; i < 6u; i++) {

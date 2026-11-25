@@ -293,6 +293,8 @@ pub struct Scopes {
     pub waveform_blue: bool,
     /// What the Parade shows side by side.
     pub parade_mode: ParadeMode,
+    /// The Vectorscope shows a line at the skin tone angle.
+    pub skin_tone: bool,
 }
 
 impl Default for Scopes {
@@ -308,6 +310,7 @@ impl Default for Scopes {
             waveform_green: true,
             waveform_blue: true,
             parade_mode: ParadeMode::default(),
+            skin_tone: false,
         }
     }
 }
@@ -448,6 +451,7 @@ impl Scopes {
             waveform_green: patch.waveform_green.unwrap_or(self.waveform_green),
             waveform_blue: patch.waveform_blue.unwrap_or(self.waveform_blue),
             parade_mode: patch.parade_mode.unwrap_or(self.parade_mode),
+            skin_tone: patch.skin_tone.unwrap_or(self.skin_tone),
         }
     }
 }
@@ -476,6 +480,8 @@ pub struct ScopesPatch {
     pub waveform_blue: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parade_mode: Option<ParadeMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skin_tone: Option<bool>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.

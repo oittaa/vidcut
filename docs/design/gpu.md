@@ -409,6 +409,7 @@ The scales (`marks`):
 - With `video_levels`, the Waveform and the Parade move each value to the 10-bit codes from 64 to 940 (`shown` in `scope.wgsl`). The marks stay.
 - A change of the scale or of `video_levels` draws each `Plot` again. `Plots::paint` takes the whole `Scopes`.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
+- With `skin_tone`, the Vectorscope also has a line from the center to the circle at `SKIN_DEGREES`.
 
 A scope that is off:
 

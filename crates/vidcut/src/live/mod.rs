@@ -3084,6 +3084,7 @@ impl Live {
                 waveform_green,
                 waveform_blue,
                 parade_mode,
+                skin_tone,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
@@ -3096,6 +3097,7 @@ impl Live {
                     waveform_green,
                     waveform_blue,
                     parade_mode,
+                    skin_tone,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {

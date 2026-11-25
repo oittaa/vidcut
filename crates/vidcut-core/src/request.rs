@@ -4400,6 +4400,9 @@ pub enum Request {
         /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parade_mode: Option<crate::preferences::ParadeMode>,
+        /// The Vectorscope shows a line at the skin tone angle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_tone: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
