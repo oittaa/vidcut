@@ -442,6 +442,10 @@ The bar and the Jobs button:
 - `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([spec §8.15](../spec.md#815-transform-and-crop-pp-766768)).
   - The handles work about the anchor point (`Shown::pivot`, from `place::anchored`).
   - A move snaps the middle of the picture as drawn, not its `position`.
+  - With Transform, `Shown::path` gives the motion path (`MotionPath`): the anchor point of each frame between the first and the last Position keyframe.
+  - A drag on a keyframe of the path (`Hold::Path`) changes that keyframe in the dragged picture. It ends in one `keyframes.set` (`Workspace::land_path`).
+  - The dragged picture of a path goes to the core as it is, not through `Picture::preview` (`Workspace::path_wanted`). Thus the picture follows the changed curve.
+  - A right-click puts the keyframe under the pointer in `path_menu`. Then the menu of the viewer shows only Delete Keyframe (`Workspace::path_menu`).
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.
 - The dragged picture goes to the core with `Handle::preview_pictures`. After it, the sent picture goes there until the project has it (`tools::landing`).
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
@@ -662,7 +666,9 @@ The bar and the Jobs button:
   - A dragged number keeps its value in `Drag` until the release. Thus one drag is one undo step.
   - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
   - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
-- With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
+- `section` draws the Keyframe buttons of the Transform, Crop and Composite headers. `group_values` names the values of each section, and `group_mark` lights the buttons.
+  - The button and its ease menu send a request for each value (`Workspace::key_group`). Previous and Next seek (`Workspace::step_group`).
+- With several clips, `number`, `section`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
 - `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.
 
 **The Keyframes tab** (`keyframe_editor::Editor`, `Workspace::keyframe_panel`).

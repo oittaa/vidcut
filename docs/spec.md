@@ -2018,7 +2018,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Resolve's Inspector also has a Keyframe button between Previous and Next arrows on each group (measured in Resolve Studio 21.1.1).
     - The groups with buttons are Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, and Volume and Pan.
     - The text of the Video panel names no Keyframe buttons for Transform, Cropping or Dynamic Zoom (pp. 734–737).
-    - vidcut does not have the buttons on Transform, Crop, Composite and Audio yet ([todo](todo/keyframes.md#buildable)).
+    - The button of a group adds or removes a keyframe at the playhead on each value of the group. The manual tells this for the groups of the Effects panel (p. 747).
+    - vidcut does not have a group button for Volume and Pan yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+  - The Transform, Crop and Composite sections have the group button, with one clip selected:
+    - On a frame with a keyframe of the section, it removes each keyframe of the section on that frame.
+    - On any other frame, it adds a keyframe on each value of the section, at the value of that frame.
+    - A right-click on the button sets the ease of the keyframes on that frame. The anchor point stays linear.
+    - The arrows go to the keyframes of all the values of the section.
+    - The button sends one `apply` with a `keyframes.add`, `keyframes.remove` or `keyframes.set` for each value.
   - A right-click on the button sets the ease. The ease is the volume curve (X74).
   - After the first keyframe, a change at another frame adds a keyframe.
   - This applies to the Inspector and to the viewer handles.
@@ -6904,6 +6911,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Crop handles move one side each. The uncropped picture shows dashed.
     - A Crop handle crosses the picture until the crop of its side is 1, the whole picture. The handle stays (measured in Resolve Studio 21.1.2).
     - When two Crop handles are on the same point, a drag takes the side with the larger crop.
+    - With the Transform handles and two or more Position keyframes, the viewer shows the motion path (pp. 1252–1254).
+      - The path goes through the anchor point of each frame, from the first Position keyframe to the last.
+      - A dot marks each frame. Thus close dots show slow motion.
+      - A square marks each keyframe. A drag on it moves the position of that keyframe, and the path and the picture follow.
+      - One `keyframes.set` with the `frames` of the keyframe follows on release.
+      - The right-click menu of a square has Delete Keyframe. It sends `keyframes.remove`.
+      - Smooth points are not in vidcut yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
     - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
     - With Shift too, Alt+wheel turns it to the next multiple of 15°.
