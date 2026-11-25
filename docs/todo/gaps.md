@@ -26,7 +26,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - Add EDL Marks on Tracks, and the keyframes of a grade that a copy or a still takes (pp. 3464–3465)
 - On the Export page: Estimated File Size, additional outputs, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
 - On the Export page: the Thumbnail timeline, the clip filter and Render This Clip (pp. 4128–4129)
-- In the render queue: the pencil that edits a job, Show All Projects and Review Before Upload (pp. 4130–4132)
+- In the render queue: Show All Projects (p. 4132) and Review Before Upload (p. 4108)
 - In the render queue: Reveal in Media Storage in the right-click menu, and Refresh in the "..." menu (pp. 4131–4132)
 - Don't show until next copy in Paste Attributes ([§8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212))
 - Paste Attributes of a copied speed that has keyframes ([§8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212))

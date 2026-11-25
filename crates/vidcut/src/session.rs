@@ -353,7 +353,7 @@ pub fn run_with(
                 envelope.dry_run,
             )?)
         }
-        Request::RenderAdd(params) => {
+        Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } => {
             let store = open(project)?;
             let env = AvEnv::for_project(store.path());
             let editor = store.load_project()?;

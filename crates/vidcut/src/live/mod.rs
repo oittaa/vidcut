@@ -101,6 +101,7 @@ pub enum GuiChange {
     Window(usize),
     QueueJobs(Vec<String>),
     JobDetails(bool),
+    EditJob(Option<String>),
     Nodes(Vec<String>, bool),
     Element(u8),
     GradeNodes(Vec<u32>, Option<u32>),
@@ -195,6 +196,7 @@ pub struct GuiState {
     pub windows: Vec<GuiPanel>,
     pub jobs: Vec<String>,
     pub job_details: bool,
+    pub edit_job: Option<String>,
 }
 
 pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
@@ -1903,7 +1905,8 @@ impl Live {
                 Err(Error::invalid(format!("{busy} renders now; stop it first"))),
             );
         }
-        if let Request::RenderAdd(params) = &envelope.request
+        if let Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } =
+            &envelope.request
             && let Some(open) = &self.project
         {
             let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
@@ -2256,6 +2259,7 @@ impl Live {
     fn rendering(&self, request: &Request) -> Option<String> {
         let gone = match request {
             Request::RenderRemove { jobs } => jobs.to_vec(),
+            Request::RenderUpdate { job, .. } => vec![job.clone()],
             Request::RenderClear { all } => {
                 let p = self.project.as_ref()?.project();
                 (p.queue.iter())
@@ -3565,6 +3569,7 @@ impl Live {
                 window,
                 jobs,
                 job_details,
+                edit_job,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
                     .chain(palette.map(GuiChange::Palette))
@@ -3574,6 +3579,9 @@ impl Live {
                     .chain(job_details.map(GuiChange::JobDetails))
                     .collect();
                 changes.push(GuiChange::Page(page));
+                if let Some(job) = edit_job {
+                    changes.push(GuiChange::EditJob(Some(job).filter(|j| !j.is_empty())));
+                }
                 self.gui_change(changes, |s| json!(s))
             }
             Request::GuiNodes {

@@ -15,7 +15,7 @@ pub fn top(p: &Project) -> Project {
     top
 }
 
-pub fn add(p: &mut Project, mut export: ExportParams) -> Result<String> {
+fn fixed(p: &Project, mut export: ExportParams) -> Result<(String, ExportParams)> {
     let timeline =
         (p.open_id().map(str::to_string)).ok_or_else(|| Error::not_found("no timeline is open"))?;
     let top = top(p);
@@ -36,6 +36,11 @@ pub fn add(p: &mut Project, mut export: ExportParams) -> Result<String> {
         end: RangeEnd::At(TimeSpec::Frames(b)),
     });
     export.background = false;
+    Ok((timeline, export))
+}
+
+pub fn add(p: &mut Project, export: ExportParams) -> Result<String> {
+    let (timeline, export) = fixed(p, export)?;
     let n = (p.queue.iter())
         .filter_map(|j| j.id.strip_prefix('r')?.parse::<u64>().ok())
         .max()
@@ -50,6 +55,16 @@ pub fn add(p: &mut Project, mut export: ExportParams) -> Result<String> {
         status: None,
     });
     Ok(id)
+}
+
+pub fn update(p: &mut Project, job: &str, export: ExportParams) -> Result<()> {
+    let i = find(p, job)?;
+    let (timeline, export) = fixed(p, export)?;
+    let j = &mut p.queue[i];
+    j.timeline = timeline;
+    j.export = export;
+    j.status = None;
+    Ok(())
 }
 
 pub fn find(p: &Project, job: &str) -> Result<usize> {
@@ -127,6 +142,10 @@ pub fn ended(p: &mut Project, job: &str, status: RenderStatus) -> Result<()> {
 pub fn change(p: &mut Project, request: &Request) -> Result<Value> {
     Ok(match request {
         Request::RenderAdd(export) => json!({ "id": add(p, export.clone())? }),
+        Request::RenderUpdate { job, export } => {
+            update(p, job, export.clone())?;
+            Value::Null
+        }
         Request::RenderRemove { jobs } => json!({ "removed": remove(p, &jobs.to_vec())? }),
         Request::RenderMove { job, to } => {
             move_to(p, job, *to)?;
