@@ -33,6 +33,7 @@ use super::workspace::{Workspace, dim, fit};
 use crate::live::{Answer, PageClock, PageTime, PlayerId};
 
 const GRIP: f32 = 9.0;
+const GRADE_PITCH: Vec2 = vec2(1.5, 1.25);
 const GRADIENT_POINT: Color32 = Color32::from_rgb(230, 60, 60);
 const GRADIENT_LINE: Color32 = Color32::from_rgb(80, 200, 80);
 const DASH: f32 = 4.0;
@@ -202,7 +203,7 @@ impl Default for EffectsPage {
             grade_seen: None,
             grade_left: Lru::new(),
             grade_coming: None,
-            grade_view: NodeView::default(),
+            grade_view: NodeView::pitched(GRADE_PITCH),
             grade_list: false,
             grade_wide: false,
             grade_spot: None,

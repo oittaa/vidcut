@@ -3891,6 +3891,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - The new node becomes the selected node.
   - vidcut: Alt+P and Alt+K give the measured numbers and links.
   - vidcut: Alt+K draws the new node one grid column right of the last node. While a node has that grid place, the new node goes one row down.
+  - vidcut: on the Color page, a grid column is 1.5 node widths and a grid row is 1.25 node heights. This is the same with and without thumbnails.
+  - vidcut: the Effects page keeps its own grid. Its pitch in Fusion is not measured.
   - vidcut: the same rule. Each link holds the order in which it was made (`made`).
   - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
   - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.

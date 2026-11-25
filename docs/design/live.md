@@ -523,6 +523,7 @@ The bar and the Jobs button:
   - A node can drop only into a link with `Wire::drops`: a link from an RGB output to an RGB input.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
+  - The grid of the Color page has its own pitch in node sizes (`GRADE_PITCH`, `NodeView::pitched`), as measured. The Effects page keeps the grid of `CELL`.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
   - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
