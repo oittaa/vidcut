@@ -750,9 +750,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The same menu has Video Level Scopes and Data Level Scopes (p. 3095). Data Level Scopes is the default (measured).
     - Video Level Scopes changes only what the scopes show. The monitor and the export do not change (p. 3095).
     - The figure on p. 3095 shows full-range white at code 940 of the 10-bit scale with Video Level Scopes.
-    - vidcut: with Video Level Scopes, the Waveform and the Parade show black at code 64 and white at code 940. The marks of the scale stay.
+    - With Video Level Scopes, the Waveform and the Parade show black at code 64 and white at code 940 (measured in Resolve Studio 21.2).
+    - The lines and labels of 10-bit stay where they are (measured). vidcut: the lines of 12-bit stay too. This is not measured.
+    - The lines and labels of Percentage, mV and HDR move with the picture (measured).
+      - Percentage: 0 is on code 64 and 100 on code 940. Lines at −10 and 110 are added.
+      - mV: 0 is on code 64 and 700 on code 940.
+      - HDR: each line is on code 64 plus 876 times the PQ value of its nits. This holds for the dashed lines too.
+    - The Vectorscope does not change (measured).
     - `viewer.scopes` with `video_levels` sets it.
-    - Not measured in Resolve: the marks of Percentage, mV and HDR with Video Level Scopes, and the Vectorscope with Video Level Scopes.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
