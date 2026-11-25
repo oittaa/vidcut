@@ -928,12 +928,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With faces, the zoom is at most the `zoom` of the request, usual 1.5. Why: the manual says about 150%.
     - The zoom is the largest up to that value at which the box around the faces, 1.1 times as large, fits in the frame. It is never under 1.0. Why: three faces across the frame gave 1.0.
     - The middle of the box around the faces goes to the middle of the frame, up to the limits of Pan and Tilt. The limits are in the size of the picture, as measured. Thus a letterboxed picture never shows the track below.
-    - A face with a score under 0.7 does not count. A face that the edge of the picture cuts does not count. Why: a face cut by the edge did not move the measured framing.
+    - A face with a score under 0.7 does not count. A face that the edge of the picture or of the frame cuts does not count. Why: a face cut by the edge did not move the measured framing.
   - vidcut: these cases are not measured:
     - **A range past the end of the clip:** it stops at the end of the clip.
     - **A clip with its own Zoom, Position, effects or grade:** the copy has the usual picture, with no effects and no grade.
     - **A generator, a title or a compound clip:** it is copied in the same way.
     - **A disabled clip, or a clip on a hidden track:** it does not count. The clip below it counts.
+    - **Mismatched Resolution Files other than Fit:** the copy has the size of the picture that this setting gives.
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.

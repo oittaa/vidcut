@@ -47,6 +47,7 @@ pub fn target(p: &Project, playhead: i64) -> Result<Option<Clip>> {
 pub fn framing(faces: &[Found], fit: [f64; 4], [w, h]: [f64; 2], zoom: f64) -> Framing {
     let least = f64::from(crate::motion::Join::of(Subject::Face).start);
     let [fx, fy, fw, fh] = fit;
+    let inside = |&[x0, y0, x1, y1]: &[f64; 4]| x0 >= 0.0 && y0 >= 0.0 && x1 <= 1.0 && y1 <= 1.0;
     let boxes: Vec<[f64; 4]> = faces
         .iter()
         .filter(|f| f64::from(f.score) >= least)
@@ -54,7 +55,7 @@ pub fn framing(faces: &[Found], fit: [f64; 4], [w, h]: [f64; 2], zoom: f64) -> F
             let ([u, v], [a, b]) = (f.center.map(f64::from), f.size.map(f64::from));
             [u - a / 2.0, v - b / 2.0, u + a / 2.0, v + b / 2.0]
         })
-        .filter(|&[x0, y0, x1, y1]| x0 >= 0.0 && y0 >= 0.0 && x1 <= 1.0 && y1 <= 1.0)
+        .filter(inside)
         .map(|[x0, y0, x1, y1]| {
             [
                 (fx + x0 * fw) / w,
@@ -63,6 +64,7 @@ pub fn framing(faces: &[Found], fit: [f64; 4], [w, h]: [f64; 2], zoom: f64) -> F
                 (fy + y1 * fh) / h,
             ]
         })
+        .filter(inside)
         .collect();
     if boxes.is_empty() {
         return Framing {

@@ -8320,7 +8320,7 @@ fn close_up_look(p: &Project, clip: &Clip) -> Option<(Media, Look, [f64; 4])> {
     let v = media.info.video.as_ref()?;
     let sar = (v.sar[0], v.sar[1]);
     let frame = (p.width(), p.height());
-    let fit = crate::place::fitted((v.width, v.height), sar, v.rotation, frame);
+    let fit = crate::place::mapped(p.scaling(), (v.width, v.height), sar, v.rotation, frame);
     let ((first, _), rate) = ops::motion::file_frames(p, clip);
     let look = subject_look(&media, rate, (first, first + 1));
     Some((media, look, fit))
