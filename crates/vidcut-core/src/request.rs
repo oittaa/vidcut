@@ -4163,7 +4163,7 @@ pub enum Request {
     },
     /// The key sets (spec §11): vidcut's own keys, and the sets you saved
     /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
-    /// `%APPDATA%idcut`, on macOS in `~/Library/Application
+    /// `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`). `set` names the set that the keys in force come
     /// from, and `changed` tells if they differ from it. A set file that
     /// can't be read is left out and listed in `refused` with why.

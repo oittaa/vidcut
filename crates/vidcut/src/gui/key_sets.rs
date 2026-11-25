@@ -25,6 +25,7 @@ pub(super) struct KeySetsUi {
     exporting: Option<(String, Picked)>,
     importing: Option<Picked>,
     naming: Option<String>,
+    focus_name: bool,
     confirm_use: Option<String>,
     confirm_delete: bool,
     want: Option<Want>,
@@ -81,6 +82,7 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                 }
                 if ui.button("Save As New Set…").clicked() {
                     s.naming = Some(String::new());
+                    s.focus_name = true;
                     ui.close();
                 }
                 ui.menu_button("Export Set", |ui| {
@@ -148,8 +150,9 @@ fn naming_row(ui: &mut egui::Ui, s: &mut KeySetsUi) {
                 .hint_text("Set Name")
                 .desired_width(200.0),
         );
-        if !field.has_focus() && name.is_empty() {
+        if s.focus_name {
             field.request_focus();
+            s.focus_name = false;
         }
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let label = match taken.is_some() {
