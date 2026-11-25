@@ -4392,6 +4392,10 @@ pub enum Request {
         vectorscope: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<crate::preferences::ScopeScale>,
+        /// Video Level Scopes: black at code 64 and white at code 940.
+        /// `false` is Data Level Scopes, the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_levels: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
