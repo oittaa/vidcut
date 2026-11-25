@@ -734,6 +734,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
     - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
   - vidcut: a color difference of zero is at the middle of the scale, code 512.
+  - The Vectorscope has Show Skin Tone Indicator (p. 3103). It shows a line at the traditional In-phase angle, a guide for average skin tone.
+    - The line goes from the center to the circle, at 123.14 degrees counterclockwise from the Cb axis (measured in Resolve Studio 21.2).
+    - Its color is dark gray (63, 63, 63) with the Graticule slider at the middle. It is off by default (measured).
+    - vidcut: Vectorscope Options in the scopes menu turns it on. `viewer.scopes` with `skin_tone` turns it on too.
   - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.

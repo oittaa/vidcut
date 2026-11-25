@@ -336,6 +336,7 @@ pub fn run_with(
             waveform_green,
             waveform_blue,
             parade_mode,
+            skin_tone,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
@@ -348,6 +349,7 @@ pub fn run_with(
                 waveform_green: *waveform_green,
                 waveform_blue: *waveform_blue,
                 parade_mode: *parade_mode,
+                skin_tone: *skin_tone,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }
