@@ -89,8 +89,8 @@ impl CudaDevice {
         })
     }
 
-    pub fn with_own_stream(&self) -> Result<Self> {
-        let stream = share::Stream::new(self)?;
+    pub fn with_own_stream(&self, waits: share::Waits) -> Result<Self> {
+        let stream = share::Stream::new(self, waits)?;
         // SAFETY: a fresh device on the context `base` keeps, owning `stream` until its `free`.
         unsafe {
             let mut device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA);

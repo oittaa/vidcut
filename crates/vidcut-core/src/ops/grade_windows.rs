@@ -1,10 +1,14 @@
 use crate::error::{Error, Result};
-use crate::model::{CurvePoint, Grade, GradeNode, GradeWindow, Project, WindowKind, WindowShape};
+use crate::model::{
+    CurvePoint, DynamicsProfile, Grade, GradeNode, GradeWindow, Project, WindowKind, WindowShape,
+};
 use crate::window_key::{
     CIRCLE_RADIUS, CURVE_HANDLE, PAN_STEP, aspect_shrink, circle_scale, linear_scale, linear_scales,
 };
 
-use super::grade::{GradeOf, changed_node, edited, frame_of, no_node, stored, unlocked};
+use super::grade::{
+    GradeOf, auto_keyed, changed_node, edited, frame_of, no_node, stored, unlocked,
+};
 
 pub const POLYGON_LEAST: usize = 3;
 pub const POLYGON_MOST: usize = 128;
@@ -277,10 +281,11 @@ pub(super) fn checked(w: &GradeWindow) -> Result<()> {
 fn keyed(
     g: &mut Grade,
     (n, i): (u32, usize),
-    frame: Option<i64>,
+    (frame, profile): (Option<i64>, DynamicsProfile),
     change: impl FnOnce(&mut GradeWindow) -> Result<()>,
 ) -> Result<()> {
     window(corrector(g, n)?, n, i)?;
+    auto_keyed(g, n, frame, profile);
     let (d, frame) = changed_node(g, n, frame)?;
     let mut now = d.windows_changed_at(frame)[i].clone();
     change(&mut now)?;
@@ -299,7 +304,10 @@ pub fn set(
         return Err(Error::usage("give a value to change"));
     }
     let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
-    edited(p, of, |g| keyed(g, (n, i), frame, |w| changed(w, c)))
+    let profile = p.settings.dynamics_profile;
+    edited(p, of, |g| {
+        keyed(g, (n, i), (frame, profile), |w| changed(w, c))
+    })
 }
 
 pub fn copy(
@@ -335,6 +343,7 @@ pub fn paste(
 ) -> Result<usize> {
     checked(copied)?;
     let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
+    let profile = p.settings.dynamics_profile;
     let mut made = 0;
     edited(p, of, |g| {
         let d = corrector(g, n)?;
@@ -351,7 +360,7 @@ pub fn paste(
             && window(d, n, i)?.shape.kind() == copied.shape.kind()
         {
             made = i;
-            return keyed(g, (n, i), frame, |w| {
+            return keyed(g, (n, i), (frame, profile), |w| {
                 *w = GradeWindow {
                     on: w.on,
                     name: std::mem::take(&mut w.name),
