@@ -26,6 +26,7 @@ mod history;
 mod import;
 mod inspector;
 mod isolation;
+mod key_sets;
 mod keyframe_editor;
 mod leveler;
 mod look_tiles;

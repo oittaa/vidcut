@@ -271,6 +271,31 @@ pub fn run_with(
         Request::KeysReset { action } => {
             answer(crate::preferences::keys_reset(*action, envelope.dry_run)?)
         }
+        Request::KeysSets {} => answer(crate::preferences::keys_sets()?),
+        Request::KeysUse { set } => answer(crate::preferences::keys_use(set, envelope.dry_run)?),
+        Request::KeysSave { name, overwrite } => answer(crate::preferences::keys_save(
+            name,
+            *overwrite,
+            envelope.dry_run,
+        )?),
+        Request::KeysDelete { name } => {
+            answer(crate::preferences::keys_delete(name, envelope.dry_run)?)
+        }
+        Request::KeysExport { set, path } => answer(crate::preferences::keys_export(
+            set,
+            path,
+            envelope.dry_run,
+        )?),
+        Request::KeysImport {
+            path,
+            name,
+            overwrite,
+        } => answer(crate::preferences::keys_import(
+            path,
+            name.as_deref(),
+            *overwrite,
+            envelope.dry_run,
+        )?),
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
             *service,
             key.as_deref(),

@@ -54,6 +54,7 @@ pub(super) struct PreferencesUi {
     confirm_keys: bool,
     pub(super) keys_open: bool,
     keys_window: super::window::Tool,
+    pub(super) key_sets: super::key_sets::KeySetsUi,
 }
 
 impl PreferencesUi {
@@ -264,6 +265,7 @@ fn without_key(bindings: &Bindings, action: Action, slot: usize) -> Option<(&'st
 
 fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) {
     ui.spacing_mut().item_spacing.y = 8.0;
+    super::key_sets::bar(ui, &mut state.key_sets, bindings);
     ui.add(
         egui::TextEdit::singleline(&mut state.key_search)
             .hint_text("Find an Action or a Key")
@@ -365,7 +367,7 @@ fn default_keys_button(
     bindings: &Bindings,
     action: Action,
 ) {
-    let shown: Vec<String> = action.default_keys().iter().map(Combo::shown).collect();
+    let shown: Vec<String> = bindings.set_keys(action).iter().map(Combo::shown).collect();
     let tip = match shown.is_empty() {
         true => "Default: No Key".to_string(),
         false => format!("Default: {}", shown.join(", ")),
@@ -442,6 +444,9 @@ impl Workspace {
     }
 
     pub(super) fn keys_window(&mut self, ctx: &egui::Context) {
+        if self.preferences.keys_open {
+            self.key_sets(ctx);
+        }
         let owner = self.main_window;
         let bindings = self.snap.bindings.clone();
         let state = &mut self.preferences;
@@ -449,6 +454,7 @@ impl Workspace {
             state.keys_window.close();
             state.capture = None;
             state.confirm_keys = false;
+            state.key_sets.close();
             return;
         }
         let mut window = std::mem::take(&mut state.keys_window);

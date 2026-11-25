@@ -880,7 +880,7 @@ Fonts:
 Keys:
 
 - The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
-- `Bindings` joins the table and `Preferences.keys`. It gives the keys of an action and the owner of a key (`Combo`).
+- `Bindings` joins the table, `Preferences.keys` and the key set in force. It gives the keys of an action and the owner of a key (`Combo`).
 - `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
 - Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.
 
@@ -910,6 +910,7 @@ The Keyboard Customization window:
 - `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
 - `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
 - The window sends `keys.set` and `keys.reset`, as the CLI does.
+- `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame
 

@@ -988,10 +988,11 @@ The file:
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services, viewer and keys ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
-- `Preferences.keys` holds the keys of each `Action` that the user changed.
-  - An action that is not in the section has its default keys.
+- `Preferences.keys` holds the keys in force of each `Action` whose keys are different from the table.
+  - An action that is not in the section has its default keys, less the keys that an action of the section has. Why: a new default key of a later version does not make the file fail (spec §11).
   - An action with an empty list has no key.
-  - A file that gives one key to two actions fails to load.
+  - A file that gives one key to two actions of the section fails to load.
+- `Preferences.key_set` names the key set that the keys in force come from. It is left out for vidcut's own set (`key_sets::OWN`).
 - No key of a service is ever in the file.
 
 Requests:
@@ -1002,6 +1003,13 @@ Requests:
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
+- The key set requests are projectless too:
+  - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
+  - A set file holds one table, `keys`, in the form of `Preferences.keys`. `keys.export` writes this form, and `keys.import` reads it.
+  - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
+  - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
+  - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.
+  - Why a copy in the preferences: the keys in force do not depend on a file that the user can delete or edit.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).

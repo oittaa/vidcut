@@ -5134,7 +5134,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - macOS keeps the keys of the manual.
 - Shortcuts do nothing while a text field has focus, or while a modal question shows.
 - Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
-- The table gives the default keys. The Keyboard Customization window (p. 121), `keys.set` and `keys.reset` change them.
+- The table gives the default keys. The Keyboard Customization window (p. 121), `keys.set`, `keys.reset` and `keys.use` change them.
 - File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
@@ -5143,6 +5143,17 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
+- Key sets (pp. 122, 124):
+  - A key set gives keys to actions. vidcut's own set is the table.
+  - The keys in force come from one set. The dropdown at the top of the window selects the set, and `keys.use` does the same.
+  - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set.
+  - The Option menu has Save, Save As New Set…, Export Set and Import Set…. The trash button deletes the set in force.
+  - Save As New Set… (`keys.save`) saves the keys in force under a name. That set is then in force.
+  - Save writes the keys in force into the user's set in force. A built-in set does not change.
+  - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force.
+  - A delete of the set in force keeps its keys in force, as changes to vidcut's own set.
+  - Reset puts back the keys of the set in force.
+  - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
   - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.

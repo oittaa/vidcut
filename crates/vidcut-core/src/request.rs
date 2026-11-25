@@ -4153,13 +4153,65 @@ pub enum Request {
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,
     },
-    /// Put default keys back. A default key that another action has now is
-    /// refused, and the refusal names that action.
+    /// Put the keys of the key set in force back (`keys.sets`). A key that
+    /// another action has now is refused, and the refusal names that action.
     #[serde(rename = "keys.reset")]
     KeysReset {
         /// The action, as `keys.list` names it. Without it, every action.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         action: Option<crate::shortcuts::Action>,
+    },
+    /// The key sets (spec §11): vidcut's own keys, and the sets you saved
+    /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
+    /// `%APPDATA%idcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`). `set` names the set that the keys in force come
+    /// from, and `changed` tells if they differ from it. A set file that
+    /// can't be read is left out and listed in `refused` with why.
+    #[serde(rename = "keys.sets")]
+    KeysSets {},
+    /// Put a key set in force. Its keys replace the keys in force, with
+    /// their changes. A running GUI follows at once.
+    #[serde(rename = "keys.use")]
+    KeysUse {
+        /// The set's name, as `keys.sets` gives it; names match whatever
+        /// their case.
+        set: String,
+    },
+    /// Save the keys in force as a key set of yours. That set is then in
+    /// force. Built-in sets can't be replaced.
+    #[serde(rename = "keys.save")]
+    KeysSave {
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
+        name: String,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Delete one of your key sets. Built-in sets can't be deleted. When the
+    /// set is in force, its keys stay in force, as changes to vidcut's own
+    /// keys.
+    #[serde(rename = "keys.delete")]
+    KeysDelete { name: String },
+    /// Write a key set to a file, for another computer (`keys.import`). A
+    /// file at the path is replaced.
+    #[serde(rename = "keys.export")]
+    KeysExport {
+        /// The set's name, as `keys.sets` gives it.
+        set: String,
+        path: PathBuf,
+    },
+    /// Add a key set from a file that `keys.export` wrote. The set is not
+    /// put in force (`keys.use`).
+    #[serde(rename = "keys.import")]
+    KeysImport {
+        path: PathBuf,
+        /// The set's name. Without it, the file's name without its
+        /// extension.
+        #[serde(default)]
+        name: Option<String>,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
     },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
@@ -7944,6 +7996,12 @@ impl Request {
                 | Self::KeysList {}
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
+                | Self::KeysSets {}
+                | Self::KeysUse { .. }
+                | Self::KeysSave { .. }
+                | Self::KeysDelete { .. }
+                | Self::KeysExport { .. }
+                | Self::KeysImport { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -8039,6 +8097,12 @@ impl Request {
                     | Self::KeysList {}
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
+                    | Self::KeysSets {}
+                    | Self::KeysUse { .. }
+                    | Self::KeysSave { .. }
+                    | Self::KeysDelete { .. }
+                    | Self::KeysExport { .. }
+                    | Self::KeysImport { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }
@@ -8055,6 +8119,8 @@ impl Request {
             }
             Self::MediaAddFolder { path, .. }
             | Self::Probe { path }
+            | Self::KeysExport { path, .. }
+            | Self::KeysImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesImport { path, .. } => path.iter_mut().collect(),
             Self::CacheClear { projects } => projects.iter_mut().collect(),

@@ -537,11 +537,62 @@ impl<'de> Deserialize<'de> for Combo {
 
 pub type Custom = BTreeMap<Action, Vec<Combo>>;
 
+type Resolved = (
+    BTreeMap<Action, Vec<Combo>>,
+    BTreeMap<(Panel, Combo), Action>,
+);
+
+fn resolve(custom: &Custom) -> Result<Resolved> {
+    let mut keys = BTreeMap::new();
+    let mut owners = BTreeMap::new();
+    for (&action, combos) in custom {
+        for &combo in combos {
+            match owners.insert((action.panel(), combo), action) {
+                Some(other) if other != action => {
+                    return Err(Error::usage(format!(
+                        "{combo} belongs to both {} and {}: one key has one action",
+                        other.title(),
+                        action.title(),
+                    )));
+                }
+                _ => {}
+            }
+        }
+        keys.insert(action, combos.clone());
+    }
+    let listed = owners.clone();
+    for &action in Action::ALL {
+        if custom.contains_key(&action) {
+            continue;
+        }
+        let mut free = Vec::new();
+        for combo in action.default_keys() {
+            let place = (action.panel(), combo);
+            if listed.contains_key(&place) {
+                continue;
+            }
+            if let Some(other) = owners.insert(place, action) {
+                return Err(Error::internal(format!(
+                    "the default keys give {combo} to both {} and {}",
+                    other.name(),
+                    action.name(),
+                )));
+            }
+            free.push(combo);
+        }
+        keys.insert(action, free);
+    }
+    Ok((keys, owners))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bindings {
     keys: BTreeMap<Action, Vec<Combo>>,
     owners: BTreeMap<(Panel, Combo), Action>,
     custom: Custom,
+    set_name: Option<String>,
+    set_keys: BTreeMap<Action, Vec<Combo>>,
+    set_custom: Custom,
 }
 
 impl Default for Bindings {
@@ -552,31 +603,19 @@ impl Default for Bindings {
 
 impl Bindings {
     pub fn of(custom: &Custom) -> Result<Self> {
-        let mut keys = BTreeMap::new();
-        let mut owners = BTreeMap::new();
-        for &action in Action::ALL {
-            let combos = match custom.get(&action) {
-                Some(combos) => combos.clone(),
-                None => action.default_keys(),
-            };
-            for &combo in &combos {
-                match owners.insert((action.panel(), combo), action) {
-                    Some(other) if other != action => {
-                        return Err(Error::usage(format!(
-                            "{combo} belongs to both {} and {}: one key has one action",
-                            other.title(),
-                            action.title(),
-                        )));
-                    }
-                    _ => {}
-                }
-            }
-            keys.insert(action, combos);
-        }
+        Self::in_set(None, &Custom::new(), custom)
+    }
+
+    pub fn in_set(set_name: Option<String>, set: &Custom, custom: &Custom) -> Result<Self> {
+        let (keys, owners) = resolve(custom)?;
+        let (set_keys, _) = resolve(set)?;
         Ok(Self {
             keys,
             owners,
             custom: custom.clone(),
+            set_name,
+            set_keys,
+            set_custom: set.clone(),
         })
     }
 
@@ -584,16 +623,32 @@ impl Bindings {
         self.keys.get(&action).map_or(&[], Vec::as_slice)
     }
 
+    pub fn set_keys(&self, action: Action) -> &[Combo] {
+        self.set_keys.get(&action).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn set_name(&self) -> Option<&str> {
+        self.set_name.as_deref()
+    }
+
     pub fn owner(&self, panel: Panel, combo: Combo) -> Option<Action> {
         self.owners.get(&(panel, combo)).copied()
     }
 
     pub fn is_custom(&self, action: Action) -> bool {
-        self.custom.contains_key(&action)
+        self.keys(action) != self.set_keys(action)
     }
 
     pub fn any_custom(&self) -> bool {
-        !self.custom.is_empty()
+        Action::ALL.iter().any(|&a| self.is_custom(a))
+    }
+
+    pub fn changes(&self) -> Custom {
+        Action::ALL
+            .iter()
+            .filter(|&&a| self.keys(a) != a.default_keys())
+            .map(|&a| (a, self.keys(a).to_vec()))
+            .collect()
     }
 
     pub fn first(&self, action: Action) -> Option<String> {
@@ -678,12 +733,9 @@ impl Bindings {
 
     pub fn reset(&self, action: Option<Action>) -> Result<Custom> {
         let Some(action) = action else {
-            return Ok(Custom::new());
+            return Ok(self.set_custom.clone());
         };
-        self.refuse_taken(action, &action.default_keys())?;
-        let mut custom = self.custom.clone();
-        custom.remove(&action);
-        Ok(custom)
+        self.set(action, self.set_keys(action))
     }
 }
 
