@@ -3888,9 +3888,16 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Nodes 1 to 4 are in series. Alt+P at node 2 gives the numbers of Alt+L, with a Parallel Mixer 4.
     - Alt+K at node 6, the last node, then adds node 7 between node 6 and the Node Tree output.
     - Alt+K with node 2 selected then adds node 8 between node 7 and the output. Thus Alt+K does not use the selected node.
-  - Measured: that node 8 was drawn in a free place under node 1. One case does not give the rule for the place.
+  - Measured in 8 cases: Alt+K draws the new node one column right of the last node, on the same row. The selected node does not change the place.
+    - The last node is the node before the output. It can be a Parallel Mixer or a Layer Mixer.
+    - A dragged last node moves the place with it.
+    - When a node is in that place, the new node goes one row down, until the place is free. Two cases showed this.
+    - A column is about 1.5 node widths, and a row is about 1.25 node heights.
+    - The new node becomes the selected node.
   - vidcut: Alt+P and Alt+K give the measured numbers and links.
-  - vidcut: Alt+K draws the new node to the right of the last node. Where Resolve draws it is open ([todo](todo/color-page.md)).
+  - vidcut: Alt+K draws the new node one grid column right of the last node. While a node has that grid place, the new node goes one row down.
+  - vidcut: on the Color page, a grid column is 1.5 node widths and a grid row is 1.25 node heights. This is the same with and without thumbnails.
+  - vidcut: the Effects page keeps its own grid. Its pitch in Fusion is not measured.
   - vidcut: the same rule. Each link holds the order in which it was made (`made`).
   - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
   - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
