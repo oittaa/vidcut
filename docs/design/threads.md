@@ -59,6 +59,7 @@ The values in the Priority column:
 | `vidcut-encode` | `Worker::spawn` | the encoders and muxer of an output | starter's |
 | `vidcut-open` | `Ahead::start` | opens sources ahead | starter's |
 | `vidcut-light-N`, `vidcut-scenes` | `Lights::analysis`, `analysis::picture_stats` | HDR light; frame scores | starter's |
+| `vidcut-pyramid` | `stabilize::measure` on the CPU, per frame | the gray picture and the pyramid of the next frame, while the pair before it is measured | starter's |
 | `vidcut-cpu-N`, `vidcut-cpu-job-N` | the first `pool::run` or `pool::give` | the two CPU pools | inherited; lowest class |
 | `vidcut-give-back` | `buffers::give_back` | `malloc_trim` (Linux, glibc) | inherited |
 | `vidcut-upscale-rest` | `nanovsr::upscale` | the other frames of an AI chunk, after the asked frame | inherited |

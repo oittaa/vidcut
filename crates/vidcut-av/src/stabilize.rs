@@ -40,27 +40,67 @@ enum Seen {
     Moved(Pairs),
 }
 
+type Step = Option<[f32; 8]>;
+
 enum Measuring {
-    Cpu(Option<Vec<Gray>>),
+    Cpu {
+        older: Option<Vec<Gray>>,
+        newer: Option<Vec<Gray>>,
+    },
     Gpu(Box<gpu::Measuring>),
 }
 
 impl Measuring {
-    fn seen(&mut self, frame: &frame::Video) -> Result<Seen> {
+    fn next(
+        &mut self,
+        frame: &frame::Video,
+        size: (u32, u32),
+        mode: StabilizeMode,
+    ) -> Result<Option<Step>> {
         match self {
-            Self::Gpu(g) => g.seen(frame),
-            Self::Cpu(last) => {
-                let levels = pyramid(Gray::of(frame));
-                let seen = match last.as_ref() {
-                    None => Seen::First,
-                    Some(before) if repeats(&before[0], &levels[0]) => Seen::Same,
-                    Some(before) => Seen::Moved(pairs(before, &levels)),
-                };
-                *last = Some(levels);
-                Ok(seen)
+            Self::Gpu(g) => Ok(match g.seen(frame)? {
+                Seen::First => None,
+                Seen::Same => Some(None),
+                Seen::Moved(pairs) => Some(Some(moved(&pairs, size, mode))),
+            }),
+            Self::Cpu { older, newer } => {
+                let job = crate::first::yields();
+                let (made, step) = std::thread::scope(|scope| -> Result<_> {
+                    let making = std::thread::Builder::new()
+                        .name("vidcut-pyramid".into())
+                        .spawn_scoped(scope, || {
+                            if job {
+                                crate::first::as_job();
+                            }
+                            pyramid(Gray::of(frame))
+                        })?;
+                    let step = judged(older.as_deref(), newer.as_deref(), mode);
+                    let made = making
+                        .join()
+                        .unwrap_or_else(|e| std::panic::resume_unwind(e));
+                    Ok((made, step))
+                })?;
+                *older = newer.replace(made);
+                Ok(step)
             }
         }
     }
+
+    fn last(&self, mode: StabilizeMode) -> Option<Step> {
+        match self {
+            Self::Gpu(_) => None,
+            Self::Cpu { older, newer } => judged(older.as_deref(), newer.as_deref(), mode),
+        }
+    }
+}
+
+fn judged(before: Option<&[Gray]>, after: Option<&[Gray]>, mode: StabilizeMode) -> Option<Step> {
+    let (before, after) = (before?, after?);
+    let size = (before[0].w as u32, before[0].h as u32);
+    Some(match repeats(&before[0], &after[0]) {
+        true => None,
+        false => Some(moved(&pairs(before, after), size, mode)),
+    })
 }
 
 pub fn measure(
@@ -75,7 +115,10 @@ pub fn measure(
     let size = working(plan.width, plan.height);
     let mut measuring = match on_gpu {
         true => Measuring::Gpu(Box::new(gpu::Measuring::start(size)?)),
-        false => Measuring::Cpu(None),
+        false => Measuring::Cpu {
+            older: None,
+            newer: None,
+        },
     };
     let reader = Reader { plan, size, gpu };
     let (lo, hi) = (look.frames.0.max(0), look.frames.1.min(plan.frames));
@@ -103,13 +146,10 @@ pub fn measure(
             Some(Some(f)) => f,
         };
         crate::cancel::stop()?;
-        match measuring.seen(&frame)? {
-            Seen::First => {}
-            Seen::Same => steps.push(None),
-            Seen::Moved(pairs) => steps.push(Some(moved(&pairs, size, look.mode))),
-        }
+        steps.extend(measuring.next(&frame, size, look.mode)?);
         shown.report(done as usize + 1);
     }
+    steps.extend(measuring.last(look.mode));
     Ok(Shake { size, steps })
 }
 
