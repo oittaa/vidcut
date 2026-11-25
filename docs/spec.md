@@ -181,6 +181,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A pasted keyframe can be past the clip's ends (p. 1258).
       - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
+    - The ⋯ menu has Reverse Keyframes (pp. 1264, 1267). It runs the selected keyframes backward over their span.
+      - Each keyframe goes as far from the last as it was from the first. It keeps its value, and it stays selected.
+      - Its In and Out handles change places. Thus Ease In becomes Ease Out.
+      - The span is that of all the selected keyframes. Thus the timing between the values stays.
+      - A reversed keyframe takes the place of a keyframe on its new frame.
+      - Speed keyframes do not reverse. `keyframes.reverse` does this.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
       - A button is off when no selected keyframe takes its ease.
@@ -719,7 +725,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
   - vidcut: the View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
   - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
-  - vidcut: the Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - The Waveform has the modes Y, CbCr and RGB (p. 3103).
+    - Y shows luma. CbCr shows the two color differences over one another. RGB shows red, green and blue over one another (p. 3097).
+    - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
+  - The Parade has the modes RGB, YRGB and YCbCr (p. 3102). It shows the graphs of a mode side by side.
+  - vidcut: Waveform Options and Parade Options in the scopes menu set the modes. `viewer.scopes` sets them too.
+  - vidcut: Y is the default of the Waveform, and RGB is the default of the Parade. The defaults of Resolve are not measured.
+  - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
+    - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
+  - vidcut: a color difference of zero is at the middle of the scale, code 512.
   - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
@@ -1862,13 +1876,16 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D65, D66.
 - **Editing** (pp. 763–764, 1176):
   - A double-click on the text of a title in the viewer edits the text there.
+  - The text is edited in place, inside a plain outline. Typing changes the Rich Text field of the Inspector at once (measured in Resolve Studio 21.2).
   - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
-  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section and a text box at the title.
-    - Typing in the box changes the title in the viewer and the text of the Title section at once.
-    - The box closes when it loses the focus, for example with Esc or a click outside it. Then one `titles.set` puts the change in.
+  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
+    - The double-click puts the caret at the pointer. A click or a drag in the text moves the caret or selects letters.
+    - A typed letter takes the style of the letter before it. At the start of a line, it takes the style of the letter after it.
+    - The edit ends with Esc or a click outside the title. Then one `titles.set` puts the change in.
+    - `gui.show` with `title_text` starts the edit, and `gui.close` ends it.
   - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
   - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
@@ -3078,11 +3095,18 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
 
 YIQ: Y = 0.299 R + 0.587 G + 0.114 B. I = 0.596 R − 0.274 G − 0.322 B. Q = 0.212 R − 0.523 G + 0.311 B.
 
-vidcut, with a mode other than Normal:
+The rows of the sliders change with the mode (measured in Resolve Studio 21.2):
 
-- Alpha Gain multiplies fa first.
-- Subtractive/Additive then multiplies F by s + (1 − s) × fa.
-- Burn In multiplies fa by 1 − u in the cover of the background.
+- Normal with Over: Subtractive/Additive, Alpha Gain, Burn In and Blend. Normal with another Operator: the same rows without Burn In.
+- Screen and the 25 other modes: Gain and Blend.
+- Gain is Alpha Gain with another name. It keeps its value when the mode changes.
+- Resolve also shows Clamp Coverage under Blend with Normal and with Screen.
+
+With a mode other than Normal (measured in Resolve Studio 21.2):
+
+- Subtractive/Additive and Burn In do not act. A value set under Normal changes nothing.
+- Gain multiplies F and fa. Then the sum of the mode follows. With Normal, Alpha Gain multiplies only fa.
+- vidcut: a Burn In set under Over also acts with another Operator of Normal. This case is not measured.
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
@@ -5370,11 +5394,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - A key works at one level: the application, or a panel (pp. 123–124). The keys of the panel that has the focus go first. A key with no action there does its application action.
-  - The Media Pool has its own level. A click in the Media tab gives it the focus, and a click in another place takes the focus away. While it has the focus, a line in the accent color is at the top of the tab.
-  - The keys of the Media Pool work only while the Media tab is on the screen. The Effects page and the Export page do not show it.
-  - In the Media Pool, Delete and Backspace remove the selected media, after a question. Ctrl+A and Ctrl+Shift+A select all or no media.
-  - These three commands and their keys are not measured. The manual does not list the commands of the Media Pool level (case 18 of shortcuts-resolve-runs.md).
-  - Thus Alt+Delete in the Media Pool lifts the timeline selection, as an application action. Not measured (case 19 of shortcuts-resolve-runs.md).
+  - The Media Pool has no level of its own. Its Remove Clips command is the Delete command of the application, with the same keys (measured).
+  - A click in the Media tab gives the Media Pool the focus, and a click in another place takes the focus away.
+  - While the Media Pool has the focus, a line in the accent color is at the top of the tab.
+  - With the focus in the Media Pool, Delete and Lift remove the selected media, as Remove in [§3](#3-media-pool-ch-34-pp-653675) tells. Select all and Select nothing act on the media that it shows.
+  - This occurs only while the Media tab is on the screen. The Effects page and the Export page do not show it.
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
   - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - On the other pages, these five keys keep the actions of the table.

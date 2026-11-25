@@ -331,6 +331,11 @@ pub fn run_with(
             vectorscope,
             scale,
             video_levels,
+            waveform_mode,
+            waveform_red,
+            waveform_green,
+            waveform_blue,
+            parade_mode,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
@@ -338,6 +343,11 @@ pub fn run_with(
                 vectorscope: *vectorscope,
                 scale: *scale,
                 video_levels: *video_levels,
+                waveform_mode: *waveform_mode,
+                waveform_red: *waveform_red,
+                waveform_green: *waveform_green,
+                waveform_blue: *waveform_blue,
+                parade_mode: *parade_mode,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }

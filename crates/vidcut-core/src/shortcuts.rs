@@ -15,20 +15,18 @@ pub enum Group {
     Edit,
     Clips,
     Trim,
-    Pool,
     Nodes,
     Color,
     App,
 }
 
 impl Group {
-    pub const ALL: [Group; 9] = [
+    pub const ALL: [Group; 8] = [
         Group::Play,
         Group::Mark,
         Group::Edit,
         Group::Clips,
         Group::Trim,
-        Group::Pool,
         Group::Nodes,
         Group::Color,
         Group::App,
@@ -41,7 +39,6 @@ impl Group {
             Group::Edit => "Put clips in",
             Group::Clips => "Change clips",
             Group::Trim => "Select and trim",
-            Group::Pool => "Media Pool",
             Group::Nodes => "Effects page",
             Group::Color => "Color page",
             Group::App => "Project and app",
@@ -50,7 +47,6 @@ impl Group {
 
     pub fn level(self) -> Option<Panel> {
         match self {
-            Group::Pool => Some(Panel::MediaPool),
             Group::Nodes => Some(Panel::Effects),
             Group::Color => Some(Panel::Color),
             _ => None,
@@ -61,16 +57,14 @@ impl Group {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Panel {
     App,
-    MediaPool,
     Transcription,
     Effects,
     Color,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 5] = [
+    pub const ALL: [Panel; 4] = [
         Panel::App,
-        Panel::MediaPool,
         Panel::Transcription,
         Panel::Effects,
         Panel::Color,
@@ -79,7 +73,6 @@ impl Panel {
     pub fn name(self) -> &'static str {
         match self {
             Panel::App => "app",
-            Panel::MediaPool => "media_pool",
             Panel::Transcription => "transcription",
             Panel::Effects => "effects",
             Panel::Color => "color",
@@ -89,7 +82,6 @@ impl Panel {
     pub fn title(self) -> &'static str {
         match self {
             Panel::App => "Application",
-            Panel::MediaPool => "Media Pool",
             Panel::Transcription => "Transcription",
             Panel::Effects => "Effects Page",
             Panel::Color => "Color Page",
@@ -228,9 +220,6 @@ actions! {
     SourceEnd "source_end",
     ClipIn "clip_in",
     ClipOut "clip_out",
-    RemoveMedia "remove_media",
-    SelectAllMedia "select_all_media",
-    SelectNoMedia "select_no_media",
     Undo "undo",
     Redo "redo",
     Import "import",
@@ -245,9 +234,6 @@ impl Action {
     pub fn panel(self) -> Panel {
         match self {
             Action::SelectSentence => Panel::Transcription,
-            Action::RemoveMedia | Action::SelectAllMedia | Action::SelectNoMedia => {
-                Panel::MediaPool
-            }
             Action::PassThrough
             | Action::LockNode
             | Action::RenameNode
@@ -856,7 +842,7 @@ const fn pointer(
     }
 }
 
-use Group::{App, Clips, Color, Edit, Mark, Nodes, Play, Pool, Trim};
+use Group::{App, Clips, Color, Edit, Mark, Nodes, Play, Trim};
 
 pub const SHORTCUTS: &[Shortcut] = &[
     own(
@@ -1179,7 +1165,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
              the main story and never has holes. With volume keyframes selected, it removes only \
-             them. With a dissolve selected, it removes the dissolve and its Cross Fade.",
+             them. With a dissolve selected, it removes the dissolve and its Cross Fade. After a \
+             click in the Media tab, it removes the selected media from the pool instead, after \
+             asking.",
         ),
     ),
     own(
@@ -1373,8 +1361,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl+A"],
         "Select all",
         Some(
-            "Every clip and subtitle on the timeline. After a click in the Keyframes tab or the \
-             keyframe tray, all its keyframes.",
+            "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
+             shows. After a click in the Keyframes tab or the keyframe tray, all its \
+             keyframes.",
         ),
     ),
     own(
@@ -1826,27 +1815,6 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+Shift+C"],
         "Auto Color on the current node",
         Some("Balances the blacks and the whites from the frame at the playhead."),
-    ),
-    own(
-        Pool,
-        Action::RemoveMedia,
-        &["Delete", "Backspace"],
-        "Remove the selected media",
-        Some("Asks first."),
-    ),
-    own(
-        Pool,
-        Action::SelectAllMedia,
-        &["Ctrl+A"],
-        "Select all media",
-        Some("All the media that the Media tab shows."),
-    ),
-    own(
-        Pool,
-        Action::SelectNoMedia,
-        &["Ctrl+Shift+A"],
-        "Select no media",
-        None,
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

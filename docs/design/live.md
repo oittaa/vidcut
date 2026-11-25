@@ -404,10 +404,15 @@ The bar and the Jobs button:
   - `Selection::keep_order` removes each item that left the selection and adds each new item at the end. Items that come in one request count clips first.
   - Its `first` is the first item of `order`.
 
-**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-and-are-edited-in-the-inspector)).
+**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab)).
 
 - The Title section (`TitleDialog`) works out the title of its fields (`title_of`). When the user leaves a field, the changes go as one `titles.set`. A change on each line of a lower third goes as one `titles.set` for each line.
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
+- A double-click on a title in the viewer starts a `Typing` (`Workspace::title_typing`). It edits the text of the Title section in place.
+  - `burn::title_letters` gives the box of each letter from the layout of the title as it is drawn. `Laid` puts the boxes on the viewer. The caret, the selection and the clicks use them.
+  - `rich::edited` changes the markup for a change of the letters that show. A typed letter takes the style of the letter before it, or at the start of a line the style of the letter after it.
+  - Why: the markup holds the styles, and the user edits the letters that show.
+  - The `Typing` holds the keyboard focus. Thus the keys of the viewer and the timeline do not act while the user types.
 - `key_buttons` draws the Keyframe buttons of the Title section. Their ease menus offer `keyframes::eases` and send `keyframes.set`. The check mark comes from `Title::position_ease` on Position, else from `keyframes::ease_of`.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.
@@ -711,6 +716,8 @@ The bar and the Jobs button:
   - Why: a speed keyframe is a cut between two sections. Its frame and its value come from the sections.
 - A press in the tab or the tray gives them the keys. A press in another place takes the keys away (`Workspace::key_focus`, `Editor::focused`).
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
+- Reverse Keyframes sends `keyframes.reverse` with the selected keyframes. The selection moves to their new frames at once (`reverse_editor_keys`).
+  - `ops::keyframes::reverse` copies the keyframes, removes them and pastes them back in the opposite order, with each handle on the other side.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
 - Without the keys, Ctrl+V pastes no keyframes.
 - With the keys, Select All and Select Nothing change the selected marks, not the clips (`Workspace::select_editor_keys`).
@@ -920,8 +927,8 @@ Order:
 
 - The windows and panels take their keys first: `TranscriptionUi::take_keys`, `Workspace::sync_clips_keys`, `Workspace::history_keys`, `Workspace::sync_numbers` and `Workspace::multi_numbers`.
 - `TranscriptionUi::take_keys` also reads `Panel::Transcription`. Thus a key can have one action in that window and another action in the main window.
-- Then `Workspace::pool_keys` takes the keys of `Panel::MediaPool` while `Workspace::pool_focus` is true and the page shows the Media tab. A press in the Media tab sets it.
 - Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
+- Delete, Lift, Select all and Select nothing act on the Media Pool when `Workspace::pool_takes_keys` is true. A press in the Media tab sets `Workspace::pool_focus`, and the page must show the Media tab.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
 - `Workspace::ui` keeps `Workspace::asking` in `Workspace::asked` before `Workspace::keys`. Normalize Audio Levels, Set Speed Change and Change Clip Speed apply at Enter only while `Workspace::asked` is false.

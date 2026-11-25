@@ -9,7 +9,7 @@ use serde_json::json;
 use vidcut_core::model::{Compound, CompoundTarget, Media, Project};
 use vidcut_core::ops::compound;
 use vidcut_core::request::{Page, PoolMode, PoolSort, ViewerMode};
-use vidcut_core::shortcuts::{Action, Panel};
+use vidcut_core::shortcuts::Action;
 
 use super::clip_info::scene_shot_take;
 use super::theme;
@@ -515,42 +515,10 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 }
 
 impl Workspace {
-    pub(super) fn pool_keys(&mut self, ctx: &egui::Context) {
-        let shown = self.left == LeftTab::Pool
-            && !matches!(self.effects_page.page, Page::Effects | Page::Export);
-        if !self.pool_focus || !shown || self.project().is_none() {
-            return;
-        }
-        let bindings = self.snap.bindings.clone();
-        let mut mine: Vec<Action> = Vec::new();
-        ctx.input_mut(|i| {
-            i.events.retain(
-                |e| match super::shortcuts::owner(&bindings, Panel::MediaPool, e) {
-                    Some((a, repeat)) => {
-                        if !repeat {
-                            mine.push(a);
-                        }
-                        false
-                    }
-                    None => true,
-                },
-            )
-        });
-        if mine.contains(&Action::RemoveMedia) {
-            let selected = self.snap.selection.media.clone();
-            self.removing = (!selected.is_empty()).then_some(selected);
-        }
-        let all = mine.contains(&Action::SelectAllMedia);
-        if all || mine.contains(&Action::SelectNoMedia) {
-            let media: Vec<String> = match self.project() {
-                Some(p) if all => shown_media(p, &self.snap.pool, &self.search)
-                    .iter()
-                    .map(|m| m.id.clone())
-                    .collect(),
-                _ => Vec::new(),
-            };
-            self.send("selection.set", json!({ "media": media }));
-        }
+    pub(super) fn pool_takes_keys(&self) -> bool {
+        self.pool_focus
+            && self.left == LeftTab::Pool
+            && !matches!(self.effects_page.page, Page::Effects | Page::Export)
     }
 
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
