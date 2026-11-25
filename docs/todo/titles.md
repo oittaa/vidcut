@@ -17,7 +17,9 @@
 - **Scroll:**
   - Measure the line distance at a size that is not a multiple of 3. vidcut rounds 4/3 of the size to the nearest whole pixel.
   - vidcut keeps the exact size of a Scroll, because its rounding is not measured. Measure a Scroll at a size with a fraction.
-- **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
+- **Faces of a variable font:** vidcut does not find a face by its own family name, for example "Bahnschrift Light" or "Bahnschrift SemiCondensed".
+  - Windows lists these faces as families, and Resolve draws them.
+  - vidcut draws another font for each of these names. At size 96, the ink of "Bahnschrift HHH" is then 685 pixels wide in each face.
 - **Gabriola:** the letters are 0.3 pixels left of Resolve, and the rows match. Find the reason.
 - **Fallback font:** a letter that the font does not have comes from another font.
   - In Arial at size 192, `Ⅷ` moves the words down by 35 pixels in vidcut and 9 pixels in Resolve. `Ⓐ` moves them 33 pixels in vidcut and 0 in Resolve.
