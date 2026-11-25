@@ -2227,7 +2227,7 @@ fn upright_block(
     let pixel = h / f64::from(timeline.max(1));
     let exact = h * t.text_fraction(timeline) * zoom;
     let drawn = match t.kind {
-        TitleKind::Scroll => exact,
+        TitleKind::Scroll => Title::scroll_size(exact, pixel),
         TitleKind::Text | TitleKind::LowerThird => Title::whole_size(exact, pixel * zoom),
     };
     let size = drawn.max(1.0) as f32;

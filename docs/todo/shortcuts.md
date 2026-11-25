@@ -11,13 +11,12 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
   - The file starts with `import "DaVinci Resolve"` and holds only the changed commands.
   - vidcut writes a TOML file with the same content, with the names of its actions.
   - To do: read and write the format of Resolve, after the built-in sets.
-- Case 17 measured the keys of the built-in presets. The files are in `$VIDCUT_TEST_DATA/fixtures/keys`.
 
-**Sets of other editors:**
+**Meta in the sets of other editors:**
 
-- The Avid Media Composer set has 15 actions. The documents that were read show most keys as pictures.
-- To do: read the Media Composer Editing Guide. It gives the keys for the marks, markers, Add Edit, Lift, Extract and trim.
-- The Pro Tools set has 6 actions. Most Pro Tools keys act on a time range or depend on the edit mode, so they do not match a vidcut action.
+- The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. On the other systems, vidcut has no such modifier.
+- A set file has one form for all systems, so the set gives Delete Marker no key.
+- To do: give Delete Marker Control+M on macOS.
 
 **Key sets and panels:**
 
