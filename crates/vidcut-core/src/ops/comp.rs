@@ -470,6 +470,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.filter, &mut m.filter);
             given(&mut left.passes, &mut m.passes);
             given(&mut left.border_width, &mut m.border_width);
+            given(&mut left.paint_mode, &mut m.paint_mode);
             given(&mut left.clipping, &mut m.clipping);
             taken(&mut left.values.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);

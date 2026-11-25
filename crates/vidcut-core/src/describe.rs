@@ -485,6 +485,8 @@ pub fn describe_at(
         | "grade.window.paste" => format!(
             "{} {}",
             match method {
+                "grade.keys.add" if d.flag("edl") => "Add EDL marks to",
+                "grade.keys.remove" if d.flag("edl") => "Remove the EDL marks of",
                 "grade.add" => "Add a node to",
                 "grade.remove" => "Remove a node from",
                 "grade.input.remove" => "Remove a mixer input from",

@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
-    AutoColor, Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow,
-    KeyInput, KeyMix, KeyOutput, Project, WindowKind,
+    AutoColor, Clip, Corrector, DynamicsProfile, Grade, GradeKey, GradeLink, GradeNode, GradeTool,
+    GradeWindow, KeyInput, KeyMix, KeyOutput, Project, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -482,6 +482,14 @@ fn keyed_node(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<(&mut GradeNo
     Ok((d, frame))
 }
 
+pub(super) fn auto_keyed(g: &mut Grade, n: u32, frame: Option<i64>, profile: DynamicsProfile) {
+    if let (Some(f), Some(d)) = (frame, g.node_mut(n))
+        && !d.locked
+    {
+        d.auto_keyed(f, profile);
+    }
+}
+
 fn changed(
     g: &mut Grade,
     n: u32,
@@ -537,9 +545,17 @@ pub fn set(
     if change.is_empty() && node_change.is_empty() {
         return Err(Error::usage(NEEDS));
     }
+    let profile = p.settings.dynamics_profile;
+    let keyed = !change.is_empty()
+        || node_change.changes_key()
+        || node_change.changes_key_input()
+        || node_change.changes_mix();
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
+            if keyed {
+                auto_keyed(g, n, frame, profile);
+            }
             if !change.is_empty() {
                 let mut had = true;
                 changed(g, n, frame, |c| {
@@ -574,6 +590,14 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
     };
     if let Some(locked) = change.locked {
         d.locked = locked;
+    }
+    if let Some(auto) = change.auto_key {
+        if !d.takes_keyframes() {
+            return Err(Error::invalid(format!(
+                "node {n} is a mixer, which takes no keyframes"
+            )));
+        }
+        d.auto_key = auto;
     }
     if let Some(at) = change.place {
         d.place = at;
@@ -622,16 +646,21 @@ pub fn clear(
         return Err(Error::usage("`palette` needs `node`"));
     }
     let size = p.frame_size();
+    let profile = p.settings.dynamics_profile;
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| match (n, keep_nodes) {
-            (Some(n), _) => cleared(g, n, frame, (palette, size)),
+            (Some(n), _) => {
+                auto_keyed(g, n, frame, profile);
+                cleared(g, n, frame, (palette, size))
+            }
             (None, true) => {
                 let graded: Vec<u32> = (g.nodes.iter().zip(1..))
                     .filter(|(d, _)| (!d.tool.is_mixer() || d.takes_keys()) && !d.locked)
                     .map(|(_, k)| k)
                     .collect();
                 for k in graded {
+                    auto_keyed(g, k, frame, profile);
                     cleared(g, k, frame, (None, size))?;
                 }
                 Ok(())
@@ -698,9 +727,11 @@ pub fn printer(
     if !point.1.is_finite() {
         return Err(Error::invalid("points must be a number"));
     }
+    let profile = p.settings.dynamics_profile;
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
+            auto_keyed(g, n, frame, profile);
             changed(g, n, frame, |c| Corrector {
                 offset: printed(c.offset, point, lights),
                 ..c.clone()
@@ -717,7 +748,9 @@ pub fn auto_color(
     balance: Balance,
 ) -> Result<()> {
     let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
+    let profile = p.settings.dynamics_profile;
     edited(p, of, |g| {
+        auto_keyed(g, n, frame, profile);
         changed(g, n, frame, |c| match tool {
             true => Corrector {
                 auto_color: Some(AutoColor {
