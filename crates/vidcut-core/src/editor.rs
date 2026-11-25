@@ -7011,6 +7011,7 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
                     line.move_handles(conv);
                     line.take_picture(&picture);
                 });
+                crate::effect_keys::Keyed::scale_key_times(title, &conv, &|_| ratio);
             }
             if let Some(reference) = c.generator.as_mut() {
                 otio::generators::scale_keys(reference, conv, ratio);

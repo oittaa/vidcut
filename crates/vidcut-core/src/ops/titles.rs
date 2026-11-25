@@ -1,10 +1,11 @@
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, SubtitleBackground,
-    Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle,
-    Track, TrackKind,
+    EffectKeys, Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project,
+    SubtitleBackground, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow,
+    TitleShape, TitleStyle, Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -101,6 +102,38 @@ fn checked_keys(t: &Title) -> Result<()> {
     all_in(&t.rotation_keys, turns, TURNED)
 }
 
+fn checked_style_keys(t: &Title) -> Result<Vec<EffectKeys>> {
+    for k in t.keys.iter().filter(|k| !k.keys.is_empty()) {
+        let name = k.value.name().replace('_', " ");
+        if !Title::KEYED.contains(&k.value) {
+            return Err(Error::invalid(format!("a title has no {name} keyframes")));
+        }
+        let Some((low, high)) = t.range_of(k.value) else {
+            return Err(Error::invalid(format!(
+                "a title's {name} keyframes need its {}",
+                Title::part_of(k.value)
+            )));
+        };
+        let steps = Title::steps_of(k.value);
+        let whole = |v: f64| steps.is_none_or(|n| (v * n - (v * n).round()).abs() < 1e-9);
+        let ys = k.y.iter().copied();
+        if !k
+            .keys
+            .iter()
+            .map(|key| key.value)
+            .chain(ys)
+            .all(|v| v.is_finite() && (low..=high).contains(&v) && whole(v))
+        {
+            return Err(Error::invalid(match steps {
+                Some(1.0) => format!("a title's {name} is a whole number, from {low} to {high}"),
+                Some(_) => format!("a title's {name} is in steps of 0.01, from {low} to {high}"),
+                None => format!("a title's {name} is from {low} to {high}"),
+            }));
+        }
+    }
+    super::picture::keys_checked(t, "title", checked)
+}
+
 pub fn checked(t: &Title) -> Result<Title> {
     let text = t.text.replace("\r\n", "\n").replace('\r', "\n");
     if t.kind == TitleKind::LowerThird && text.lines().count() > 2 {
@@ -191,6 +224,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         rotation,
         rotation_keys: t.rotation_keys.clone(),
         upper,
+        keys: checked_style_keys(t)?,
     })
 }
 
@@ -413,6 +447,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             zoom_link: old.zoom_link,
             rotation_keys: old.rotation_keys.clone(),
             upper: old.upper.clone(),
+            keys: old.keys.clone(),
             ..l.on(&old.text)
         },
         None => old.clone(),
@@ -463,6 +498,13 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
     if let Some(r) = change.rotation {
         t.rotation = Some(r);
     }
+    let held: Vec<EffectKeys> = t
+        .keys
+        .iter()
+        .filter(|k| t.takes(k.value))
+        .cloned()
+        .collect();
+    t.keys = held;
     t
 }
 
@@ -544,6 +586,9 @@ fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) 
         }
         next.take_picture(&picture);
     }
+    if change.style.is_some() && next.has_keys() {
+        restyled_keys(old, &mut next, frame)?;
+    }
     let t = checked(&next)?;
     let c = &mut p.tracks[ti].clips[ci];
     if let Some(l) = &change.look {
@@ -554,6 +599,24 @@ fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) 
         c.picture = super::picture::checked(&picture)?;
     }
     c.title = Some(t);
+    Ok(())
+}
+
+fn restyled_keys(old: &Title, next: &mut Title, frame: Option<i64>) -> Result<()> {
+    let was = frame.map_or_else(|| old.clone(), |f| old.adopted(f as f64));
+    let keyed: Vec<_> = next.keys.iter().map(|k| k.value).collect();
+    for v in keyed {
+        let now = next.point(v);
+        if !next.takes(v) || now == was.point(v) {
+            continue;
+        }
+        let Some(f) = frame else {
+            return Err(Error::invalid(
+                "a value with keyframes needs `at` or a playhead",
+            ));
+        };
+        next.put_point(v, f, now);
+    }
     Ok(())
 }
 

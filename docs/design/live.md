@@ -417,6 +417,7 @@ The bar and the Jobs button:
   - When the edit ends, `Typing::passed` gives the text before each step. `commit_title_form` sends each as its own `titles.set`, then the last text.
   - Why: each step of the edit is then one undo step, as in Resolve.
 - `key_buttons` draws the Keyframe buttons of the Title section. Their ease menus offer `keyframes::eases` and send `keyframes.set`. The check mark comes from `Title::position_ease` on Position, else from `keyframes::ease_of`.
+  - `TextFields::rows` calls a `KeyRow` after each row of the shadow and the background. The Title section draws the buttons there, and the subtitle sections draw none.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.
 - The Titles tab (`title_browser::Browser`) draws its cards with `burn::title`. A dragged card (`Gesture::Title`) drops as `titles.add`.

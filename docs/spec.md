@@ -2020,7 +2020,22 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Drop Shadow: Offset, Blur and Opacity
     - Background: Outline Width, Width, Height, Corner Radius, Center and Opacity
     - the Transform and Cropping of the clip
-  - vidcut does not key the shadow and the background yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+  - **The shadow and the background** (measured in Resolve Studio 21.2, on Text at 1920×1080 and 3840×2160, 24 fps):
+    - Each of these values writes its keys in `Key Frames`, as `{"0": {"Value": v, "Variant Type": T}, "48": {…}}`:
+      - Drop Shadow: Offset is `shadow offset` (`POINTF`), Blur is `shadow` (`Int`) and Opacity is `shadow opacity` (`Int`).
+      - Background: Outline Width is `backgroundOutlineWidth` (`Int`), and Opacity is `backgroundOpacity` (`Int`).
+      - Background: Width, Height and Corner Radius are `backgroundWidth`, `backgroundHeight` and `backgroundCornerRadius` (`Double`).
+      - Background: Center is `backgroundCenter` (`POINTF`).
+    - A `POINTF` key is in fractions of the timeline, with the sign of the Inspector.
+      - An Offset of 10, −10 is 0.005208, −0.009259 at 1920×1080. It is 0.002604, −0.004630 at 3840×2160.
+    - Between two keys, each value changes evenly.
+    - An `Int` value shows the nearest whole number between keys. An Outline Width of 4.67 shows 5, and one of 5.33 shows 5.
+    - The ease menu has the items of the other values, by the place of the key.
+    - On a gap of 24 frames, Ease Out on the first key writes `"OutBez": {"OutBez": [8.0, 0.0], "Variant Type": "POINTF"}`.
+      - Ease In on the last key writes `InBez` [−8.0, 0.0]. An `Int` and a `Double` get the same handles.
+    - A Width goes from 0.5 to 0.65 over frames 0 to 24, with Ease Out. Frames 4, 8, 12, 16 and 20 show 0.509, 0.528, 0.553, 0.583 and 0.615.
+      - This is a cubic with P1 = P0 + `OutBez` and P2 = P3.
+    - On Center and Offset, Ease Out on the first key and Ease In on the last key do not stay set ([gotchas](gotchas.md#resolves-edits)).
 - **Keyframes in vidcut:**
   - A Text title and a lower third take keyframes on the position, the zoom and the rotation of the text: `text_position`, `text_zoom` and `text_rotation`. A scroll takes them only on the position of its text.
   - The zoom of the text is one keyframe for X and Y, as on a clip (§8.15).
@@ -2044,13 +2059,29 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - `titles.set` and the handles of the viewer put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
   - With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
   - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
+  - **The shadow and the background:**
+    - The `keyframes` requests name these values `shadow_offset`, `shadow_blur`, `shadow_opacity` and `background_opacity`.
+    - The values of the background shape are `background_outline_width`, `background_width`, `background_height`, `background_corner_radius` and `background_center`.
+    - Their numbers are those of `style`. The offset and the center are fractions of the picture, right and down. The opacities are from 0 to 1.
+    - A value takes keyframes only while the title has its part: `shadow`, `background` or `shape`.
+    - A `style` or a `look` without that part drops its keyframes, as a switch to Scroll drops the zoom keyframes.
+    - The keys are on the whole title. The two lines of a lower third share them.
+    - The Blur, the Outline Width and the two opacities go to the nearest whole number between keys. Play, export and a new key take that number.
+    - An ease gives a flat handle of a third of the gap, as on Zoom. On a gap of 24 frames, that is the measured [8, 0].
+    - vidcut keeps each ease on Center and Offset.
+    - These rows of the Title section have the Keyframe button:
+      - the Opacity of the background
+      - Box Width, Box Height, Box Center X, Box Corner Radius and Box Outline Width
+      - Shadow opacity, Shadow across and Shadow blur
+    - Box Center X holds the keyframes of the center, and Shadow across those of the offset.
+    - The Keyframes tab lists them in the Generator group, as Shadow Offset, Background Center and the like.
+    - A `style` in `titles.set` puts a new number on a keyframe at `at`, or at the playhead, as the position does.
   - A switch to Scroll drops the zoom and rotation keyframes and the position handles.
   - A `look` in `titles.set` keeps the keyframes and the position handles. A look that makes a scroll drops what a switch to Scroll drops.
   - A `look` adds no keyframe. Its number for a value with keyframes shows when the last of them goes.
 - **Later** (X53):
   - Text+ and Fusion titles (p. 1178)
   - animation
-  - keyframes of the shadow and the background
   - Safe area overlays in the viewer are in §4.5 (D90).
 
 ### 8.15 Transform and Crop (pp. 766–768)
@@ -7056,12 +7087,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `backgroundWidth` and `backgroundHeight` are in fractions of the picture.
     - `backgroundCenter` is from the anchor point of the last `Rich Text` group. Resolve centers its box on that point.
     - `backgroundCornerRadius` is `corner`, and `backgroundOutlineWidth` and `backgroundOutlineColor` are the outline.
-    - No background is a height of 0.
+    - No background is a height of 0. A box with keys on its width or height is there at a side of 0 too.
   - **Drop shadow:**
     - `shadow offset` is in fractions of the picture, right and up.
     - `shadow` is its blur: a Gaussian whose sigma is that many 3370ths of the picture height. It is an `Int`.
     - `shadow opacity` is in whole percents, as an `Int`, and `shadow color` is its color.
-    - No shadow is an offset of 0, which Resolve does not draw.
+    - No shadow is an offset of 0, which Resolve does not draw. A shadow with keys on its offset is there at an offset of 0 too.
   - **The picture of the clip:**
     - The Transform, Cropping, Dynamic Zoom and Composite of a title clip are in the effects of the clip, as on a media clip (§8.14, D75).
     - The opacity of a title is the `opacity` of the clip's `Composite` effect, in percent.
@@ -7074,6 +7105,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A key with a handle adds `"OutBez": {"OutBez": [x, y], "Variant Type": "POINTF"}`, or the same with `InBez`. The numbers are fractions of the picture (measured in Resolve Studio 21.1.2).
     - Resolve's import keeps these handles. vidcut reads them as the handles of the position, and writes them back, with Y turned over.
     - A scroll reads and writes no position handles, because no measurement gives them.
+    - The keys of the `Drop Shadow` and `Background` groups have the type of the plain value. A `POINTF` key is right and up.
+      - `shadow opacity` and `backgroundOpacity` keys are in whole percents. The reader cuts the fraction of an `Int` key.
+      - An ease writes `InBez` and `OutBez` as on Zoom. On an `Int`, the value of the handle is in the units of the file.
+      - vidcut writes no handles on `shadow offset` and `backgroundCenter`. No measured file has them (§8.14).
+      - vidcut writes the shadow keys only when the shadow shows, and the background keys only when the background shows.
     - The `vidcut` metadata holds the keyframes on source frames, as for a picture.
   - The `Title` itself also goes in the `vidcut` metadata of the clip. Thus vidcut reads its own titles back exactly.
   - Resolve drops this metadata.

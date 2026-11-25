@@ -5,8 +5,8 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::looks::{Look, LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow, TitleShape,
-    TitleStyle,
+    EffectValue, Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow,
+    TitleShape, TitleStyle,
 };
 
 use super::export::Ask;
@@ -401,6 +401,8 @@ pub(super) struct TextFields {
     frame: Option<[f64; 2]>,
 }
 
+pub(super) type KeyRow<'a> = &'a mut dyn FnMut(&mut egui::Ui, EffectValue);
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct ShapeFields {
     width: String,
@@ -685,10 +687,16 @@ impl TextFields {
         families: &[String],
         usual: &Usual,
         spaced: Option<(&mut String, &mut String)>,
-        shaped: Option<&mut ShapeFields>,
+        titled: Option<(&mut ShapeFields, KeyRow<'_>)>,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
+        let (shaped, mut keyed) = titled.unzip();
+        let mut keys = |ui: &mut egui::Ui, v: EffectValue| {
+            if let Some(k) = keyed.as_mut() {
+                k(ui, v);
+            }
+        };
         let mut row = |ui: &mut egui::Ui, on: bool, label: &str, text: &mut String, hint: &str| {
             ui.add_enabled(on, egui::Label::new(label));
             let r = ui.add_enabled(
@@ -746,18 +754,23 @@ impl TextFields {
             .inner;
         ui.end_row();
         changed |= row(ui, on, "Opacity", &mut self.opacity, usual.opacity);
+        keys(ui, EffectValue::BackgroundOpacity);
         ui.end_row();
         if let Some(s) = shaped {
             let corner = plain(Some(Title::BOX_CORNER));
             changed |= row(ui, on, "Box Width", &mut s.width, "Fits Text");
+            keys(ui, EffectValue::BackgroundWidth);
             ui.end_row();
             changed |= row(ui, on, "Box Height", &mut s.height, "Fits Text");
+            keys(ui, EffectValue::BackgroundHeight);
             ui.end_row();
             changed |= row(ui, on, "Box Center X", &mut s.across, "0");
+            keys(ui, EffectValue::BackgroundCenter);
             ui.end_row();
             changed |= row(ui, on, "Box Center Y", &mut s.down, "0");
             ui.end_row();
             changed |= row(ui, on, "Box Corner Radius", &mut s.corner, &corner);
+            keys(ui, EffectValue::BackgroundCornerRadius);
             ui.end_row();
             changed |= row(ui, on, "Box Outline", &mut s.outline, "#000000");
             changed |= ui
@@ -765,6 +778,7 @@ impl TextFields {
                 .inner;
             ui.end_row();
             changed |= row(ui, on, "Box Outline Width", &mut s.outline_width, "0");
+            keys(ui, EffectValue::BackgroundOutlineWidth);
             ui.end_row();
         }
         if usual.switches {
@@ -783,6 +797,7 @@ impl TextFields {
             &mut self.shadow_opacity,
             &shadow_opacity,
         );
+        keys(ui, EffectValue::ShadowOpacity);
         ui.end_row();
         changed |= row(
             ui,
@@ -791,10 +806,12 @@ impl TextFields {
             &mut self.shadow_across,
             &shadow_across,
         );
+        keys(ui, EffectValue::ShadowOffset);
         ui.end_row();
         changed |= row(ui, on, "Shadow down", &mut self.shadow_down, &shadow_down);
         ui.end_row();
         changed |= row(ui, on, "Shadow blur", &mut self.shadow_blur, &shadow_blur);
+        keys(ui, EffectValue::ShadowBlur);
         ui.end_row();
         (changed, enter)
     }

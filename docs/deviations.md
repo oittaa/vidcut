@@ -359,7 +359,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - vidcut does not have Text+ and Fusion titles.
   - Markup in the text of a title styles words: `<b>`, `<i>`, `<u>` and `<font color face size>`.
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
-  - The Position, Zoom, Rotation and Opacity of a title take keyframes ([spec §8.14](spec.md#814-titles-pp-762764-11761178)). Its shadow and background do not.
+  - The Position, Zoom, Rotation and Opacity of a title take keyframes ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 - **Why:**
   - Text+ and Fusion titles are Fusion compositions with text tools. The compositions of vidcut have no text tool (spec §8.19).
   - Markup in the text is what a script writes and reads.

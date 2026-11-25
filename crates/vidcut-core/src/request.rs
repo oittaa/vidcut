@@ -6053,6 +6053,35 @@ pub enum KeyParam {
     /// The Center Y of a Four Color Gradient, from -1 to 1. A number past an
     /// end takes that end.
     CenterY,
+    /// The offset of a title's shadow, x and y, one keyframe for both, as
+    /// fractions of the picture, right and down, from -4 to 4. The title needs
+    /// a `shadow`.
+    ShadowOffset,
+    /// The blur of a title's shadow, a whole number from 1 to 100. The title
+    /// needs a `shadow`.
+    ShadowBlur,
+    /// The opacity of a title's shadow, from 0 to 1 in steps of 0.01. The
+    /// title needs a `shadow`.
+    ShadowOpacity,
+    /// The outline width of a title's background, whole pixels of the
+    /// timeline from 0 to 30. The title needs a `shape`.
+    BackgroundOutlineWidth,
+    /// The width of a title's background, as a fraction of the picture width,
+    /// from 0 to 2. The title needs a `shape`.
+    BackgroundWidth,
+    /// The height of a title's background, as a fraction of the picture
+    /// height, from 0 to 2. The title needs a `shape`.
+    BackgroundHeight,
+    /// The corner radius of a title's background, as a fraction of the
+    /// picture height, from 0 to 1. The title needs a `shape`.
+    BackgroundCornerRadius,
+    /// The center of a title's background, x and y, one keyframe for both, as
+    /// fractions of the picture from the title's position, right and down,
+    /// from -4 to 4. The title needs a `shape`.
+    BackgroundCenter,
+    /// The opacity of a title's background, from 0 to 1 in steps of 0.01. The
+    /// title needs a `background`.
+    BackgroundOpacity,
     /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
     /// numbers are those of `effects.set`. One number of a color has a value
     /// of its own, for example `color_red`. A `position` or a `center` is one
@@ -6063,7 +6092,7 @@ pub enum KeyParam {
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 26] = [
+    pub const ALL: [KeyParam; 35] = [
         KeyParam::Volume,
         KeyParam::Pan,
         KeyParam::Position,
@@ -6090,7 +6119,46 @@ impl KeyParam {
         KeyParam::LowerRotation,
         KeyParam::CenterX,
         KeyParam::CenterY,
+        KeyParam::ShadowOffset,
+        KeyParam::ShadowBlur,
+        KeyParam::ShadowOpacity,
+        KeyParam::BackgroundOutlineWidth,
+        KeyParam::BackgroundWidth,
+        KeyParam::BackgroundHeight,
+        KeyParam::BackgroundCornerRadius,
+        KeyParam::BackgroundCenter,
+        KeyParam::BackgroundOpacity,
     ];
+
+    pub const STYLED: [(KeyParam, EffectValue); 9] = [
+        (KeyParam::ShadowOffset, EffectValue::ShadowOffset),
+        (KeyParam::ShadowBlur, EffectValue::ShadowBlur),
+        (KeyParam::ShadowOpacity, EffectValue::ShadowOpacity),
+        (
+            KeyParam::BackgroundOutlineWidth,
+            EffectValue::BackgroundOutlineWidth,
+        ),
+        (KeyParam::BackgroundWidth, EffectValue::BackgroundWidth),
+        (KeyParam::BackgroundHeight, EffectValue::BackgroundHeight),
+        (
+            KeyParam::BackgroundCornerRadius,
+            EffectValue::BackgroundCornerRadius,
+        ),
+        (KeyParam::BackgroundCenter, EffectValue::BackgroundCenter),
+        (KeyParam::BackgroundOpacity, EffectValue::BackgroundOpacity),
+    ];
+
+    pub fn style_value(self) -> Option<EffectValue> {
+        Self::STYLED
+            .into_iter()
+            .find_map(|(param, v)| (param == self).then_some(v))
+    }
+
+    pub fn of_style(v: EffectValue) -> Option<KeyParam> {
+        Self::STYLED
+            .into_iter()
+            .find_map(|(param, value)| (value == v).then_some(param))
+    }
 
     pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
         match self {
