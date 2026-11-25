@@ -9,6 +9,8 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::tracking::{Reader, Shown, going};
 
+mod gpu;
+
 const SIDE: f64 = 640.0;
 const LEVELS: usize = 4;
 const GRID: (usize, usize) = (24, 14);
@@ -29,15 +31,51 @@ pub fn name() -> &'static str {
     "steady2"
 }
 
+type Pairs = Vec<([f32; 2], [f32; 2])>;
+
+enum Seen {
+    First,
+    Same,
+    Moved(Pairs),
+}
+
+enum Measuring {
+    Cpu(Option<Vec<Gray>>),
+    Gpu(Box<gpu::Measuring>),
+}
+
+impl Measuring {
+    fn seen(&mut self, frame: &frame::Video) -> Result<Seen> {
+        match self {
+            Self::Gpu(g) => g.seen(frame),
+            Self::Cpu(last) => {
+                let levels = pyramid(Gray::of(frame));
+                let seen = match last.as_ref() {
+                    None => Seen::First,
+                    Some(before) if repeats(&before[0], &levels[0]) => Seen::Same,
+                    Some(before) => Seen::Moved(pairs(before, &levels)),
+                };
+                *last = Some(levels);
+                Ok(seen)
+            }
+        }
+    }
+}
+
 pub fn measure(
     plan: &RenderPlan,
     look: &Shaky,
     gpu: Option<&crate::hw::GpuDecoder>,
     source: &Path,
+    on_gpu: bool,
 ) -> Result<Shake> {
     crate::cancel::stop()?;
     let _turn = crate::turns::cpu_analysis()?;
     let size = working(plan.width, plan.height);
+    let mut measuring = match on_gpu {
+        true => Measuring::Gpu(Box::new(gpu::Measuring::start(size)?)),
+        false => Measuring::Cpu(None),
+    };
     let reader = Reader { plan, size, gpu };
     let (lo, hi) = (look.frames.0.max(0), look.frames.1.min(plan.frames));
     if hi <= lo {
@@ -51,7 +89,6 @@ pub fn measure(
     let Some(mut run) = going(reader.run(lo, hi))? else {
         return Err(stopped());
     };
-    let mut last: Option<Vec<Gray>> = None;
     let mut steps = Vec::new();
     for done in 0..hi - lo {
         let frame = match going(run.next_frame())? {
@@ -65,14 +102,11 @@ pub fn measure(
             Some(Some(f)) => f,
         };
         crate::cancel::stop()?;
-        let levels = pyramid(Gray::of(&frame));
-        if let Some(before) = &last {
-            steps.push(match repeats(&before[0], &levels[0]) {
-                true => None,
-                false => Some(step(before, &levels, look.mode)),
-            });
+        match measuring.seen(&frame)? {
+            Seen::First => {}
+            Seen::Same => steps.push(None),
+            Seen::Moved(pairs) => steps.push(Some(moved(&pairs, size, look.mode))),
         }
-        last = Some(levels);
         shown.report(done as usize + 1);
     }
     Ok(Shake { size, steps })
@@ -312,16 +346,8 @@ fn follow(from: &[Gray], to: &[Gray], p: [f32; 2]) -> Option<[f32; 2]> {
     (inside(q[0], to[0].w) && inside(q[1], to[0].h)).then_some(q)
 }
 
-fn step(before: &[Gray], after: &[Gray], mode: StabilizeMode) -> [f32; 8] {
-    let (w, h) = (before[0].w as f64, before[0].h as f64);
-    let centered = |[x, y]: [f32; 2]| {
-        [
-            (f64::from(x) + 0.5 - w / 2.0) / h,
-            (f64::from(y) + 0.5 - h / 2.0) / h,
-        ]
-    };
-    let mut from = Vec::new();
-    let mut to = Vec::new();
+fn pairs(before: &[Gray], after: &[Gray]) -> Pairs {
+    let mut out = Vec::new();
     for p in corners(&before[0]) {
         let Some(q) = follow(before, after, p) else {
             continue;
@@ -332,9 +358,21 @@ fn step(before: &[Gray], after: &[Gray], mode: StabilizeMode) -> [f32; 8] {
         if (back[0] - p[0]).hypot(back[1] - p[1]) > RETURN {
             continue;
         }
-        from.push(centered(p));
-        to.push(centered(q));
+        out.push((p, q));
     }
+    out
+}
+
+fn moved(pairs: &[([f32; 2], [f32; 2])], (w, h): (u32, u32), mode: StabilizeMode) -> [f32; 8] {
+    let (w, h) = (f64::from(w), f64::from(h));
+    let centered = |[x, y]: [f32; 2]| {
+        [
+            (f64::from(x) + 0.5 - w / 2.0) / h,
+            (f64::from(y) + 0.5 - h / 2.0) / h,
+        ]
+    };
+    let from: Vec<[f64; 2]> = pairs.iter().map(|(p, _)| centered(*p)).collect();
+    let to: Vec<[f64; 2]> = pairs.iter().map(|(_, q)| centered(*q)).collect();
     let m = fitted(mode, &from, &to, INLIER / h).unwrap_or(SAME);
     std::array::from_fn(|i| (m[i] / m[8]) as f32)
 }

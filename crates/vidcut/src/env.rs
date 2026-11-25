@@ -520,7 +520,13 @@ impl Env for AvEnv {
             analysis_file(media, &key),
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
-                vidcut_av::stabilize::measure(plan, &look, decoder.as_ref(), &media.path)
+                vidcut_av::stabilize::measure(
+                    plan,
+                    &look,
+                    decoder.as_ref(),
+                    &media.path,
+                    crate::preferences::gpu_acceleration(),
+                )
             },
             Shake::to_bytes,
             Shake::from_bytes,

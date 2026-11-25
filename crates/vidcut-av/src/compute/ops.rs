@@ -455,7 +455,7 @@ pub(crate) struct Kernels {
     four: bool,
 }
 
-const HEADER: &str = r#"
+pub(crate) const HEADER: &str = r#"
 struct P { v: array<vec4<u32>, 16> }
 @group(0) @binding(0) var<uniform> p: P;
 

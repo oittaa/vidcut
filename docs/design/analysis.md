@@ -208,7 +208,7 @@ flowchart TD
 - `editor::stabilize_looks` gives the plan to measure: the own picture of the clip (`render::own_picture`).
   - That is the composition of the clip. It has one frame for each frame of the file from the In to the Out, at the rate of the file.
   - Why: the correction refers back to the source (spec, p. 295). Thus the crop, the transform and the speed of the clip do not change the measurement.
-- `stabilize::measure` in vidcut-av measures, on the CPU:
+- `stabilize::measure` in vidcut-av measures. With GPU acceleration on, the GPU measures (`gpu::Measuring`). With it off, the CPU measures.
   - The `Reader` of the tracker reads the frames of the plan at a working size. It decodes on the GPU when GPU decoding is on.
   - Each frame becomes gray, with a pyramid of `LEVELS` levels.
   - A frame that differs from the frame before by less than `REPEAT` on average repeats that frame. A repeat has no step.
@@ -220,6 +220,16 @@ flowchart TD
   - A pair of frames with fewer than `LEAST` corners that agree gets no motion.
   - The result is a `Shake`: one step for each pair of frames, or none for a repeat. A step is in units of the picture height, from the center of the picture.
   - Why a method of our own: the deshake filter of FFmpeg finds only moves and turns. vid.stab has no perspective, and many FFmpeg builds do not have it.
+- On the GPU, `gpu::Measuring` does the same steps in kernels on the shared off-screen device ([GPU](gpu.md#each-decoders-frames)):
+  - The CPU sends each frame of the working size. The kernels make the gray picture and the pyramid.
+  - The pyramids of the frame before and of the current frame stay on the GPU.
+  - One workgroup takes each cell of the `GRID`. It finds the best corner of the cell, follows it to the next frame, and follows it back.
+    - The threads of the workgroup share the window of the Lucas–Kanade method. Each sum of the window is one reduction in workgroup memory.
+  - One readback gives the corners, their moves and the sums of the repeat test.
+  - `fitted` then runs on the CPU, with the corners in the order of the cells.
+    - Why on the CPU: it is a small part of the work. The same code fits the corners of both paths.
+  - The GPU and the CPU sum in different orders. Thus a corner can move by a small fraction of a pixel. On the seven test clips, the zoom and the shake are the same to three decimals.
+  - No test checks the GPU before it measures. Why: AGENTS.md rule 9 trusts a GPU until it is found to give wrong results.
 - `stabilize::steadied` in the core decides:
   - It uses the new pictures only. A repeat gets the correction of the frame that it repeats.
   - Each step becomes parts (`parts`): a move, a turn, the log of the scale, a stretch, a shear and the two perspective terms. The path of the camera is the sum of these parts.
