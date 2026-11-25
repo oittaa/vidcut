@@ -1876,13 +1876,16 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D65, D66.
 - **Editing** (pp. 763–764, 1176):
   - A double-click on the text of a title in the viewer edits the text there.
+  - The text is edited in place, inside a plain outline. Typing changes the Rich Text field of the Inspector at once (measured in Resolve Studio 21.2).
   - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
-  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section and a text box at the title.
-    - Typing in the box changes the title in the viewer and the text of the Title section at once.
-    - The box closes when it loses the focus, for example with Esc or a click outside it. Then one `titles.set` puts the change in.
+  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
+    - The double-click puts the caret at the pointer. A click or a drag in the text moves the caret or selects letters.
+    - A typed letter takes the style of the letter before it. At the start of a line, it takes the style of the letter after it.
+    - The edit ends with Esc or a click outside the title. Then one `titles.set` puts the change in.
+    - `gui.show` with `title_text` starts the edit, and `gui.close` ends it.
   - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
   - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
@@ -3877,6 +3880,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Alt+S at node 1 then puts the new node on the older link, between node 1 and node 2. Node 1 still feeds the old node 4.
     - The old node 4 becomes 2, and the new node is 3. The old nodes 2 and 3 become 4 and 5.
     - In one case, a node with no link from the source came last.
+    - Nodes 1 to 4 are in series. Alt+P at node 2 gives the numbers of Alt+L, with a Parallel Mixer 4.
+    - Alt+K at node 6, the last node, then adds node 7 between node 6 and the Node Tree output.
+    - Alt+K with node 2 selected then adds node 8 between node 7 and the output. Thus Alt+K does not use the selected node.
+  - Measured: that node 8 was drawn in a free place under node 1. One case does not give the rule for the place.
+  - vidcut: Alt+P and Alt+K give the measured numbers and links.
+  - vidcut: Alt+K draws the new node to the right of the last node. Where Resolve draws it is open ([todo](todo/color-page.md)).
   - vidcut: the same rule. Each link holds the order in which it was made (`made`).
   - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
   - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
@@ -3899,6 +3908,14 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: this occurs with a Parallel Mixer and a Layer Mixer, with two inputs, and with three inputs of which one is empty.
   - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
   - Measured: after a delete, the last corrector is the current node.
+  - Measured: in nodes 1 to 4 in series, the delete of node 2 gives nodes 1, 2 (old 3) and 3 (old 4).
+    - Node 1 feeds the new node 2. Node 3 is then the current node.
+  - Measured: Alt+P at node 2, then the delete of the new node 3, removes the Parallel Mixer too.
+    - Nodes 1 to 4 are in series again. Node 4 is then the current node.
+  - Measured: Alt+P at node 2, then the delete of the Parallel Mixer, gives nodes 1, 2, 3, 4 (old 5) and 5 (old 6). Node 3 is the parallel node.
+    - Node 1 still feeds nodes 2 and 3. Nothing takes the pictures of nodes 2 and 3.
+    - Node 4 has no input link. It feeds node 5, and node 5 feeds the output.
+    - Node 3, which was the current node, stays the current node.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
@@ -3907,6 +3924,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
+  - vidcut: the three measured deletes give the same numbers, links and current node.
 - **The Nodes submenu** (pp. 3392, 3395):
   - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
   - Measured in Resolve Studio 21.2: the submenu has six groups of items:
@@ -5454,15 +5472,19 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
-  - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set.
+  - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
+  - With changes, a pick of another set asks first, because the changes are lost. Not measured (case 15 of shortcuts-resolve-runs.md).
   - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124). Export Set and Delete Set list the sets.
   - vidcut: the Option menu also has Save, under a line.
   - The trash button deletes the set in force (p. 124). Each delete asks first.
   - Save As New Set… (`keys.save`) saves the keys in force under a name. That set is then in force.
-  - Save writes the keys in force into the user's set in force. A built-in set does not change.
-  - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force.
-  - A delete of the set in force keeps its keys in force, as changes to vidcut's own set.
+  - Save writes the keys in force into the user's set in force. A built-in set does not change. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
+  - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force. Not measured (case 13 of shortcuts-resolve-runs.md).
+  - A delete of the set in force keeps its keys in force, as changes to vidcut's own set. Not measured (case 14 of shortcuts-resolve-runs.md).
   - Reset puts back the keys of the set in force.
+  - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
+  - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
+  - The keys of these sets are not measured against the presets of Resolve (case 17 of shortcuts-resolve-runs.md).
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
