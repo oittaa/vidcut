@@ -140,6 +140,7 @@ fn loud_key(plan: &RenderPlan) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
         "audio": plan.audio,
         "ducking": plan.ducking,
+        "buses": plan.buses,
         "frames": plan.frames,
         "fps": plan.fps,
         "sample_rate": plan.sample_rate,
