@@ -6,9 +6,11 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **Key sets to measure:**
 
-- The manual does not tell these two rules (p. 124). vidcut keeps the keys in force in both cases.
+- The manual does not tell these rules (p. 124). Cases 13 to 17 of shortcuts-resolve-runs.md measure them.
 - After Import Preset, is the imported preset in force?
 - After a delete of the preset in force, which preset and which keys are in force?
+- How does a preset keep the changes to its keys?
+- Which keys do the built-in presets of the other editors give?
 
 **Sets of other editors:**
 
