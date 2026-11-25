@@ -322,7 +322,7 @@ impl<'a> Usual<'a> {
             ink: [0, 0, 0],
             outline_size: "none",
             background: "none",
-            opacity: "100%",
+            opacity: "50%",
             shadow: "none",
             switches: false,
         }
@@ -413,20 +413,24 @@ pub(super) struct ShapeFields {
 }
 
 impl ShapeFields {
-    pub(super) fn load(s: Option<&TitleShape>) -> Self {
+    pub(super) fn load(s: Option<&TitleShape>, frame: [f64; 2]) -> Self {
         let center = s.and_then(|s| s.center);
         Self {
-            width: percent(s.map(|s| s.size[0])),
-            height: percent(s.map(|s| s.size[1])),
-            across: percent(center.map(|c| c[0])),
-            down: percent(center.map(|c| c[1])),
-            corner: percent(s.and_then(|s| s.corner)),
+            width: plain(s.map(|s| s.size[0])),
+            height: plain(s.map(|s| s.size[1])),
+            across: plain(center.map(|c| c[0] * frame[0])),
+            down: plain(center.map(|c| 0.0 - c[1] * frame[1])),
+            corner: plain(s.and_then(|s| s.corner)),
             outline: s.and_then(|s| s.outline_color.clone()).unwrap_or_default(),
-            outline_width: plain(s.and_then(|s| s.outline_width)),
+            outline_width: plain(s.and_then(|s| s.outline_width).map(f64::from)),
         }
     }
 
-    pub(super) fn shape(&self, stored: Option<&TitleShape>) -> Result<Option<TitleShape>, String> {
+    pub(super) fn shape(
+        &self,
+        stored: Option<&TitleShape>,
+        frame: [f64; 2],
+    ) -> Result<Option<TitleShape>, String> {
         let bare = [
             &self.width,
             &self.height,
@@ -443,26 +447,76 @@ impl ShapeFields {
         }
         let size = stored.map(|s| s.size);
         let center = stored.and_then(|s| s.center);
-        let width = kept_number(&self.width, size.map(|s| s[0]), "box width")?;
-        let height = kept_number(&self.height, size.map(|s| s[1]), "box height")?;
-        let across = kept_number(&self.across, center.map(|c| c[0]), "box across")?;
-        let down = kept_number(&self.down, center.map(|c| c[1]), "box down")?;
+        let sides = (0.0, Title::BOX_MOST);
+        let width = kept_within(&self.width, size.map(|s| s[0]), 1.0, sides, "box width")?;
+        let height = kept_within(&self.height, size.map(|s| s[1]), 1.0, sides, "box height")?;
+        let reach = (-Picture::REACH, Picture::REACH);
+        let across = kept_within(
+            &self.across,
+            center.map(|c| c[0]),
+            frame[0],
+            reach,
+            "box center x",
+        )?;
+        let up = kept_within(
+            &self.down,
+            center.map(|c| 0.0 - c[1]),
+            frame[1],
+            reach,
+            "box center y",
+        )?;
         let Some(height) = height else {
             return Err("a box needs a height".into());
         };
+        let corner = stored.and_then(|s| s.corner);
         Ok(Some(TitleShape {
             size: [width.unwrap_or(Title::BOX_WIDTH), height],
-            center: (across.is_some() || down.is_some())
-                .then(|| [across.unwrap_or(0.0), down.unwrap_or(0.0)]),
-            corner: kept_number(&self.corner, stored.and_then(|s| s.corner), "box corner")?,
+            center: (across.is_some() || up.is_some())
+                .then(|| [across.unwrap_or(0.0), 0.0 - up.unwrap_or(0.0)]),
+            corner: kept_within(&self.corner, corner, 1.0, (0.0, 1.0), "box corner radius")?,
             outline_color: field(&self.outline),
-            outline_width: kept_plain(
+            outline_width: kept_whole(
                 &self.outline_width,
                 stored.and_then(|s| s.outline_width),
+                Title::BOX_MOST_OUTLINE,
                 "box outline width",
             )?,
         }))
     }
+}
+
+fn kept_within(
+    shown: &str,
+    stored: Option<f64>,
+    unit: f64,
+    (low, high): (f64, f64),
+    what: &str,
+) -> Result<Option<f64>, String> {
+    if shown.trim() == plain(stored.map(|v| v * unit)) {
+        return Ok(stored);
+    }
+    Ok(kept_plain(shown, None, what)?.map(|v| (v / unit).clamp(low, high)))
+}
+
+fn kept_whole(
+    shown: &str,
+    stored: Option<u32>,
+    most: u32,
+    what: &str,
+) -> Result<Option<u32>, String> {
+    let t = shown.trim().trim_end_matches('%').trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    if stored.is_some_and(|v| t == v.to_string()) {
+        return Ok(stored);
+    }
+    let n = t
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite())
+        .ok_or_else(|| format!("{what} is a whole number, such as 5"))?;
+    Ok(Some(n.trunc().clamp(0.0, f64::from(most)) as u32))
 }
 
 fn usual_font() -> &'static str {
@@ -578,6 +632,11 @@ impl TextFields {
         out
     }
 
+    pub(super) fn whole_opacity(&self, stored: Option<f64>) -> Result<Option<f64>, String> {
+        let shown = stored.map(|o| (o * 100.0).round() as u32);
+        Ok(kept_whole(&self.opacity, shown, 100, "opacity")?.map(|p| f64::from(p) / 100.0))
+    }
+
     pub(super) fn refilled(&self, stored: &Parts) -> Self {
         let was = Self::load(stored);
         let kept = |shown: &str, was: &str| {
@@ -674,16 +733,16 @@ impl TextFields {
         changed |= row(ui, on, "Opacity", &mut self.opacity, usual.opacity);
         ui.end_row();
         if let Some(s) = shaped {
-            let corner = format!("{}%", percent(Some(Title::BOX_CORNER)));
+            let corner = plain(Some(Title::BOX_CORNER));
             changed |= row(ui, on, "Box Width", &mut s.width, "Fits Text");
             ui.end_row();
             changed |= row(ui, on, "Box Height", &mut s.height, "Fits Text");
             ui.end_row();
-            changed |= row(ui, on, "Box Across", &mut s.across, "0%");
+            changed |= row(ui, on, "Box Center X", &mut s.across, "0");
             ui.end_row();
-            changed |= row(ui, on, "Box Down", &mut s.down, "0%");
+            changed |= row(ui, on, "Box Center Y", &mut s.down, "0");
             ui.end_row();
-            changed |= row(ui, on, "Box Corner", &mut s.corner, &corner);
+            changed |= row(ui, on, "Box Corner Radius", &mut s.corner, &corner);
             ui.end_row();
             changed |= row(ui, on, "Box Outline", &mut s.outline, "#000000");
             changed |= ui

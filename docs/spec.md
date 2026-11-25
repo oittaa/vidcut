@@ -750,9 +750,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The same menu has Video Level Scopes and Data Level Scopes (p. 3095). Data Level Scopes is the default (measured).
     - Video Level Scopes changes only what the scopes show. The monitor and the export do not change (p. 3095).
     - The figure on p. 3095 shows full-range white at code 940 of the 10-bit scale with Video Level Scopes.
-    - vidcut: with Video Level Scopes, the Waveform and the Parade show black at code 64 and white at code 940. The marks of the scale stay.
+    - With Video Level Scopes, the Waveform and the Parade show black at code 64 and white at code 940 (measured in Resolve Studio 21.2).
+    - The lines and labels of 10-bit stay where they are (measured). vidcut: the lines of 12-bit stay too. This is not measured.
+    - The lines and labels of Percentage, mV and HDR move with the picture (measured).
+      - Percentage: 0 is on code 64 and 100 on code 940. Lines at −10 and 110 are added.
+      - mV: 0 is on code 64 and 700 on code 940.
+      - HDR: each line is on code 64 plus 876 times the PQ value of its nits. This holds for the dashed lines too.
+    - The Vectorscope does not change (measured).
     - `viewer.scopes` with `video_levels` sets it.
-    - Not measured in Resolve: the marks of Percentage, mV and HDR with Video Level Scopes, and the Vectorscope with Video Level Scopes.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
@@ -2102,6 +2107,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
+  - Shift+Space opens the Effects Search window on the Cut, Edit, Color and Fairlight pages (p. 1144). A click on an effect there adds it to the selected clip.
+  - vidcut: Effects Search finds an effect by its name or its group, as the search of the Effects tab does (p. 1144). The names that start with the text come first.
+  - vidcut: a click on an effect adds it to the first selected clip with a picture, as the double-click does. Not measured (case 20 of shortcuts-resolve-runs.md).
+  - vidcut: then the window closes. Not measured (case 21 of shortcuts-resolve-runs.md).
+  - vidcut: Up and Down pick an effect, and Return adds it.
+  - vidcut: with no selected clip that has a picture, the window shows a warning and adds nothing. Not measured (case 22 of shortcuts-resolve-runs.md).
+  - vidcut: on the Color page, the effect goes to the selected clip of the timeline, as on the Cut page. Not measured (case 23 of shortcuts-resolve-runs.md).
+  - vidcut: on the Effects page, Shift+Space opens the Select Tool window, and Effects Search does not open.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
   - vidcut: `effects.add` refuses a generator. A drag of a card onto a generator does nothing, and the double-click and Add to Selected Clips skip it.
 - **Inspector** (vidcut, X70):
@@ -5484,6 +5497,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
+  - A key works at one level: the application, or a panel (pp. 123–124). The keys of the panel that has the focus go first. A key with no action there does its application action.
+  - The Media Pool has no level of its own. Its Remove Clips command is the Delete command of the application, with the same keys (measured).
+  - A click in the Media tab gives the Media Pool the focus, and a click in another place takes the focus away.
+  - While the Media Pool has the focus, a line in the accent color is at the top of the tab.
+  - With the focus in the Media Pool, Delete and Lift remove the selected media, as Remove in [§3](#3-media-pool-ch-34-pp-653675) tells. Select all and Select nothing act on the media that it shows.
+  - This occurs only while the Media tab is on the screen. The Effects page and the Export page do not show it.
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
   - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - On the other pages, these five keys keep the actions of the table.
@@ -5497,20 +5516,27 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A key set gives keys to actions. vidcut's own set is the table.
   - The table gives the keys of the built-in DaVinci Resolve preset of Resolve Studio 21.2 (measured, case 17 of shortcuts-resolve-runs.md). This applies to the actions that have a command of Resolve. The keypad keys are not in it yet ([todo](todo/egui-keypad-keys.md)).
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
-  - A change of a key changes the keys in force at once ([todo](todo/shortcuts.md)). The dropdown then shows "*" after the name of the set (measured).
+  - The changes of keys and the picks of a set in the window make a draft. The keys in force change only at Save (measured).
+  - The dropdown shows "*" after the name of the set when the keys of the window differ from that set (measured).
   - A changed key has a button that puts back the key of the set (measured).
   - With changes, a pick of another set asks "Discard Changes?", with Cancel and Discard. Cancel has the focus (measured).
+  - With a draft, the bottom of the window has Cancel and Save (measured). Without a draft, it has Close. Not measured (case 26 of shortcuts-resolve-runs.md).
+  - With a draft, Cancel and a close of the window ask "Discard Changes?", with Cancel and Discard. Cancel has the focus. Discard closes the window (measured).
+  - When the window opens again, it shows the keys in force (measured).
+  - vidcut: in the window, Undo and Redo go back and forward through the changes of the draft. Whether Resolve has this is not measured (case 26 of shortcuts-resolve-runs.md).
+  - `keys.set`, `keys.reset` and `keys.use` change the keys in force at once, with no draft. Then the dropdown shows "*" too, and Save writes those keys.
   - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124).
   - Export Set lists all the sets. Delete Set lists the user's sets, and it is gray when the user has no set (measured).
-  - vidcut: the Option menu also has Save, under a line.
   - The trash button deletes the set in force (p. 124).
   - Each delete asks first, for example 'Delete "Run A"?', with Cancel and Delete. Cancel has the focus (measured).
   - Save As New Set… (`keys.save`) asks for a name. The field holds the name of the set in force (measured).
-  - It saves the keys in force under that name. That set is then in force.
-  - Save writes the keys in force into the user's set in force (measured).
+  - It saves the keys of the window under that name. That set is then in force.
+  - Save puts the keys of the window in force. With changed keys of a user's set, it writes them into that set first (measured).
+  - Save without changed keys puts the picked set in force (measured). After Save, the window stays open. Not measured (case 26 of shortcuts-resolve-runs.md).
   - On a changed built-in set, Save asks for a name, as Save As New Set… does. A built-in set does not change (measured).
   - Export Set (`keys.export`) writes a set to a file ([todo](todo/shortcuts.md)). The file name that it offers is the name of the set and " Keys" (measured).
   - Import Set… (`keys.import`) adds the set of such a file, with the name of the file. The imported set is then in force (measured).
+  - An import drops the draft without a question. Not measured (case 26 of shortcuts-resolve-runs.md).
   - A delete of the set in force puts vidcut's own set in force, with its keys (measured).
   - Reset puts back the keys of the set in force.
   - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
@@ -6584,7 +6610,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `corner` is its radius, as a fraction of the picture height. No radius passes half of a side, on each axis apart.
     - `outline_width` is in pixels of the timeline, and half of it is outside the box.
     - The outline is not changed by the background's opacity.
-  - The Title section shows `shape` as Box Width, Box Height, Box Across, Box Down, Box Corner, Box Outline and Box Outline Width. Empty Width and Height fit the box to the text. Empty Width alone takes 90%, the usual width in a file.
+  - These are measurements of the Background controls of the Inspector, in Resolve Studio 21.2 at 1920×1080 and 3840×2160:
+    - The Background of a new Text title is on, with Height 0. Thus it draws nothing.
+    - Width, Height and Corner Radius show 3 decimals. The file holds the same numbers at each picture size. Their usual values are 0.9, 0 and 1/27.
+    - Center X and Center Y are pixels of the timeline, with Y up. The file holds them as fractions of the picture width and height.
+    - Outline Width and Opacity are whole numbers. A typed fraction loses its decimals: 7.6 gives 7. Their usual values are 0 and 50.
+    - A typed value past a limit gives the limit. The limits are 0 to 2 for Width and Height, 0 to 1 for Corner Radius, and 0 to 30 for Outline Width.
+    - Opacity is from 0 to 100. Center goes 4 picture widths and 4 picture heights from the middle.
+  - The Title section shows `shape` as Box Width, Box Height, Box Center X, Box Center Y, Box Corner Radius, Box Outline and Box Outline Width. They have the units and the limits of the Inspector.
+    - A title's Opacity is a whole percent. Its usual value is 50%.
+    - Empty Width and Height fit the box to the text. Empty Width alone takes 0.9, the usual width in a file.
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).

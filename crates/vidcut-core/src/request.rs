@@ -4337,6 +4337,12 @@ pub enum Request {
         /// Replace your set of that name.
         #[serde(default)]
         overwrite: bool,
+        /// The keys to save in place of the keys in force: each action whose
+        /// keys differ from vidcut's own set, with its keys, like
+        /// `{"play_forward": ["Ctrl+F12"]}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<std::collections::BTreeMap<String, Vec<String>>>")]
+        keys: Option<crate::shortcuts::Custom>,
     },
     /// Delete one of your key sets. Built-in sets can't be deleted. When the
     /// set is in force, vidcut's own set is put in force.
@@ -6442,6 +6448,9 @@ pub enum GuiPanel {
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.
     SelectTool,
+    /// The Effects Search window: it finds an effect by its name or its group,
+    /// and adds it to the first selected clip with a picture.
+    EffectsSearch,
 }
 
 /// Media tab sort orders.

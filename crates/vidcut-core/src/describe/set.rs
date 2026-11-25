@@ -223,6 +223,13 @@ fn percent(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}%", trim(n * 100.0)))
 }
 
+fn numbers(v: &Value) -> String {
+    match v.as_array() {
+        Some(a) => a.iter().map(number).collect::<Vec<_>>().join(", "),
+        None => number(v),
+    }
+}
+
 fn percents(v: &Value) -> String {
     match v.as_array() {
         Some(a) => a.iter().map(percent).collect::<Vec<_>>().join(", "),
@@ -352,7 +359,7 @@ const STYLE: [(&str, &str); 32] = [
     ("background.off", "Background Off"),
     ("shape.size", "Box Size"),
     ("shape.center", "Box Center"),
-    ("shape.corner", "Box Corner"),
+    ("shape.corner", "Box Corner Radius"),
     ("shape.outline_color", "Box Outline"),
     ("shape.outline_width", "Box Outline Width"),
     ("shadow", "Shadow"),
@@ -373,12 +380,15 @@ const STYLE: [(&str, &str); 32] = [
 
 fn style_show(key: &str) -> Show<'static> {
     match key {
-        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop"
-        | "shape.corner" => &percent,
-        "shape.size" | "shape.center" => &percents,
-        "outline.size" | "shadow.blur" | "line_spacing" | "tracking" | "shape.outline_width" => {
-            &number
-        }
+        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop" => &percent,
+        "shape.center" => &percents,
+        "shape.size" => &numbers,
+        "outline.size"
+        | "shadow.blur"
+        | "line_spacing"
+        | "tracking"
+        | "shape.outline_width"
+        | "shape.corner" => &number,
         "case" | "words.show" | "speaker_color" | "anchor" => &word,
         _ => &raw,
     }

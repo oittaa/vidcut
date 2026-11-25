@@ -197,7 +197,7 @@ fn card_frame(
 }
 
 impl Workspace {
-    fn pictured_selection(&self) -> Vec<String> {
+    pub(super) fn pictured_selection(&self) -> Vec<String> {
         let Some(p) = self.project() else {
             return Vec::new();
         };
