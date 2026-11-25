@@ -25,8 +25,9 @@ pub(super) struct KeySetsUi {
     exporting: Option<(String, Picked)>,
     importing: Option<Picked>,
     naming: Option<String>,
+    focus_name: bool,
     confirm_use: Option<String>,
-    confirm_delete: bool,
+    confirm_delete: Option<String>,
     want: Option<Want>,
     error: Option<String>,
 }
@@ -36,7 +37,7 @@ impl KeySetsUi {
         self.listed = false;
         self.naming = None;
         self.confirm_use = None;
-        self.confirm_delete = false;
+        self.confirm_delete = None;
         self.error = None;
     }
 
@@ -52,35 +53,15 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
     let changed = b.any_custom();
     let mine = s.mine(&in_force);
     ui.horizontal(|ui| {
-        let shown = match changed {
-            true => format!("{in_force} (Changed)"),
-            false => in_force.clone(),
-        };
-        egui::ComboBox::from_id_salt("key-set")
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                for (name, _) in &s.sets {
-                    let current = same(name, &in_force);
-                    if !ui.selectable_label(current, name).clicked() || (current && !changed) {
-                        continue;
-                    }
-                    match changed {
-                        true => s.confirm_use = Some(name.clone()),
-                        false => s.want = Some(Want::Use(name.clone())),
-                    }
-                }
-            });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button(icon::DOTS_THREE, |ui| {
-                if ui
-                    .add_enabled(mine && changed, egui::Button::new("Save"))
-                    .clicked()
-                {
-                    s.want = Some(Want::Save(in_force.clone(), true));
-                    ui.close();
-                }
                 if ui.button("Save As New Set…").clicked() {
                     s.naming = Some(String::new());
+                    s.focus_name = true;
+                    ui.close();
+                }
+                if ui.button("Import Set…").clicked() {
+                    s.want = Some(Want::Import);
                     ui.close();
                 }
                 ui.menu_button("Export Set", |ui| {
@@ -91,19 +72,49 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                         }
                     }
                 });
-                if ui.button("Import Set…").clicked() {
-                    s.want = Some(Want::Import);
+                ui.menu_button("Delete Set", |ui| {
+                    for (name, built_in) in &s.sets {
+                        if !built_in && ui.button(name).clicked() {
+                            s.confirm_delete = Some(name.clone());
+                            ui.close();
+                        }
+                    }
+                });
+                ui.separator();
+                if ui
+                    .add_enabled(mine && changed, egui::Button::new("Save"))
+                    .clicked()
+                {
+                    s.want = Some(Want::Save(in_force.clone(), true));
                     ui.close();
                 }
             });
+            let shown = match changed {
+                true => format!("{in_force} (Changed)"),
+                false => in_force.clone(),
+            };
+            egui::ComboBox::from_id_salt("key-set")
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for (name, _) in &s.sets {
+                        let current = same(name, &in_force);
+                        if !ui.selectable_label(current, name).clicked() || (current && !changed) {
+                            continue;
+                        }
+                        match changed {
+                            true => s.confirm_use = Some(name.clone()),
+                            false => s.want = Some(Want::Use(name.clone())),
+                        }
+                    }
+                });
             if ui
                 .add_enabled(mine, egui::Button::new(icon::TRASH))
                 .on_hover_text("Delete Set")
                 .clicked()
             {
-                s.confirm_delete = true;
+                s.confirm_delete = Some(in_force.clone());
             }
-        });
+        })
     });
     naming_row(ui, s);
     if let Some(name) = s.confirm_use.clone() {
@@ -118,14 +129,14 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
             }
         });
     }
-    if s.confirm_delete {
+    if let Some(name) = s.confirm_delete.clone() {
         ui.horizontal(|ui| {
-            if dialog::main_button(ui, &format!("Delete {in_force}"), mine) {
-                s.want = Some(Want::Delete(in_force.clone()));
-                s.confirm_delete = false;
+            if dialog::main_button(ui, &format!("Delete {name}"), true) {
+                s.want = Some(Want::Delete(name));
+                s.confirm_delete = None;
             }
             if ui.button("Cancel").clicked() {
-                s.confirm_delete = false;
+                s.confirm_delete = None;
             }
         });
     }
@@ -148,8 +159,9 @@ fn naming_row(ui: &mut egui::Ui, s: &mut KeySetsUi) {
                 .hint_text("Set Name")
                 .desired_width(200.0),
         );
-        if !field.has_focus() && name.is_empty() {
+        if s.focus_name {
             field.request_focus();
+            s.focus_name = false;
         }
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let label = match taken.is_some() {

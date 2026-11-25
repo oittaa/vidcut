@@ -208,6 +208,7 @@ actions! {
     AddLayerNode "add_layer_node",
     AppendNode "append_node",
     AddOutsideNode "add_outside_node",
+    AddSplitterCombiner "add_splitter_combiner",
     AddCircleNode "add_circle_node",
     AddLinearNode "add_linear_node",
     AddPolygonNode "add_polygon_node",
@@ -267,6 +268,7 @@ impl Action {
             | Action::AddLayerNode
             | Action::AppendNode
             | Action::AddOutsideNode
+            | Action::AddSplitterCombiner
             | Action::AddCircleNode
             | Action::AddLinearNode
             | Action::AddPolygonNode
@@ -1177,9 +1179,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
              the main story and never has holes. With volume keyframes selected, it removes only \
-             them. With a dissolve selected, it removes the dissolve and its Cross Fade. After a \
-             click in the Media tab, it removes the selected media from the pool instead, after \
-             asking.",
+             them. With a dissolve selected, it removes the dissolve and its Cross Fade.",
         ),
     ),
     own(
@@ -1373,8 +1373,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl+A"],
         "Select all",
         Some(
-            "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
-             shows.",
+            "Every clip and subtitle on the timeline. After a click in the Keyframes tab or the \
+             keyframe tray, all its keyframes.",
         ),
     ),
     own(
@@ -1703,6 +1703,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     own(
         Color,
+        Action::AddSplitterCombiner,
+        &["Alt+Y"],
+        "Add a splitter and a combiner",
+        Some("After the current node: a corrector for each channel, joined again."),
+    ),
+    own(
+        Color,
         Action::AddCircleNode,
         &["Alt+C"],
         "Add a serial node with a circle window",
@@ -1741,7 +1748,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Action::DeleteNode,
         &["Shift+Backspace", "Delete"],
         "Delete the selected nodes",
-        Some("The nodes after them get lower numbers. The last corrector becomes current."),
+        Some(
+            "The nodes after them get lower numbers. The last corrector becomes current. With selected points of a curve window, it deletes those points.",
+        ),
     ),
     own(
         Color,

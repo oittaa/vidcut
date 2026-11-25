@@ -14,17 +14,14 @@ const PRESETS: &[(&str, &str)] = &[
         include_str!("../keys/adobe_premiere_pro.toml"),
     ),
     (
-        "Apple Final Cut Pro",
+        "Apple Final Cut Pro X",
         include_str!("../keys/apple_final_cut_pro.toml"),
     ),
     (
         "Avid Media Composer",
         include_str!("../keys/avid_media_composer.toml"),
     ),
-    (
-        "Avid Pro Tools",
-        include_str!("../keys/avid_pro_tools.toml"),
-    ),
+    ("Pro Tools", include_str!("../keys/avid_pro_tools.toml")),
 ];
 
 #[derive(Debug, Clone, PartialEq)]

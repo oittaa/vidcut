@@ -4,8 +4,8 @@ use vidcut_core::grade::{
 };
 use vidcut_core::lru::{ByBytes, Lru};
 use vidcut_core::model::{
-    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MaskChannel, MergeEdges,
-    MergeOperator, NoiseColoring,
+    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, JoinStyle, MaskChannel,
+    MergeEdges, MergeOperator, NoiseColoring, PaintMode,
 };
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
@@ -87,6 +87,12 @@ const MIX_PARALLEL: f64 = 0.0;
 const MIX_SHARPEN: f64 = 2.0;
 
 const MIX_LAYER: f64 = 1.0;
+
+const MIX_SPREAD: f64 = 3.0;
+
+const MIX_TAKE: f64 = 4.0;
+
+const MIX_CLEAR: f64 = 5.0;
 
 const SHOT_TAPS: u32 = 16;
 
@@ -422,6 +428,13 @@ fn shape_bytes(shape: &Shaping, figure: &Figure, joined: bool) -> Vec<u8> {
         flag(shape.solid),
         flag(winding),
         flag(joined),
+        JoinStyle::ALL
+            .iter()
+            .position(|j| *j == shape.join)
+            .unwrap_or_default() as f64,
+        0.0,
+        0.0,
+        0.0,
     ])
 }
 
@@ -610,7 +623,11 @@ fn mask_pads(shape: &Shaping, (w, h): (u32, u32), most: u32) -> [u32; 4] {
     if !shape.beyond || reach == [0, 0] || points.is_empty() {
         return [0; 4];
     }
-    let near = shape.border.abs() + MASK_NEAR;
+    let corner = match shape.join {
+        JoinStyle::Sharp => std::f64::consts::SQRT_2,
+        _ => 1.0,
+    };
+    let near = shape.border.abs() * corner + MASK_NEAR;
     let low = |k: usize| points.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min) - near;
     let high = |k: usize| {
         points
@@ -731,11 +748,16 @@ fn mask_made<'a>(
         }
         let to = kept.map_or(0, |k| 1 - k);
         let start = kept.map_or(&room[1].view, |k| &room[k].view);
+        let paint = match kept {
+            Some(_) => shape.paint,
+            None => PaintMode::Copy,
+        };
+        let mode = PaintMode::ALL.iter().position(|m| *m == paint);
         let how = [
             shape.level,
             flag(shape.invert),
             flag(kept.is_none()),
-            0.0,
+            mode.unwrap_or_default() as f64,
             by[0],
             by[1],
             0.0,
@@ -2185,6 +2207,27 @@ fn pass_into(
                 encoder,
             );
         }
+        GradePass::Spread { on, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*on], at[*on]),
+            (&scratch[0], [MIX_SPREAD, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
+        GradePass::Take { on, from, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*from], at[*on]),
+            (&scratch[0], [MIX_TAKE, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
+        GradePass::Clear { on, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*on], at[*on]),
+            (&scratch[0], [MIX_CLEAR, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
     }
 }
 
