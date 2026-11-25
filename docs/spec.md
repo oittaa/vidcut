@@ -6875,6 +6875,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
+  - Blur and Opacity of the Drop Shadow are whole numbers, measured in Resolve Studio 21.2. The file holds them as `Int`, as the Outline Width and the Opacity of the Background.
+  - vidcut: a title's shadow blur is a whole number from 1 to 100, and its opacity is a whole percent.
+    - `titles.set` refuses a fraction. The OTIO reader cuts the decimals, as Resolve's `Int` does.
+    - The Title section shows them as whole numbers. A typed fraction loses its decimals, and a typed value past a limit gives the limit, as on the Background rows.
   - The blur, measured in Resolve Studio 21.2 at 1920×1080 with blur 1, 10, 40 and 100:
     - It is a Gaussian. Its sigma is the blur times the picture height, divided by 3370.
     - The shadow is the blurred letters times its opacity. No other gain applies.
@@ -6988,8 +6992,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - No background is a height of 0.
   - **Drop shadow:**
     - `shadow offset` is in fractions of the picture, right and up.
-    - `shadow` is its blur: a Gaussian whose sigma is that many 3370ths of the picture height.
-    - `shadow opacity` is in percent, and `shadow color` is its color.
+    - `shadow` is its blur: a Gaussian whose sigma is that many 3370ths of the picture height. It is an `Int`.
+    - `shadow opacity` is in whole percents, as an `Int`, and `shadow color` is its color.
     - No shadow is an offset of 0, which Resolve does not draw.
   - **The picture of the clip:**
     - The Transform, Cropping, Dynamic Zoom and Composite of a title clip are in the effects of the clip, as on a media clip (§8.14, D75).

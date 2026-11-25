@@ -3422,7 +3422,7 @@ pub struct TitleShadow {
     /// `#rrggbb`, `#rgb` or a name such as `navy`. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// From 0 to 1. Usual: 0.75.
+    /// From 0 to 1. On a title, it is in steps of 1/100. Usual: 0.75.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `[x, y]`: how far it falls right and down, as fractions of the
@@ -3431,7 +3431,8 @@ pub struct TitleShadow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
     /// How soft its edge is, from 1 to 100, where the blur's radius is
-    /// about 3% of the picture height. Usual: 20.
+    /// about 3% of the picture height. On a title, it is a whole number.
+    /// Usual: 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur: Option<f64>,
     /// `true` draws no shadow and keeps these values.

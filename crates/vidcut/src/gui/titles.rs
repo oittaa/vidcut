@@ -300,6 +300,9 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     if let Some(b) = style.background.as_mut() {
         b.opacity = fields.whole_opacity(was.background.as_ref().and_then(|b| b.opacity))?;
     }
+    if let Some(h) = style.shadow.as_mut() {
+        [h.opacity, h.blur] = fields.whole_shadow(was.shadow.as_ref())?;
+    }
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
     style.case = (d.case != TitleCase::Mixed).then_some(d.case);
