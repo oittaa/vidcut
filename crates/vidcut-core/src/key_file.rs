@@ -323,7 +323,8 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
     }
     let mut custom = match set {
         Some(name) if !same(name, BASE) => base(name)?,
-        _ => Custom::new(),
+        Some(_) => Custom::new(),
+        None => COMMANDS.iter().map(|&(_, a)| (a, Vec::new())).collect(),
     };
     let start = Bindings::of(&custom)?;
     for &action in Action::ALL {
