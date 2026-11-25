@@ -5433,6 +5433,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
+  - The table gives the keys of the built-in DaVinci Resolve preset of Resolve Studio 21.2 (measured, case 17 of shortcuts-resolve-runs.md). This applies to the actions that have a command of Resolve. The keypad keys are not in it yet ([todo](todo/egui-keypad-keys.md)).
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
   - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
   - With changes, a pick of another set asks first, because the changes are lost. Not measured (case 15 of shortcuts-resolve-runs.md).
@@ -5445,8 +5446,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A delete of the set in force keeps its keys in force, as changes to vidcut's own set. Not measured (case 14 of shortcuts-resolve-runs.md).
   - Reset puts back the keys of the set in force.
   - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
-  - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
-  - The keys of these sets are not measured against the presets of Resolve (case 17 of shortcuts-resolve-runs.md).
+  - A set of another editor gives the keys of the Resolve preset of the same name (measured, case 17). This applies to the actions that have a command of Resolve.
+  - The presets of Adobe Premiere Pro, Apple Final Cut Pro X and Avid Media Composer leave out 20 of these commands. The Pro Tools preset leaves out 3.
+  - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
+  - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
+  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
+  - The actions that have no command of Resolve keep their keys from the table, as the next rule tells.
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
