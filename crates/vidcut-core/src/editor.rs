@@ -5155,9 +5155,10 @@ fn mutate(
             input,
             from,
             key,
+            output,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::connect(p, &of, (*node, *input), (*from, *key))?;
+            ops::grade::connect(p, &of, (*node, *input), (*from, *key, *output))?;
             Value::Null
         }
         Request::GradeInputRemove {

@@ -67,13 +67,14 @@ const PRINTED: [(PrinterColor, &str); 3] = [
 
 const CURRENT: Color32 = Color32::from_rgb(255, 140, 0);
 
-const ADDS: [(Action, GradeAdd); 6] = [
+const ADDS: [(Action, GradeAdd); 7] = [
     (Action::AddSerialNode, GradeAdd::Serial),
     (Action::AddNodeBefore, GradeAdd::Before),
     (Action::AddParallelNode, GradeAdd::Parallel),
     (Action::AddLayerNode, GradeAdd::Layer),
     (Action::AppendNode, GradeAdd::Append),
     (Action::AddOutsideNode, GradeAdd::Outside),
+    (Action::AddSplitterCombiner, GradeAdd::SplitterCombiner),
 ];
 
 const WINDOW_ADDS: [(Action, WindowKind); 4] = [
@@ -84,6 +85,22 @@ const WINDOW_ADDS: [(Action, WindowKind); 4] = [
 ];
 
 const KEY_PORT: usize = 1;
+
+const SPLIT_NAMES: [&str; 3] = ["Red", "Green", "Blue"];
+
+fn outlet_slot(output: u8) -> usize {
+    match output {
+        0 => 0,
+        j => KEY_PORT + usize::from(j),
+    }
+}
+
+fn output_of(slot: usize) -> u8 {
+    slot.checked_sub(KEY_PORT)
+        .filter(|j| *j > 0)
+        .and_then(|j| u8::try_from(j).ok())
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Copy)]
 enum NodesItem {
@@ -108,6 +125,10 @@ const NODES_MENU: [&[(&str, NodesItem)]; 6] = [
         (
             "Add Outside Node",
             NodesItem::Act(NodeAct::Add(GradeAdd::Outside)),
+        ),
+        (
+            "Add Splitter Combiner Node",
+            NodesItem::Key(Action::AddSplitterCombiner),
         ),
     ],
     &[
@@ -185,6 +206,8 @@ enum NodeAct {
 enum FieldAct {
     Corrector,
     KeyMixer,
+    Splitter,
+    Combiner,
     ResetAll,
     KeepNodes,
     Zoom(NodeZoom),
@@ -731,6 +754,8 @@ fn kind(tool: &GradeTool) -> &'static str {
         GradeTool::ParallelMixer => "Parallel Mixer",
         GradeTool::LayerMixer { .. } => "Layer Mixer",
         GradeTool::KeyMixer { .. } => "Key Mixer",
+        GradeTool::Splitter => "Splitter",
+        GradeTool::Combiner => "Combiner",
     }
 }
 
@@ -798,6 +823,23 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
                 vec![outlet(KEY_PORT, "Key Output")],
                 None,
             ),
+            GradeTool::Splitter => (
+                kind(&d.tool).to_string(),
+                vec![input(0, "RGB Input".into())],
+                (0u8..)
+                    .zip(SPLIT_NAMES)
+                    .map(|(j, name)| outlet(outlet_slot(j), name))
+                    .collect(),
+                None,
+            ),
+            GradeTool::Combiner => (
+                kind(&d.tool).to_string(),
+                (SPLIT_NAMES.iter().enumerate())
+                    .map(|(i, name)| input(i, (*name).into()))
+                    .collect(),
+                vec![outlet(0, "RGB Output")],
+                None,
+            ),
             tool => (
                 kind(tool).to_string(),
                 (0..d.inputs.len())
@@ -847,7 +889,11 @@ fn wires(g: &Grade) -> Vec<Wire<Port>> {
     let dim = Stroke::new(1.5, theme::colors().text_dim);
     let wire = |l: GradeLink, (to, slot): (Port, usize)| Wire {
         from: port(l.node),
-        out: if l.key { KEY_PORT } else { 0 },
+        out: if l.key {
+            KEY_PORT
+        } else {
+            outlet_slot(l.output)
+        },
         to,
         slot,
         drops: !l.key && inlet(g, to, slot) == Some(false),
@@ -887,7 +933,11 @@ fn inlet(g: &Grade, to: Port, slot: usize) -> Option<bool> {
 
 fn link_of((from, out): (Port, usize)) -> Option<GradeLink> {
     let key = out == KEY_PORT;
-    from_number(from).map(|node| GradeLink::new(node, key))
+    let output = output_of(out);
+    from_number(from).map(|node| GradeLink {
+        output,
+        ..GradeLink::new(node, key)
+    })
 }
 
 fn gives(g: &Grade, from: Port, key: bool) -> bool {
@@ -929,6 +979,9 @@ fn connect(
         more["from"] = json!(f.node);
         if f.key {
             more["key"] = json!(true);
+        }
+        if f.output > 0 {
+            more["output"] = json!(f.output);
         }
     }
     Some(command("grade.connect", params(of, "clip", more)))
@@ -981,6 +1034,11 @@ fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
     out
 }
 
+fn leads(g: &Grade, n: u32) -> bool {
+    g.node(n)
+        .is_some_and(|d| !matches!(d.tool, GradeTool::Splitter | GradeTool::Combiner))
+}
+
 fn grade_pick(mut picked: Vec<u32>, current: Option<u32>) -> (Vec<u32>, bool) {
     let Some(c) = current else {
         return (picked, false);
@@ -1002,6 +1060,7 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
     };
     let adds: &[(GradeAdd, &str)] = match &d.tool {
         GradeTool::Corrector(_) => &ADD_MENU,
+        GradeTool::Splitter => &MIXER_ADD_MENU[1..],
         _ => &MIXER_ADD_MENU,
     };
     let keyed = d.takes_keys();
@@ -1051,6 +1110,12 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             pick(ui, true, less, NodeAct::RemoveInput);
             return;
         }
+        GradeTool::Splitter | GradeTool::Combiner => {
+            let lock = egui::Button::selectable(d.locked, "Lock Node");
+            pick(ui, true, lock, NodeAct::Lock);
+            pick(ui, true, delete(), NodeAct::Delete);
+            return;
+        }
         GradeTool::ParallelMixer => ("Morph Into Layer Mixer Node", GradeMixer::LayerMixer),
         GradeTool::LayerMixer { .. } => ("Morph Into Parallel Node", GradeMixer::ParallelMixer),
     };
@@ -1093,6 +1158,8 @@ fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
     ui.menu_button("Add Node", |ui| {
         pick(ui, "Corrector", FieldAct::Corrector);
         pick(ui, "Key Mixer", FieldAct::KeyMixer);
+        pick(ui, "Splitter", FieldAct::Splitter);
+        pick(ui, "Combiner", FieldAct::Combiner);
     });
     ui.separator();
     for (text, zoom) in [
@@ -2349,8 +2416,14 @@ impl Workspace {
             kept.retain(|k| *k != n);
             kept.push(n);
         }
+        if let Some(c) = current.filter(|c| !leads(&g, *c)) {
+            return Err(format!(
+                "node {c}: a splitter or a combiner is never current"
+            ));
+        }
         self.settle_grade(&of, &g);
-        let current = current.or(kept.last().copied());
+        let was = self.current_grade_node(&g);
+        let current = (current.or(kept.iter().rev().copied().find(|n| leads(&g, *n)))).or(was);
         let (kept, loose) = grade_pick(kept, current);
         self.effects_page.pick_grade(kept, loose);
         Ok(())
@@ -2536,7 +2609,8 @@ impl Workspace {
         let node = self.current_grade_node(&g);
         let d = node.and_then(|n| g.node(n));
         let mixer = d.is_some_and(|d| d.tool.is_mixer());
-        if mixer && !matches!(add, GradeAdd::Serial | GradeAdd::Before | GradeAdd::Append) {
+        let serial = matches!(add, GradeAdd::Serial | GradeAdd::SplitterCombiner);
+        if mixer && !serial && !matches!(add, GradeAdd::Before | GradeAdd::Append) {
             return;
         }
         if d.is_some_and(GradeNode::takes_keys) && add != GradeAdd::Append {
@@ -2668,13 +2742,17 @@ impl Workspace {
                 let area = self.effects_page.grade_view.area();
                 ("grade.cleanup", json!({ "area": area }))
             }
-            FieldAct::Corrector | FieldAct::KeyMixer => {
+            FieldAct::Corrector | FieldAct::KeyMixer | FieldAct::Splitter | FieldAct::Combiner => {
                 let at = self.effects_page.grade_spot.unwrap_or_default();
                 let add = match act {
                     FieldAct::KeyMixer => GradeAdd::KeyMixer,
+                    FieldAct::Splitter => GradeAdd::Splitter,
+                    FieldAct::Combiner => GradeAdd::Combiner,
                     _ => GradeAdd::Corrector,
                 };
-                self.select_added(g, add, None);
+                if matches!(add, GradeAdd::Corrector | GradeAdd::KeyMixer) {
+                    self.select_added(g, add, None);
+                }
                 ("grade.add", json!({ "add": add, "place": at }))
             }
             FieldAct::KeepNodes => {
@@ -2875,7 +2953,9 @@ impl Workspace {
         match done.picked {
             Some((Port::Node(n), Pick::Active)) => {
                 picked.push(n);
-                current = Some(n);
+                if leads(&stored, n) {
+                    current = Some(n);
+                }
             }
             Some((Port::Node(n), Pick::Toggle)) if Some(n) == current && picked.contains(&n) => {
                 return;
@@ -2886,7 +2966,9 @@ impl Workspace {
             Some((Port::Node(n), Pick::Toggle)) => picked.push(n),
             Some((Port::Node(n), Pick::Only)) => {
                 picked = vec![n];
-                current = Some(n);
+                if leads(&stored, n) {
+                    current = Some(n);
+                }
             }
             None if done.clicked && done.unlink.is_none() => picked = current.into_iter().collect(),
             _ => return,
