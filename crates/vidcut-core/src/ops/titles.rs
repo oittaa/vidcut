@@ -12,8 +12,6 @@ use super::{block_clip, clear_range, fix_audio, is_main, locate, place, tracks, 
 
 pub const DEFAULT_SECS: f64 = 5.0;
 
-const ZOOM: (f64, f64) = (0.25, 4.0);
-
 const PLACE: &str =
     "a title's position is two fractions of the picture, from -4 to 4 across and -3 to 5 down";
 const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
@@ -41,7 +39,11 @@ fn down(v: f64) -> bool {
 }
 
 fn zooms(z: f64) -> bool {
-    z.is_finite() && (ZOOM.0..=ZOOM.1).contains(&z)
+    z.is_finite() && (Title::ZOOM.0..=Title::ZOOM.1).contains(&z)
+}
+
+fn flat(z: [f64; 2]) -> bool {
+    z == [1.0, 1.0]
 }
 
 fn turns(r: f64) -> bool {
@@ -91,6 +93,9 @@ fn checked_keys(t: &Title) -> Result<()> {
         return Err(Error::invalid(PLACE));
     }
     all_in(&t.zoom_keys, zooms, ZOOMED)?;
+    if !t.zoom_y.iter().copied().all(zooms) {
+        return Err(Error::invalid(ZOOMED));
+    }
     all_in(&t.rotation_keys, turns, TURNED)
 }
 
@@ -100,7 +105,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid("a lower third has two lines at the most"));
     }
     if t.kind == TitleKind::Scroll
-        && (t.zoom.is_some_and(|z| z != 1.0) || t.rotation.is_some_and(|r| r != 0.0))
+        && (t.zoom.is_some_and(|z| !flat(z)) || t.rotation.is_some_and(|r| r != 0.0))
     {
         return Err(Error::invalid("a scroll has no zoom or rotation"));
     }
@@ -110,7 +115,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid(PLACE));
     }
     let zoom = match t.zoom {
-        Some(z) if zooms(z) => (z != 1.0).then_some(z),
+        Some(z) if z.iter().copied().all(zooms) => (!flat(z)).then_some(z),
         Some(_) => return Err(Error::invalid(ZOOMED)),
         None => None,
     };
@@ -177,6 +182,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         position_handles: t.position_handles.clone(),
         zoom,
         zoom_keys: t.zoom_keys.clone(),
+        zoom_y: t.zoom_y.clone(),
         rotation,
         rotation_keys: t.rotation_keys.clone(),
         upper,
@@ -370,7 +376,7 @@ pub struct TitleChange {
     pub anchor: Option<TitleAnchor>,
     pub style: Option<TitleStyle>,
     pub position: Option<Option<[f64; 2]>>,
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
     pub rotation: Option<f64>,
     pub look: Option<TitleLook>,
     pub line: Option<LowerThirdLine>,
@@ -383,6 +389,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             position_y: old.position_y.clone(),
             position_handles: old.position_handles.clone(),
             zoom_keys: old.zoom_keys.clone(),
+            zoom_y: old.zoom_y.clone(),
             rotation_keys: old.rotation_keys.clone(),
             upper: old.upper.clone(),
             ..l.on(&old.text)
@@ -407,6 +414,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         t.style.case = None;
         t.position_handles.clear();
         t.zoom_keys.clear();
+        t.zoom_y.clear();
         t.rotation_keys.clear();
     }
     if let Some(a) = change.align {

@@ -1932,6 +1932,19 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A Scroll has no edit in place. Its text changes only in the Inspector.
   - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
+  - **Zoom X and Zoom Y** (measured in Resolve Studio 21.2, on a Text title at Position 960, 540, with the Zoom link on):
+    - One click on the title shows a box with 4 corner handles, 4 side handles, a center handle and a handle above the box.
+    - A drag of the right side handle changed Zoom X only, from 1.000 to 1.580. Position stayed at 960, 540.
+    - The box grew on both sides, about its center. The dragged side followed the pointer.
+    - A drag of the top side handle changed Zoom Y only, from 1.000 to 2.022.
+    - Each drag is one undo step.
+    - With the link on, Zoom X typed as 1.2 sets Zoom Y to 1.2 too.
+  - vidcut: a title has a Zoom X and a Zoom Y. `titles.set` takes one number for both, or `[x, y]`.
+    - The Zoom row of the Title section has Zoom X, a link button and Zoom Y, in percent.
+    - With the link on, a number in one box goes into the other box too. A click that turns the link on sets Zoom Y to Zoom X.
+    - A drag of a corner in the viewer keeps the ratio of Zoom X to Zoom Y.
+    - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title.
+    - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md#zoom-x-and-zoom-y)).
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
@@ -2006,6 +2019,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut does not key the shadow and the background yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
 - **Keyframes in vidcut:**
   - A Text title and a lower third take keyframes on the position, the zoom and the rotation of the text: `text_position`, `text_zoom` and `text_rotation`. A scroll takes them only on the position of its text.
+  - The zoom of the text is one keyframe for X and Y, as on a clip (§8.15).
   - Each line of a lower third takes its own keyframes. `upper_position`, `lower_position` and the like in the `keyframes` requests name the line.
   - The picture of the clip takes keyframes as on a media clip, with the same names. Its opacity is the opacity of the whole title.
   - The Keyframes tab of a title has the rows of its clip's picture. It also has the rows Text Position, Text Zoom and Text Rotation. The text of a scroll has only Text Position.

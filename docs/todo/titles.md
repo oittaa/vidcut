@@ -13,6 +13,11 @@
   - Down, vidcut is 0.5 pixels lower at zoom 1. It is 0.75 pixels higher at zoom 1.5, and 1 pixel higher at zoom 2.
   - Measured in Resolve Studio 21.2 with Arial 96, at the left, middle and right anchors. Find the stage that makes this offset.
 
+## Zoom X and Zoom Y
+
+- **Stretched text:** vidcut lays out the text at Zoom Y, then stretches it across by Zoom X / Zoom Y ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)).
+  - Run: a Text title at Zoom X 1.5 and Zoom Y 1, at 1920×1080 and 3840×2160. Measure the width of the letters, the wrap and the outline.
+
 ## Tracking
 
 - Measure a tracking with a fraction of a pixel at a zoom. vidcut takes the step of 1/64 of a pixel before the zoom.

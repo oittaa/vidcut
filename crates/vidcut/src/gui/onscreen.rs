@@ -229,18 +229,18 @@ impl Workspace {
             else {
                 continue;
             };
-            let z = title.scale() as f32;
+            let [zx, zy] = title.scale().map(|v| v as f32);
             let [qx, qy] = base.place().map(|v| v as f32);
             let [px, py] = title.place();
             let (rx, ry) = (px as f32, py as f32);
             let (fw, fh) = (w as f32, h as f32);
-            let x = rx * fw + (bx - qx * fw) * z;
+            let x = rx * fw + (bx - qx * fw) * zx;
             let y = if title.moves() {
                 by
             } else {
-                ry * fh + (by - qy * fh) * z
+                ry * fh + (by - qy * fh) * zy
             };
-            let (bw, bh) = (bw * z, bh * z);
+            let (bw, bh) = (bw * zx, bh * zy);
             let run = title.moves().then_some(Run {
                 at: at - c.start,
                 of: c.duration,
@@ -330,8 +330,12 @@ impl Workspace {
                 let pivot = self.pivot_on(t0, picture);
                 let (d0, d1) = (held.from.distance(pivot), to.distance(pivot));
                 if d0 > 1.0 {
-                    let z = t0.scale() * f64::from(d1 / d0);
-                    next.now.zoom = Some(rounded(z.clamp(0.25, 4.0), 3));
+                    let [zx, zy] = t0.scale();
+                    let (least, most) = Title::ZOOM;
+                    let low = (least / zx).max(least / zy);
+                    let high = (most / zx).min(most / zy);
+                    let k = f64::from(d1 / d0).clamp(low, high);
+                    next.now.zoom = Some([rounded(zx * k, 3), rounded(zy * k, 3)]);
                 }
             }
             Hold::Turn => {
@@ -434,7 +438,7 @@ impl Workspace {
         if let Some(h) = &self.timeline.title_grab.held
             && h.hold == Hold::Zoom
         {
-            let zoom = format!("{:.0}%", h.now.scale() * 100.0);
+            let zoom = super::placing::zoom_text(h.now.scale());
             egui::Tooltip::always_open(
                 ui.ctx().clone(),
                 ui.layer_id(),
@@ -537,7 +541,7 @@ impl Workspace {
             }
         };
         let (w, h) = (size.0 as f32, size.1 as f32);
-        let tall = (s.title.text_fraction(size.1) * s.title.scale()) as f32 * picture.height();
+        let tall = (s.title.text_fraction(size.1) * s.title.scale()[1]) as f32 * picture.height();
         let home = [
             s.pivot - vec2(0.0, tall / 2.0),
             s.pivot + vec2(0.0, tall / 2.0),

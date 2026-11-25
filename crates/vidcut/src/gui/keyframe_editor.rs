@@ -990,12 +990,14 @@ fn frames_of(marks: &[Mark], param: KeyParam) -> Vec<i64> {
 
 fn by_value(param: KeyParam, axis: Axis, d: f64) -> Value {
     match param {
-        KeyParam::TextZoom | KeyParam::UpperZoom | KeyParam::LowerZoom => json!(d),
         KeyParam::Position
         | KeyParam::TextPosition
         | KeyParam::UpperPosition
         | KeyParam::LowerPosition
         | KeyParam::Zoom
+        | KeyParam::TextZoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
         | KeyParam::Anchor => match axis {
             Axis::Y => json!([0.0, d]),
             _ => json!([d, 0.0]),
@@ -1307,9 +1309,6 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
             for v in PictureValue::ALL {
                 if view.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
                     let mut lane = lane_from(&picture, v);
-                    if v == PictureValue::Zoom {
-                        lane.extra.clear();
-                    }
                     if let Some(text) = KeyParam::of_text(v) {
                         lane.param = line.map_or(text, |l| text.for_line(l));
                     }

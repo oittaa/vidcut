@@ -4931,7 +4931,10 @@ fn mutate(
                     anchor: *anchor,
                     style: style.clone(),
                     position: position.map(Some),
-                    zoom: *zoom,
+                    zoom: zoom
+                        .as_ref()
+                        .map(|z| ops::picture::zoom(&z.to_vec(), "title"))
+                        .transpose()?,
                     rotation: *rotation,
                     look: None,
                     line: None,
@@ -4966,7 +4969,10 @@ fn mutate(
                 anchor: *anchor,
                 style: style.clone(),
                 position: position.as_deref().map(ops::titles::position).transpose()?,
-                zoom: *zoom,
+                zoom: zoom
+                    .as_ref()
+                    .map(|z| ops::picture::zoom(&z.to_vec(), "title"))
+                    .transpose()?,
                 rotation: *rotation,
                 look: look
                     .as_deref()
@@ -5059,7 +5065,7 @@ fn mutate(
                     .transpose()?,
                 zoom: zoom
                     .as_ref()
-                    .map(|z| ops::picture::zoom(&z.to_vec()))
+                    .map(|z| ops::picture::zoom(&z.to_vec(), "picture"))
                     .transpose()?,
                 rotation: *rotation,
                 anchor: anchor

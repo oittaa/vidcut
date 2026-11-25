@@ -707,7 +707,7 @@ fn read_point_keys(p: &Value, origin: i64) -> Option<(Vec<Keyframe>, Vec<f64>)> 
     Some(out.into_iter().unzip())
 }
 
-fn merge(
+pub(super) fn merge(
     x: Vec<Keyframe>,
     y: Vec<Keyframe>,
     x_plain: f64,
@@ -773,6 +773,20 @@ fn placed_pair(
         ys.push(rounded(0.5 - tilt * ph / h));
     }
     (keys, ys)
+}
+
+pub(super) fn zoom_linked(p: &Picture) -> bool {
+    match p.zoom_keys.is_empty() {
+        true => {
+            let [x, y] = p.scale();
+            x == y
+        }
+        false => p
+            .zoom_keys
+            .iter()
+            .zip(&p.zoom_y)
+            .all(|(k, y)| k.value == *y),
+    }
 }
 
 pub(super) fn file_curve(
@@ -942,14 +956,7 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
     let pitch = p.pitch_keys.first().map_or(p.pitch(), |k| k.value);
     let yaw_keys = file_curve(&p.yaw_keys, None, source, |v| v, 1.0);
     let yaw = p.yaw_keys.first().map_or(p.yaw(), |k| k.value);
-    let linked = match p.zoom_keys.is_empty() {
-        true => zx == zy,
-        false => p
-            .zoom_keys
-            .iter()
-            .zip(&p.zoom_y)
-            .all(|(k, y)| k.value == *y),
-    };
+    let linked = zoom_linked(p);
     let transform: Vec<Value> = [
         double_frames(ZOOM_X, zx, 1.0, zoom, zoom_x),
         double_frames(ZOOM_Y, zy, 1.0, zoom, zoom_y),

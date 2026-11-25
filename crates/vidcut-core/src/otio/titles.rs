@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use super::effects::{group, handle_point, handle_value, keyed, plain, ranged, rounded};
-use super::picture::{file_curve, read_keys};
+use super::picture::{file_curve, merge, read_keys, zoom_linked};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
@@ -367,17 +367,18 @@ fn rich_text(
     position: Value,
     origin: i64,
 ) -> Value {
-    let scale = rounded(t.scale());
-    let zoom = |id: &str| {
+    let [zx, zy] = t.scale().map(rounded);
+    let zoom = |id: &str, value: f64, y: Option<&[f64]>| {
         ranged(
             with_frames(
-                keyed(id, json!(scale), json!(1.0), "Double"),
-                file_curve(&t.zoom_keys, None, origin, rounded, 1.0),
+                keyed(id, json!(value), json!(1.0), "Double"),
+                file_curve(&t.zoom_keys, y, origin, rounded, 1.0),
             ),
             0.25,
             4.0,
         )
     };
+    let linked = zoom_linked(&t.as_picture());
     group(
         "Rich Text",
         24,
@@ -397,9 +398,9 @@ fn rich_text(
                 "UInt",
             ),
             position,
-            zoom("transformationZoomX"),
-            zoom("transformationZoomY"),
-            plain("transformationZoomLink", json!(true), json!(true), "Bool"),
+            zoom("transformationZoomX", zx, None),
+            zoom("transformationZoomY", zy, Some(&t.zoom_y)),
+            plain("transformationZoomLink", json!(linked), json!(true), "Bool"),
             ranged(
                 with_frames(
                     keyed(
@@ -1083,6 +1084,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         position_handles: Vec::new(),
         zoom: None,
         zoom_keys: Vec::new(),
+        zoom_y: Vec::new(),
         rotation: None,
         rotation_keys: Vec::new(),
         upper: None,
@@ -1154,7 +1156,16 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
 
 fn read_turn_keys(t: &mut Title, g: &Value, origin: i64) {
     let keys = |id: &str| read_keys(parameter(g, id), origin).unwrap_or_default();
-    t.zoom_keys = fitted(&keys("transformationZoomX"), 1.0, 0.25, 4.0);
+    let [zx, zy] = t.scale();
+    let (x, y) = merge(
+        keys("transformationZoomX"),
+        keys("transformationZoomY"),
+        zx,
+        zy,
+    )
+    .unwrap_or_default();
+    t.zoom_keys = fitted(&x, 1.0, 0.25, 4.0);
+    t.zoom_y = y.into_iter().map(|v| rounded(v.clamp(0.25, 4.0))).collect();
     t.rotation_keys = fitted(
         &keys("transformationRotationAngle"),
         1.0,
@@ -1163,11 +1174,17 @@ fn read_turn_keys(t: &mut Title, g: &Value, origin: i64) {
     );
 }
 
-fn read_zoom(g: &Value) -> Option<f64> {
-    value(g, "transformationZoomX")
-        .as_f64()
-        .filter(|z| z.is_finite())
-        .map(|z| rounded(z.clamp(0.25, 4.0)))
+fn read_zoom(g: &Value) -> Option<[f64; 2]> {
+    let axis = |id: &str| {
+        value(g, id)
+            .as_f64()
+            .filter(|z| z.is_finite())
+            .map(|z| rounded(z.clamp(0.25, 4.0)))
+    };
+    match (axis("transformationZoomX"), axis("transformationZoomY")) {
+        (None, None) => None,
+        (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
+    }
 }
 
 fn read_rotation(g: &Value) -> Option<f64> {
@@ -1211,6 +1228,7 @@ fn take_keys(t: &mut Title, read: &Title) {
     t.position_y = read.position_y.iter().map(|y| down(y + dy)).collect();
     t.position_handles.clone_from(&read.position_handles);
     t.zoom_keys.clone_from(&read.zoom_keys);
+    t.zoom_y.clone_from(&read.zoom_y);
     t.rotation_keys.clone_from(&read.rotation_keys);
 }
 
@@ -1359,6 +1377,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         position_handles: Vec::new(),
         zoom,
         zoom_keys: Vec::new(),
+        zoom_y: Vec::new(),
         rotation,
         rotation_keys: Vec::new(),
         upper: None,

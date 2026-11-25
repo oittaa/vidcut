@@ -3158,15 +3158,21 @@ pub struct Title {
     /// none. Left out when no keyframe has a handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
-    /// How much larger its text is drawn, from 1/4 to 4, about the `position`
-    /// of a `text` title or a lower third's line; a scroll has none. Usual: 1.
-    /// With `zoom_keys`, the zoom at a frame is that curve.
+    /// How much larger its text is drawn across and down, `[x, y]`, each
+    /// from 1/4 to 4, about the `position` of a `text` title or a lower
+    /// third's line; a scroll has none. Usual: `[1, 1]`. With `zoom_keys`,
+    /// the zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
-    /// Zoom keyframes, on the clip's source frames. Left out when the zoom
-    /// has no keyframes.
+    pub zoom: Option<[f64; 2]>,
+    /// Zoom keyframes, one for X and Y, on the clip's source frames. `value`
+    /// is X. `zoom_y` is Y, one number for each keyframe, in the same order.
+    /// A handle value moves X. Y keeps the handle frames and a value offset
+    /// of 0. Left out when the zoom has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
+    /// Y of each `zoom_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
     /// Degrees it is turned counterclockwise, with its background and
     /// shadow, about the same point as `zoom`. Usual: 0. With
     /// `rotation_keys`, the angle at a frame is that curve.
@@ -3211,9 +3217,11 @@ pub struct TitleLine {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3235,8 +3243,14 @@ pub struct TitleBlock {
     pub anchor: [f64; 2],
     pub pivot: [f64; 2],
     pub edge: f64,
-    pub zoom: f64,
+    pub zoom: [f64; 2],
     pub turn: f64,
+}
+
+impl TitleBlock {
+    pub fn stretch(&self) -> f64 {
+        self.zoom[0] / self.zoom[1]
+    }
 }
 
 /// The handles of one position keyframe of a title, as fractions of the
@@ -3479,6 +3493,7 @@ pub fn size_fits(v: f64, most: u32) -> bool {
 impl Title {
     pub const MOST_SIZE: u32 = 4096;
     pub const MOST_SPACING: f64 = 4096.0;
+    pub const ZOOM: (f64, f64) = (0.25, 4.0);
     pub const TRACKING_SHARE: f64 = 100.0;
     pub const TRACKING_SHARE_LESS: f64 = 200.0;
     pub const TRACKING_FILE: f64 = 0.85;
@@ -3527,6 +3542,7 @@ impl Title {
             position_handles: Vec::new(),
             zoom: None,
             zoom_keys: Vec::new(),
+            zoom_y: Vec::new(),
             rotation: None,
             rotation_keys: Vec::new(),
             upper: None,
@@ -3746,8 +3762,8 @@ impl Title {
         )
     }
 
-    pub fn scale(&self) -> f64 {
-        self.zoom.unwrap_or(1.0)
+    pub fn scale(&self) -> [f64; 2] {
+        self.zoom.unwrap_or([1.0, 1.0])
     }
 
     pub fn turn(&self) -> f64 {
@@ -3772,6 +3788,7 @@ impl Title {
             position_handles: self.position_handles.clone(),
             zoom: self.zoom,
             zoom_keys: self.zoom_keys.clone(),
+            zoom_y: self.zoom_y.clone(),
             rotation: self.rotation,
             rotation_keys: self.rotation_keys.clone(),
         }
@@ -3805,6 +3822,7 @@ impl Title {
         std::mem::swap(&mut self.position_handles, &mut u.position_handles);
         std::mem::swap(&mut self.zoom, &mut u.zoom);
         std::mem::swap(&mut self.zoom_keys, &mut u.zoom_keys);
+        std::mem::swap(&mut self.zoom_y, &mut u.zoom_y);
         std::mem::swap(&mut self.rotation, &mut u.rotation);
         std::mem::swap(&mut self.rotation_keys, &mut u.rotation_keys);
         self.upper = Some(u);
@@ -3844,7 +3862,7 @@ impl Title {
                 place[1]
             },
             zoom: if part == TitlePart::Shape {
-                1.0
+                [1.0, 1.0]
             } else {
                 self.scale()
             },
@@ -10970,14 +10988,14 @@ impl Hash for Title {
         } = self;
         (kind, align, anchor, text, style).hash(h);
         pair_bits(*position).hash(h);
-        (floats_bits(*zoom), floats_bits(*rotation)).hash(h);
+        (pair_bits(*zoom), floats_bits(*rotation)).hash(h);
         upper
             .as_ref()
             .map(|u| {
                 (
                     u.anchor,
                     pair_bits(u.position),
-                    floats_bits(u.zoom),
+                    pair_bits(u.zoom),
                     floats_bits(u.rotation),
                 )
             })

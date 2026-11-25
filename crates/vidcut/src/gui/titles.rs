@@ -9,7 +9,7 @@ use vidcut_core::model::{
 use vidcut_core::request::KeyParam;
 
 use super::export::Ask;
-use super::inspector::{KeyClick, key_buttons, mark, next_key};
+use super::inspector::{KeyClick, key_buttons, link_toggle, mark, next_key};
 use super::looks::{Parts, Picker, ShapeFields, TextFields, Usual, kept_plain, plain};
 use super::subtitles::{filled, font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
@@ -21,7 +21,8 @@ struct LineFields {
     anchor: Option<TitleAnchor>,
     across: String,
     down: String,
-    zoom: String,
+    zoom: [String; 2],
+    unlinked: bool,
     rotation: String,
 }
 
@@ -75,9 +76,50 @@ impl LineFields {
             anchor: t.anchor,
             across: x.shown(t.position.map(|p| p[0])),
             down: y.shown(t.position.map(|p| p[1])),
-            zoom: percent(t.zoom),
+            zoom: [0, 1].map(|i| percent(t.zoom.map(|z| z[i]))),
+            unlinked: false,
             rotation: plain(t.rotation),
         }
+    }
+
+    fn kept_link(self, was: &Self) -> Self {
+        Self {
+            unlinked: was.unlinked,
+            ..self
+        }
+    }
+
+    fn linked(&self) -> bool {
+        let read = |s: &String| kept_number(s, None, "zoom").ok();
+        !self.unlinked && read(&self.zoom[0]) == read(&self.zoom[1])
+    }
+
+    fn zoom_row(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.label("Zoom");
+        let linked = self.linked();
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            let axis = |ui: &mut egui::Ui, f: &mut Self, i: usize| {
+                let edit = egui::TextEdit::singleline(&mut f.zoom[i])
+                    .hint_text("100%")
+                    .desired_width(100.0);
+                let typed = ui.add(edit).changed();
+                if typed && linked {
+                    f.zoom[1 - i] = f.zoom[i].clone();
+                }
+                typed
+            };
+            changed |= axis(ui, self, 0);
+            if link_toggle(ui, linked) {
+                self.unlinked = linked;
+                if !linked {
+                    self.zoom[1] = self.zoom[0].clone();
+                    changed = true;
+                }
+            }
+            changed |= axis(ui, self, 1);
+        });
+        changed
     }
 
     fn of_upper(t: &Title, size: [f64; 2]) -> Self {
@@ -187,8 +229,8 @@ impl TitleDialog {
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
         self.base = Some(t.clone());
-        self.line = LineFields::of(t, self.size);
-        self.upper = LineFields::of_upper(t, self.size);
+        self.line = LineFields::of(t, self.size).kept_link(&self.line);
+        self.upper = LineFields::of_upper(t, self.size).kept_link(&self.upper);
         self.loaded = true;
     }
 }
@@ -207,8 +249,8 @@ impl TitleDialog {
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
-        self.line = LineFields::of(t, self.size);
-        self.upper = LineFields::of_upper(t, self.size);
+        self.line = LineFields::of(t, self.size).kept_link(&self.line);
+        self.upper = LineFields::of_upper(t, self.size).kept_link(&self.upper);
         self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
@@ -279,7 +321,11 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
         zoom: if scroll {
             None
         } else {
-            kept(&f.zoom, stored.zoom, "zoom")?
+            let axis = |i: usize| kept(&f.zoom[i], stored.zoom.map(|z| z[i]), "zoom");
+            match (axis(0)?, axis(1)?) {
+                (None, None) => None,
+                (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
+            }
         },
         rotation: if scroll {
             None
@@ -325,6 +371,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         position_handles: stored.position_handles.clone(),
         zoom: lower.zoom,
         zoom_keys: stored.zoom_keys.clone(),
+        zoom_y: stored.zoom_y.clone(),
         rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
         upper: (lines && apart).then_some(upper),
@@ -848,7 +895,7 @@ impl Workspace {
                         };
                         moved |= row(ui, "Y", &mut f.down, hint);
                         ui.end_row();
-                        moved |= row(ui, "Zoom", &mut f.zoom, "100%");
+                        moved |= f.zoom_row(ui);
                         keys(ui, PictureValue::Zoom, line);
                         ui.end_row();
                         moved |= row(ui, "Rotation", &mut f.rotation, "0°");
