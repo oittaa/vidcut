@@ -14,7 +14,7 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 - The Avid Media Composer set has 15 actions. The documents that were read show most keys as pictures.
 - To do: read the Media Composer Editing Guide. It gives the keys for the marks, markers, Add Edit, Lift, Extract and trim.
-- The Avid Pro Tools set has 6 actions. Most Pro Tools keys act on a time range or depend on the edit mode, so they do not match a vidcut action.
+- The Pro Tools set has 6 actions. Most Pro Tools keys act on a time range or depend on the edit mode, so they do not match a vidcut action.
 
 **Key sets and panels:**
 
