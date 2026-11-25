@@ -523,11 +523,16 @@ Voice Isolation:
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
   - On the page, `Workspace::mark` and `Workspace::clear_marks` call `export_mark` and `export_clear_marks`. Thus the keys and the Mark In, Mark Out and Clear buttons of the viewer follow the rules of the page.
   - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
+  - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is the clip alone with its grade (`render::graded_frame`).
+  - The tile workers make the pictures (`Tiles::clip_job`). The key of a picture holds a digest of the clip, its media and the project settings. Why: a change of the grade gives a new key, and the old picture leaves the tile memory as other tiles do.
+  - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
 
 The render queue:
 
 - `Project.queue` holds the jobs (`RenderJob`) in the project file. Thus a job and its status stay after a quit.
 - `render.add` keeps the open timeline and the export params of the job (`ops::render::add`). It fixes the range in frames. Why: a later change of the marks does not change a job.
+- `render.update` gives a job new export params in the same way (`ops::render::update`). `Live` and the headless session check its files as they check those of `render.add`.
+- The pencil of a job loads its params into the render settings (`Render::load_job`), the reverse of `Render::params`. `Workspace::edit_job` opens its timeline and sets its range in one `apply`.
 - Before it adds a job, `queue::existing` checks the job as `render.add` does, and finds the files that are there. `Live` and the headless session refuse them without `overwrite`. A dry run returns them, and the page asks its prompt from them.
 - `queue::plan` picks the jobs that `render.start` renders. It opens the timeline of each job in a copy of the project (`ops::render::source`).
   - It finds the files that are there with `export::prepare`, as the export does. Thus it also finds the frames of an image sequence and the subtitle files.

@@ -537,7 +537,7 @@ impl Workspace {
             }
         };
         let (w, h) = (size.0 as f32, size.1 as f32);
-        let tall = (s.title.text_fraction() * s.title.scale()) as f32 * picture.height();
+        let tall = (s.title.text_fraction(size.1) * s.title.scale()) as f32 * picture.height();
         let home = [
             s.pivot - vec2(0.0, tall / 2.0),
             s.pivot + vec2(0.0, tall / 2.0),

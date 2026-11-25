@@ -1,12 +1,13 @@
 use eframe::egui::{self, RichText};
+use egui_phosphor::regular::PENCIL_SIMPLE;
 use serde_json::json;
 use vidcut_core::model::{RenderJob, RenderRange, RenderStatus, TrackKind};
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{RangeEnd, TimeSpec};
 
 use super::export::{
-    self, Ask, Picked, SavePreset, Tab, audio_tab, file_tab, plan_and_command, subtitle_settings,
-    video_tab,
+    self, Ask, Picked, SavePreset, Tab, Update, audio_tab, file_tab, plan_and_command,
+    subtitle_settings, video_tab,
 };
 use super::theme::{self, Deco};
 use super::workspace::{BOTTOM_SHARE, Workspace, dim, escape_cancels};
@@ -21,6 +22,7 @@ impl Workspace {
     }
 
     pub(super) fn leave_export_page(&mut self) {
+        self.export.edit_wanted = None;
         if let Some(mode) = self.export.viewer_before.take() {
             self.send("viewer.set", json!({ "mode": mode }));
         }
@@ -30,6 +32,8 @@ impl Workspace {
         let ctx = ui.ctx().clone();
         if self.export.render.is_none() {
             self.want_render_settings(&ctx);
+        } else if let Some(id) = self.export.edit_wanted.take() {
+            self.try_edit(&id);
         }
         let panel = theme::colors().panel;
         egui::Panel::left("render-settings")
@@ -56,6 +60,15 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))
             });
+        if !self.export.hide_clips {
+            egui::Panel::bottom("export-clips")
+                .resizable(false)
+                .exact_size(super::thumbnail_timeline::CLIPS_HEIGHT)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.thumbnail_timeline(ui))
+                });
+        }
         egui::Panel::right("render-queue")
             .resizable(true)
             .default_size(320.0)
@@ -204,6 +217,7 @@ impl Workspace {
         if self.queue_rendering() {
             ui.disable();
         }
+        let focus_name = std::mem::take(&mut self.export.focus_name);
         if let Some(p) = &d.picking
             && let Some(choice) = p.take()
         {
@@ -243,7 +257,10 @@ impl Workspace {
         ui.separator();
         let ready = self.plan_ready(&d);
         let busy = self.export.busy();
+        let editing = self.export.editing.clone();
         let mut add = false;
+        let mut update = false;
+        let mut cancel = false;
         egui::Panel::bottom("render-settings-footer")
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
@@ -251,7 +268,16 @@ impl Workspace {
                     super::dialog::warn(ui, e.clone());
                 }
                 super::dialog::footer(ui, |ui| {
-                    add = super::dialog::main_button(ui, "Add to Render Queue", ready);
+                    match editing.is_some() {
+                        true => {
+                            add = ui
+                                .add_enabled(ready, egui::Button::new("Add New Job"))
+                                .clicked();
+                            update = super::dialog::main_button(ui, "Update Job", ready);
+                            cancel = ui.button("Cancel").clicked();
+                        }
+                        false => add = super::dialog::main_button(ui, "Add to Render Queue", ready),
+                    }
                     match &d.plan_result {
                         _ if ready || busy => {}
                         Some(Err(_)) => super::dialog::why(ui, "These settings can't render"),
@@ -314,11 +340,17 @@ impl Workspace {
                         }
                         (true, false) => {
                             let edit = egui::TextEdit::singleline(&mut d.template);
-                            ui.add(edit.desired_width(220.0));
+                            let field = ui.add(edit.desired_width(220.0));
+                            if focus_name {
+                                field.request_focus();
+                            }
                         }
                         (false, _) => {
                             let edit = egui::TextEdit::singleline(&mut d.name);
-                            ui.add(edit.desired_width(220.0));
+                            let field = ui.add(edit.desired_width(220.0));
+                            if focus_name {
+                                field.request_focus();
+                            }
                         }
                     });
                     if d.per_clip && !d.source_names {
@@ -373,9 +405,166 @@ impl Workspace {
         }
         self.refresh_plan(&ctx, &mut d);
         if add {
-            self.start_render(&ctx, &mut d);
+            self.start_render(&ctx, &mut d, None);
+        }
+        if update && let Some(job) = editing {
+            self.start_render(&ctx, &mut d, Some(Update { job, next: None }));
+        }
+        if cancel {
+            self.export.editing = None;
+            self.export.leave_edit = None;
         }
         self.export.render = Some(d);
+    }
+
+    pub(super) fn edit_job(&mut self, id: &str) -> Result<(), String> {
+        let Some(p) = self.project() else {
+            return Err("Open a project first".into());
+        };
+        let Some(job) = p.queue.iter().find(|j| j.id == id).cloned() else {
+            return Err(format!("no render job {id}"));
+        };
+        if self.queue_rendering() {
+            return Err(RENDERING.into());
+        }
+        let opened = p.open_id() == Some(job.timeline.as_str());
+        let source = vidcut_core::ops::render::source(p, &job).map_err(|e| e.message)?;
+        let name = (job.export.preset.as_deref())
+            .unwrap_or(crate::export::usual_preset(&job.export))
+            .to_string();
+        let Some(preset) = self.export.presets.iter().find(|p| p.name == name) else {
+            return Err(format!("no preset {name}"));
+        };
+        let shown = (source.subtitles.iter())
+            .find(|t| t.shown)
+            .map(|t| t.id.clone());
+        let Some(d) = self.export.render.as_mut() else {
+            return Err("The render settings are not ready yet".into());
+        };
+        d.load_job(preset, &job.export, shown)?;
+        let end = source.end();
+        let (a, b) = match &job.export.range {
+            Some(r) => match (&r.start, &r.end) {
+                (TimeSpec::Frames(a), RangeEnd::At(TimeSpec::Frames(b))) => (*a, *b),
+                _ => (0, end),
+            },
+            None => (0, end),
+        };
+        let mut commands = Vec::new();
+        let command =
+            |method: &str, params: serde_json::Value| json!({ "method": method, "params": params });
+        if !opened {
+            commands.push(command(
+                "timeline.open",
+                json!({ "timeline": job.timeline }),
+            ));
+        }
+        let entire = (source.timeline()).is_none_or(|t| t.render == RenderRange::Entire);
+        let marks = &source.marks;
+        if a == 0 && b == end {
+            if !entire || marks.mark_in.is_some() || marks.mark_out.is_some() {
+                commands.push(command(
+                    "timeline.set",
+                    json!({ "render": RenderRange::Entire }),
+                ));
+            }
+        } else {
+            if marks.mark_in != Some(a) || marks.mark_out != Some(b) {
+                commands.push(command("marks.set", json!({ "in": a, "out": b })));
+            }
+            if entire {
+                commands.push(command(
+                    "timeline.set",
+                    json!({ "render": RenderRange::InOut }),
+                ));
+            }
+        }
+        if !commands.is_empty() {
+            self.send("apply", json!({ "commands": commands }));
+        }
+        self.export.editing = Some(job.id.clone());
+        self.export.selected = vec![job.id];
+        Ok(())
+    }
+
+    fn job_renders(&self, id: &str) -> bool {
+        (self.snap.jobs.iter()).any(|k| k.render.as_deref() == Some(id) && k.unfinished())
+    }
+
+    fn try_edit(&mut self, id: &str) {
+        if let Err(e) = self.edit_job(id)
+            && let Some(d) = &mut self.export.render
+        {
+            d.error = Some(e);
+        }
+    }
+
+    fn pencil(&mut self, job: &str) {
+        match self.export.editing.as_deref() {
+            None => self.try_edit(job),
+            Some(now) if now == job => self.export.focus_name = true,
+            Some(_) => {
+                let next = job.to_string();
+                self.export.leave_edit = Some(LeaveEdit { next });
+            }
+        }
+    }
+
+    pub(super) fn set_edit_job(&mut self, job: Option<String>) -> Result<(), String> {
+        self.export.leave_edit = None;
+        self.export.edit_wanted = None;
+        let Some(id) = job else {
+            self.export.editing = None;
+            return Ok(());
+        };
+        if self.export.render.is_some() {
+            return self.edit_job(&id);
+        }
+        let Some(p) = self.project() else {
+            return Err("Open a project first".into());
+        };
+        if !p.queue.iter().any(|j| j.id == id) {
+            return Err(format!("no render job {id}"));
+        }
+        if self.queue_rendering() {
+            return Err(RENDERING.into());
+        }
+        self.export.edit_wanted = Some(id);
+        Ok(())
+    }
+
+    fn leave_edit_prompt(&mut self, ctx: &egui::Context) {
+        let Some(leave) = self.export.leave_edit.take() else {
+            return;
+        };
+        let Some(job) = self.export.editing.clone() else {
+            return;
+        };
+        let queue = self
+            .project()
+            .map(|p| p.queue.as_slice())
+            .unwrap_or_default();
+        let name = (queue.iter().enumerate())
+            .find(|(_, j)| j.id == job)
+            .map_or_else(|| job.clone(), |(i, j)| job_name(i, j));
+        match ask_update_job(ctx, &name) {
+            None => self.export.leave_edit = Some(leave),
+            Some(SaveJob::Cancel) => {}
+            Some(SaveJob::Discard) => {
+                self.export.editing = None;
+                self.try_edit(&leave.next);
+            }
+            Some(SaveJob::Update) => {
+                if let Some(mut d) = self.export.render.take() {
+                    let update = Update {
+                        job,
+                        next: Some(leave.next),
+                    };
+                    self.start_render(ctx, &mut d, Some(update));
+                    self.export.render = Some(d);
+                }
+            }
+        }
     }
 
     pub(super) fn select_queue_jobs(&mut self, jobs: Vec<String>) -> Result<(), String> {
@@ -400,6 +589,11 @@ impl Workspace {
         self.export
             .selected
             .retain(|id| queue.iter().any(|j| &j.id == id));
+        let gone = |id: &String| !queue.iter().any(|j| &j.id == id) || self.job_renders(id);
+        if self.export.editing.as_ref().is_some_and(gone) {
+            self.export.editing = None;
+            self.export.leave_edit = None;
+        }
         let rendering = self.queue_rendering();
         ui.horizontal(|ui| {
             ui.label(RichText::new("Render Queue").strong());
@@ -479,6 +673,7 @@ impl Workspace {
             };
         }
         self.queue_prompts(&ctx);
+        self.leave_edit_prompt(&ctx);
     }
 
     fn queue_progress(&self) -> Option<(usize, usize, f32)> {
@@ -506,6 +701,8 @@ impl Workspace {
                 .collect()
         });
         let colors = theme::colors();
+        let editing = self.export.editing.clone();
+        let rendering = self.queue_rendering();
         let mut picked: Option<(usize, egui::Modifiers)> = None;
         let mut moved: Option<(String, usize)> = None;
         let mut menu: Option<(String, QueueAction)> = None;
@@ -536,8 +733,7 @@ impl Workspace {
                                         .selectable(false),
                                 );
                                 handle.dnd_set_drag_payload(j.id.clone());
-                                let name =
-                                    j.name.clone().unwrap_or_else(|| format!("Job {}", i + 1));
+                                let name = job_name(i, j);
                                 match &mut self.export.renaming {
                                     Some(edit) if edit.job == j.id => {
                                         let field = ui.add(
@@ -583,6 +779,12 @@ impl Workspace {
                                             .clicked()
                                         {
                                             menu = Some((j.id.clone(), QueueAction::Remove));
+                                        }
+                                        let edited = editing.as_deref() == Some(j.id.as_str());
+                                        let pencil =
+                                            egui::Button::selectable(edited, PENCIL_SIMPLE);
+                                        if ui.add_enabled(!rendering, pencil).clicked() {
+                                            menu = Some((j.id.clone(), QueueAction::Edit));
                                         }
                                     },
                                 );
@@ -665,6 +867,7 @@ impl Workspace {
             Some((job, QueueAction::Remove)) => {
                 self.send("render.remove", json!({ "jobs": [job] }))
             }
+            Some((job, QueueAction::Edit)) => self.pencil(&job),
             Some((job, QueueAction::Show)) => {
                 if let Some(j) = queue.iter().find(|j| j.id == job) {
                     super::file_manager::show(&j.export.output);
@@ -875,8 +1078,55 @@ pub(super) enum QueueStep {
 
 enum QueueAction {
     Remove,
+    Edit,
     Show,
     ClearStatus,
+}
+
+const RENDERING: &str = "Jobs render now; stop the render first";
+
+fn job_name(i: usize, j: &RenderJob) -> String {
+    j.name.clone().unwrap_or_else(|| format!("Job {}", i + 1))
+}
+
+pub(super) struct LeaveEdit {
+    next: String,
+}
+
+enum SaveJob {
+    Update,
+    Discard,
+    Cancel,
+}
+
+fn ask_update_job(ctx: &egui::Context, name: &str) -> Option<SaveJob> {
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique("render-update-job")).show(ctx, |ui| {
+        ui.set_width(super::dialog::WIDTH);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.heading("Update Render Job?");
+        ui.label(format!("{name} is being edited and has unsaved changes."));
+        super::dialog::footer(ui, |ui| {
+            let update = super::dialog::main_button_ui(ui, "Update Job", true);
+            focus_once(ui.ctx(), "render-update-focus", &update);
+            if update.clicked() {
+                answer = Some(SaveJob::Update);
+            }
+            if ui.button("Cancel").clicked() {
+                answer = Some(SaveJob::Cancel);
+            }
+            if ui.button("Discard Changes").clicked() {
+                answer = Some(SaveJob::Discard);
+            }
+        });
+    });
+    if escape_cancels(ctx, &modal) {
+        answer = Some(SaveJob::Cancel);
+    }
+    if answer.is_some() {
+        focus_reset(ctx, "render-update-focus");
+    }
+    answer
 }
 
 fn fps_text(num: i64, den: i64) -> String {

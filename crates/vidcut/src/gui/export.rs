@@ -10,7 +10,7 @@ use vidcut_core::export::{
     ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
 };
 use vidcut_core::request::{
-    FindSpeech, ImportMode, LevelsFrom, SubtitleFormat, SubtitlesAs, UniqueAs,
+    ExportParams, FindSpeech, ImportMode, LevelsFrom, SubtitleFormat, SubtitlesAs, UniqueAs,
 };
 use vidcut_core::{Envelope, Error, Response};
 
@@ -192,7 +192,14 @@ pub struct ExportUi {
     render_wanted: bool,
     pub(super) viewer_before: Option<vidcut_core::request::ViewerMode>,
     pub(super) selected: Vec<String>,
+    pub(super) editing: Option<String>,
+    pub(super) edit_wanted: Option<String>,
+    pub(super) leave_edit: Option<super::export_page::LeaveEdit>,
+    pub(super) focus_name: bool,
     pub(super) job_details: bool,
+    pub(super) hide_clips: bool,
+    pub(super) clip_label: vidcut_core::request::ClipLabel,
+    pub(super) strip: Option<super::thumbnail_timeline::Strip>,
     pub(super) queue: Option<super::export_page::QueueStep>,
     pub(super) renaming: Option<super::export_page::Renaming>,
     starting: Option<Starting>,
@@ -232,6 +239,9 @@ impl ExportUi {
         self.render = None;
         self.render_wanted = false;
         self.selected.clear();
+        self.editing = None;
+        self.edit_wanted = None;
+        self.leave_edit = None;
         self.queue = None;
         self.renaming = None;
     }
@@ -243,6 +253,7 @@ impl ExportUi {
                 self.queue,
                 Some(QueueStep::ReRender { .. } | QueueStep::Replace { .. })
             )
+            || self.leave_edit.is_some()
             || self.starting.as_ref().is_some_and(|s| {
                 !s.offline.is_empty() || s.weights || (!s.existing.is_empty() && s.rename.is_none())
             })
@@ -263,6 +274,7 @@ enum From {
 struct Starting {
     params: Value,
     from: From,
+    update: Option<Update>,
     picking: Option<Picked>,
     ask: Option<Ask>,
     weights: bool,
@@ -272,11 +284,17 @@ struct Starting {
     rename: Option<Picked>,
 }
 
+pub(super) struct Update {
+    pub(super) job: String,
+    pub(super) next: Option<String>,
+}
+
 impl Starting {
     fn method(&self) -> &'static str {
-        match self.from {
-            From::Quick => "export.start",
-            From::Page => "render.add",
+        match (self.from, &self.update) {
+            (From::Quick, _) => "export.start",
+            (From::Page, None) => "render.add",
+            (From::Page, Some(_)) => "render.update",
         }
     }
 }
@@ -599,14 +617,97 @@ impl Render {
     }
 
     pub(super) fn use_preset(&mut self, preset: &PresetInfo) {
+        let rate = (self.settings.audio.as_ref())
+            .filter(|a| a.codec == AudioCodec::Aac)
+            .and_then(|a| a.bitrate);
         self.preset = preset.name.clone();
         self.base = preset.settings.clone();
         self.settings = preset.settings.clone();
+        if let Some(a) = self.settings.audio.as_mut()
+            && a.codec == AudioCodec::Aac
+            && a.bitrate.is_none()
+        {
+            a.bitrate = rate;
+        }
         self.stashed_video = None;
     }
 
     pub(super) fn changed(&self) -> bool {
-        self.settings != self.base
+        let mut base = self.base.clone();
+        if let (Some(b), Some(s)) = (base.audio.as_mut(), self.settings.audio.as_ref())
+            && b.codec == AudioCodec::Aac
+            && b.bitrate.is_none()
+        {
+            b.bitrate = s.bitrate;
+        }
+        self.settings != base
+    }
+
+    pub(super) fn load_job(
+        &mut self,
+        preset: &PresetInfo,
+        e: &ExportParams,
+        shown: Option<String>,
+    ) -> std::result::Result<(), String> {
+        let mut settings = e
+            .settings
+            .clone()
+            .unwrap_or_else(|| preset.settings.clone());
+        apply_overrides(&mut settings, &e.set).map_err(|x| x.message)?;
+        let ext = e.output.extension().and_then(|x| x.to_str());
+        if !e.per_clip
+            && let Some(c) = ext.and_then(Container::from_extension)
+        {
+            settings.container = c;
+        }
+        if let Some(encoder) = e.encoder
+            && let Some(v) = settings.video.as_mut()
+        {
+            v.encoder = encoder;
+        }
+        if e.audio_only || settings.container.audio_only() {
+            settings.video = None;
+        }
+        self.preset = preset.name.clone();
+        self.base = preset.settings.clone();
+        self.settings = settings;
+        self.stashed_video = None;
+        self.per_clip = e.per_clip;
+        self.template = e.name.clone().unwrap_or_else(|| CLIP_NAME.into());
+        self.source_names = e.source_names;
+        self.suffix = e.suffix.clone().unwrap_or_default();
+        self.frame_count = !e.no_frame_count;
+        self.unique = e.unique;
+        self.subfolder = e.subfolder.clone().unwrap_or_default();
+        self.separate_folders = e.separate_folders;
+        self.source_levels = e.source_levels;
+        self.levels_from = e.levels_from;
+        match e.per_clip {
+            true => self.folder = e.output.display().to_string(),
+            false => {
+                if let Some(stem) = e.output.file_stem() {
+                    self.name = stem.to_string_lossy().into_owned();
+                }
+                if let Some(folder) = e.output.parent() {
+                    self.folder = folder.display().to_string();
+                }
+            }
+        }
+        self.overwrite = e.overwrite;
+        self.subtitles = match (&e.subtitles, e.subtitles_as) {
+            (_, Some(how)) => Some(how),
+            (Some(_), None) => Some(SubtitlesAs::File),
+            (None, None) => None,
+        };
+        self.subtitle_tracks = match (&e.subtitles, e.subtitles_as) {
+            (Some(tracks), _) => tracks.clone(),
+            (None, Some(_)) => shown.into_iter().collect(),
+            (None, None) => Vec::new(),
+        };
+        self.subtitle_format = e.subtitle_format.unwrap_or(SubtitleFormat::Srt);
+        self.error = None;
+        self.save = None;
+        Ok(())
     }
 
     pub(super) fn output(&self) -> PathBuf {
@@ -938,6 +1039,7 @@ impl Workspace {
             self.export.starting = Some(Starting {
                 params,
                 from: From::Quick,
+                update: None,
                 picking: Some(picking),
                 ask: None,
                 weights: false,
@@ -1068,6 +1170,13 @@ impl Workspace {
                         if let Some(id) = r.result["id"].as_str() {
                             self.export.selected = vec![id.to_string()];
                         }
+                        self.export.editing = None;
+                        if let Some(job) = s.update.and_then(|u| u.next)
+                            && let Err(e) = self.edit_job(&job)
+                            && let Some(d) = &mut self.export.render
+                        {
+                            d.error = Some(e);
+                        }
                     }
                 },
                 Err(e) => match s.from {
@@ -1121,14 +1230,23 @@ impl Workspace {
         }
     }
 
-    pub(super) fn start_render(&mut self, ctx: &egui::Context, d: &mut Render) {
-        let params = d.params();
+    pub(super) fn start_render(
+        &mut self,
+        ctx: &egui::Context,
+        d: &mut Render,
+        update: Option<Update>,
+    ) {
+        let mut params = d.params();
+        if let Some(u) = &update {
+            params["job"] = json!(u.job);
+        }
         d.error = None;
         self.folders.remember(Kind::Exports, &d.output());
         let mut s = Starting {
             ask: None,
             params,
             from: From::Page,
+            update,
             picking: None,
             weights: false,
             offline: Vec::new(),
