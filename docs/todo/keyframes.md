@@ -20,8 +20,6 @@ This file lists what vidcut does not have yet. The page numbers are those of the
 
 In order of value:
 
-- **The motion path.** With the Transform handles on, the viewer shows the path of the Position keyframes (pp. 1252–1254). It has a point on each keyframe and a dot on each frame. A drag on a point changes its keyframe. Its right-click menu has Delete Keyframe.
-  - Thus the user sees the motion in the picture.
 - **Stretch to Fit in Change Clip Speed.** The window gets Maintain Timing and Stretch to Fit (p. 1217). Stretch keeps each Transform, Crop and Composite keyframe on its source frame ([gotchas](../gotchas.md#resolves-otio-files)). Now a speed change always maintains the timing.
 - **The time ruler and the curve tooltips.** The ⋯ menu gets Display Time Ruler in Seconds, Display Time Ruler in Frames and Show Curve Tooltips (pp. 1258, 1264). A tooltip gives the name and the value of the curve under the pointer.
 - **The parameter filters.** The ⋯ menu gets Display All Video Parameters and Display Selected Parameters (p. 1256). The second opens a check box for each value, in a Video and an Audio group. A clip with effects has many tracks, and the user needs only some of them.
