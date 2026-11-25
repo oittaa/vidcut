@@ -308,7 +308,7 @@ impl eframe::App for App {
         self.ws.picture = Picture { texture, has_frame };
         self.ws.scope_pictures =
             self.viewer
-                .sync_scopes(&self.render, &self.ws.scope_want, self.ws.snap.scopes.scale);
+                .sync_scopes(&self.render, &self.ws.scope_want, self.ws.snap.scopes);
         self.ws.node_shots = self
             .viewer
             .sync_shots(&self.render, self.ws.shots_want.as_ref());

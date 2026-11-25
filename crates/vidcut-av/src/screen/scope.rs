@@ -1,6 +1,6 @@
 use vidcut_core::generators::{hlg_code, pq_code};
 use vidcut_core::model::Hdr;
-use vidcut_core::preferences::{Scope, ScopeScale};
+use vidcut_core::preferences::{Scope, ScopeScale, Scopes};
 
 use super::{Gpu, TARGET, Target, begin, make_target};
 use crate::color::{Colors, Matrix, shader_colors};
@@ -21,7 +21,13 @@ const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
 
-const PARAMS: usize = 176;
+const PARAMS: usize = 192;
+
+const DASHED_NITS: [f64; 3] = [26.0, 203.0, 2000.0];
+
+const VIDEO_BLACK: f64 = 64.0 / 1023.0;
+
+const VIDEO_SPAN: f64 = 876.0 / 1023.0;
 
 const MOST_ROWS: usize = 12;
 
@@ -119,6 +125,13 @@ fn levels(scale: ScopeScale, colors: Option<Hdr>) -> Vec<(String, f64)> {
     }
 }
 
+fn dashed(scale: ScopeScale, colors: Option<Hdr>) -> Vec<f64> {
+    match (scale, colors) {
+        (ScopeScale::Hdr, None | Some(Hdr::Pq)) => DASHED_NITS.map(pq_code).to_vec(),
+        _ => Vec::new(),
+    }
+}
+
 fn from_top(v: f64) -> f64 {
     (HIGH - v) / (HIGH - LOW)
 }
@@ -162,13 +175,9 @@ fn per_unit((w, h): (u32, u32)) -> f64 {
     f64::from(w.min(h)) / (2.0 * REACH)
 }
 
-pub fn marks(
-    scope: Scope,
-    (colors, scale): (Option<Hdr>, ScopeScale),
-    size: (u32, u32),
-) -> Vec<Mark> {
+pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u32)) -> Vec<Mark> {
     match scope {
-        Scope::Waveform | Scope::Parade => levels(scale, colors)
+        Scope::Waveform | Scope::Parade => levels(prefs.scale, colors)
             .into_iter()
             .map(|(label, v)| Mark {
                 label,
@@ -193,7 +202,7 @@ pub fn marks(
 
 fn params(
     scope: Scope,
-    (colors, scale): (Option<Hdr>, ScopeScale),
+    (colors, prefs): (Option<Hdr>, Scopes),
     canvas: (u32, u32),
     size: (u32, u32),
 ) -> [[u8; 4]; PARAMS / 4] {
@@ -210,11 +219,18 @@ fn params(
     let f = |v: f64| (v as f32).to_le_bytes();
     let n = |v: u32| v.to_le_bytes();
     let mut rows = [f(-1.0); MOST_ROWS];
-    let lines = match scope {
-        Scope::Vectorscope => Vec::new(),
-        _ => levels(scale, colors),
+    let (labeled, lines) = match scope {
+        Scope::Vectorscope => (0, Vec::new()),
+        _ => {
+            let labeled: Vec<f64> = levels(prefs.scale, colors)
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect();
+            let count = labeled.len();
+            (count, [labeled, dashed(prefs.scale, colors)].concat())
+        }
     };
-    for (row, (_, v)) in rows.iter_mut().zip(&lines) {
+    for (row, v) in rows.iter_mut().zip(&lines) {
         let at = (from_top(*v) * f64::from(size.1)).floor();
         *row = f(at.min(f64::from(size.1 - 1)));
     }
@@ -225,6 +241,10 @@ fn params(
             f((middle[1] + y * unit).floor()),
         ]
     });
+    let (black, span) = match prefs.video_levels {
+        true => (VIDEO_BLACK, VIDEO_SPAN),
+        false => (0.0, 1.0),
+    };
     let kind = match scope {
         Scope::Waveform => 0,
         Scope::Parade => 1,
@@ -247,10 +267,19 @@ fn params(
         f(HIGH - LOW),
         f(1.0 / full as f64),
         f(unit),
+        f(black),
+        f(span),
+        f(0.0),
+        f(0.0),
     ];
     bytes.extend(rows);
     bytes.extend(hues.iter().flatten());
-    bytes.extend([n(kind), n(lines.len().min(MOST_ROWS) as u32), n(0), n(0)]);
+    bytes.extend([
+        n(kind),
+        n(lines.len().min(MOST_ROWS) as u32),
+        n(labeled.min(MOST_ROWS) as u32),
+        n(0),
+    ]);
     bytes
         .try_into()
         .expect("the fields of the scope's parameters")
@@ -271,7 +300,7 @@ struct Plot {
 pub(super) struct Plots {
     plots: Vec<Plot>,
     made: u64,
-    scale: ScopeScale,
+    prefs: Scopes,
 }
 
 impl Plots {
@@ -320,10 +349,10 @@ impl Plots {
         (canvas, canvas_size): (&wgpu::TextureView, (u32, u32)),
         (colors, draw): (Option<Hdr>, u64),
         wanted: &[(Scope, (u32, u32))],
-        scale: ScopeScale,
+        prefs: Scopes,
     ) -> bool {
-        if self.scale != scale {
-            self.scale = scale;
+        if self.prefs != prefs {
+            self.prefs = prefs;
             for p in &mut self.plots {
                 p.drawn = None;
             }
@@ -351,7 +380,7 @@ impl Plots {
                 label: Some("vidcut scope"),
             });
         for plot in self.plots.iter_mut().filter(|p| p.drawn != Some(draw)) {
-            let words = params(plot.scope, (colors, scale), canvas_size, plot.size);
+            let words = params(plot.scope, (colors, prefs), canvas_size, plot.size);
             gpu.queue
                 .write_buffer(&plot.params, 0, words.as_flattened());
             encoder.clear_buffer(&plot.hits, 0, None);

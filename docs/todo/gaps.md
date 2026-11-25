@@ -15,8 +15,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - The Solo icon of a track header, between Lock and Mute ([§5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718))
 - The Histogram and the other scopes (pp. 3093, 3097)
 - The Y, CbCr and RGB overlays of the Waveform (p. 3097), and RGB, YRGB and YCbCr in the Parade (p. 3102)
-- The skin tone line of the Vectorscope (p. 3098), and Video Level Scopes in the scale menu
-- The unlabeled dashed lines of the HDR scale
+- The skin tone line of the Vectorscope (p. 3098)
 - Copy and paste of the Equalizer settings of a clip (p. 745; [§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779))
 - Keyframes of the Angle and the Border of an Edge Wipe. Resolve can keyframe them. vidcut keeps one value of each ([§8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173))
 - The Reset of the Dialogue Leveler section, once its values are measured (p. 734; [§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779))
