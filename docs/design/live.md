@@ -404,7 +404,7 @@ The bar and the Jobs button:
   - `Selection::keep_order` removes each item that left the selection and adds each new item at the end. Items that come in one request count clips first.
   - Its `first` is the first item of `order`.
 
-**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-and-their-handles-show-near-the-pointer)).
+**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab)).
 
 - The Title section (`TitleDialog`) works out the title of its fields (`title_of`). When the user leaves a field, the changes go as one `titles.set`. A change on each line of a lower third goes as one `titles.set` for each line.
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.

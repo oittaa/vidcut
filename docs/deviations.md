@@ -326,12 +326,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One change for each edit of the text keeps typing out of the undo history. With the playhead at the start of the cue, the viewer shows the cue.
   - Imports and scripts can need cues that overlap (D56). Thus `subtitles.set` alone keeps them.
 
-## X52. Titles come from a Titles tab, and their handles show near the pointer
+## X52. Titles come from a Titles tab
 
 - **Resolve:**
   - The user drags titles from the Titles browser onto the timeline (pp. 762–763, 1176).
   - In the Timeline Viewer, onscreen controls move, scale and rotate the title (pp. 763–764, 1176).
-  - One click on the text selects it. Then a box with corner and edge handles and a handle above shows (measured in Resolve Studio 21.2).
   - The Video Inspector sets its fonts, colors, drop shadows, backgrounds and transform (p. 764).
 - **vidcut:**
   - A double-click on a title in the Titles tab adds it at the playhead and opens the Title section of the Inspector tab.
@@ -345,12 +344,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Over them, the pointer becomes a move, resize or hand cursor. The corners zoom the title, and the pointer shows the zoom.
   - A scroll moves only across.
   - The title shows during the drag. One `titles.set` follows on release.
-  - The box has no edge handles.
 - **Why:**
   - One change for each title keeps typing out of the undo history.
   - Handles that show on hover, and a cursor that changes over them, show that the user can drag them.
   - The zoom by the pointer shows when the zoom stops at its limit, 400%.
-  - The zoom of a title is one value for the two directions. Thus no handle stretches it in one direction.
 
 ## X53. Titles are Text, the three lower thirds and Scroll, styled by markup
 
