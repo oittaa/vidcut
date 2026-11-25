@@ -207,6 +207,7 @@ impl Workspace {
         if self.queue_rendering() {
             ui.disable();
         }
+        let focus_name = std::mem::take(&mut self.export.focus_name);
         if let Some(p) = &d.picking
             && let Some(choice) = p.take()
         {
@@ -327,11 +328,17 @@ impl Workspace {
                         }
                         (true, false) => {
                             let edit = egui::TextEdit::singleline(&mut d.template);
-                            ui.add(edit.desired_width(220.0));
+                            let field = ui.add(edit.desired_width(220.0));
+                            if focus_name {
+                                field.request_focus();
+                            }
                         }
                         (false, _) => {
                             let edit = egui::TextEdit::singleline(&mut d.name);
-                            ui.add(edit.desired_width(220.0));
+                            let field = ui.add(edit.desired_width(220.0));
+                            if focus_name {
+                                field.request_focus();
+                            }
                         }
                     });
                     if d.per_clip && !d.source_names {
@@ -401,8 +408,8 @@ impl Workspace {
         let Some(job) = p.queue.iter().find(|j| j.id == id).cloned() else {
             return Err(format!("no render job {id}"));
         };
-        if self.job_renders(id) {
-            return Err(format!("{id} renders now; stop it first"));
+        if self.queue_rendering() {
+            return Err(RENDERING.into());
         }
         let opened = p.open_id() == Some(job.timeline.as_str());
         let source = vidcut_core::ops::render::source(p, &job).map_err(|e| e.message)?;
@@ -477,10 +484,11 @@ impl Workspace {
     }
 
     fn pencil(&mut self, job: &str) {
-        match &self.export.editing {
+        match self.export.editing.as_deref() {
             None => self.try_edit(job),
-            Some(now) => {
-                let next = (now != job).then(|| job.to_string());
+            Some(now) if now == job => self.export.focus_name = true,
+            Some(_) => {
+                let next = job.to_string();
                 self.export.leave_edit = Some(LeaveEdit { next });
             }
         }
@@ -502,8 +510,8 @@ impl Workspace {
         if !p.queue.iter().any(|j| j.id == id) {
             return Err(format!("no render job {id}"));
         }
-        if self.job_renders(&id) {
-            return Err(format!("{id} renders now; stop it first"));
+        if self.queue_rendering() {
+            return Err(RENDERING.into());
         }
         self.export.edit_wanted = Some(id);
         Ok(())
@@ -513,23 +521,28 @@ impl Workspace {
         let Some(leave) = self.export.leave_edit.take() else {
             return;
         };
-        match ask_save_job(ctx) {
+        let Some(job) = self.export.editing.clone() else {
+            return;
+        };
+        let queue = self
+            .project()
+            .map(|p| p.queue.as_slice())
+            .unwrap_or_default();
+        let name = (queue.iter().enumerate())
+            .find(|(_, j)| j.id == job)
+            .map_or_else(|| job.clone(), |(i, j)| job_name(i, j));
+        match ask_update_job(ctx, &name) {
             None => self.export.leave_edit = Some(leave),
             Some(SaveJob::Cancel) => {}
-            Some(SaveJob::DontSave) => {
+            Some(SaveJob::Discard) => {
                 self.export.editing = None;
-                if let Some(next) = leave.next {
-                    self.try_edit(&next);
-                }
+                self.try_edit(&leave.next);
             }
-            Some(SaveJob::Save) => {
-                let Some(job) = self.export.editing.clone() else {
-                    return;
-                };
+            Some(SaveJob::Update) => {
                 if let Some(mut d) = self.export.render.take() {
                     let update = Update {
                         job,
-                        next: leave.next,
+                        next: Some(leave.next),
                     };
                     self.start_render(ctx, &mut d, Some(update));
                     self.export.render = Some(d);
@@ -673,6 +686,7 @@ impl Workspace {
         });
         let colors = theme::colors();
         let editing = self.export.editing.clone();
+        let rendering = self.queue_rendering();
         let mut picked: Option<(usize, egui::Modifiers)> = None;
         let mut moved: Option<(String, usize)> = None;
         let mut menu: Option<(String, QueueAction)> = None;
@@ -703,8 +717,7 @@ impl Workspace {
                                         .selectable(false),
                                 );
                                 handle.dnd_set_drag_payload(j.id.clone());
-                                let name =
-                                    j.name.clone().unwrap_or_else(|| format!("Job {}", i + 1));
+                                let name = job_name(i, j);
                                 match &mut self.export.renaming {
                                     Some(edit) if edit.job == j.id => {
                                         let field = ui.add(
@@ -754,7 +767,7 @@ impl Workspace {
                                         let edited = editing.as_deref() == Some(j.id.as_str());
                                         let pencil =
                                             egui::Button::selectable(edited, PENCIL_SIMPLE);
-                                        if ui.add_enabled(live.is_none(), pencil).clicked() {
+                                        if ui.add_enabled(!rendering, pencil).clicked() {
                                             menu = Some((j.id.clone(), QueueAction::Edit));
                                         }
                                     },
@@ -1054,37 +1067,48 @@ enum QueueAction {
     ClearStatus,
 }
 
+const RENDERING: &str = "Jobs render now; stop the render first";
+
+fn job_name(i: usize, j: &RenderJob) -> String {
+    j.name.clone().unwrap_or_else(|| format!("Job {}", i + 1))
+}
+
 pub(super) struct LeaveEdit {
-    next: Option<String>,
+    next: String,
 }
 
 enum SaveJob {
-    Save,
-    DontSave,
+    Update,
+    Discard,
     Cancel,
 }
 
-fn ask_save_job(ctx: &egui::Context) -> Option<SaveJob> {
+fn ask_update_job(ctx: &egui::Context, name: &str) -> Option<SaveJob> {
     let mut answer = None;
-    let modal = egui::Modal::new(egui::Id::unique("render-save-job")).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("render-update-job")).show(ctx, |ui| {
         ui.set_width(super::dialog::WIDTH);
         ui.spacing_mut().item_spacing.y = 8.0;
-        ui.heading("Save Job Changes?");
-        ui.label("Update Job keeps the changes in the job.");
+        ui.heading("Update Render Job?");
+        ui.label(format!("{name} is being edited and has unsaved changes."));
         super::dialog::footer(ui, |ui| {
-            if super::dialog::main_button(ui, "Save", true) {
-                answer = Some(SaveJob::Save);
-            }
-            if ui.button("Don't Save").clicked() {
-                answer = Some(SaveJob::DontSave);
+            let update = super::dialog::main_button_ui(ui, "Update Job", true);
+            focus_once(ui.ctx(), "render-update-focus", &update);
+            if update.clicked() {
+                answer = Some(SaveJob::Update);
             }
             if ui.button("Cancel").clicked() {
                 answer = Some(SaveJob::Cancel);
+            }
+            if ui.button("Discard Changes").clicked() {
+                answer = Some(SaveJob::Discard);
             }
         });
     });
     if escape_cancels(ctx, &modal) {
         answer = Some(SaveJob::Cancel);
+    }
+    if answer.is_some() {
+        focus_reset(ctx, "render-update-focus");
     }
     answer
 }

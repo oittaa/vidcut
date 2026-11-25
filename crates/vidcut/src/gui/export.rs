@@ -195,6 +195,7 @@ pub struct ExportUi {
     pub(super) editing: Option<String>,
     pub(super) edit_wanted: Option<String>,
     pub(super) leave_edit: Option<super::export_page::LeaveEdit>,
+    pub(super) focus_name: bool,
     pub(super) job_details: bool,
     pub(super) queue: Option<super::export_page::QueueStep>,
     pub(super) renaming: Option<super::export_page::Renaming>,

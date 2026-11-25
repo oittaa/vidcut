@@ -3902,10 +3902,10 @@ pub enum Request {
     RenderAdd(ExportParams),
     /// Change a job of the render queue, as Update Job after its pencil on
     /// the Export page does: the job gets the export and the range that
-    /// `render.add` takes, of the open timeline. It keeps its place and its
-    /// name, and its status goes. A job that renders is refused. An output
-    /// file that is there is an error, unless `overwrite`. A dry run returns
-    /// the `existing` files.
+    /// `render.add` takes, of the open timeline. It keeps its place, its
+    /// name and its status. A job that renders is refused. An output file
+    /// that is there is an error, unless `overwrite`. A dry run returns the
+    /// `existing` files.
     #[serde(rename = "render.update")]
     RenderUpdate {
         /// The job, like `r1`.
@@ -4683,7 +4683,8 @@ pub enum Request {
         /// The job of the render queue that the Render Settings edit, as its
         /// pencil does: they get the job's settings, and the timeline gets
         /// its range. Update Job then changes the job. `""` stops, and the
-        /// job keeps its settings. Left out, it stays.
+        /// job keeps its settings. A job is refused while jobs render. Left
+        /// out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         edit_job: Option<String>,
     },
