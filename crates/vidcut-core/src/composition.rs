@@ -5,8 +5,9 @@ use crate::model::{
     Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
     Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
     GradientStop, GradientType, ImageFormat, JoinStyle, Mask, MaskChannel, Merge, MergeEdges,
-    MergeOperator, MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime,
-    ShadingElement, SubPixel, TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
+    MergeOperator, MotionPath, Node, NoiseColoring, PaintMode, Pattern, PivotType, Project,
+    ReferenceTime, ShadingElement, SubPixel, TextPlus, Tool, ToolType, Tracker, TrackerMerge,
+    TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -105,6 +106,38 @@ impl BlurClipping {
     }
 }
 
+impl PaintMode {
+    pub const ALL: [PaintMode; 11] = [
+        PaintMode::Merge,
+        PaintMode::Add,
+        PaintMode::Subtract,
+        PaintMode::Minimum,
+        PaintMode::Maximum,
+        PaintMode::Average,
+        PaintMode::Multiply,
+        PaintMode::Replace,
+        PaintMode::Invert,
+        PaintMode::Copy,
+        PaintMode::Ignore,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Merge => "Merge",
+            Self::Add => "Add",
+            Self::Subtract => "Subtract",
+            Self::Minimum => "Minimum",
+            Self::Maximum => "Maximum",
+            Self::Average => "Average",
+            Self::Multiply => "Multiply",
+            Self::Replace => "Replace",
+            Self::Invert => "Invert",
+            Self::Copy => "Copy",
+            Self::Ignore => "Ignore",
+        }
+    }
+}
+
 impl MaskChannel {
     pub const ALL: [MaskChannel; 8] = [
         MaskChannel::Red,
@@ -140,6 +173,7 @@ impl Default for Mask {
             filter: None,
             passes: None,
             border_width: None,
+            paint_mode: None,
             invert: false,
             solid: true,
             center: None,
@@ -1249,6 +1283,10 @@ impl Mask {
 
     pub fn clipping(&self) -> BlurClipping {
         self.clipping.unwrap_or(BlurClipping::None)
+    }
+
+    pub fn paint(&self) -> PaintMode {
+        self.paint_mode.unwrap_or_default()
     }
 
     pub fn filter(&self) -> BlurFilter {

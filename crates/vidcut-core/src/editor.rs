@@ -5207,8 +5207,20 @@ fn mutate(
             node,
             at,
             kind,
+            edl,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
+            if *edl {
+                if of != ops::grade::GradeOf::Timeline {
+                    return Err(Error::usage(
+                        "`edl` marks go on the timeline grade: give `timeline`",
+                    ));
+                }
+                if at.is_some() || *kind != crate::model::GradeKeyKind::default() {
+                    return Err(Error::usage("`edl` takes no `at` or `kind`"));
+                }
+                return ops::grade_keys::add_marks(p, *node);
+            }
             let at = time_or_playhead(p, at.as_ref(), playhead)?
                 .ok_or_else(|| Error::usage("give `at`: there is no playhead"))?;
             ops::grade_keys::add(p, &of, *node, at, *kind)?
@@ -5254,8 +5266,16 @@ fn mutate(
             node,
             frames,
             at,
+            edl,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
+            if *edl {
+                if frames.is_some() || at.is_some() {
+                    return Err(Error::usage("`edl` takes no `frames` or `at`"));
+                }
+                ops::grade_keys::remove_marks(p, &of, *node)?;
+                return Ok(Value::Null);
+            }
             let pick = key_pick(p, frames, at, playhead)?;
             ops::grade_keys::remove(p, &of, *node, &pick)?;
             Value::Null
