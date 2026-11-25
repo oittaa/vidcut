@@ -736,6 +736,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The Additional Gamut adds a second triangle (p. 3104). vidcut does not have it ([gaps](todo/gaps.md)).
     - vidcut: the gamut is that of the timeline: Rec.709 in SDR and Rec.2020 in HDR. The white point is D65.
     - vidcut: each point of the graph is in the color of its chromaticity. The axes go from 0 to 1, with a line each 0.1, as in the figures on pp. 3100–3101.
+    - The graph is a square at the left of the scope. The names of the axes are beside the 1.0 labels (pp. 3100–3101).
+    - The name of the gamut and its coordinates are in a column at the right of the scope (pp. 3100–3101).
     - vidcut: the horseshoe uses the CIE 1931 2-degree observer from 380 nm to 700 nm. The black body locus goes from 1000 K to 25000 K.
     - vidcut: CIE Chromaticity Options in the scopes menu sets the graph. CIE 1931 xy is the default. The default of Resolve is not measured.
     - Not measured in Resolve: the range of the black body locus, the marks of the wavelengths on the horseshoe and the colors of the lines.

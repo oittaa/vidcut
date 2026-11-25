@@ -54,11 +54,11 @@ fn places(column: Rect, scopes: &[Scope], ppp: f32) -> Vec<(Scope, Rect)> {
                 vec2(column.width(), tall.max(1.0)),
             );
             let rect = match scope {
-                Scope::Vectorscope | Scope::Chromaticity => Rect::from_center_size(
+                Scope::Vectorscope => Rect::from_center_size(
                     cell.center(),
                     egui::Vec2::splat(cell.width().min(cell.height())),
                 ),
-                Scope::Waveform | Scope::Parade | Scope::Histogram => cell,
+                Scope::Waveform | Scope::Parade | Scope::Histogram | Scope::Chromaticity => cell,
             };
             (scope, rect.round_to_pixels(ppp))
         })
@@ -176,6 +176,7 @@ impl Workspace {
         let dim = theme::colors().text_dim;
         let font = FontId::proportional(MARK_FONT);
         let prefs = self.snap.scopes;
+        let row = ui.painter().fonts_mut(|f| f.row_height(&font));
         for &(scope, rect) in plots {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
@@ -206,9 +207,15 @@ impl Workspace {
                         at.y + 2.0,
                     ),
                     Scope::Chromaticity => at,
-                };
+                } + vec2(mark.shift[0], mark.shift[1]) * MARK_FONT;
                 let align = Align2([side(mark.align[0]), side(mark.align[1])]);
-                painter.text(at, align, mark.label, font.clone(), dim);
+                let lines: Vec<&str> = mark.label.lines().collect();
+                let top = at.y - align.y().to_factor() * row * lines.len() as f32;
+                for (i, line) in lines.into_iter().enumerate() {
+                    let y = top + row * i as f32;
+                    let align = Align2([align.x(), Align::Min]);
+                    painter.text(pos2(at.x, y), align, line, font.clone(), dim);
+                }
             }
             let (corner, align) = match scope {
                 Scope::Histogram => (rect.right_bottom() + vec2(-3.0, -2.0), Align2::RIGHT_BOTTOM),

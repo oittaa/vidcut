@@ -31,11 +31,23 @@ const PARAMS: usize = 1040;
 
 const SKIN_DEGREES: f64 = 123.0;
 
-const PLOT: [f64; 4] = [0.12, 0.08, 0.92, 0.88];
+const PLOT_TOP: f64 = 0.04;
+
+const PLOT_BOTTOM: f64 = 0.07;
+
+const PLOT_LEFT: f64 = 0.16;
+
+const PLOT_LEAST: f64 = 0.5;
+
+const TEXT_ROOM: f64 = 0.3;
+
+const ACROSS_SHIFT: f32 = 1.2;
+
+const UP_SHIFT: f32 = -2.0;
+
+const TEXT_SHIFT: f32 = 1.8;
 
 const CHART_STEP: f64 = 0.2;
-
-const TEXT_AT: [f64; 2] = [0.55, 0.97];
 
 const LABEL_GAP: f64 = 3.0;
 
@@ -219,6 +231,7 @@ pub struct Mark {
     pub label: String,
     pub at: [f32; 2],
     pub align: [f32; 2],
+    pub shift: [f32; 2],
 }
 
 fn nits_marks(nits: &[f64], code: fn(f64) -> f64) -> Vec<(String, f64)> {
@@ -279,7 +292,15 @@ fn chart_xy(prefs: Scopes, [x, y]: [f64; 2]) -> [f64; 2] {
 
 fn plot_rect((w, h): (u32, u32)) -> [f64; 4] {
     let (w, h) = (f64::from(w), f64::from(h));
-    [PLOT[0] * w, PLOT[1] * h, PLOT[2] * w, PLOT[3] * h]
+    let text = h * TEXT_ROOM;
+    let side = ((w - text) / (1.0 + PLOT_LEFT))
+        .max(w * PLOT_LEAST)
+        .min(h * (1.0 - PLOT_TOP - PLOT_BOTTOM));
+    let left = ((w - side) / 2.0)
+        .min(w - side - text)
+        .max(side * PLOT_LEFT);
+    let top = (h - side) * PLOT_TOP / (PLOT_TOP + PLOT_BOTTOM);
+    [left, top, left + side, top + side]
 }
 
 fn on_chart(rect: [f64; 4], [u, v]: [f64; 2]) -> [f64; 2] {
@@ -311,11 +332,13 @@ fn curve_points(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<[f6
 fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark> {
     let rect = plot_rect(size);
     let (w, h) = (f64::from(size.0), f64::from(size.1));
-    let mark = |label: String, [x, y]: [f64; 2], align: [f32; 2]| Mark {
+    let shifted = |label: String, [x, y]: [f64; 2], align: [f32; 2], shift: [f32; 2]| Mark {
         label,
         at: [(x / w) as f32, (y / h) as f32],
         align,
+        shift,
     };
+    let mark = |label, at, align| shifted(label, at, align, [0.0, 0.0]);
     let mut marks = Vec::new();
     for i in 0..=5 {
         let v = f64::from(i) * CHART_STEP;
@@ -334,10 +357,15 @@ fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark
         ChromaticityMode::Xy => ("X", "Y"),
         ChromaticityMode::Uv => ("U", "V"),
     };
-    let corner = [rect[2] + LABEL_GAP, rect[3] - LABEL_GAP];
-    marks.push(mark(across.to_string(), corner, [0.0, 1.0]));
-    let top = [rect[0] + LABEL_GAP, rect[1] - LABEL_GAP];
-    marks.push(mark(up.to_string(), top, [0.0, 1.0]));
+    let corner = [rect[2], rect[3] + LABEL_GAP];
+    marks.push(shifted(
+        across.to_string(),
+        corner,
+        [0.0, 0.0],
+        [ACROSS_SHIFT, 0.0],
+    ));
+    let top = [rect[0] - LABEL_GAP, rect[1]];
+    marks.push(shifted(up.to_string(), top, [1.0, 0.5], [UP_SHIFT, 0.0]));
     let name = gamut_name(colors);
     let gamut = timeline_primaries(colors);
     let green = on_chart(rect, chart_xy(prefs, [gamut[1].0, gamut[1].1]));
@@ -354,7 +382,12 @@ fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark
         coordinates(gamut[2]),
         coordinates(D65),
     );
-    marks.push(mark(text, on_chart(rect, TEXT_AT), [0.0, 0.0]));
+    marks.push(shifted(
+        text,
+        [w - LABEL_GAP, rect[1]],
+        [1.0, 0.0],
+        [0.0, TEXT_SHIFT],
+    ));
     marks
 }
 
@@ -409,6 +442,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 label,
                 at: [0.0, from_top(v) as f32],
                 align: [0.0, 1.0],
+                shift: [0.0, 0.0],
             })
             .collect(),
         Scope::Histogram => levels(prefs.scale, colors)
@@ -417,6 +451,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 label,
                 at: [v as f32, 0.0],
                 align: [0.5, 0.0],
+                shift: [0.0, 0.0],
             })
             .collect(),
         Scope::Chromaticity => chart_marks(colors, prefs, size),
@@ -431,6 +466,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                         (0.5 + y * unit / f64::from(size.1)) as f32,
                     ],
                     align: [0.5, 0.5],
+                    shift: [0.0, 0.0],
                 })
                 .collect()
         }

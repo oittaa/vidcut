@@ -3988,11 +3988,11 @@ pub enum Request {
         out: PathBuf,
         scope: crate::preferences::Scope,
         /// Width of the scope, 16 to 4096. Default: 1024, or 512 for the
-        /// vectorscope and the chromaticity scope.
+        /// vectorscope.
         #[serde(default)]
         width: Option<u32>,
         /// Height of the scope, 16 to 4096. Default: half the width, or the
-        /// width for the vectorscope and the chromaticity scope.
+        /// width for the vectorscope.
         #[serde(default)]
         height: Option<u32>,
     },
