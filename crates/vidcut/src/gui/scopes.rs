@@ -2,7 +2,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2
 use eframe::emath::GuiRounding;
 use serde_json::json;
 use vidcut_av::screen::scope::marks;
-use vidcut_core::preferences::{ParadeMode, Scope, ScopeScale, WaveformMode};
+use vidcut_core::preferences::{HistogramMode, ParadeMode, Scope, ScopeScale, WaveformMode};
 
 use super::theme;
 use super::workspace::Workspace;
@@ -17,11 +17,14 @@ const GAP: f32 = 4.0;
 
 const MARK_FONT: f32 = 10.0;
 
+const MARK_ROOM: f32 = 12.0;
+
 fn field(scope: Scope) -> &'static str {
     match scope {
         Scope::Waveform => "waveform",
         Scope::Parade => "parade",
         Scope::Vectorscope => "vectorscope",
+        Scope::Histogram => "histogram",
     }
 }
 
@@ -42,7 +45,7 @@ fn places(column: Rect, scopes: &[Scope], ppp: f32) -> Vec<(Scope, Rect)> {
                     cell.center(),
                     egui::Vec2::splat(cell.width().min(cell.height())),
                 ),
-                Scope::Waveform | Scope::Parade => cell,
+                Scope::Waveform | Scope::Parade | Scope::Histogram => cell,
             };
             (scope, rect.round_to_pixels(ppp))
         })
@@ -92,6 +95,14 @@ impl Workspace {
             let mut on = self.snap.scopes.skin_tone;
             if ui.checkbox(&mut on, "Show Skin Tone Indicator").clicked() {
                 self.send("viewer.scopes", json!({ "skin_tone": on }));
+            }
+        });
+        ui.menu_button("Histogram Options", |ui| {
+            let now = self.snap.scopes.histogram_mode;
+            for mode in HistogramMode::ALL {
+                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
+                    self.send("viewer.scopes", json!({ "histogram_mode": mode }));
+                }
             }
         });
         ui.menu_button("Waveform Scale Style", |ui| {
@@ -172,16 +183,19 @@ impl Workspace {
                         (at + out, Align2::CENTER_CENTER)
                     }
                     Scope::Waveform | Scope::Parade => (at + vec2(2.0, 0.0), Align2::LEFT_BOTTOM),
+                    Scope::Histogram => {
+                        let x =
+                            at.x.clamp(rect.left() + MARK_ROOM, rect.right() - MARK_ROOM);
+                        (pos2(x, at.y + 2.0), Align2::CENTER_TOP)
+                    }
                 };
                 painter.text(at, align, mark.label, font.clone(), dim);
             }
-            painter.text(
-                rect.right_top() + vec2(-3.0, 2.0),
-                Align2::RIGHT_TOP,
-                scope.name(),
-                font.clone(),
-                dim,
-            );
+            let (corner, align) = match scope {
+                Scope::Histogram => (rect.right_bottom() + vec2(-3.0, -2.0), Align2::RIGHT_BOTTOM),
+                _ => (rect.right_top() + vec2(-3.0, 2.0), Align2::RIGHT_TOP),
+            };
+            painter.text(corner, align, scope.name(), font.clone(), dim);
         }
     }
 }

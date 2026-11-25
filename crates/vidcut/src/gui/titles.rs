@@ -182,7 +182,7 @@ impl TitleDialog {
         self.align = t.align();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
-        self.shape = ShapeFields::load(t.style.shape.as_ref());
+        self.shape = ShapeFields::load(t.style.shape.as_ref(), self.size);
         self.line_spacing = plain(t.style.line_spacing);
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
@@ -295,11 +295,15 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
     let was = Parts::of_title(&stored.style);
-    let mut style = d.fields.refilled(&was).parts(&was, None)?.title();
+    let fields = d.fields.refilled(&was);
+    let mut style = fields.parts(&was, None)?.title();
+    if let Some(b) = style.background.as_mut() {
+        b.opacity = fields.whole_opacity(was.background.as_ref().and_then(|b| b.opacity))?;
+    }
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
     style.case = (d.case != TitleCase::Mixed).then_some(d.case);
-    style.shape = d.shape.shape(stored.style.shape.as_ref())?;
+    style.shape = d.shape.shape(stored.style.shape.as_ref(), d.size)?;
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;
@@ -549,7 +553,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn commit_title_form(&mut self) {
+    pub(super) fn commit_title_form(&mut self, passed: Vec<String>) {
         let Some(mut d) = self.timeline.title_dialog.take() else {
             return;
         };
@@ -558,16 +562,28 @@ impl Workspace {
             .and_then(|p| p.clip(&d.clip))
             .and_then(|c| Some(sampled_at(c, c.title.as_ref()?, d.at)));
         if d.dirty
-            && let Some(s) = stored
+            && let Some(mut s) = stored
             && let Ok(t) = title_of(&d, &s)
         {
+            let mut sent = false;
+            for text in passed {
+                if text != s.text {
+                    let params = json!({ "clip": d.clip, "text": text, "at": d.at });
+                    self.send("titles.set", params);
+                    s.text = text;
+                    sent = true;
+                }
+            }
             let sends = commands(&d, changes(&d.clip, &t, &s, d.at));
             d.fade = None;
-            if sends.is_empty() {
-                d.loaded = false;
-            } else {
+            if !sends.is_empty() {
                 self.send_title(sends);
+                sent = true;
+            }
+            if sent {
                 self.title_landing(&d.clip, &t);
+            } else {
+                d.loaded = false;
             }
             d.dirty = false;
             d.error.clear();

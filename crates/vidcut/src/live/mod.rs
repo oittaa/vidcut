@@ -93,6 +93,8 @@ pub enum GuiChange {
     Target(String),
     Timeline(TimelineOptions),
     Show(GuiPanel),
+    Equalizer(String),
+    Dynamics(String),
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
@@ -3096,6 +3098,8 @@ impl Live {
                 waveform_blue,
                 parade_mode,
                 skin_tone,
+                histogram,
+                histogram_mode,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
@@ -3109,6 +3113,8 @@ impl Live {
                     waveform_blue,
                     parade_mode,
                     skin_tone,
+                    histogram,
+                    histogram_mode,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {
@@ -3576,7 +3582,21 @@ impl Live {
                 self.renderer.quit();
                 Step::Now(Ok(answer(Value::Null)))
             }
-            Request::GuiShow { panel } => {
+            Request::GuiShow {
+                panel: GuiPanel::Equalizer,
+                track,
+            } => match track {
+                Some(t) => self.gui_change(vec![GuiChange::Equalizer(t)], |s| json!(s)),
+                None => Step::Now(Err(Error::usage("give the track of the equalizer"))),
+            },
+            Request::GuiShow {
+                panel: GuiPanel::Dynamics,
+                track,
+            } => match track {
+                Some(t) => self.gui_change(vec![GuiChange::Dynamics(t)], |s| json!(s)),
+                None => Step::Now(Err(Error::usage("give the track of the dynamics"))),
+            },
+            Request::GuiShow { panel, .. } => {
                 self.gui_change(vec![GuiChange::Show(panel)], |s| json!(s))
             }
             Request::GuiClose { panel } => {

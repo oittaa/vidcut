@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::model::{
     Corrector, DynamicsProfile, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow,
-    KeyInput, KeyMix, KeyOutput, WindowShape,
+    KeyInput, KeyMix, KeyOutput, Qualifier, WindowShape,
 };
 use crate::window_key::{circle_scale, circle_size, linear_scale, linear_size};
 
@@ -269,6 +269,56 @@ impl KeyInput {
             offset: pick(&self.offset, &was.offset, &now.offset),
             blur: pick(&self.blur, &was.blur, &now.blur),
             blur_ratio: pick(&self.blur_ratio, &was.blur_ratio, &now.blur_ratio),
+        }
+    }
+}
+
+impl Qualifier {
+    pub fn blended(&self, to: &Qualifier, w: f64) -> Qualifier {
+        let one = |a: f64, b: f64| a + (b - a) * w;
+        Qualifier {
+            hue_center: one(self.hue_center, to.hue_center),
+            hue_width: one(self.hue_width, to.hue_width),
+            hue_soft: one(self.hue_soft, to.hue_soft),
+            hue_sym: one(self.hue_sym, to.hue_sym),
+            sat_low: one(self.sat_low, to.sat_low),
+            sat_high: one(self.sat_high, to.sat_high),
+            sat_low_soft: one(self.sat_low_soft, to.sat_low_soft),
+            sat_high_soft: one(self.sat_high_soft, to.sat_high_soft),
+            lum_low: one(self.lum_low, to.lum_low),
+            lum_high: one(self.lum_high, to.lum_high),
+            lum_low_soft: one(self.lum_low_soft, to.lum_low_soft),
+            lum_high_soft: one(self.lum_high_soft, to.lum_high_soft),
+            gain: one(self.gain, to.gain),
+            offset: one(self.offset, to.offset),
+            ..*self
+        }
+    }
+
+    pub fn carried(&self, was: &Qualifier, now: &Qualifier) -> Qualifier {
+        let p = |own: &f64, a: &f64, b: &f64| pick(own, a, b);
+        let f = |own: &bool, a: &bool, b: &bool| pick(own, a, b);
+        Qualifier {
+            hue_center: p(&self.hue_center, &was.hue_center, &now.hue_center),
+            hue_width: p(&self.hue_width, &was.hue_width, &now.hue_width),
+            hue_soft: p(&self.hue_soft, &was.hue_soft, &now.hue_soft),
+            hue_sym: p(&self.hue_sym, &was.hue_sym, &now.hue_sym),
+            sat_low: p(&self.sat_low, &was.sat_low, &now.sat_low),
+            sat_high: p(&self.sat_high, &was.sat_high, &now.sat_high),
+            sat_low_soft: p(&self.sat_low_soft, &was.sat_low_soft, &now.sat_low_soft),
+            sat_high_soft: p(&self.sat_high_soft, &was.sat_high_soft, &now.sat_high_soft),
+            lum_low: p(&self.lum_low, &was.lum_low, &now.lum_low),
+            lum_high: p(&self.lum_high, &was.lum_high, &now.lum_high),
+            lum_low_soft: p(&self.lum_low_soft, &was.lum_low_soft, &now.lum_low_soft),
+            lum_high_soft: p(&self.lum_high_soft, &was.lum_high_soft, &now.lum_high_soft),
+            hue: f(&self.hue, &was.hue, &now.hue),
+            sat: f(&self.sat, &was.sat, &now.sat),
+            lum: f(&self.lum, &was.lum, &now.lum),
+            invert: f(&self.invert, &was.invert, &now.invert),
+            gain: p(&self.gain, &was.gain, &now.gain),
+            offset: p(&self.offset, &was.offset, &now.offset),
+            key_invert: f(&self.key_invert, &was.key_invert, &now.key_invert),
+            mask: f(&self.mask, &was.mask, &now.mask),
         }
     }
 }
@@ -693,6 +743,36 @@ impl GradeNode {
         }
     }
 
+    fn qualifier_mut(&mut self, key: Option<usize>) -> Option<&mut Qualifier> {
+        match key {
+            _ if self.tool.is_mixer() => None,
+            Some(i) => Some(&mut self.keys[i].qualifier),
+            None => Some(&mut self.qualifier),
+        }
+    }
+
+    pub fn qualifier_changed_at(&self, frame: i64) -> Option<Qualifier> {
+        let q = (self.changed_key(frame)).map_or(self.qualifier, |i| self.keys[i].qualifier);
+        self.own().map(|_| q)
+    }
+
+    pub fn change_qualifier_at(
+        &mut self,
+        frame: i64,
+        change: impl FnOnce(Qualifier) -> Qualifier,
+    ) -> Option<()> {
+        let change = |q: &Qualifier| change(*q);
+        self.keyed_change(frame, Self::qualifier_mut, change, Qualifier::carried)
+    }
+
+    pub fn qualifier_at(&self, frame: f64) -> Qualifier {
+        match self.span(frame) {
+            None => self.qualifier,
+            Some((k, Some((n, w)))) => k.qualifier.blended(&n.qualifier, w),
+            Some((k, None)) => k.qualifier,
+        }
+    }
+
     fn mix_mut(&mut self, key: Option<usize>) -> Option<&mut Vec<KeyMix>> {
         match (key, &mut self.tool) {
             (Some(i), GradeTool::KeyMixer { .. }) => Some(&mut self.keys[i].mix),
@@ -804,6 +884,7 @@ impl GradeNode {
                 .unwrap_or_default(),
             key: self.key_output_at(at),
             key_input: self.key_input_at(at),
+            qualifier: self.qualifier_at(at),
             mix: self.mix_at(at).map_or_else(Vec::new, Cow::into_owned),
             windows: self.windows_at(at).into_owned(),
             edl: false,
@@ -848,6 +929,7 @@ impl Grade {
             }
             d.key = from.key_output_at(frame);
             d.key_input = from.key_input_at(frame);
+            d.qualifier = from.qualifier_at(frame);
             d.windows = from.windows_at(frame).into_owned();
             d.keys.clear();
             d.animated = false;

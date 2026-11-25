@@ -308,6 +308,10 @@ impl Typing {
         }
     }
 
+    pub fn passed(&self) -> Vec<String> {
+        self.undo.iter().map(|s| s.text.clone()).collect()
+    }
+
     fn range(&self) -> (usize, usize) {
         (self.caret.min(self.anchor), self.caret.max(self.anchor))
     }
@@ -396,9 +400,11 @@ impl Typing {
                 let column = self.column.or_else(|| laid.column(self.caret));
                 let to = match column.filter(|_| !m.command) {
                     Some(x) => laid.vertical(self.caret, down, x),
-                    None => None,
+                    None => Some(if down { n } else { 0 }),
                 };
-                self.to(to.unwrap_or(if down { n } else { 0 }), m.shift);
+                if let Some(to) = to {
+                    self.to(to, m.shift);
+                }
                 self.column = column;
             }
             Key::Home | Key::End => {

@@ -413,6 +413,8 @@ The bar and the Jobs button:
   - `rich::edited` changes the markup for a change of the letters that show. A typed letter takes the style of the letter before it, or at the start of a line the style of the letter after it.
   - Why: the markup holds the styles, and the user edits the letters that show.
   - The `Typing` holds the keyboard focus. Thus the keys of the viewer and the timeline do not act while the user types.
+  - When the edit ends, `Typing::passed` gives the text before each step. `commit_title_form` sends each as its own `titles.set`, then the last text.
+  - Why: each step of the edit is then one undo step, as in Resolve.
 - `key_buttons` draws the Keyframe buttons of the Title section. Their ease menus offer `keyframes::eases` and send `keyframes.set`. The check mark comes from `Title::position_ease` on Position, else from `keyframes::ease_of`.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.
@@ -422,6 +424,7 @@ The bar and the Jobs button:
   - `keyframes::split` adds a key between two keys. On a curved part, it cuts the Bezier curve at the key, and the shape stays.
 - The Transitions tab (`transition_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Transition`) drops as `edit.dissolve` on an edit, and as `edit.transition` on a transition.
 - The Effects tab (`effect_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Effect`) drops as `effects.add` on the clip under the pointer.
+- The Effects Search window (`GuiPanel::EffectsSearch`, `Workspace::effects_search_window`) finds a card of `effect_browser::GROUPS` by its name or its group. It sends `effects.add` for the first clip of `Workspace::pictured_selection`.
 - A hovered card previews with `Handle::preview_free_title`: the core adds the title at the playhead to its copy of the project (`FreeTitle`).
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.
@@ -458,10 +461,12 @@ The bar and the Jobs button:
 **The Color page** (`Workspace::primaries_panel`).
 
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
-  - Primaries and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Input (`key_input`) and the Key Output (`key_output`) of the node.
+  - Primaries, Qualifier, Window and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Input (`key_input`), the Key Output (`key_output`) and the Qualifier row (`qualifier_key`) of the node.
+  - The Qualifier palette draws the HSL values of the node (`qualifier_body`).
   - The palette and the mode of the Primaries palette (`PrimariesView`) are in `EffectsPage`. A click sends `gui.page` with `palette` or `primaries`.
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
   - A Key Input change changes the `key_input` of the node in the same way. The sent `grade.set` has the `key_input_` fields.
+  - A qualifier change changes the `qualifier` of the node in the same way (`qualified`). The sent `grade.set` has the `qualifier_` fields.
   - A key mixer has its own palette (`Workspace::key_mixer_palette`). It shows each linked input (`key_mix_row`), then the output.
   - It sends one `grade.set` with `input` for each changed input, and one for the output, in one `apply` (`mixer_sets`).
   - Reset in a palette sends `grade.clear` with the `palette` of that palette.
@@ -500,7 +505,8 @@ The bar and the Jobs button:
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
   - In List View, the label is in the row, and Node Label edits it there. The graph and the list use one edit field (`label_field`).
   - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`). The Keyframes badge comes from `GradeNode::is_animated`. Each grade edit keeps that state in `animated` (`edited`).
-  - The Key badge comes from the Key Input and the Key Output of the node (`KeyInput::is_usual`, `KeyOutput::is_usual`).
+  - The Key badge comes from the Key Input, the Key Output and the Qualifier row of the node (`KeyInput::is_usual`, `KeyOutput::is_usual`, `Qualifier::row_usual`).
+  - The Qualifier badge comes from the HSL values of the node and of each keyframe (`Qualifier::hsl_usual`).
   - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
   - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
@@ -549,6 +555,7 @@ The bar and the Jobs button:
   - The dragged grade changes that keyframe and the other keyframe of its pair, as `grade.set` does (`GradeNode::change_at`).
   - The Key palette does the same with the Key Output (`GradeNode::key_output_changed_at`, `GradeNode::change_key_output_at`).
   - The Key palette does the same with the Key Input (`GradeNode::key_input_changed_at`, `GradeNode::change_key_input_at`).
+  - The Qualifier palette and the Qualifier row do the same with the qualifier (`GradeNode::qualifier_changed_at`, `GradeNode::change_qualifier_at`).
   - The Key Mixer palette does the same with the mix and the Key Output (`GradeNode::mix_changed_at`, `GradeNode::change_mix_at`).
   - The Window palette and the window overlay do the same with the windows (`GradeNode::windows_changed_at`, `GradeNode::change_window_at`).
   - The dragged grade (`Graded`) stays until the playhead comes to a frame that picks a different keyframe (`GradeNode::changed_key`).
@@ -928,6 +935,7 @@ Order:
 - The windows and panels take their keys first: `TranscriptionUi::take_keys`, `Workspace::sync_clips_keys`, `Workspace::history_keys`, `Workspace::sync_numbers` and `Workspace::multi_numbers`.
 - `TranscriptionUi::take_keys` also reads `Panel::Transcription`. Thus a key can have one action in that window and another action in the main window.
 - Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
+- Delete, Lift, Select all and Select nothing act on the Media Pool when `Workspace::pool_takes_keys` is true. A press in the Media tab sets `Workspace::pool_focus`, and the page must show the Media tab.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
 - `Workspace::ui` keeps `Workspace::asking` in `Workspace::asked` before `Workspace::keys`. Normalize Audio Levels, Set Speed Change and Change Clip Speed apply at Enter only while `Workspace::asked` is false.
@@ -939,8 +947,12 @@ The Keyboard Customization window:
 - It is a system window of its own (`dialog::separate_window`). Its keys go to the main window in the next frame, as for the other separate windows.
 - `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
 - `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
-- The window sends `keys.set` and `keys.reset`, as the CLI does.
-- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. The list asks `Bindings::owner` at each `Panel`.
+- The window keeps its changes in a draft in `KeySetsUi`. `KeySetsUi::shown` gives the draft, or the keys in force when there is no draft.
+  - Why: the keys in force change only at Save. The requests of a script still change them at once.
+  - `KeySetsUi::save` sends `keys.save` with the keys of the draft. For a pick of a set alone, it sends `keys.use`.
+  - The draft keeps a limited list of earlier drafts. `draft_keys` takes Undo and Redo from the events of the window before they go to the main window.
+  - `dialog::held_window` keeps the window open on a close request while there is a draft. Then `key_sets::close_row` asks "Discard Changes?".
+- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. Both show the keys of `KeySetsUi::shown`. The list asks `Bindings::owner` at each `Panel`.
 - `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame

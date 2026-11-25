@@ -695,12 +695,21 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
   - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
   - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- **A typed Soft of the HSL qualifier shows 0.1 more.**
+  - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
+  - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
+  - The renders use the typed value. A render with a typed Soft 20 at Width 10 matches Soft 20 within 2e-4.
+  - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 
 - **Close Up leaves the Out frame out.**
   - With a timeline Out at frame 200 alone, the copy ends before frame 200.
   - With an In at 220 and an Out at 260, the copy covers frames 220 to 259.
   - The other edits put the Out frame in the clip (spec D16).
   - vidcut puts the Out frame in the copy, as in the other edits ([spec §7.2](spec.md#72-edit-functions)).
+- **The render queue of the Deliver page has no undo.**
+  - On the Deliver page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
+  - Add to Render Queue, the X of a job, a drag in the queue, Clear Rendered and Clear All are not undo steps.
+  - vidcut: each change of the render queue is an undo step, and Undo works on the Export page ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 - **Paste Attributes puts each keyframe one frame early.**
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
@@ -714,6 +723,28 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.
   - Two runs gave the same result.
   - vidcut does not copy this fault. Delete removes each selected point ([spec §8.23](spec.md#823-windows-pp-32653279)).
+- **The outline of a title edit stays after the title leaves the viewer.**
+  - A Text title was in the edit state. The playhead then moved to another clip, and the outline stayed in the viewer.
+  - A click in the viewer removed it.
+  - vidcut ends the edit when the title leaves the viewer, and puts the change in ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **The first edit of a title can put the caret at the start of the line.**
+  - In 3 of 12 double-clicks, the caret went to the start of the line, not to the pointer.
+  - These were the first edit of the first Text title and the first edit of each line of a Left Lower Third. The cause was not found.
+  - vidcut always puts the caret at the letter boundary nearest to the pointer.
+- **Esc does not end the edit of a title.**
+  - In the edit of a Text title, Esc kept the change and moved the caret to the start of the text. The edit stayed open.
+  - Only a click outside the title ended the edit. Thus no key ends it.
+  - vidcut does not copy this fault. Esc keeps the change and ends the edit, as in most editors ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+
+## Resolve's scopes
+
+These facts come from measurements in Resolve Studio 21.2, on the floating Scopes window.
+
+- **Percentage with Video Level Scopes adds four dashed lines.**
+  - They are at 38.0, 58.1, 75.0 and 83.0 %. These are the PQ places of 26, 203, 1000 and 2000 nits.
+  - Two runs showed them: a 10-step chart in one scope, and SMPTE bars in four scopes.
+  - Data Level Scopes, 10-bit and mV do not show them.
+  - vidcut does not copy this fault. Percentage has no dashed lines (`dashed`).
 
 ## Resolve's renders
 
@@ -776,6 +807,12 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - At weight 600 and 700, the title draws a false bold of a SemiCondensed face, 628 pixels wide.
   - Windows gives the Regular face for the family name "Bahnschrift" at weight 300 to 400.
   - vidcut does not copy this fault. It draws the Regular face, as Windows does. The ink of "Bahnschrift HHH" is then 704 pixels wide.
+- **Arial picked in a Scroll draws Arial Black.**
+  - The Inspector shows the face Regular. Its other faces, such as Bold and Black, cannot be picked.
+  - The file writes the font `Arial,8.25,-1,5,127,0,0,0,0,0,Regular`.
+  - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
+  - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
+  - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 
 ## Resolve's Fusion page
 

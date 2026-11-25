@@ -406,6 +406,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut viewer scopes --scale percent --video-levels true\n  \
          vidcut viewer scopes --waveform-mode rgb --waveform-blue false --parade-mode yrgb\n  \
          vidcut viewer scopes --skin-tone true\n  \
+         vidcut viewer scopes --histogram true --histogram-mode yrgb\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),
@@ -470,7 +471,9 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut track set A2 --duck '{}' --download\n  \
          vidcut track set A2 --duck '{\"sources\":[\"V1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
          vidcut track set A2 --duck '{\"on\":false}'\n  \
-         vidcut track set A2 --duck null",
+         vidcut track set A2 --duck null\n  \
+         vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \
+         vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'",
     ),
     (
         "titles.add",
@@ -686,7 +689,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "frame.scope",
         "vidcut frame scope waveform --at 1m --out w.png\n  \
-         vidcut frame scope vectorscope --at 1m --out v.png --width 400",
+         vidcut frame scope vectorscope --at 1m --out v.png --width 400\n  \
+         vidcut frame scope histogram --at 1m --out h.png",
     ),
     (
         "presets.save",

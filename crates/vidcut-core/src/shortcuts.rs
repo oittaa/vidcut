@@ -223,6 +223,7 @@ actions! {
     Undo "undo",
     Redo "redo",
     Import "import",
+    EffectsSearch "effects_search",
     NewBin "new_bin",
     NewTimeline "new_timeline",
     Preferences "preferences",
@@ -654,6 +655,10 @@ impl Bindings {
             set_keys,
             set_custom: set.clone(),
         })
+    }
+
+    pub fn with(&self, custom: &Custom) -> Result<Self> {
+        Self::in_set(self.set_name.clone(), &self.set_custom, custom)
     }
 
     pub fn keys(&self, action: Action) -> &[Combo] {
@@ -1159,7 +1164,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Clips,
         Action::Delete,
-        &["Delete", "Backspace"],
+        &["Delete", "Backspace", "Shift+Backspace"],
         "Delete",
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
@@ -1519,7 +1524,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         App,
         Action::Undo,
-        &["Ctrl+Z"],
+        &["Ctrl+Z", "`"],
         "Undo",
         Some("While Ripple Delete Silence is open, it undoes a change to its stripes or settings."),
     ),
@@ -1531,6 +1536,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some("While Ripple Delete Silence is open, it redoes a change to its stripes or settings."),
     ),
     own(App, Action::Import, &["Ctrl+I"], "Import media", None),
+    own(
+        App,
+        Action::EffectsSearch,
+        &["Shift+Space"],
+        "Effects Search",
+        Some("Adds an effect, found by its name or group, to the selected clip."),
+    ),
     own(
         Nodes,
         Action::PassThrough,
@@ -1678,7 +1690,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Color,
         Action::AddOutsideNode,
-        &["Alt+O"],
+        &[],
         "Add an outside node",
         Some("A corrector after the current node, on the inverse of its key."),
     ),

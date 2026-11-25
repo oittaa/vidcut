@@ -1,6 +1,8 @@
 use vidcut_core::generators::pq_code;
 use vidcut_core::model::Hdr;
-use vidcut_core::preferences::{ParadeMode, Scope, ScopeScale, Scopes, WaveformMode};
+use vidcut_core::preferences::{
+    HistogramMode, ParadeMode, Scope, ScopeScale, Scopes, WaveformMode,
+};
 
 use super::{Gpu, TARGET, Target, begin, make_target};
 use crate::color::{Colors, Matrix, shader_colors};
@@ -21,7 +23,9 @@ const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
 
-const PARAMS: usize = 224;
+const HISTOGRAM_SHARE: u64 = 64;
+
+const PARAMS: usize = 240;
 
 const SKIN_DEGREES: f64 = 123.14;
 
@@ -37,12 +41,13 @@ const VIDEO_MIDDLE: f64 = 512.0 / 1023.0;
 
 const VIDEO_CHROMA: f64 = 896.0 / 1023.0;
 
-const MOST_ROWS: usize = 12;
+const MOST_ROWS: usize = 16;
 
 pub(super) struct Pipes {
     waveform: wgpu::ComputePipeline,
     parade: wgpu::ComputePipeline,
     vectorscope: wgpu::ComputePipeline,
+    histogram: wgpu::ComputePipeline,
     painting: wgpu::RenderPipeline,
 }
 
@@ -91,6 +96,7 @@ impl Pipes {
             waveform: gather("waveform"),
             parade: gather("parade"),
             vectorscope: gather("vectorscope"),
+            histogram: gather("histogram"),
             painting,
         }
     }
@@ -100,6 +106,7 @@ impl Pipes {
             Scope::Waveform => &self.waveform,
             Scope::Parade => &self.parade,
             Scope::Vectorscope => &self.vectorscope,
+            Scope::Histogram => &self.histogram,
         }
     }
 }
@@ -120,28 +127,47 @@ fn steps(count: u32, label: impl Fn(u32) -> u32) -> Vec<(String, f64)> {
         .collect()
 }
 
-fn levels(scale: ScopeScale) -> Vec<(String, f64)> {
-    match scale {
-        ScopeScale::TenBit => steps(8, |i| (i * 128).min(1023)),
-        ScopeScale::TwelveBit => steps(8, |i| (i * 512).min(4095)),
-        ScopeScale::Percent => steps(10, |i| i * 10),
-        ScopeScale::Millivolts => steps(7, |i| i * 100),
-        ScopeScale::Hdr => nits_marks(&HDR_NITS),
+fn percent(tens: std::ops::RangeInclusive<i32>) -> Vec<(String, f64)> {
+    tens.map(|i| ((i * 10).to_string(), f64::from(i) / 10.0))
+        .collect()
+}
+
+fn on_scale(v: f64, video: bool) -> f64 {
+    match video {
+        true => VIDEO_BLACK + VIDEO_SPAN * v,
+        false => v,
     }
 }
 
-fn dashed(scale: ScopeScale) -> Vec<f64> {
+fn levels(scale: ScopeScale, video: bool) -> Vec<(String, f64)> {
+    let marks = match scale {
+        ScopeScale::TenBit => steps(8, |i| (i * 128).min(1023)),
+        ScopeScale::TwelveBit => steps(8, |i| (i * 512).min(4095)),
+        ScopeScale::Percent if video => percent(-1..=11),
+        ScopeScale::Percent => percent(0..=10),
+        ScopeScale::Millivolts => steps(7, |i| i * 100),
+        ScopeScale::Hdr => nits_marks(&HDR_NITS),
+    };
+    let moves = video && !matches!(scale, ScopeScale::TenBit | ScopeScale::TwelveBit);
+    marks
+        .into_iter()
+        .map(|(label, v)| (label, on_scale(v, moves)))
+        .collect()
+}
+
+fn dashed(scale: ScopeScale, video: bool) -> Vec<f64> {
     match scale {
-        ScopeScale::Hdr => DASHED_NITS.map(pq_code).to_vec(),
+        ScopeScale::Hdr => DASHED_NITS.map(|n| on_scale(pq_code(n), video)).to_vec(),
         _ => Vec::new(),
     }
 }
 
 fn sections(scope: Scope, prefs: Scopes) -> u32 {
-    match (scope, prefs.parade_mode) {
-        (Scope::Parade, ParadeMode::Yrgb) => 4,
-        (Scope::Parade, _) => 3,
-        _ => 1,
+    match scope {
+        Scope::Parade if prefs.parade_mode == ParadeMode::Yrgb => 4,
+        Scope::Histogram if prefs.histogram_mode == HistogramMode::Yrgb => 4,
+        Scope::Parade | Scope::Histogram => 3,
+        Scope::Waveform | Scope::Vectorscope => 1,
     }
 }
 
@@ -195,13 +221,41 @@ fn per_unit((w, h): (u32, u32)) -> f64 {
     f64::from(w.min(h)) / (2.0 * REACH)
 }
 
+fn in_range(scope: Scope, v: f64) -> bool {
+    match scope {
+        Scope::Histogram => (0.0..=1.0).contains(&v),
+        _ => (LOW..=HIGH).contains(&v),
+    }
+}
+
+fn scale_levels(scope: Scope, prefs: Scopes) -> Vec<(String, f64)> {
+    levels(prefs.scale, prefs.video_levels)
+        .into_iter()
+        .filter(|(_, v)| in_range(scope, *v))
+        .collect()
+}
+
+fn scale_dashed(scope: Scope, prefs: Scopes) -> Vec<f64> {
+    dashed(prefs.scale, prefs.video_levels)
+        .into_iter()
+        .filter(|v| in_range(scope, *v))
+        .collect()
+}
+
 pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u32)) -> Vec<Mark> {
     match scope {
-        Scope::Waveform | Scope::Parade => levels(prefs.scale)
+        Scope::Waveform | Scope::Parade => scale_levels(scope, prefs)
             .into_iter()
             .map(|(label, v)| Mark {
                 label,
                 at: [0.0, from_top(v) as f32],
+            })
+            .collect(),
+        Scope::Histogram => scale_levels(scope, prefs)
+            .into_iter()
+            .map(|(label, v)| Mark {
+                label,
+                at: [v as f32, 0.0],
             })
             .collect(),
         Scope::Vectorscope => {
@@ -231,25 +285,37 @@ fn params(
     let unit = per_unit(size);
     let pixels = u64::from(canvas.0) * u64::from(canvas.1);
     let columns = match scope {
-        Scope::Waveform => size.0,
+        Scope::Waveform | Scope::Histogram => size.0,
         Scope::Parade => size.0 / sections(scope, prefs),
         Scope::Vectorscope => size.0.min(size.1),
     };
-    let full = (pixels / u64::from(columns.max(1)) / FULL_AT).max(1);
+    let full = match scope {
+        Scope::Histogram => pixels / HISTOGRAM_SHARE,
+        _ => pixels / u64::from(columns.max(1)) / FULL_AT,
+    }
+    .max(1);
     let f = |v: f64| (v as f32).to_le_bytes();
     let n = |v: u32| v.to_le_bytes();
     let mut rows = [f(-1.0); MOST_ROWS];
     let (labeled, lines) = match scope {
         Scope::Vectorscope => (0, Vec::new()),
         _ => {
-            let labeled: Vec<f64> = levels(prefs.scale).into_iter().map(|(_, v)| v).collect();
+            let labeled: Vec<f64> = scale_levels(scope, prefs)
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect();
             let count = labeled.len();
-            (count, [labeled, dashed(prefs.scale)].concat())
+            (count, [labeled, scale_dashed(scope, prefs)].concat())
         }
     };
     for (row, v) in rows.iter_mut().zip(&lines) {
-        let at = (from_top(*v) * f64::from(size.1)).floor();
-        *row = f(at.min(f64::from(size.1 - 1)));
+        let at = match scope {
+            Scope::Histogram => (v * f64::from(size.0)).floor().min(f64::from(size.0 - 1)),
+            _ => (from_top(*v) * f64::from(size.1))
+                .floor()
+                .min(f64::from(size.1 - 1)),
+        };
+        *row = f(at);
     }
     let middle = [f64::from(size.0) / 2.0, f64::from(size.1) / 2.0];
     let hues = hue_points(colors).map(|(_, [x, y])| {
@@ -265,6 +331,7 @@ fn params(
     let mode = match scope {
         Scope::Waveform => prefs.waveform_mode as u32,
         Scope::Parade => prefs.parade_mode as u32,
+        Scope::Histogram => prefs.histogram_mode as u32,
         Scope::Vectorscope => 0,
     };
     let channels = [
@@ -280,6 +347,7 @@ fn params(
         Scope::Waveform => 0,
         Scope::Parade => 1,
         Scope::Vectorscope => 2,
+        Scope::Histogram => 3,
     };
     let mut bytes = vec![
         n(canvas.0),

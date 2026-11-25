@@ -186,7 +186,7 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> 
                 ranged(
                     plain(
                         "size",
-                        json!(points.round().clamp(24.0, 4096.0) as i64),
+                        json!(Title::scroll_size(points, 1.0).clamp(24.0, 4096.0) as i64),
                         json!(216),
                         "Int",
                     ),
@@ -974,7 +974,7 @@ fn shape_of(all: &[&Value]) -> Option<TitleShape> {
     let width = value(g, "backgroundOutlineWidth")
         .as_f64()
         .unwrap_or(0.0)
-        .clamp(0.0, Title::BOX_MOST_OUTLINE);
+        .clamp(0.0, f64::from(Title::BOX_MOST_OUTLINE)) as u32;
     Some(TitleShape {
         size: box_size(g)?,
         center: (across != 0.0 || up != 0.0)
@@ -982,12 +982,12 @@ fn shape_of(all: &[&Value]) -> Option<TitleShape> {
         corner: value(g, "backgroundCornerRadius")
             .as_f64()
             .map(|c| c.clamp(0.0, 1.0)),
-        outline_color: (width > 0.0)
+        outline_color: (width > 0)
             .then(|| value(g, "backgroundOutlineColor").as_str())
             .flatten()
             .filter(|c| crate::ops::subtitles::checked_color(Some(c), "outline").is_ok())
             .map(str::to_string),
-        outline_width: (width > 0.0).then_some(width),
+        outline_width: (width > 0).then_some(width),
     })
 }
 
@@ -1000,7 +1000,7 @@ fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
                 .to_string(),
             opacity: value(g, "backgroundOpacity")
                 .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+                .map(|o| (o.trunc() / 100.0).clamp(0.0, 1.0)),
             off: None,
         })
     })
