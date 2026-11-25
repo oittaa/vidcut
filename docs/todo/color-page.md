@@ -38,7 +38,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 - Measure the node numbers after an Extract, and the order of the moved links after a delete or an Extract, then match them ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
   - vidcut gives each moved link the order of the link into the removed node. No measurement shows that this is correct.
-- Measure where Alt+K draws its new node, then match it. In one case, it went to a free place under node 01 ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
 - The 3D, RGB and Luma modes of the Qualifier palette (pp. 3241–3242, 3254–3258).
 - The pickers of the Qualifier palette: the eyedropper, Add and Subtract Color Range, and Add and Subtract Softness (p. 3247).
 - Matte Finesse of the Qualifier palette (pp. 3259–3262). It needs a Resolve run first.

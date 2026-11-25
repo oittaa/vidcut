@@ -1127,12 +1127,16 @@ fn shifted(g: &mut Grade, from_x: f64) {
     }
 }
 
-fn free_below(g: &Grade, [x, y]: [f64; 2]) -> [f64; 2] {
-    let mut below = y + 1.0;
+fn free_from(g: &Grade, [x, y]: [f64; 2]) -> [f64; 2] {
+    let mut below = y;
     while g.nodes.iter().any(|d| d.place == [x, below]) {
         below += 1.0;
     }
     [x, below]
+}
+
+fn free_below(g: &Grade, [x, y]: [f64; 2]) -> [f64; 2] {
+    free_from(g, [x, y + 1.0])
 }
 
 fn input_of(g: &Grade, n: u32) -> Result<Option<GradeLink>> {
@@ -1353,7 +1357,7 @@ fn grown(
         }
         GradeAdd::Append => {
             let at = match g.output.and_then(|o| g.node(o.node)) {
-                Some(d) => [d.place[0] + 1.0, d.place[1]],
+                Some(d) => free_from(g, [d.place[0] + 1.0, d.place[1]]),
                 None => {
                     let right = g.nodes.iter().map(|d| d.place[0] + 1.0).fold(0.0, f64::max);
                     [right, 0.0]

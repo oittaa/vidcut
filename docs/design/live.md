@@ -526,6 +526,7 @@ The bar and the Jobs button:
   - A node can drop only into a link with `Wire::drops`: a link from an RGB output to an RGB input.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
+  - The grid of the Color page has its own pitch in node sizes (`GRADE_PITCH`, `NodeView::pitched`), as measured. The Effects page keeps the grid of `CELL`.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
   - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
@@ -943,6 +944,7 @@ The Keyboard Customization window:
 - `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
 - `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
 - The window sends `keys.set` and `keys.reset`, as the CLI does.
+- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. The list asks `Bindings::owner` at each `Panel`.
 - `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame
