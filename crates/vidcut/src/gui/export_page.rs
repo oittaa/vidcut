@@ -316,8 +316,9 @@ impl Workspace {
                                         (false, true) => " (yours)",
                                         (false, false) => "",
                                     };
+                                    let video = d.more.is_empty() || p.settings.video.is_some();
                                     let r = ui
-                                        .add_enabled_ui(p.unavailable.is_none(), |ui| {
+                                        .add_enabled_ui(p.unavailable.is_none() && video, |ui| {
                                             ui.selectable_label(
                                                 p.name == d.preset,
                                                 format!("{}{mark}", p.title),

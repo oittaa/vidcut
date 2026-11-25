@@ -859,7 +859,11 @@ impl MoreOutput {
 }
 
 pub fn written_twice(output: &Path, more: &[MoreOutput]) -> Option<PathBuf> {
-    let key = |p: &Path| p.to_string_lossy().to_lowercase();
+    let key = |p: &Path| {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect::<Vec<_>>()
+    };
     let mut seen = vec![key(output)];
     for m in more {
         let path = m.path(output);

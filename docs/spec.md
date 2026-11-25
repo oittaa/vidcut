@@ -5437,7 +5437,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Render Settings have the measured menu item, tabs and rows. The pencil of a job loads its additional outputs.
   - An additional output has no Data burn-in row, because vidcut has no data burn-in ([gaps](todo/gaps.md)).
   - Type shows for each format with fixed profiles: ProRes, DNxHR, TIFF and OpenEXR. Only ProRes is measured.
-  - With additional outputs, the Format menu of tab 1 has only the formats that hold video.
+  - With additional outputs, the Format menu of tab 1 has only the formats that hold video. The Preset menu greys the presets with no video.
   - An additional output gets the audio of output 1 when its format takes that codec, else no audio. Its codec gives its default quality.
   - The audio and the quality of an additional output are not measured.
   - An additional output gets the subtitle streams of output 1. Burned-in subtitles are in the picture of each output.

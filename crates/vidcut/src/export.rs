@@ -878,7 +878,7 @@ fn more_outputs(
         );
     if two && runs_twice {
         return Err(Error::usage(
-            "vidcut does not combine more_outputs with two runs of the encoder yet: set              video.passes to 1",
+            "more_outputs need one run of the encoder: set video.passes to 1",
         ));
     }
     let streams = params.subtitles_as == Some(SubtitlesAs::Stream);
