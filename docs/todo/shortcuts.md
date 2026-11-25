@@ -4,13 +4,11 @@
 
 The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
 
-**Key files:**
+**Key files to measure:**
 
-- Case 13 of shortcuts-resolve-runs.md measured the key file of Resolve Studio 21.2.
-- Resolve writes a key file as lines of `command := Key | Key`, with the command names of Resolve.
-  - The file starts with `import "DaVinci Resolve"` and holds only the changed commands.
-  - vidcut writes a TOML file with the same content, with the names of its actions.
-  - To do: read and write the format of Resolve, after the built-in sets.
+- Case 27 of shortcuts-resolve-runs.md: how Resolve reads a key file that vidcut writes.
+- Does Resolve read Esc and Ins, the comment lines of vidcut, and a key that another command has?
+- Which import line does Resolve write for a preset that it saved from another built-in preset?
 - Case 17 measured the keys of the built-in presets. The files are in `$VIDCUT_TEST_DATA/fixtures/keys`.
 
 **Sets of other editors:**

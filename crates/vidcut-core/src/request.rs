@@ -4341,16 +4341,21 @@ pub enum Request {
     /// set is in force, vidcut's own set is put in force.
     #[serde(rename = "keys.delete")]
     KeysDelete { name: String },
-    /// Write a key set to a file, for another computer (`keys.import`). A
-    /// file at the path is replaced.
+    /// Write a key set to a key file, for another computer or another
+    /// editor (`keys.import`). The first line names the set that the file
+    /// changes. Then each command whose keys differ has a line like
+    /// `editUndo := Ctrl+Z`. An action without such a command has a line
+    /// like `#vidcut ducking := Alt+D`. A file at the path is replaced.
     #[serde(rename = "keys.export")]
     KeysExport {
         /// The set's name, as `keys.sets` gives it.
         set: String,
         path: PathBuf,
     },
-    /// Add a key set from a file that `keys.export` wrote, and put it in
-    /// force.
+    /// Add a key set from a key file, as `keys.export` writes it, and put
+    /// it in force. The commands that vidcut does not have are listed in
+    /// `unknown_commands`. The keys that vidcut can't use, such as keypad
+    /// keys, are listed in `unusable_keys`.
     #[serde(rename = "keys.import")]
     KeysImport {
         path: PathBuf,

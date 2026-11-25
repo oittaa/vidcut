@@ -245,7 +245,7 @@ impl Action {
             .map_or(self.name(), |s| s.title)
     }
 
-    fn named(name: &str) -> Option<Action> {
+    pub fn named(name: &str) -> Option<Action> {
         Action::ALL.iter().copied().find(|a| a.name() == name)
     }
 

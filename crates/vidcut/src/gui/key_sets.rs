@@ -398,16 +398,16 @@ impl Workspace {
             }
             Want::Delete(name) => ("keys.delete", json!({ "name": name }), Sent::Delete(name)),
             Want::Export(name) => {
-                let file = format!("{} Keys.toml", name.replace(['/', '\\'], "-"));
+                let file = format!("{} Keys.txt", name.replace(['/', '\\'], "-"));
                 let picked = Picked::ask(ctx, move || {
-                    dialogs.save_file("Export Key Set", &folder, &file, &["toml"])
+                    dialogs.save_file("Export Key Set", &folder, &file, &["txt"])
                 });
                 s.exporting = Some((name, picked));
                 return;
             }
             Want::Import => {
                 let picked = Picked::ask(ctx, move || {
-                    dialogs.pick_file("Import Key Set", &folder, &["toml"])
+                    dialogs.pick_file("Import Key Set", &folder, &["txt"])
                 });
                 s.importing = Some(picked);
                 return;

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::key_file;
 use crate::looks::checked_name;
 use crate::shortcuts::{Bindings, Custom};
 
@@ -222,7 +223,7 @@ pub fn delete(dir: &Path, name: &str, dry_run: bool) -> Result<PathBuf> {
 pub fn export(dir: &Path, name: &str, to: &Path, dry_run: bool) -> Result<KeySet> {
     let set = find(dir, name)?;
     if !dry_run {
-        crate::temp::write(to, text(&set.keys)?.as_bytes())
+        crate::temp::write(to, key_file::text(&set.keys)?.as_bytes())
             .map_err(|e| Error::usage(format!("{}: {e}", to.display())))?;
     }
     Ok(set)
@@ -234,13 +235,15 @@ pub fn import(
     name: Option<&str>,
     overwrite: bool,
     dry_run: bool,
-) -> Result<(KeySet, PathBuf)> {
+) -> Result<(KeySet, PathBuf, key_file::Read)> {
     let text = std::fs::read_to_string(from)
         .map_err(|e| Error::usage(format!("{}: {e}", from.display())))?;
-    let keys = parse(&text).map_err(|why| Error::invalid(format!("{}: {why}", from.display())))?;
+    let read = key_file::parse(&text, |base| find(dir, base).map(|s| s.keys))
+        .map_err(|e| Error::invalid(format!("{}: {}", from.display(), e.message)))?;
     let stem = from
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    save(dir, name.unwrap_or(&stem), &keys, overwrite, dry_run)
+    let (set, path) = save(dir, name.unwrap_or(&stem), &read.keys, overwrite, dry_run)?;
+    Ok((set, path, read))
 }

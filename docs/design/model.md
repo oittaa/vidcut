@@ -1017,7 +1017,11 @@ Requests:
 - The key set requests are projectless too:
   - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
   - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
-  - A set file holds one table, `keys`, in the form of `Preferences.keys`. `keys.export` writes this form, and `keys.import` reads it.
+  - A set file holds one table, `keys`, in the form of `Preferences.keys`.
+  - `keys.export` and `keys.import` use the key file of other editors (`key_file`). `key_file::text` writes it, and `key_file::parse` reads it.
+    - `key_file` has a table of the commands of the other editor and the action of each. An action with two commands splits its keys by the default keys of each command.
+    - An action that has no command is in a comment line of vidcut. Why: the other editor skips comments, and vidcut keeps all keys of its own files.
+    - `key_file::parse` starts from the set that the file names, applies the listed commands, and keeps only the changes from the table. Thus the free-key rule of the set applies.
   - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
   - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
   - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.
