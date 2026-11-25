@@ -526,6 +526,9 @@ Voice Isolation:
   - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is the clip alone with its grade (`render::graded_frame`).
   - The tile workers make the pictures (`Tiles::clip_job`). The key of a picture holds a digest of the clip, its media and the project settings. Why: a change of the grade gives a new key, and the old picture leaves the tile memory as other tiles do.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
+  - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
+  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.
+  - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
 
 The render queue:
 

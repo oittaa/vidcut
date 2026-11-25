@@ -112,6 +112,7 @@ pub fn describe_at(
             match params["render"].as_str() {
                 Some("entire") => "Render Entire Timeline".to_string(),
                 Some(_) => "Render In/Out Range".to_string(),
+                None if params["clip_filter"].is_object() => "Filter the clips".to_string(),
                 None => "Change the timeline settings".to_string(),
             }
         }

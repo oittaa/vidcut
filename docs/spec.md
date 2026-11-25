@@ -5600,6 +5600,28 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: Mark In alone leaves the Out at the end of the timeline.
   - Measured: Render This Clip sets the In and the Out at the first and the last frame, and switches to In/Out Range. It adds no job.
   - Measured: with Individual clips, Render This Clip does the same, and Individual clips stays.
+- **Clip filter** (pp. 3114–3116, 4099, 4128):
+  - The Color page has a Thumbnail timeline too. An arrow next to its Clips button opens the timeline filters (p. 3114).
+  - A filter hides the clips that do not meet it. It does not change the edit (p. 3114).
+  - Measured: the arrow is only on the Color page. Each timeline keeps its own filter, and the Thumbnail timeline of the Deliver page shows it too.
+  - Measured: with a filter on, a red line is under Clips on both pages. The manual says orange (p. 3114).
+  - Measured: the menu has these groups, with a line between them:
+    - All Clips, Selected Clips.
+    - Graded Clips, Clips with Fusion Composition, Ungraded Clips, Modified Clips, Unrendered Clips.
+    - Clip Color, Flagged Clips, Marked Clips, Node Color.
+    - Keywords, People, Stereoscopic, Grouped, Tracked, HDR Graded, Magic Mask, Noise Reduction, Open FX, Different Frame Rate.
+    - Edit Sizing, Input Sizing, Common Media Pool Source, Clips in Bin, Matte Nodes, Mattes Available.
+    - Create Smart Filter.
+  - Measured: Clip Color has No Clip Color, Any Clip Color and the 16 clip colors. Marked Clips has No Marker, Any Marker and the 16 marker colors.
+  - Measured: Modified Clips has Last 1 Hour, Last 2 Hours, Last 3 Hours, Last 6 Hours and Last 24 Hours.
+  - Edit Sizing finds the clips with changed Edit Sizing. These are the sizing controls of the Inspector (pp. 3115, 3498).
+  - Measured: with a filter on, the Render menu has In/Out Range and All Filtered Clips. It has no Entire Timeline.
+  - Measured: All Filtered Clips sets the In and the Out at the span of the filtered clips. The job renders each filtered clip, whole, to a file of its own.
+  - Measured: after a pick of All Filtered Clips, the Render button shows "Entire Timeline". This was seen 3 times.
+  - Measured: with a filter on and Single clip set, the Deliver page opens the prompt "Unable to Apply Filter". Apply Filter sets Individual clips.
+  - Measured: with a filter on, a click on Single clip opens "Cannot Render Single Clip", with Cancel and Clear Filter. Cancel keeps Individual clips and the filter.
+  - Measured: Unrendered Clips looks at each timeline clip. An Individual clips render marks the clips that it renders. A Single clip render marks no clip.
+  - Measured: in two runs, Individual clips with In/Out rendered only the clips wholly inside the range.
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5714,6 +5736,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a picture moves the playhead to the first frame of the clip.
   - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
+  - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.
+  - `clip_filter` of `timeline.set` sets the filter of a timeline. A pick of a filter is an undo step.
+  - The Thumbnail timeline of both pages shows only the clips that meet the filter. Each clip keeps its number.
+  - With a filter on, a red line is under Clips.
+  - vidcut has Graded, Ungraded, Clips with Composition, Clip Color, Marked Clips, Video Effects, Different Frame Rate and Edit Sizing.
+  - A graded clip has a grade that is not the usual grade. A clip with a composition has a node other than MediaIn and MediaOut.
+  - Marked Clips looks at the markers of the media in the part that the clip shows. Edit Sizing looks at the transform and the crop.
+  - The other filters are greyed. Those of features that vidcut does not have are in [gaps](todo/gaps.md).
+  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source wait for measurements ([todo](todo/clip-filter.md)).
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
