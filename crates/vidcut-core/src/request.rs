@@ -1542,6 +1542,10 @@ pub enum Request {
         ripple: Option<bool>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Where the Transform, Crop and Composite keyframes go. Default:
+        /// `maintain`.
+        #[serde(default)]
+        keyframes: KeyTiming,
         /// Download the model of the Retime Process that the clips then use,
         /// if this computer doesn't have it yet, checked against its SHA-256.
         /// Without it, an export asks for it.
@@ -2106,6 +2110,18 @@ pub enum Request {
     /// `keyframes.copy` does, then remove them.
     #[serde(rename = "keyframes.cut")]
     KeyframesCut {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
+    /// Reverse Keyframes: run keyframes of `clip` backward over their span.
+    /// Each one goes as far from the last as it was from the first, with
+    /// its value. Its In and Out handles change places, and Ease In and
+    /// Ease Out too. It takes the place of a keyframe there. `keys` picks
+    /// as in `keyframes.copy`. Without `keys`, every keyframe of the clip.
+    /// Returns the `keyframes` with their clip, value and source frame.
+    #[serde(rename = "keyframes.reverse")]
+    KeyframesReverse {
         clip: ClipRef,
         #[serde(default)]
         keys: Option<Vec<KeyPicks>>,
@@ -4268,13 +4284,65 @@ pub enum Request {
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,
     },
-    /// Put default keys back. A default key that another action has now is
-    /// refused, and the refusal names that action.
+    /// Put the keys of the key set in force back (`keys.sets`). A key that
+    /// another action has now is refused, and the refusal names that action.
     #[serde(rename = "keys.reset")]
     KeysReset {
         /// The action, as `keys.list` names it. Without it, every action.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         action: Option<crate::shortcuts::Action>,
+    },
+    /// The key sets (spec §11): vidcut's own keys, and the sets you saved
+    /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
+    /// `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`). `set` names the set that the keys in force come
+    /// from, and `changed` tells if they differ from it. A set file that
+    /// can't be read is left out and listed in `refused` with why.
+    #[serde(rename = "keys.sets")]
+    KeysSets {},
+    /// Put a key set in force. Its keys replace the keys in force, with
+    /// their changes. A running GUI follows at once.
+    #[serde(rename = "keys.use")]
+    KeysUse {
+        /// The set's name, as `keys.sets` gives it; names match whatever
+        /// their case.
+        set: String,
+    },
+    /// Save the keys in force as a key set of yours. That set is then in
+    /// force. Built-in sets can't be replaced.
+    #[serde(rename = "keys.save")]
+    KeysSave {
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
+        name: String,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Delete one of your key sets. Built-in sets can't be deleted. When the
+    /// set is in force, its keys stay in force, as changes to vidcut's own
+    /// keys.
+    #[serde(rename = "keys.delete")]
+    KeysDelete { name: String },
+    /// Write a key set to a file, for another computer (`keys.import`). A
+    /// file at the path is replaced.
+    #[serde(rename = "keys.export")]
+    KeysExport {
+        /// The set's name, as `keys.sets` gives it.
+        set: String,
+        path: PathBuf,
+    },
+    /// Add a key set from a file that `keys.export` wrote. The set is not
+    /// put in force (`keys.use`).
+    #[serde(rename = "keys.import")]
+    KeysImport {
+        path: PathBuf,
+        /// The set's name. Without it, the file's name without its
+        /// extension.
+        #[serde(default)]
+        name: Option<String>,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
     },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
@@ -4500,6 +4568,21 @@ pub enum Request {
         /// `false` is Data Level Scopes, the default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         video_levels: Option<bool>,
+        /// What the Waveform shows: `y`, `cbcr` or `rgb`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_mode: Option<crate::preferences::WaveformMode>,
+        /// In RGB mode, the Waveform shows red.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_red: Option<bool>,
+        /// In RGB mode, the Waveform shows green.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_green: Option<bool>,
+        /// In RGB mode, the Waveform shows blue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_blue: Option<bool>,
+        /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parade_mode: Option<crate::preferences::ParadeMode>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -4751,8 +4834,10 @@ pub enum Request {
     /// clip (the topmost clip at the playhead when none is selected), the
     /// viewer's `color_tool` (the switch, Auto Color and Reset of the Auto
     /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
-    /// Dynamic Zoom, Color and their buttons, or `select_tool` (a tool to
-    /// add on the effects page). Answers what `gui.state` does.
+    /// Dynamic Zoom, Color and their buttons, `title_text` (the text of the
+    /// selected title, or of the topmost title at the playhead, to edit in
+    /// place in the viewer), or `select_tool` (a tool to add on the effects
+    /// page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -4796,6 +4881,8 @@ pub enum Request {
     /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
+        /// Left out, no node is selected.
+        #[serde(default)]
         nodes: Vec<String>,
         /// False: no node is active, and the Inspector shows only the
         /// header of each node. A box select in the node editor does this.
@@ -4839,6 +4926,8 @@ pub enum Request {
     /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
+        /// Left out, the list is empty.
+        #[serde(default)]
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
         /// shows it, and a delete of the selected nodes keeps it. With an
@@ -5480,14 +5569,16 @@ pub enum ClipAttribute {
     DialogueLeveler,
 }
 
-/// Where `clip.paste_attributes` puts the keyframes in each clip.
+/// Where `clip.paste_attributes` and `edit.change_speed` put the keyframes
+/// in each clip.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyTiming {
     /// The same frames from the start of the clip (Maintain Timing).
     #[default]
     Maintain,
-    /// The same part of the length of the clip (Stretch to Fit).
+    /// Stretch to Fit: in a paste, the same part of the length of the clip.
+    /// In a speed change, the same source frames.
     Stretch,
 }
 
@@ -6366,6 +6457,12 @@ pub enum GuiPanel {
     /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Color, the
     /// flips, Swap, the ease, Auto Color and Reset.
     Tools,
+    /// The text of a title, to edit in place in the viewer, with a caret at
+    /// its end: the first selected title at the playhead, else the topmost
+    /// title there. The Title section of the Inspector opens with it.
+    /// Typing changes the title as `titles.set` with `text` does, and
+    /// `gui.close` puts the change in.
+    TitleText,
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.
     SelectTool,
@@ -7004,7 +7101,8 @@ pub struct NodeChange {
     /// the edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside_only: Option<bool>,
-    /// How the corners of the outline of the shading element are drawn.
+    /// How the corners of the outline of the shading element, or the sharp
+    /// corners of a rectangle mask whose edge moves out, are drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join_style: Option<JoinStyle>,
     /// What one border of the shading element goes around.
@@ -8160,6 +8258,12 @@ impl Request {
                 | Self::KeysList {}
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
+                | Self::KeysSets {}
+                | Self::KeysUse { .. }
+                | Self::KeysSave { .. }
+                | Self::KeysDelete { .. }
+                | Self::KeysExport { .. }
+                | Self::KeysImport { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -8255,6 +8359,12 @@ impl Request {
                     | Self::KeysList {}
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
+                    | Self::KeysSets {}
+                    | Self::KeysUse { .. }
+                    | Self::KeysSave { .. }
+                    | Self::KeysDelete { .. }
+                    | Self::KeysExport { .. }
+                    | Self::KeysImport { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }
@@ -8271,6 +8381,8 @@ impl Request {
             }
             Self::MediaAddFolder { path, .. }
             | Self::Probe { path }
+            | Self::KeysExport { path, .. }
+            | Self::KeysImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesImport { path, .. } => path.iter_mut().collect(),
             Self::CacheClear { projects } => projects.iter_mut().collect(),

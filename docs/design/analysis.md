@@ -58,7 +58,8 @@ flowchart TD
   - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::Person` is a person. `Subject::Vehicle` is a vehicle.
   - `Subject::ALL` lists the subjects.
   - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.
-  - A `FindModel` picks the model of the subject. `FindModel::Fast` is the small model of each subject, on the CPU.
+  - A `FindModel` picks the model of the subject. `FindModel::Fast` is the small model of each subject.
+    - The fast models of faces and text run on the CPU. The model of people and vehicles runs on the GPU when `gpu.acceleration` is on (`subjects::uses_gpu`).
     - `FindModel::Slow` is a second model of `Subject::Face`, on the GPU (`retinaface`). The other subjects have no second model, and `FindModel::finds` refuses them.
   - `Subject::Person` and `Subject::Vehicle` have one model and one model file. Each keeps its own classes of that model (`yolox::PEOPLE`, `yolox::VEHICLES`).
 - `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
@@ -71,7 +72,10 @@ flowchart TD
     - With a given size, the picture is never larger than its source.
     - `AvEnv` puts a given size in the name of the cached find.
   - A model on the CPU runs with tract, one picture on each thread of the pool (`subjects::each`).
-  - The model on the GPU takes several pictures in one pass, and one readback gives the outputs of all passes (`retinaface::Model::find`).
+  - A model on the GPU takes several pictures in one pass, and one readback gives the outputs of all passes (`net::Runner::find`).
+    - `subjects::net` holds what the GPU models share: the weights reader (`Onnx`), the batch size (`net::batch`), the upload of the picture planes and the readback.
+    - Each model gives its layers and its work buffers (`net::Net`).
+    - A pass takes up to `MOST` pictures, with up to `PIXELS` pixels in all.
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
     - `Looking::picture` measures it on the small picture, with `small_luma`, `mafd` and `scene_score` of `analyze.scenes`. Thus the file is not decoded a second time.
@@ -84,7 +88,7 @@ flowchart TD
   - The score of a box is the root of the product of the two scores.
   - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays (`subjects::apart`).
 - `retinaface` finds faces with RetinaFace and a ResNet-34, in the shaders of vidcut on the shared off-screen device ([GPU](gpu.md#gpu-layers)):
-  - The weights come from the ONNX file of the maker. `Onnx` reads the weights of each convolution by the name of its node, with the proto parser of tract.
+  - The weights come from the ONNX file of the maker. `retinaface` reads the weights of each convolution by the name of its node (`Onnx::parts`), with the proto parser of tract.
     - The file has each batch norm in the weights of its convolution.
     - The file runs the first convolution of a context module twice on the same input. `retinaface` runs it once.
   - The picture goes in as blue, green and red values from 0 to 255, each less its mean (`MEAN`). Its right side and its bottom are padded to a multiple of 32.
@@ -95,7 +99,6 @@ flowchart TD
   - Of the boxes that overlap more than `retinaface::SAME`, the box with the highest score stays (`subjects::apart`).
   - Layers 2 to 4, the merge layers and the context modules use `ops::layer`. The first layer uses `Ops::conv`.
     - Why: with 64 channels, Winograd measured slower than the direct convolution.
-  - A pass takes up to `MOST` pictures, with up to `PIXELS` pixels in all.
   - The work buffers have one size for each find (`plan`). The picture planes, the first feature map and the middle of each residual block share one buffer (`Work::wide`).
     - Why: no two of them are in use at the same time. A buffer that a layer reads is never the buffer that it writes.
   - Two more buffers hold the transformed pictures of Winograd (`Work::scratch`).
@@ -110,6 +113,20 @@ flowchart TD
     - The code of the maker does this for each class alone. `yolox` does it for the classes of the subject together.
     - Why: a `Found` holds no class. Two boxes of two classes on one vehicle must not make two paths.
   - The maker scales the picture with a bilinear filter. `subjects::small` scales with the mean of an area, as for the other subjects.
+  - With `gpu.acceleration` on, the model runs in the shaders of vidcut on the shared off-screen device (`yolox::gpu`, [GPU](gpu.md#gpu-layers)). With it off, tract runs the model on the CPU.
+    - Why: the GPU takes the work off the CPU ([AGENTS.md](../../AGENTS.md), rule 9).
+    - With `gpu.acceleration` on and no usable GPU, the find fails, and the error names `gpu.acceleration`. Why: vidcut does not move the work to the CPU without the user.
+    - The CPU makes the planes of `colors` and sends them. Three copies on the GPU interleave the colors (`net::plane`).
+    - `Convs` reads the weights of the 83 convolutions in the order of the file. Each convolution must have the shape that YOLOX-S gives it, and the file must have no more convolutions.
+    - The file has each batch norm in the weights of its convolution.
+    - The Focus layer takes the four pixels of each 2×2 square as 12 channels. The next convolution is 3×3. Together they are one 6×6 convolution with a stride of 2 on the picture (`Convs::focus`).
+      - Why: no layer moves the pixels, and the sums are the same.
+    - A concatenation is two parts of the channels of one buffer. Each layer writes its part.
+      - A layer never reads its own buffer. Thus the 1×1 convolution before the pools of the last stage writes a buffer of its own. A copy puts it into its part (`Ops::copy`).
+    - The pools keep the largest value in windows of 5, 9 and 13 pixels (`Ops::pool`). The feature pyramid enlarges with `Ops::nearest`.
+    - The last convolutions of each stride write the rows of the output, as the file gives them. A row holds the box, the object score and the class scores. The object and class scores take their sigmoid in the same pass.
+    - The CPU and the GPU decode the rows with the same code (`yolox::boxes`).
+    - The 3×3 convolutions with a stride of 1 use `ops::layer`. The others use `Ops::conv`.
 - `ppocr` finds text with the PP-OCRv5 mobile detection model, by the rules of the config of that model:
   - The picture goes in as blue, green and red values, each less its mean and divided by its spread (`MEAN`, `SPREAD`).
   - The model gives one map of the picture. A value tells how sure the model is that the pixel is in the middle part of a line of text.
@@ -161,10 +178,11 @@ flowchart TD
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
   - Each model names its own rules (`yunet::name`, `retinaface::name`, `ppocr::name`, `yolox::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
   - `yolox::name` also holds the classes of the subject.
-- With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
+- With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames and the time. It also gives the time in the model and the device of the model.
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model files are `catalog::YUNET_ONNX`, `catalog::RETINAFACE_ONNX`, `catalog::PPOCR_DET_ONNX` and `catalog::YOLOX_ONNX`. `subjects::get_ready` fetches the file of the subject and its model when the request has `download`.
 - `models.check` finds the subject and the model of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
+  - It loads the model as a find does, with the GPU setting of the preferences. Its `loaded` is `vidcut` for a model in the GPU layers of vidcut, and `tract` for a model in tract.
 
 ## Tracks
 

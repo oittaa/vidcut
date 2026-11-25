@@ -3656,20 +3656,21 @@ impl Title {
         ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 
-    pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
-        match self.kind {
-            TitleKind::Scroll => {
-                (heights[0] + heights[1]) * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
-            }
-            TitleKind::Text | TitleKind::LowerThird => {
-                let size = (text / zoom / pixel).round();
-                let line: f64 = heights
-                    .iter()
-                    .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
-                    .sum();
-                line.ceil() * zoom * pixel
-            }
-        }
+    pub fn line_gap(heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
+        let size = (text / zoom / pixel).round();
+        let line: f64 = heights
+            .iter()
+            .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
+            .sum();
+        line.ceil() * zoom * pixel
+    }
+
+    pub fn scroll_em(text: f64, pixel: f64) -> u32 {
+        (text / pixel * Self::SCROLL_LINE).round().max(1.0) as u32
+    }
+
+    pub fn scroll_gap(screen: u32, pixel: f64) -> f64 {
+        (f64::from(screen) + Self::SCROLL_LEAD) * pixel
     }
 
     pub fn ink(&self) -> [u8; 3] {
@@ -5819,15 +5820,18 @@ pub struct Merge {
     pub operator: Option<MergeOperator>,
     /// From 0 to 1. At 0, the colors of the foreground are multiplied by
     /// its alpha first: a foreground with straight colors. At 1, they are
-    /// used as they are: premultiplied colors. Usual: 1.
+    /// used as they are: premultiplied colors. Only a `normal` merge uses
+    /// it. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// What the alpha of the foreground is multiplied by, from 0 to 1. At
-    /// 0, the foreground is added to the background. Usual: 1.
+    /// 0, a `normal` foreground is added to the background. The other apply
+    /// modes multiply the colors of the foreground too. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha_gain: Option<f64>,
     /// How much less the alpha of the foreground covers the background,
-    /// from 0 to 1. The foreground is still added in full. Usual: 0.
+    /// from 0 to 1. The foreground is still added in full. Only a `normal`
+    /// merge uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
     /// The width that the center is shown in: its x shows as x × this
@@ -6586,6 +6590,11 @@ pub struct Mask {
     /// Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
+    /// How the sharp corners of a `rectangle` are drawn where its edge moves
+    /// out: `sharp` keeps a square corner, `rounded` gives an arc and
+    /// `beveled` cuts the corner straight. Usual: `sharp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,
@@ -8150,6 +8159,14 @@ impl Ease {
 
     pub fn is_linear(&self) -> bool {
         *self == Self::Linear
+    }
+
+    pub fn backward(self) -> Self {
+        match self {
+            Self::EaseIn => Self::EaseOut,
+            Self::EaseOut => Self::EaseIn,
+            other => other,
+        }
     }
 
     pub fn of(self, t: f64) -> f64 {

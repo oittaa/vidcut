@@ -185,6 +185,7 @@ impl Default for Mask {
             x_rotation: None,
             y_rotation: None,
             corner_radius: None,
+            join_style: None,
             fill_method: None,
             clipping: None,
             points: Vec::new(),
@@ -1267,6 +1268,7 @@ impl Mask {
     pub const SCALE: f64 = 1.0;
     pub const TURNS: (f64, f64) = (-1e6, 1e6);
     pub const CORNERS: (f64, f64) = (0.0, 1.0);
+    pub const JOIN: JoinStyle = JoinStyle::Sharp;
     pub const POINTS_KEPT: usize = 128;
     pub const LEAST_POINTS: usize = 3;
     pub const SOFT: f64 = 0.431;
@@ -1287,6 +1289,10 @@ impl Mask {
 
     pub fn paint(&self) -> PaintMode {
         self.paint_mode.unwrap_or_default()
+    }
+
+    pub fn join(&self) -> JoinStyle {
+        self.join_style.unwrap_or(Self::JOIN)
     }
 
     pub fn filter(&self) -> BlurFilter {

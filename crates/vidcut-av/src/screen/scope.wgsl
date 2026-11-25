@@ -8,6 +8,7 @@ struct Params {
     rows: array<vec4<f32>, 3>,
     hues: array<vec4<f32>, 3>,
     how: vec4<u32>,
+    parts: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -19,8 +20,25 @@ const GRID: vec3<f32> = vec3<f32>(0.3, 0.3, 0.3);
 
 const DASH: u32 = 4u;
 
+const WHITE: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
+
+const RED: vec3<f32> = vec3<f32>(1.0, 0.25, 0.25);
+
+const GREEN: vec3<f32> = vec3<f32>(0.25, 1.0, 0.25);
+
+const BLUE: vec3<f32> = vec3<f32>(0.35, 0.45, 1.0);
+
 fn shown(v: f32) -> f32 {
     return params.levels.x + params.levels.y * v;
+}
+
+fn shown_difference(v: f32) -> f32 {
+    return params.levels.z + params.levels.w * v;
+}
+
+fn differences(c: vec3<f32>) -> vec2<f32> {
+    let y = dot(c, params.luma.xyz);
+    return vec2<f32>((c.b - y) * params.chroma.x, (c.r - y) * params.chroma.y);
 }
 
 fn row(v: f32) -> u32 {
@@ -29,8 +47,12 @@ fn row(v: f32) -> u32 {
     return min(u32(clamp(down, 0.0, f32(params.size.y))), params.size.y - 1u);
 }
 
+fn add_in(plane: u32, x: u32, y: u32) {
+    atomicAdd(&hits[(plane * params.size.y + y) * params.size.x + x], 1u);
+}
+
 fn add(x: u32, y: u32) {
-    atomicAdd(&hits[y * params.size.x + x], 1u);
+    add_in(0u, x, y);
 }
 
 fn outside(id: vec3<u32>) -> bool {
@@ -47,7 +69,33 @@ fn waveform(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let x = id.x * params.size.x / params.canvas.x;
-    add(x, row(shown(dot(color_at(id), params.luma.xyz))));
+    let c = color_at(id);
+    if params.how.w == 0u {
+        add(x, row(shown(dot(c, params.luma.xyz))));
+    } else if params.how.w == 1u {
+        let d = differences(c);
+        add(x, row(shown_difference(d.x)));
+        add(x, row(shown_difference(d.y)));
+    } else {
+        for (var i = 0u; i < 3u; i++) {
+            if (params.parts.y & (1u << i)) != 0u {
+                add_in(i, x, row(shown(c[i])));
+            }
+        }
+    }
+}
+
+fn parade_value(c: vec3<f32>, section: u32) -> f32 {
+    if params.how.w == 0u {
+        return shown(c[section]);
+    }
+    if section == 0u {
+        return shown(dot(c, params.luma.xyz));
+    }
+    if params.how.w == 1u {
+        return shown(c[section - 1u]);
+    }
+    return shown_difference(differences(c)[section - 1u]);
 }
 
 @compute @workgroup_size(16, 16)
@@ -55,12 +103,12 @@ fn parade(@builtin(global_invocation_id) id: vec3<u32>) {
     if outside(id) {
         return;
     }
-    let part = params.size.x / 3u;
+    let part = params.size.x / params.parts.x;
     let x = id.x * part / params.canvas.x;
     let c = color_at(id);
-    add(x, row(shown(c.r)));
-    add(x + part, row(shown(c.g)));
-    add(x + 2u * part, row(shown(c.b)));
+    for (var s = 0u; s < params.parts.x; s++) {
+        add(x + s * part, row(parade_value(c, s)));
+    }
 }
 
 @compute @workgroup_size(16, 16)
@@ -84,11 +132,35 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(x, y, 0.0, 1.0);
 }
 
-fn hit(x: i32, y: i32) -> f32 {
+fn hit_in(plane: u32, x: i32, y: i32) -> f32 {
     if x < 0 || y < 0 || x >= i32(params.size.x) || y >= i32(params.size.y) {
         return 0.0;
     }
-    return f32(counted[u32(y) * params.size.x + u32(x)]);
+    return f32(counted[(plane * params.size.y + u32(y)) * params.size.x + u32(x)]);
+}
+
+fn hit(x: i32, y: i32) -> f32 {
+    return hit_in(0u, x, y);
+}
+
+fn channel_tint(i: u32) -> vec3<f32> {
+    if i == 0u {
+        return RED;
+    }
+    if i == 1u {
+        return GREEN;
+    }
+    return BLUE;
+}
+
+fn parade_tint(section: u32) -> vec3<f32> {
+    if params.how.w == 0u {
+        return channel_tint(section);
+    }
+    if params.how.w == 1u && section > 0u {
+        return channel_tint(section - 1u);
+    }
+    return WHITE;
 }
 
 fn level(hits_here: f32) -> f32 {
@@ -149,24 +221,27 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
         let grid = select(vec3<f32>(0.0), GRID, on_graticule(p));
         return vec4<f32>(max(grid, vec3<f32>(level(most))), 1.0);
     }
-    var tint = vec3<f32>(1.0);
+    var color = vec3<f32>(0.0);
     var edge = false;
-    var even = evened(u32(x), params.size.x);
     if params.how.x == 1u {
-        let part = params.size.x / 3u;
+        let sections = params.parts.x;
+        let part = params.size.x / sections;
         let section = u32(x) / part;
-        even = evened(u32(x) % part, part);
-        edge = u32(x) % part == 0u && section > 0u && section < 3u;
-        if section == 0u {
-            tint = vec3<f32>(1.0, 0.25, 0.25);
-        } else if section == 1u {
-            tint = vec3<f32>(0.25, 1.0, 0.25);
-        } else if section == 2u {
-            tint = vec3<f32>(0.35, 0.45, 1.0);
+        edge = u32(x) % part == 0u && section > 0u && section < sections;
+        if section < sections {
+            let even = evened(u32(x) % part, part);
+            color = parade_tint(section) * level(hit(x, y) * even);
+        }
+    } else {
+        let even = evened(u32(x), params.size.x);
+        if params.parts.z == 3u {
+            for (var i = 0u; i < 3u; i++) {
+                color += channel_tint(i) * level(hit_in(i, x, y) * even);
+            }
         } else {
-            tint = vec3<f32>(0.0);
+            color = WHITE * level(hit(x, y) * even);
         }
     }
     let grid = select(vec3<f32>(0.0), GRID, edge || ruled(p));
-    return vec4<f32>(max(grid, tint * level(hit(x, y) * even)), 1.0);
+    return vec4<f32>(max(grid, min(color, WHITE)), 1.0);
 }

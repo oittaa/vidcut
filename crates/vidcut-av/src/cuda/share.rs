@@ -59,7 +59,14 @@ const HANDLE_TYPE: u32 = 1;
 const HANDLE_TYPE: u32 = 2;
 const DEDICATED: u32 = 1;
 const MEMORY_TYPE_DEVICE: u32 = 2;
+const STREAM_DEFAULT: u32 = 0;
 const STREAM_NON_BLOCKING: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waits {
+    ForDefault,
+    Never,
+}
 
 pub(super) struct Cuda {
     _lib: libloading::Library,
@@ -332,15 +339,19 @@ pub(crate) struct Stream {
 }
 
 impl Stream {
-    pub(crate) fn new(device: &CudaDevice) -> Result<Self> {
+    pub(crate) fn new(device: &CudaDevice, waits: Waits) -> Result<Self> {
         let cuda = Cuda::get()?;
+        let flags = match waits {
+            Waits::ForDefault => STREAM_DEFAULT,
+            Waits::Never => STREAM_NON_BLOCKING,
+        };
         // SAFETY: a CUDA device, as `cuda_context` asks.
         let (ctx, _) = unsafe { cuda_context(device.as_ptr()) };
         let raw = in_context(cuda, ctx, || {
             let mut raw = std::ptr::null_mut();
             // SAFETY: the context is current; the stream goes into `raw`.
             check("making a stream", unsafe {
-                (cuda.stream_create)(&mut raw, STREAM_NON_BLOCKING)
+                (cuda.stream_create)(&mut raw, flags)
             })?;
             Ok(raw)
         })?;

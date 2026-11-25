@@ -1,6 +1,6 @@
 use vidcut_core::generators::{hlg_code, pq_code};
 use vidcut_core::model::Hdr;
-use vidcut_core::preferences::{Scope, ScopeScale, Scopes};
+use vidcut_core::preferences::{ParadeMode, Scope, ScopeScale, Scopes, WaveformMode};
 
 use super::{Gpu, TARGET, Target, begin, make_target};
 use crate::color::{Colors, Matrix, shader_colors};
@@ -21,13 +21,17 @@ const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
 
-const PARAMS: usize = 192;
+const PARAMS: usize = 208;
 
 const DASHED_NITS: [f64; 3] = [26.0, 203.0, 2000.0];
 
 const VIDEO_BLACK: f64 = 64.0 / 1023.0;
 
 const VIDEO_SPAN: f64 = 876.0 / 1023.0;
+
+const VIDEO_MIDDLE: f64 = 512.0 / 1023.0;
+
+const VIDEO_CHROMA: f64 = 896.0 / 1023.0;
 
 const MOST_ROWS: usize = 12;
 
@@ -132,6 +136,21 @@ fn dashed(scale: ScopeScale, colors: Option<Hdr>) -> Vec<f64> {
     }
 }
 
+fn sections(scope: Scope, prefs: Scopes) -> u32 {
+    match (scope, prefs.parade_mode) {
+        (Scope::Parade, ParadeMode::Yrgb) => 4,
+        (Scope::Parade, _) => 3,
+        _ => 1,
+    }
+}
+
+fn planes(scope: Scope, prefs: Scopes) -> u32 {
+    match (scope, prefs.waveform_mode) {
+        (Scope::Waveform, WaveformMode::Rgb) => 3,
+        _ => 1,
+    }
+}
+
 fn from_top(v: f64) -> f64 {
     (HIGH - v) / (HIGH - LOW)
 }
@@ -212,7 +231,7 @@ fn params(
     let pixels = u64::from(canvas.0) * u64::from(canvas.1);
     let columns = match scope {
         Scope::Waveform => size.0,
-        Scope::Parade => size.0 / 3,
+        Scope::Parade => size.0 / sections(scope, prefs),
         Scope::Vectorscope => size.0.min(size.1),
     };
     let full = (pixels / u64::from(columns.max(1)) / FULL_AT).max(1);
@@ -241,10 +260,24 @@ fn params(
             f((middle[1] + y * unit).floor()),
         ]
     });
-    let (black, span) = match prefs.video_levels {
-        true => (VIDEO_BLACK, VIDEO_SPAN),
-        false => (0.0, 1.0),
+    let (black, span, middle_code, chroma) = match prefs.video_levels {
+        true => (VIDEO_BLACK, VIDEO_SPAN, VIDEO_MIDDLE, VIDEO_CHROMA),
+        false => (0.0, 1.0, 0.5, 1.0),
     };
+    let mode = match scope {
+        Scope::Waveform => prefs.waveform_mode as u32,
+        Scope::Parade => prefs.parade_mode as u32,
+        Scope::Vectorscope => 0,
+    };
+    let channels = [
+        prefs.waveform_red,
+        prefs.waveform_green,
+        prefs.waveform_blue,
+    ]
+    .iter()
+    .enumerate()
+    .filter(|(_, on)| **on)
+    .fold(0, |mask, (i, _)| mask | 1 << i);
     let kind = match scope {
         Scope::Waveform => 0,
         Scope::Parade => 1,
@@ -269,8 +302,8 @@ fn params(
         f(unit),
         f(black),
         f(span),
-        f(0.0),
-        f(0.0),
+        f(middle_code),
+        f(chroma),
     ];
     bytes.extend(rows);
     bytes.extend(hues.iter().flatten());
@@ -278,6 +311,10 @@ fn params(
         n(kind),
         n(lines.len().min(MOST_ROWS) as u32),
         n(labeled.min(MOST_ROWS) as u32),
+        n(mode),
+        n(sections(scope, prefs)),
+        n(channels),
+        n(planes(scope, prefs)),
         n(0),
     ]);
     bytes
@@ -288,6 +325,7 @@ fn params(
 struct Plot {
     scope: Scope,
     size: (u32, u32),
+    planes: u32,
     generation: u64,
     target: Target,
     params: wgpu::Buffer,
@@ -304,7 +342,12 @@ pub(super) struct Plots {
 }
 
 impl Plots {
-    fn make(gpu: &Gpu, pipes: &Pipes, scope: Scope, size: (u32, u32), generation: u64) -> Plot {
+    fn make(
+        gpu: &Gpu,
+        pipes: &Pipes,
+        (scope, size, planes): (Scope, (u32, u32), u32),
+        generation: u64,
+    ) -> Plot {
         let params = crate::compute::buffer(
             &gpu.device,
             "vidcut scope",
@@ -314,7 +357,7 @@ impl Plots {
         let hits = crate::compute::buffer(
             &gpu.device,
             "vidcut scope hits",
-            size.0 as usize * size.1 as usize * 4,
+            size.0 as usize * size.1 as usize * planes as usize * 4,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
         let painted = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -334,6 +377,7 @@ impl Plots {
         Plot {
             scope,
             size,
+            planes,
             generation,
             target: make_target(&gpu.device, size),
             params,
@@ -361,14 +405,14 @@ impl Plots {
         self.plots.retain(|p| {
             wanted
                 .iter()
-                .any(|&(s, z)| s == p.scope && sized(z) == p.size)
+                .any(|&(s, z)| s == p.scope && sized(z) == p.size && planes(s, prefs) == p.planes)
         });
         for &(scope, size) in wanted {
             let size = sized(size);
             if !self.plots.iter().any(|p| p.scope == scope) {
                 self.made += 1;
-                self.plots
-                    .push(Self::make(gpu, pipes, scope, size, self.made));
+                let made = (scope, size, planes(scope, prefs));
+                self.plots.push(Self::make(gpu, pipes, made, self.made));
             }
         }
         if self.plots.iter().all(|p| p.drawn == Some(draw)) {

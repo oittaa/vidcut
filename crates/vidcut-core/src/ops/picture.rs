@@ -1137,6 +1137,9 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         Mask::CORNERS,
         "a corner radius is from 0 to 1",
     )?;
+    if m.join_style.is_some() && tool != "rectangle" {
+        return Err(Error::invalid("only a rectangle has a join style"));
+    }
     if !polygon && !m.points.is_empty() {
         return Err(Error::invalid("only a polygon has points"));
     }
@@ -1173,6 +1176,7 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         x_rotation: m.x_rotation.filter(|v| *v != 0.0),
         y_rotation: m.y_rotation.filter(|v| *v != 0.0),
         corner_radius: m.corner_radius.filter(|v| *v != 0.0),
+        join_style: m.join_style.filter(|j| *j != Mask::JOIN),
         fill_method: m.fill_method.filter(|f| *f != FillMethod::default()),
         clipping: m.clipping.filter(|c| *c != BlurClipping::None),
         ..m.clone()
