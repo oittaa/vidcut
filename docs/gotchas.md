@@ -698,6 +698,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 - **A typed Soft of the HSL qualifier shows 0.1 more.**
   - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
   - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
+  - The renders use the typed value. A render with a typed Soft 20 at Width 10 matches Soft 20 within 2e-4.
   - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 
 - **Close Up leaves the Out frame out.**
