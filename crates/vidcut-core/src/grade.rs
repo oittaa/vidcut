@@ -1044,9 +1044,6 @@ fn corrected(
         });
         r.used(&key);
         r.hold(k, mix, uses.kept(k));
-        if uses.kept(k) == 0 {
-            r.free.push(mix);
-        }
         let whole = uses.all.len() + k;
         r.hold(whole, on, uses.over[k]);
         uses.whole[k] = whole;

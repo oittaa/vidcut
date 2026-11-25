@@ -4211,8 +4211,9 @@ impl Stabilization {
 /// A grade: the nodes of the color page. The picture comes in, goes through
 /// the nodes that the inputs join, and goes out from the link `output`.
 /// A node's number is its place in `nodes`, from 1. The number 0 is the
-/// picture that comes into the grade. While a node has an empty input, or
-/// its picture goes nowhere, or nothing goes out, the grade does nothing.
+/// picture that comes into the grade. While a corrector or a splitter has
+/// an empty input, a parallel mixer, a layer mixer or a combiner has no
+/// input with a link, or nothing goes out, the grade does nothing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Grade {
     /// The nodes, in the order of their numbers.
@@ -4877,9 +4878,9 @@ pub enum GradeTool {
     /// and B are that channel. It has no key input and no key output.
     Splitter,
     /// It joins three pictures into one: red from input 0, green from
-    /// input 1 and blue from input 2. The alpha comes from input 0. It has
-    /// three inputs, which each need a link, and no key input or key
-    /// output.
+    /// input 1 and blue from input 2. The alpha comes from the first input
+    /// that has a link. An input with no link gives 0 to its channel. At
+    /// least one input needs a link. It has no key input or key output.
     Combiner,
 }
 

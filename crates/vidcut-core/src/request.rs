@@ -5086,7 +5086,7 @@ pub enum GradeAdd {
     KeyMixer,
     /// As `serial` after `node`: a splitter, a corrector on each of its
     /// three outputs, and a combiner that joins the three correctors. The
-    /// returned `node` is the corrector of red.
+    /// returned `node` is the corrector of blue.
     SplitterCombiner,
     /// A splitter whose input takes nothing, at `place`.
     Splitter,
