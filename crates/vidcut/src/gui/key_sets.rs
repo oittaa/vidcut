@@ -392,8 +392,11 @@ impl Workspace {
         let (method, params, sent) = match want {
             Want::Use(set) => ("keys.use", json!({ "set": set }), Sent::InForce),
             Want::Save(name, overwrite) => {
-                let keys = s.shown(&in_force).changes();
-                let params = json!({ "name": name, "overwrite": overwrite, "keys": keys });
+                let shown = s.shown(&in_force);
+                let keys = shown.changes();
+                let from = shown.set_name().unwrap_or(OWN);
+                let params =
+                    json!({ "name": name, "overwrite": overwrite, "keys": keys, "from": from });
                 ("keys.save", params, Sent::InForce)
             }
             Want::Delete(name) => ("keys.delete", json!({ "name": name }), Sent::Delete(name)),

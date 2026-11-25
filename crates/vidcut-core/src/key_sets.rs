@@ -29,6 +29,7 @@ const PRESETS: &[(&str, &str)] = &[
 pub struct KeySet {
     pub name: String,
     pub built_in: bool,
+    pub base: String,
     pub keys: Custom,
 }
 
@@ -48,6 +49,8 @@ pub struct Listing {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetFile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base: Option<String>,
     keys: Custom,
 }
 
@@ -59,27 +62,45 @@ pub fn same(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
 }
 
-pub fn parse(text: &str) -> std::result::Result<Custom, String> {
-    let file: SetFile = toml::from_str(text).map_err(|e| e.message().to_string())?;
-    Bindings::of(&file.keys).map_err(|e| e.message)?;
-    Ok(file.keys)
+fn preset(name: &str) -> Option<&'static str> {
+    PRESETS
+        .iter()
+        .map(|(preset, _)| *preset)
+        .find(|preset| same(preset, name))
 }
 
-pub fn text(keys: &Custom) -> Result<String> {
-    toml::to_string(&SetFile { keys: keys.clone() }).map_err(|e| Error::internal(e.to_string()))
+pub fn parse(text: &str) -> std::result::Result<(String, Custom), String> {
+    let file: SetFile = toml::from_str(text).map_err(|e| e.message().to_string())?;
+    Bindings::of(&file.keys).map_err(|e| e.message)?;
+    let base = match file.base {
+        None => OWN,
+        Some(base) => preset(&base)
+            .ok_or_else(|| format!("{base} is not the name of another editor's key set"))?,
+    };
+    Ok((base.to_string(), file.keys))
+}
+
+pub fn text(base: &str, keys: &Custom) -> Result<String> {
+    let file = SetFile {
+        base: preset(base).map(str::to_string),
+        keys: keys.clone(),
+    };
+    toml::to_string(&file).map_err(|e| Error::internal(e.to_string()))
 }
 
 pub fn built_in() -> Vec<KeySet> {
     let own = KeySet {
         name: OWN.to_string(),
         built_in: true,
+        base: OWN.to_string(),
         keys: Custom::new(),
     };
     std::iter::once(own)
         .chain(PRESETS.iter().map(|(name, text)| KeySet {
             name: name.to_string(),
             built_in: true,
-            keys: parse(text).expect("a built-in key set is valid"),
+            base: name.to_string(),
+            keys: parse(text).expect("a built-in key set is valid").1,
         }))
         .collect()
 }
@@ -107,16 +128,17 @@ pub fn read(dir: &Path) -> Listing {
         let found = std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|text| parse(&text))
-            .and_then(|keys| match is_built_in(&name) {
+            .and_then(|set| match is_built_in(&name) {
                 true => Err(format!("{name} is the name of a built-in key set")),
                 false => checked_name("key set", &name)
-                    .map(|_| keys)
+                    .map(|_| set)
                     .map_err(|e| e.message),
             });
         match found {
-            Ok(keys) => listing.sets.push(KeySet {
+            Ok((base, keys)) => listing.sets.push(KeySet {
                 name,
                 built_in: false,
+                base,
                 keys,
             }),
             Err(why) => listing.refused.push(Refused { path, name, why }),
@@ -165,10 +187,12 @@ fn mine(dir: &Path, name: &str) -> Option<PathBuf> {
 pub fn save(
     dir: &Path,
     name: &str,
+    base: &str,
     keys: &Custom,
     overwrite: bool,
     dry_run: bool,
 ) -> Result<(KeySet, PathBuf)> {
+    let base = preset(base).unwrap_or(OWN);
     let name = checked_name("key set", name)?;
     if is_built_in(&name) {
         return Err(Error::invalid(format!(
@@ -186,6 +210,7 @@ pub fn save(
     let set = KeySet {
         name,
         built_in: false,
+        base: base.to_string(),
         keys: keys.clone(),
     };
     if dry_run {
@@ -196,7 +221,7 @@ pub fn save(
     if let Some(old) = old.filter(|o| *o != path) {
         std::fs::rename(&old, &path).map_err(failed)?;
     }
-    crate::temp::write(&path, text(keys)?.as_bytes()).map_err(failed)?;
+    crate::temp::write(&path, text(base, keys)?.as_bytes()).map_err(failed)?;
     Ok((set, path))
 }
 
@@ -222,8 +247,9 @@ pub fn delete(dir: &Path, name: &str, dry_run: bool) -> Result<PathBuf> {
 
 pub fn export(dir: &Path, name: &str, to: &Path, dry_run: bool) -> Result<KeySet> {
     let set = find(dir, name)?;
+    let base = find(dir, &set.base)?;
     if !dry_run {
-        crate::temp::write(to, key_file::text(&set.keys)?.as_bytes())
+        crate::temp::write(to, key_file::text(&set.keys, &base)?.as_bytes())
             .map_err(|e| Error::usage(format!("{}: {e}", to.display())))?;
     }
     Ok(set)
@@ -240,10 +266,15 @@ pub fn import(
         .map_err(|e| Error::usage(format!("{}: {e}", from.display())))?;
     let read = key_file::parse(&text, |base| find(dir, base).map(|s| s.keys))
         .map_err(|e| Error::invalid(format!("{}: {}", from.display(), e.message)))?;
+    let base = match &read.base {
+        None => OWN.to_string(),
+        Some(set) => find(dir, set)?.base,
+    };
     let stem = from
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let (set, path) = save(dir, name.unwrap_or(&stem), &read.keys, overwrite, dry_run)?;
+    let name = name.unwrap_or(&stem);
+    let (set, path) = save(dir, name, &base, &read.keys, overwrite, dry_run)?;
     Ok((set, path, read))
 }
