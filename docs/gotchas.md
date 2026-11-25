@@ -695,6 +695,11 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
   - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
   - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- **A typed Soft of the HSL qualifier shows 0.1 more.**
+  - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
+  - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
+  - The renders use the typed value. A render with a typed Soft 20 at Width 10 matches Soft 20 within 2e-4.
+  - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 
 - **Close Up leaves the Out frame out.**
   - With a timeline Out at frame 200 alone, the copy ends before frame 200.

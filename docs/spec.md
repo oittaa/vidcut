@@ -3851,6 +3851,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
   - vidcut: the Key badge shows when the Key Output is not at its usual values.
+  - vidcut: each palette has its own badge (p. 3390). The Qualifier badge shows when the HSL values are not at their usual values.
 - **Thumbnails** (pp. 3385, 3390):
   - Each corrector node has a thumbnail. The badges are under the thumbnail (p. 3390).
   - Show Thumbnails in the option menu of the Node Editor turns the thumbnails off or on. Without thumbnails, the nodes are shorter (p. 3385).
@@ -4102,7 +4103,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
   - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
-  - vidcut: the Qualifier controls come later ([todo](todo/color-page.md)).
+  - vidcut: the Key palette has the Qualifier row after the Key Output ([§8.28](#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 - **Key Input, Key Mixer and Outside node** (pp. 3388–3389, 3417–3420, 3431–3437):
   - Each corrector has a key input and a key output. They are blue, below the RGB input and the RGB output (p. 3388).
   - A link from a key output to a key input gives the key of one node to another node.
@@ -4828,6 +4829,60 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An OpenTimelineIO file of vidcut keeps the stabilization in the vidcut metadata of the picture. Other editors read nothing of it.
   - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
   - [design](design/analysis.md#stabilization) gives the method.
+
+### 8.28 Qualifier (pp. 3238–3256, 3263, 3436; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Qualifier palette pulls a key from the colors of the picture. Its modes are 3D, HSL, RGB and Luma (p. 3239).
+  - HSL is the usual mode. The Matte Finesse controls refine the key of each mode (p. 3241).
+  - HSL has a range and a softness for hue, saturation and luma (p. 3253).
+  - The Hue, Sat and Lum switches at the left of each control turn that part on or off (p. 3254).
+  - The HSL values are Hue Center, Width, Soft and Symmetry, Sat Low, High, Low Soft and High Soft, and the same four for Lum (p. 3254).
+  - A lower Symmetry makes the softness at the right of the hue range steeper. A higher one makes the left side steeper (p. 3254).
+  - The Invert button of the palette inverts the key of the palette (p. 3263).
+  - The Qualifier Invert of the Key palette also inverts the key of the palette. The Output Invert inverts the key of the whole node (p. 3263).
+  - A qualifier key and a window give the intersection of the two keys (p. 3263).
+  - The Key palette has the Qualifier controls (p. 3436).
+- Measured (float renders, YRGB, Rec.709 timeline, no color management):
+  - The usual values are Hue Center 50, Width 100, Soft 0 and Sym 50. Sat and Lum have Low 0, High 100, L.Soft 0 and H.Soft 0. The three switches are on.
+  - A new node with HSL and the usual values gives the key 1 at each pixel.
+  - Each HSL value goes from 0 to 100. A typed value past an end takes that end. A Low above its High stays.
+  - Hue Soft is at most 2 times Width. A larger Soft raises Width to half the Soft. A Width below half the Soft lowers Soft to 2 times Width.
+  - A typed Soft shows 0.1 more after a clip switch ([gotchas](gotchas.md#resolves-edits)).
+  - Hue is the Rec. 601 chroma angle atan2(Cr, Cb) in degrees. Y = 0.299 R + 0.587 G + 0.114 B, Cb = (B − Y) / 1.772 and Cr = (R − Y) / 1.402.
+  - A gray pixel has the hue 0. Thus Center 95 with Width 30 keys gray, and Center 40 with Width 10 does not.
+  - Hue Center c is at 3.6 c degrees. The key is 1 to lo = max(0, 1.8 (Width − Soft)) degrees from the center, and 0 from hi = 1.8 (Width + Soft).
+  - Sym: the side of larger angle keeps the part clamp((Sym − 30) / 20, 0, 1) of the soft span. The other side keeps clamp((70 − Sym) / 20, 0, 1).
+    - A side with no span ends hard at lo.
+  - Sat = 0.4115 hypot(Cb, Cr). Lum = 0.5 + Y / 4. Thus Lum 0 to 100 is Y −2 to 2.
+  - A Sat or Lum edge E with the softness s goes from max(0, E − s / 2) to min(1, E + s / 2). Soft 0 gives a hard edge at E.
+  - In each soft span, the key is 1 − smoothstep(t). t is 0 at the inner end and 1 at the outer end.
+  - The key is the product of the parts that are on. With all three parts off, the key is 1.
+  - The Invert of the palette gives 1 minus the key.
+  - The Key palette has a Qualifier row: an Invert button, a Matte or Mask button, Gain and Offset.
+    - The usual values are Invert off, Matte, Gain 1 and Offset 0. Gain goes from 0 to 2, and Offset from −1 to 1.
+  - With the three switches on and the Qualifier row at its usual values, the key goes out as it is.
+  - Else the key goes through Q of the Key Input ([§8.21](#821-color-page-nodes-pp-33853399-34093415)). Gain 0.5 and Offset 0.2 give Q(0.5 k + 0.2). The row's Invert gives Q(1 − k).
+    - Thus a switch that changes nothing, such as Lum off at Low 0 and High 100, changes the soft shape.
+  - With a window w in the node, the qualifier key x folds as a key input does ([§8.21](#821-color-page-nodes-pp-33853399-34093415)). x is the key after the Gain, the Offset and the Invert of the row.
+    - Matte gives clamp(1 − U(1 − Q(w), 1 − x)). Mask gives clamp(U(Q(w), x)).
+    - With the usual circle, Matte gives 0 at each pixel of the test frame, and Mask gives a mean of 0.12276.
+  - The Matte Finesse values and their ranges are in the measurement record. Their effects are not measured.
+  - The record is section Q1 of `fixtures/color/NOTES.md` in the test data.
+- vidcut:
+  - Qualifier at the top of the palette selects the Qualifier palette. It has the HSL mode, with the measured key.
+  - The palette has Invert, and the switch and the four values of each part.
+  - The Key palette has the Qualifier row after the Key Output: Invert, Matte, Gain and Offset.
+  - `grade.set` with the `qualifier_` values. It refuses a value past an end, and a Soft above 2 times Width.
+    - A change of Width or Soft alone moves the other value as measured.
+  - A typed Soft stays as it is.
+  - The qualifier reads the picture that comes into the corrector. A gray pixel has the hue 0.
+  - Renders of the 16 measured cases H0 to K4 match Resolve within 1.2e-3. Only one 8 x 8 block of J1, J2 and K2 is above 6e-4.
+  - A qualifier at its usual values gives no key.
+  - Each keyframe of a corrector holds its qualifier. The values blend as the values of the corrector do. The switches and the buttons change on the frame of the next keyframe.
+  - Reset in the Qualifier palette resets the HSL values. Reset in the Key palette also resets the Qualifier row.
+  - The node shows a Qualifier badge when the HSL values are not at their usual values. The Qualifier row counts for the Key badge.
+  - The 3D, RGB and Luma modes, the pickers and Matte Finesse come later ([todo](todo/color-page.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
