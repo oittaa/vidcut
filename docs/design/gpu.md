@@ -401,7 +401,9 @@ The scales (`marks`):
 - The Waveform and the Parade have the same room above and below the full range (`LOW`, `HIGH`). Thus a value out of range still shows.
 - The marks come from `ScopeScale` (`levels`): 10-bit codes, 12-bit codes, percent, millivolts or nits. Each scale spans the full range.
 - The nits go through `pq_code`, and through `hlg_code` on an HLG timeline.
-- A change of the scale draws each `Plot` again.
+- The HDR scale of a PQ timeline also has dashed lines with no label (`dashed`). The shader draws a row from index `how.z` on as a dashed line.
+- With `video_levels`, the Waveform and the Parade move each value to the 10-bit codes from 64 to 940 (`shown` in `scope.wgsl`). The marks stay.
+- A change of the scale or of `video_levels` draws each `Plot` again. `Plots::paint` takes the whole `Scopes`.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
 
 A scope that is off:

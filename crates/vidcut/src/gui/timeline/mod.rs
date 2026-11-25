@@ -2905,22 +2905,21 @@ impl Workspace {
             return;
         };
         let at = self.drawn_playhead();
-        let mut times: Vec<i64> = self
-            .snap
-            .selection
-            .clips
-            .iter()
-            .filter_map(|id| p.clip(id))
-            .flat_map(|c| {
-                let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
-                keys.iter()
-                    .map(|k| c.key_time(k.frame).round() as i64)
-                    .filter(|t| (c.start..c.end()).contains(t))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        times.sort_unstable();
-        times.dedup();
+        let times = self.grade_key_times().unwrap_or_else(|| {
+            let mut times: Vec<i64> = (self.snap.selection.clips.iter())
+                .filter_map(|id| p.clip(id))
+                .flat_map(|c| {
+                    let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+                    keys.iter()
+                        .map(|k| c.key_time(k.frame).round() as i64)
+                        .filter(|t| (c.start..c.end()).contains(t))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            times.sort_unstable();
+            times.dedup();
+            times
+        });
         let to = if dir < 0 {
             times.iter().rev().find(|&&t| t < at)
         } else {

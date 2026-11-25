@@ -220,6 +220,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It reads the picture through the Scopes LUT of the project, as the scopes of the GUI do. A file that cannot be read is an error.
 - The PNG has the lines of the scale, with no text.
 - The answer names `colors`, which is the timeline color space. It gives `marks`, with the label and the place of each line of the scale.
+- The answer also gives `scale` and `video_levels`, from the preferences.
 
 **The refusals of Upscale:** `scripts/upscale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
 

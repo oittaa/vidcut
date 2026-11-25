@@ -3089,10 +3089,11 @@ pub enum Request {
         timeline: bool,
         add: GradeAdd,
         /// The node it goes beside: for `serial`, `before`, `parallel`,
-        /// `layer` and `outside`.
+        /// `layer`, `outside` and `splitter_combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
-        /// Its place in the node editor, for `corrector`.
+        /// Its place in the node editor, for `corrector`, `key_mixer`,
+        /// `splitter` and `combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
         /// The first window of this kind of the new corrector is on.
@@ -3123,10 +3124,12 @@ pub enum Request {
     /// grade) to an input of `node` (0: the output of the grade), in place of
     /// what was there. Without `from`, the input takes nothing. Input 0 of a
     /// corrector is its RGB input, and input 1 is its key input. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. The
-    /// inputs of a key mixer are key inputs. A key on an RGB input is a gray
-    /// picture: R, G and B are the key. A picture on a key input gives its
-    /// Rec. 709 luma as the key. A link that makes a loop is an error.
+    /// an `input` one past the last, or no `input`, adds an input. A
+    /// combiner has inputs 0, 1 and 2: no `input` gives the first input with
+    /// no link. The inputs of a key mixer are key inputs. A key on an RGB
+    /// input is a gray picture: R, G and B are the key. A picture on a key
+    /// input gives its Rec. 709 luma as the key. A splitter gives no key. A
+    /// link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3145,6 +3148,10 @@ pub enum Request {
         /// Needs `from`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
+        /// The RGB output of the splitter `from`: 0 red, 1 green, 2 blue.
+        /// Left out: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<u8>,
     },
     /// Remove one input with no link from a mixer of the grade of a clip,
     /// or with `timeline` of the timeline grade (Remove One Input). The
@@ -3230,7 +3237,8 @@ pub enum Request {
     /// A new keyframe holds the values that the picture gets on its frame,
     /// with the `start` and `end` of the project's `dynamics_profile`. A
     /// keyframe already on that frame takes the `kind`. Returns the `frame`
-    /// and the `nodes` that have the keyframe.
+    /// and the `nodes` that have the keyframe. With `edl`, returns the
+    /// `frames` of the marks.
     #[serde(rename = "grade.keys.add")]
     GradeKeysAdd {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3248,6 +3256,12 @@ pub enum Request {
         /// Usual: `dynamic`.
         #[serde(default)]
         kind: GradeKeyKind,
+        /// With `timeline`, in place of `at` and `kind`: Add EDL Marks on
+        /// Tracks. A Static keyframe goes on each frame where a clip starts
+        /// or ends on a video track, after the first frame and before the
+        /// end. A node that has a keyframe on that frame keeps it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edl: bool,
     },
     /// Change the kind, the `start` or the `end` of keyframes of the grade
     /// of a clip, or with `timeline` of the timeline grade: those on the
@@ -3325,6 +3339,10 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<OneOrMany<TimeSpec>>,
+        /// In place of `frames` and `at`: Delete EDL Marks on Tracks. Only
+        /// the marks of `grade.keys.add` with `edl` go.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edl: bool,
     },
     /// Add a window at its usual values to a corrector of the grade of a
     /// clip, or with `timeline` of the timeline grade. It goes last in the
@@ -4381,6 +4399,10 @@ pub enum Request {
         vectorscope: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<crate::preferences::ScopeScale>,
+        /// Video Level Scopes: black at code 64 and white at code 940.
+        /// `false` is Data Level Scopes, the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_levels: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -4673,6 +4695,8 @@ pub enum Request {
     /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
+        /// Left out, no node is selected.
+        #[serde(default)]
         nodes: Vec<String>,
         /// False: no node is active, and the Inspector shows only the
         /// header of each node. A box select in the node editor does this.
@@ -4716,6 +4740,8 @@ pub enum Request {
     /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
+        /// Left out, the list is empty.
+        #[serde(default)]
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
         /// shows it, and a delete of the selected nodes keeps it. With an
@@ -5011,6 +5037,10 @@ pub struct GradeNodeChange {
     /// Key Output of a corrector, and the kind and mode of a mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<bool>,
+    /// Auto-Keyframe of a corrector or a key mixer. On, a change on a frame
+    /// where the node has no keyframe first adds a Dynamic keyframe there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_key: Option<bool>,
 }
 
 /// A palette of a corrector on the Color page.
@@ -5077,6 +5107,14 @@ pub enum GradeAdd {
     Outside,
     /// A key mixer with two inputs that take nothing, at `place`.
     KeyMixer,
+    /// As `serial` after `node`: a splitter, a corrector on each of its
+    /// three outputs, and a combiner that joins the three correctors. The
+    /// returned `node` is the corrector of blue.
+    SplitterCombiner,
+    /// A splitter whose input takes nothing, at `place`.
+    Splitter,
+    /// A combiner whose three inputs take nothing, at `place`.
+    Combiner,
 }
 
 /// The channels of a printer point.

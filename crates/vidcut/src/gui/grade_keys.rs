@@ -1,4 +1,5 @@
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
 use vidcut_core::grade_keys::{Dissolve, LAST_PROFILE};
 use vidcut_core::model::{Clip, Grade, GradeKeyKind, GradeNode, Project};
@@ -11,7 +12,9 @@ use super::theme;
 use super::workspace::Workspace;
 use crate::live::PlayerId;
 
-const LABEL: f32 = 64.0;
+const LABEL: f32 = 112.0;
+
+const BUTTON: f32 = 15.0;
 
 const ROW: f32 = 18.0;
 
@@ -26,6 +29,10 @@ const CURVE: egui::Vec2 = egui::Vec2::new(240.0, 140.0);
 const ALL_BAR: Color32 = Color32::from_rgb(255, 140, 0);
 
 const COLOR_BAR: Color32 = Color32::from_rgb(70, 190, 110);
+
+const PICKED: Color32 = Color32::from_rgb(230, 50, 50);
+
+const BAND: Color32 = Color32::from_rgba_premultiplied(60, 60, 70, 60);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum KeyMode {
@@ -46,12 +53,39 @@ enum Aim {
     Key(Picked),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum KeyAct {
     Add(Option<u32>, GradeKeyKind),
-    Kind(Picked, GradeKeyKind),
+    Kind(Option<u32>, Vec<i64>, GradeKeyKind),
     Attributes(Picked),
-    Delete(Picked),
+    Delete(Option<u32>, Vec<i64>),
+    Marks(Option<u32>, bool),
+    Node(u32, Flag, bool),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flag {
+    On,
+    Locked,
+    AutoKey,
+}
+
+impl Flag {
+    fn field(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Locked => "locked",
+            Self::AutoKey => "auto_key",
+        }
+    }
+
+    fn tip(self) -> &'static str {
+        match self {
+            Self::On => "Enable/Disable",
+            Self::Locked => "Lock",
+            Self::AutoKey => "Auto-Keyframe",
+        }
+    }
 }
 
 struct Dynamics {
@@ -64,17 +98,31 @@ struct Dynamics {
 #[derive(Default)]
 pub(super) struct GradeKeys {
     mode: KeyMode,
-    picked: Option<Picked>,
+    picked: Vec<Picked>,
     dragging: Option<(Picked, f32)>,
+    band: Option<(Option<u32>, f32)>,
     aim: Option<Aim>,
     dynamics: Option<Dynamics>,
 }
 
 impl GradeKeys {
     pub(super) fn forget(&mut self) {
-        self.picked = None;
+        self.picked.clear();
         self.dragging = None;
+        self.band = None;
         self.aim = None;
+    }
+
+    fn frames_in(&self, track: Option<u32>) -> Vec<i64> {
+        (self.picked.iter())
+            .filter(|k| k.node == track)
+            .map(|k| k.frame)
+            .collect()
+    }
+
+    fn shows(&self, track: Option<u32>, frame: i64) -> bool {
+        let has = |node| self.picked.contains(&Picked { node, frame });
+        has(track) || (track.is_some() && has(None))
     }
 }
 
@@ -139,6 +187,17 @@ fn target(of: &GradeOf, more: Value) -> Value {
     v
 }
 
+fn clips_target(of: &GradeOf, more: Value) -> Value {
+    let mut v = match of {
+        GradeOf::Clip(id) => json!({ "clips": id }),
+        GradeOf::Timeline => json!({ "timeline": true }),
+    };
+    if let (Value::Object(to), Value::Object(from)) = (&mut v, more) {
+        to.extend(from);
+    }
+    v
+}
+
 fn with_node(node: Option<u32>, more: Value) -> Value {
     let mut more = more;
     if let Some(n) = node {
@@ -170,6 +229,17 @@ fn keys_of(g: &Grade, track: Option<u32>) -> Vec<(i64, bool)> {
             })
             .collect(),
     }
+}
+
+fn has_marks(g: &Grade, track: Option<u32>) -> bool {
+    (g.nodes.iter().zip(1u32..))
+        .filter(|(_, n)| track.is_none_or(|t| t == *n))
+        .any(|(d, _)| d.keys.iter().any(|k| k.edl))
+}
+
+fn paint_glyph(painter: &Painter, at: Pos2, glyph: &str, tint: Color32) {
+    let font = egui::FontId::proportional(11.0);
+    painter.text(at, egui::Align2::CENTER_CENTER, glyph, font, tint);
 }
 
 fn track_name(track: Option<u32>) -> String {
@@ -259,6 +329,22 @@ impl Workspace {
             KeyCmd::DeleteAll if !g.is_keyed() => Some("The grade has no keyframes"),
             _ => None,
         }
+    }
+
+    pub(super) fn grade_key_times(&self) -> Option<Vec<i64>> {
+        if self.effects_page.page != Page::Color {
+            return None;
+        }
+        let (of, _, g) = self.grade_shown()?;
+        let span = Span::of(self.project()?, &of)?;
+        let mut times: Vec<i64> = (g.key_frames().into_iter())
+            .map(|f| span.time(f).round())
+            .filter(|t| (span.lo..span.hi).contains(t))
+            .map(|t| t as i64)
+            .collect();
+        times.sort_unstable();
+        times.dedup();
+        Some(times)
     }
 
     pub(super) fn grade_key_cmd(&mut self, cmd: KeyCmd) {
@@ -410,6 +496,7 @@ impl Workspace {
             self.seek(PlayerId::Timeline, at, r.dragged());
         }
         let mut act = None;
+        let timeline = *of == GradeOf::Timeline;
         for (i, &track) in tracks.iter().enumerate() {
             let top = rect.top() + RULER + ROW * i as f32;
             let row = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + ROW));
@@ -431,6 +518,42 @@ impl Workspace {
                 font.clone(),
                 c.text,
             );
+            if let Some((n, d)) = track.and_then(|n| Some((n, g.node(n)?))) {
+                let flags = [
+                    (Flag::On, d.on),
+                    (Flag::Locked, d.locked),
+                    (Flag::AutoKey, d.auto_key),
+                ];
+                for (j, (flag, lit)) in flags.into_iter().enumerate() {
+                    let at = pos2(left - BUTTON * (3 - j) as f32, row.center().y);
+                    let spot = Rect::from_center_size(at, vec2(BUTTON - 2.0, ROW - 2.0));
+                    let id = ui.scope_id().with(("grade-key-flag", i, j));
+                    let b = ui
+                        .interact(spot, id, Sense::click())
+                        .on_hover_text(flag.tip());
+                    let tint = match (flag, lit) {
+                        (Flag::AutoKey, true) => theme::KEY_ON,
+                        (_, true) => c.text,
+                        (_, false) => c.text_dim,
+                    };
+                    match (flag, lit) {
+                        (Flag::On, true) => {
+                            painter.circle_filled(at, 4.0, tint);
+                        }
+                        (Flag::On, false) => {
+                            painter.circle_stroke(at, 4.0, Stroke::new(1.0, tint));
+                        }
+                        (Flag::Locked, true) => paint_glyph(&painter, at, icon::LOCK_SIMPLE, tint),
+                        (Flag::Locked, false) => {
+                            paint_glyph(&painter, at, icon::LOCK_SIMPLE_OPEN, tint)
+                        }
+                        (Flag::AutoKey, _) => paint_glyph(&painter, at, icon::DIAMOND, tint),
+                    }
+                    if b.clicked() {
+                        act = Some(KeyAct::Node(n, flag, !lit));
+                    }
+                }
+            }
             let keys = keys_of(g, track);
             let x_of = |f: i64| map.x(span.time(f));
             let hit = |p: Pos2| {
@@ -445,18 +568,8 @@ impl Workspace {
                 if !lane.x_range().contains(at.x) {
                     continue;
                 }
-                let on = state.picked
-                    == Some(Picked {
-                        node: track,
-                        frame: f,
-                    })
-                    || (track.is_some()
-                        && state.picked
-                            == Some(Picked {
-                                node: None,
-                                frame: f,
-                            }));
-                let color = if on { c.accent } else { c.text };
+                let on = state.shows(track, f);
+                let color = if on { PICKED } else { c.text };
                 match moving {
                     true => diamond(&painter, at, if on { 6.0 } else { 4.5 }, color),
                     false => dot(&painter, at, if on { 5.0 } else { 3.5 }, color),
@@ -473,37 +586,76 @@ impl Workspace {
                 true => ui.input(|i| i.pointer.press_origin()).or(pointer),
                 false => None,
             };
-            if let Some(o) = origin
-                && let Some(f) = hit(o)
+            if let Some(o) = origin {
+                match hit(o) {
+                    Some(f) => {
+                        let picked = Picked {
+                            node: track,
+                            frame: f,
+                        };
+                        if !keys_state.picked.contains(&picked) {
+                            keys_state.picked = vec![picked];
+                        }
+                        keys_state.dragging = Some((picked, o.x));
+                    }
+                    None => {
+                        keys_state.picked.clear();
+                        keys_state.band = Some((track, o.x));
+                    }
+                }
+            }
+            if let Some((_, from)) = keys_state.band.filter(|(t, _)| *t == track)
+                && let Some(p) = pointer
             {
-                let picked = Picked {
-                    node: track,
-                    frame: f,
-                };
-                keys_state.picked = Some(picked);
-                keys_state.dragging = Some((picked, o.x));
+                let (a, b) = (from.min(p.x), from.max(p.x));
+                let band = Rect::from_min_max(
+                    pos2(a.max(lane.left()), row.top() + 1.0),
+                    pos2(b.min(lane.right()), row.bottom() - 1.0),
+                );
+                painter.rect(
+                    band,
+                    0.0,
+                    BAND,
+                    Stroke::new(1.0, c.text_dim),
+                    egui::StrokeKind::Inside,
+                );
+                if r.drag_stopped() {
+                    keys_state.band = None;
+                    keys_state.picked = (keys.iter())
+                        .filter(|(f, _)| (a..=b).contains(&x_of(*f)))
+                        .map(|(f, _)| Picked {
+                            node: track,
+                            frame: *f,
+                        })
+                        .collect();
+                }
             }
             if let Some((d, from)) = keys_state.dragging.filter(|(d, _)| d.node == track)
                 && let Some(p) = pointer
             {
-                let x = x_of(d.frame) + p.x - from;
-                let ghost = pos2(x.clamp(lane.left(), lane.right()), row.center().y);
-                diamond(&painter, ghost, 4.0, c.accent.gamma_multiply(0.5));
+                let moving = keys_state.frames_in(track);
+                for &f in &moving {
+                    let x = x_of(f) + p.x - from;
+                    let ghost = pos2(x.clamp(lane.left(), lane.right()), row.center().y);
+                    diamond(&painter, ghost, 4.0, PICKED.gamma_multiply(0.5));
+                }
                 if r.drag_stopped() {
                     keys_state.dragging = None;
                     let by = (map.t(p.x) - map.t(from)).round() as i64;
                     if by != 0 {
-                        let more = with_node(d.node, json!({ "frames": [d.frame], "by": by }));
+                        let more = with_node(d.node, json!({ "frames": moving, "by": by }));
                         self.send("grade.keys.move", target(of, more));
                     }
                 }
             }
             let keys_state = &mut self.effects_page.grade_keys;
             if r.clicked() {
-                keys_state.picked = pointer.and_then(hit).map(|f| Picked {
-                    node: track,
-                    frame: f,
-                });
+                keys_state.picked = (pointer.and_then(hit).into_iter())
+                    .map(|f| Picked {
+                        node: track,
+                        frame: f,
+                    })
+                    .collect();
             }
             if r.secondary_clicked() {
                 keys_state.aim = Some(match pointer.and_then(hit) {
@@ -512,17 +664,21 @@ impl Workspace {
                             node: track,
                             frame: f,
                         };
-                        keys_state.picked = Some(picked);
+                        if !keys_state.picked.contains(&picked) {
+                            keys_state.picked = vec![picked];
+                        }
                         Aim::Key(picked)
                     }
                     None => Aim::Track(track),
                 });
             }
             let aim = keys_state.aim;
+            let frames = keys_state.frames_in(track);
+            let marks = timeline.then(|| has_marks(g, track));
             r.context_menu(|ui| {
                 let chosen = match aim {
-                    Some(Aim::Key(k)) if k.node == track => key_menu(ui, g, k),
-                    Some(Aim::Track(t)) if t == track => track_menu(ui, t),
+                    Some(Aim::Key(k)) if k.node == track => key_menu(ui, g, k, &frames),
+                    Some(Aim::Track(t)) if t == track => track_menu(ui, t, marks),
                     _ => None,
                 };
                 if chosen.is_some() {
@@ -550,14 +706,25 @@ impl Workspace {
                     with_node(node, json!({ "kind": kind, "at": at })),
                 )
             }
-            KeyAct::Kind(k, kind) => (
+            KeyAct::Kind(node, frames, kind) => (
                 "grade.keys.set",
-                with_node(k.node, json!({ "frames": [k.frame], "kind": kind })),
+                with_node(node, json!({ "frames": frames, "kind": kind })),
             ),
-            KeyAct::Delete(k) => (
+            KeyAct::Delete(node, frames) => (
                 "grade.keys.remove",
-                with_node(k.node, json!({ "frames": [k.frame] })),
+                with_node(node, json!({ "frames": frames })),
             ),
+            KeyAct::Marks(node, true) => {
+                ("grade.keys.add", with_node(node, json!({ "edl": true })))
+            }
+            KeyAct::Marks(node, false) => {
+                ("grade.keys.remove", with_node(node, json!({ "edl": true })))
+            }
+            KeyAct::Node(n, flag, on) => {
+                let more = json!({ "node": n, flag.field(): on });
+                self.send("grade.set", clips_target(of, more));
+                return;
+            }
             KeyAct::Attributes(k) => {
                 let key = (g.nodes.iter().zip(1u32..))
                     .filter(|(_, n)| k.node.is_none_or(|m| m == *n))
@@ -607,36 +774,46 @@ impl Workspace {
     }
 }
 
-fn key_menu(ui: &mut Ui, g: &Grade, k: Picked) -> Option<KeyAct> {
+fn key_menu(ui: &mut Ui, g: &Grade, k: Picked, frames: &[i64]) -> Option<KeyAct> {
     let kinds: Vec<bool> = (g.nodes.iter().zip(1u32..))
         .filter(|(_, n)| k.node.is_none_or(|m| m == *n))
-        .filter_map(|(d, _)| d.key_on(k.frame))
+        .flat_map(|(d, _)| frames.iter().filter_map(|f| d.key_on(*f)))
         .map(|key| key.is_static())
         .collect();
     let mut act = None;
     if kinds.iter().any(|s| *s) && ui.button("Change to Dynamic Keyframe").clicked() {
-        act = Some(KeyAct::Kind(k, GradeKeyKind::Dynamic));
+        act = Some(KeyAct::Kind(k.node, frames.to_vec(), GradeKeyKind::Dynamic));
     }
     if kinds.iter().any(|s| !*s) && ui.button("Change to Static Keyframe").clicked() {
-        act = Some(KeyAct::Kind(k, GradeKeyKind::Static));
+        act = Some(KeyAct::Kind(k.node, frames.to_vec(), GradeKeyKind::Static));
     }
     if ui.button("Change Dynamic Attributes").clicked() {
         act = Some(KeyAct::Attributes(k));
     }
     ui.separator();
     if ui.button("Delete Selected Keyframe").clicked() {
-        act = Some(KeyAct::Delete(k));
+        act = Some(KeyAct::Delete(k.node, frames.to_vec()));
     }
     act
 }
 
-fn track_menu(ui: &mut Ui, track: Option<u32>) -> Option<KeyAct> {
+fn track_menu(ui: &mut Ui, track: Option<u32>, marks: Option<bool>) -> Option<KeyAct> {
     let mut act = None;
     if ui.button("Add Static Keyframe").clicked() {
         act = Some(KeyAct::Add(track, GradeKeyKind::Static));
     }
     if ui.button("Add Dynamic Keyframe").clicked() {
         act = Some(KeyAct::Add(track, GradeKeyKind::Dynamic));
+    }
+    if let Some(has) = marks {
+        ui.separator();
+        if ui.button("Add EDL Marks on Tracks").clicked() {
+            act = Some(KeyAct::Marks(track, true));
+        }
+        let delete = ui.add_enabled(has, egui::Button::new("Delete EDL Marks on Tracks"));
+        if delete.clicked() {
+            act = Some(KeyAct::Marks(track, false));
+        }
     }
     act
 }

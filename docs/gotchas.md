@@ -471,6 +471,10 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - `dynamicZoomCenter` (POINTF) is the middle of a box. It is from the middle of the picture, in fractions of the picture, y up.
   - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
   - Resolve writes two keys for each, at −s and 1000 − s. s is the first source frame of the clip, in media without a timecode.
+  - It writes them on a clip with Dynamic Zoom on or off.
+  - A title has an s of 0. Thus its keys are at `0` and `1000`, also on a title later in the timeline.
+    - The six titles of `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` show this, at 24 fps and g = 86400. Each has a source start of 0 and Dynamic Zoom off.
+    - The `dynamicZoomScale` of the first title has the keys 0.8 and 1.0, the default 1.0, and the range 0.01 to 100.
   - For a still, Resolve writes them at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - In media with a timecode, s still counts from the first frame of the media, not from its timecode.
     - A clip from frame 90 of media at 10:00:00:00 has its keys at −90 and 910. Its `source_range` starts at 1080090.
@@ -478,6 +482,32 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
   - Thus `otio::picture` reads and writes the box as it is, with any `scale`.
+- **Resolve's scripting API has no keyframe calls** (Resolve Studio 21.1.1).
+  - No call adds, reads or removes the keyframes of a clip.
+  - A scripted value on a parameter with keyframes changes nothing that Resolve shows or plays.
+  - A script can change the speed, with or without a stretch of the keyframes, and can export and import OTIO.
+  - Thus a measurement sets keyframes in the Inspector and reads them from an OTIO export.
+- **A time in `Key Frames` is a whole frame of the clip** (Resolve Studio 21.1.1, on a 1920×1080 timeline at 30 fps that starts at 01:00:00:00).
+  - It counts the timeline frames from the first frame of the clip.
+  - At speed 1, it is the source frame less the start of the clip's `source_range`.
+  - This is so in media with a timecode too. A key on the second frame of a clip is at `1`.
+  - At any speed, the source frame is the first frame that the clip shows, plus the time times the speed.
+    - At 50%, a key 30 source frames into the clip is at `60`. At 200%, it is at `15`.
+  - A clip that plays backward shows its highest source frame first. Frame f shows that frame less f.
+    - A render of a clip with numbered frames showed this. vidcut plays a reversed clip in the same way.
+    - Thus a key on source frame 239 of a clip that shows 388 first is at `149`.
+    - The time of the file runs against the source. Thus `InBez` and `OutBez` change places.
+  - A speed change that stretches the keyframes keeps each key on its source frame.
+    - On a clip that plays backward, the stretch moves each key by one source frame.
+  - A speed change that does not stretch keeps the numbers in the file. Thus each key stays on its frame of the clip, over another source frame.
+  - Resolve reads a file as written. Times, values and eases come back in its Inspector and in its next export.
+- **X and Y have keyframes of their own** (Resolve Studio 21.1.1).
+  - `transformationZoomX` and `transformationZoomY` each have their own `Key Frames`. So do Pan and Tilt.
+  - A keyframe on Position keys X and Y. A later change of X alone adds a keyframe to X only.
+  - vidcut keys X and Y together. When both axes have keys, `otio::picture` reads them only on the same frames.
+- **With keyframes, `Parameter Value` is not a value of the curve.**
+  - It is not the value at the playhead, and not the value of the last keyframe.
+  - An import reads the keyframes.
 - **Resolve reads a Bezier handle of a keyframe only in its own form.**
   - It writes `"OutBez": {"OutBez": [20.0, 0.0], "Variant Type": "POINTF"}`, and `InBez` in the same way.
   - The first number is the time from the keyframe in frames. The second is a value in the units of the parameter.
@@ -664,6 +694,11 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
   - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+- **Delete removes only one of the selected points of a curve window.**
+  - The manual says that a Shift drag box selects points to delete them all at once (p. 3274).
+  - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.
+  - Two runs gave the same result.
+  - vidcut does not copy this fault. Delete removes each selected point ([spec §8.23](spec.md#823-windows-pp-32653279)).
 
 ## Resolve's renders
 
