@@ -5318,6 +5318,30 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: I near the end of a clip goes to the start of that clip, not to the nearest clip start.
   - Measured: with clips on V1 and V2 under the playhead, I and O snap to the V2 clip. In a gap, they set no mark.
   - Measured: Add to Render Queue leaves the playhead. After a render, the playhead is at the In.
+- **Thumbnail timeline** (pp. 3106–3111, 4097, 4099, 4128–4129):
+  - The Thumbnail timeline is over the timeline of the page. The Clips button hides or shows it (p. 4097; measured).
+  - It matches the Thumbnail timeline of the Color page (p. 4099).
+  - Each clip is one thumbnail with a number, whatever its duration (p. 3106).
+  - The clips are numbered by the place of their first frame, from left to right, on all video tracks (p. 3110).
+  - Measured: of clips that start together, the clip that ends first goes first. Of clips that also end together, the clip of the lower track goes first.
+  - Four cases were measured. In one, V2 and V3 of 48 frames went before V1 of 199. In another, the order was V1 of 24, V3 of 48, then V2 of 72.
+  - Measured: generators, titles and adjustment clips are not in it. A compound clip is in it.
+  - Above each thumbnail are the clip number, the source timecode of the first frame of the clip and its track (p. 3110).
+  - Measured: the timecode is the start timecode of the media plus the source In. Media with no timecode starts at 00:00:00:00, and so does a compound clip.
+  - The thumbnails show the media as it is graded (p. 3109).
+  - Measured: the thumbnail is the first frame of the clip, with its grade. It does not follow the playhead.
+  - Under each thumbnail is the codec by default. A double-click on that text cycles the codec, the clip name and the version (pp. 3110–3111).
+  - Measured: the codec is the Video Codec of the media pool, like "H.264 High L4.0" or "Apple ProRes 422". An EXR sequence shows "EXR", and a compound clip "Compound Clip".
+  - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
+  - Measured: of the clips at the playhead, the clip of the top track has the outline. Its text is white, and the text of the others is grey.
+  - The clips of a disabled track are not in the Thumbnail timeline (p. 3107; measured).
+  - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
+  - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
+  - Measured: the menu has only these three items, also on a compound clip.
+  - Measured: Mark In sets the In at the first frame of the clip, and Mark Out sets the Out at its last frame. Each switches Entire Timeline to In/Out Range.
+  - Measured: Mark In alone leaves the Out at the end of the timeline.
+  - Measured: Render This Clip sets the In and the Out at the first and the last frame, and switches to In/Out Range. It adds no job.
+  - Measured: with Individual clips, Render This Clip does the same, and Individual clips stays.
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5412,6 +5436,20 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Render Speed limits the export to that number of frames in each second. Maximum gives no limit. The menu has the measured numbers.
   - `render_speed` of the settings takes each number from 1. Left out, it is Maximum.
   - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
+  - The Thumbnail timeline is over the timeline of the page. Clips in the toolbar of the timeline hides or shows it. `gui.page` with `clips` does the same.
+  - It has a picture of each clip of the video tracks that are on, in the order of their first frames. Generators, titles and adjustment clips are not in it.
+  - Of clips that start together, the clip that ends first goes first. Of clips that also end together, the clip of the lower track goes first.
+  - Above each picture are the number of the clip, the source timecode of its first frame and its track.
+  - The timecode is the start timecode of the media plus the source In. Without a start timecode, and for a compound clip, it starts at 00:00:00:00.
+  - The picture is the first frame of the clip, with the grade of the clip. The clip's transform and the timeline grade are not in it.
+  - A change of the grade makes the picture again. A compound clip has no picture.
+  - Under each picture is the codec of the clip, or its name. A double-click on that text changes it for all clips. `clip_label` of `gui.page` sets it.
+  - The codec is the one that the media pool shows. A compound clip shows "Compound Clip".
+  - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
+  - The text under the clip at the playhead is white. The text under the other clips is grey.
+  - A click on a picture moves the playhead to the first frame of the clip.
+  - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
+  - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
