@@ -5633,7 +5633,7 @@ pub struct Merge {
     pub alpha_gain: Option<f64>,
     /// How much less the alpha of the foreground covers the background,
     /// from 0 to 1. The foreground is still added in full. Only a `normal`
-    /// merge uses it. Usual: 0.
+    /// merge with the `over` operator uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
     /// The width that the center is shown in: its x shows as x × this

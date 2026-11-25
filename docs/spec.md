@@ -3095,7 +3095,8 @@ With a mode other than Normal (measured in Resolve Studio 21.2):
 
 - Subtractive/Additive and Burn In do not act. A value set under Normal changes nothing.
 - Gain multiplies F and fa. Then the sum of the mode follows. With Normal, Alpha Gain multiplies only fa.
-- vidcut: a Burn In set under Over also acts with another Operator of Normal. This case is not measured.
+
+With Normal, Burn In acts only with the Over operator (measured in Resolve Studio 21.2). With another Operator, a value set under Over changes nothing.
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
