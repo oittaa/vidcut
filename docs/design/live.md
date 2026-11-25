@@ -919,6 +919,8 @@ Keys:
 
 - The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
 - `Bindings` joins the table, `Preferences.keys` and the key set in force. It gives the keys of an action and the owner of a key (`Combo`).
+  - A key file can give one key to two actions of one level. `Bindings::owner` then gives the first in the table, and `Bindings::owners` gives all.
+  - `Bindings::conflicts` lists these keys, and `Bindings::conflicting` gives the keys of one action that another action has.
 - `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
 - Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.
 
@@ -953,7 +955,8 @@ The Keyboard Customization window:
   - `KeySetsUi::save` sends `keys.save` with the keys of the draft. For a pick of a set alone, it sends `keys.use`.
   - The draft keeps a limited list of earlier drafts. `draft_keys` takes Undo and Redo from the events of the window before they go to the main window.
   - `dialog::held_window` keeps the window open on a close request while there is a draft. Then `key_sets::close_row` asks "Discard Changes?".
-- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. Both show the keys of `KeySetsUi::shown`. The list asks `Bindings::owner` at each `Panel`.
+- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. Both show the keys of `KeySetsUi::shown`. The list asks `Bindings::owners` at each `Panel`.
+- A row whose action has a key of another action shows a warning button (`conflict_button`). A click selects that key with `KeyboardUi::select`.
 - `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame

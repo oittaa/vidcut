@@ -5742,6 +5742,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
+  - A key file can give one key to two actions of one level. The import keeps the key on both, as Resolve does (measured, case 27).
+    - The row of each such action has a warning mark (p. 125). Its tooltip names the other actions.
+    - A click on the mark selects that key on the on-screen keyboard. The Active Key list then shows all its actions (p. 125).
+    - `keys.list` gives these keys in `conflicts`.
+    - A press of such a key does the first of these actions in the table. Not measured (case 28 of shortcuts-resolve-runs.md).
+    - The manual tells of a warning dialog on such a press, with the key and the names of the actions (p. 126).
   - A key works at one level: the application, or a panel (pp. 123–124). The keys of the panel that has the focus go first. A key with no action there does its application action.
   - The Media Pool has no level of its own. Its Remove Clips command is the Delete command of the application, with the same keys (measured).
   - A click in the Media tab gives the Media Pool the focus, and a click in another place takes the focus away.
@@ -5805,6 +5811,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A file without an import line lists all commands. A command that it leaves out has no key, as in a built-in preset (measured, case 25 of shortcuts-resolve-runs.md).
     - An import of such a file does the same. The keys of the Fusion page stay (measured, case 27).
     - Thus the actions that have no command of Resolve keep their keys. The base of the new set is vidcut's own set.
+  - An action that has a command of Resolve and no line keeps the keys of the set that the import line names (measured, case 27).
+    - It also keeps a key that a line gives to another command.
+    - `keys.import` lists each such key in `conflicts`, with its level and its actions. The import asks no question (measured).
   - An import leaves out these lines and keys. `keys.import` names them in its answer.
     - The commands that vidcut does not have.
     - The keypad keys, which vidcut can't tell apart ([todo](todo/egui-keypad-keys.md)).
@@ -5818,8 +5827,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
   - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
   - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
+  - The file of the Avid Media Composer preset gives `V` to Insert and `v` to Select Nearest Edit Point. The set gives V only to Smart Insert.
+    - An import of that file keeps V on Smart Insert and on Nearest Cut. What Resolve shows is not measured (case 28 g, [todo](todo/shortcuts.md)).
   - The actions that have no command of Resolve keep their keys from the table, as the next rule tells.
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
+    - A set also lists each action that has a key of another listed action of its level. Thus both actions keep that key.
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
   - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.

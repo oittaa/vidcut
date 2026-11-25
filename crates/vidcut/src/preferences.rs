@@ -292,6 +292,9 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
         Keys::Hold(first, then) => (None, Vec::new(), false, vec![first, then]),
         Keys::Pointer(_) => (None, Vec::new(), false, Vec::new()),
     };
+    let conflicts: Vec<String> = action
+        .map(|a| b.conflicting(a).iter().map(Combo::shown).collect())
+        .unwrap_or_default();
     json!({
         "group": s.group,
         "group_title": s.group.title(),
@@ -301,6 +304,7 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
         "keys": b.row(s).into_iter().map(shown).collect::<Vec<_>>(),
         "default_keys": default_keys,
         "custom": custom,
+        "conflicts": conflicts,
         "follows": follows,
         "explanation": s.explanation.map(|e| b.explain(e)),
     })
@@ -470,6 +474,12 @@ pub fn keys_import(
     out["path"] = json!(path);
     out["unknown_commands"] = json!(read.unknown);
     out["unusable_keys"] = json!(read.unusable);
+    let conflicts: Vec<Value> = read
+        .conflicts
+        .iter()
+        .map(|c| json!({ "key": c.combo.shown(), "level": c.panel.name(), "actions": c.actions }))
+        .collect();
+    out["conflicts"] = json!(conflicts);
     Ok(out)
 }
 

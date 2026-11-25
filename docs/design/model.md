@@ -1042,8 +1042,11 @@ Requests:
     - `key_file::text` names the base, and writes only the commands whose keys differ from the base. Why: the other editor then keeps the keys of that base for the commands that vidcut does not have.
     - `key_file` has a table of the commands of the other editor and the action of each. An action with two commands splits its keys by the default keys of each command.
     - An action that has no command is in a comment line of vidcut. Why: the other editor skips comments, and vidcut keeps all keys of its own files.
-    - `key_file::parse` starts from the set that the file names, applies the listed commands, and keeps only the changes from the table. Thus the free-key rule of the set applies.
+    - `key_file::parse` starts from the set that the file names, applies the listed commands, and keeps only the changes from the table.
+    - An action with a command and no line keeps the keys of that set, also a key that a line gives to another action. Then the set lists both actions, and `Bindings::conflicts` gives the key.
+    - The actions without a command follow the free-key rule of the set. Why: the other editor does not know them, as a later version of vidcut adds actions.
     - A file that names no set starts with no key for each command. Thus an export of a built-in preset gives the same keys as the built-in set.
+    - The Avid Media Composer file is the one exception. It gives V to two commands, and the import keeps V on both.
   - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
   - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
   - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.
