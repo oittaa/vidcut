@@ -10,7 +10,7 @@ use crate::model::{
     EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow,
     GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite,
     ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
+    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
     ShadingElement, Sharpen, Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind,
     Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
@@ -1163,6 +1163,7 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         filter: m.filter.filter(|f| *f != BlurFilter::default()),
         passes: m.passes.filter(|v| *v != Blur::PASSES),
         border_width: m.border_width.filter(|v| *v != 0.0),
+        paint_mode: m.paint_mode.filter(|p| *p != PaintMode::default()),
         center: m.center.filter(|c| *c != Mask::MIDDLE),
         width: m.width.filter(|v| *v != Mask::SIZE),
         height: m.height.filter(|v| *v != Mask::SIZE),

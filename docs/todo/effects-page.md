@@ -15,9 +15,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - Blend, Process When Blend Is 0.0, the channels, Apply Mask Inverted, Multiply by Mask, Motion Blur, Use GPU, Comments and Scripts.
   - vidcut shows Blend and Multiply by Mask in the one list of controls.
 - **Output Size of a mask** (pp. 2500–2501, [spec](../spec.md#the-masks)): Default or Custom, with the rows of Custom.
-- **Paint Mode of a mask:** it has 11 modes, and Merge is the usual mode (p. 2474). The spec gives the measured forms ([spec](../spec.md#the-masks)).
-  - Replace follows the manual: the areas where the new mask is 0 keep the input mask (p. 2465, [gotchas](../gotchas.md#resolves-fusion-page)).
-  - vidcut always uses Merge.
 - **Border Style of a rectangle:** the joins, the ends, Position and Length ([spec](../spec.md#the-masks)). vidcut has none.
 - **Fit Mask of a picture on an effect mask** (p. 2465, [spec](../spec.md#the-masks)): Crop, Stretch, Inside, Width, Height and Outside. It needs pictures of other sizes, as the Image tab of the generators gives ([todo](generator-nodes.md)).
   - The reads of Resolve Studio 21.2 are in section M17 R4c of `fixtures/nodes/NOTES.md` in the test data.

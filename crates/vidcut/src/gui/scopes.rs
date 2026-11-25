@@ -64,6 +64,13 @@ impl Workspace {
                     self.send("viewer.scopes", json!({ "scale": scale }));
                 }
             }
+            ui.separator();
+            let video = self.snap.scopes.video_levels;
+            for (on, name) in [(true, "Video Level Scopes"), (false, "Data Level Scopes")] {
+                if ui.radio(video == on, name).clicked() && video != on {
+                    self.send("viewer.scopes", json!({ "video_levels": on }));
+                }
+            }
         });
     }
 
@@ -99,7 +106,7 @@ impl Workspace {
         let colors = self.scope_pictures.colors;
         let dim = theme::colors().text_dim;
         let font = FontId::proportional(MARK_FONT);
-        let scale = self.snap.scopes.scale;
+        let prefs = self.snap.scopes;
         for &(scope, rect) in plots {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
@@ -120,7 +127,7 @@ impl Workspace {
                 (rect.width() * ppp).round() as u32,
                 (rect.height() * ppp).round() as u32,
             );
-            for mark in marks(scope, (colors, scale), size.max((1, 1))) {
+            for mark in marks(scope, (colors, prefs), size.max((1, 1))) {
                 let at = rect.min + vec2(mark.at[0] * rect.width(), mark.at[1] * rect.height());
                 let (at, align) = match scope {
                     Scope::Vectorscope => {

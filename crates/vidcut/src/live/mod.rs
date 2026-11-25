@@ -3078,12 +3078,14 @@ impl Live {
                 parade,
                 vectorscope,
                 scale,
+                video_levels,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
                     parade,
                     vectorscope,
                     scale,
+                    video_levels,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {

@@ -20,7 +20,6 @@ This file lists what vidcut does not have yet. The page numbers are those of the
 
 In order of value:
 
-- **Select All and Deselect All.** Ctrl+A in the Keyframes tab or the keyframe tray selects all the keyframes of the shown item (p. 1262). Ctrl+Shift+A clears that selection. Now both keys act on the clips of the timeline.
 - **Keyframe buttons on the sections.** The Transform, Crop, Composite and Audio sections get a Keyframe button between Previous and Next. Resolve has one on each group, and it keys each value of the group (p. 747; [§8.15](../spec.md#815-transform-and-crop-pp-766768)).
 - **The motion path.** With the Transform handles on, the viewer shows the path of the Position keyframes (pp. 1252–1254). It has a point on each keyframe and a dot on each frame. A drag on a point changes its keyframe. Its right-click menu has Delete Keyframe.
   - Thus the user sees the motion in the picture.

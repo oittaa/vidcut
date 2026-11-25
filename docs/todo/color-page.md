@@ -38,7 +38,5 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - Measure the node numbers after Alt+P, Alt+K and a delete in Resolve, then match them ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
   - The spec has measured cases for a serial node, a node before, an outside node, a layer mixer and a new link.
   - After a delete or an Extract, each moved link keeps the order of the link into the removed node. No measurement shows that this is correct.
-- The windows ([spec §8.23](../spec.md#823-windows-pp-32653279)):
-  - Shift and a drag box select points of a curve, to move, delete or scale them together (p. 3274, measured).
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
 - The Qualifier controls of the Key palette (p. 3436).

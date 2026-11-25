@@ -304,12 +304,14 @@ pub fn run_with(
             parade,
             vectorscope,
             scale,
+            video_levels,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
                 parade: *parade,
                 vectorscope: *vectorscope,
                 scale: *scale,
+                video_levels: *video_levels,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }
