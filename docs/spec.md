@@ -711,7 +711,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
   - vidcut: the View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
   - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
-  - vidcut: the Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - The Waveform has the modes Y, CbCr and RGB (p. 3103).
+    - Y shows luma. CbCr shows the two color differences over one another. RGB shows red, green and blue over one another (p. 3097).
+    - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
+  - The Parade has the modes RGB, YRGB and YCbCr (p. 3102). It shows the graphs of a mode side by side.
+  - vidcut: Waveform Options and Parade Options in the scopes menu set the modes. `viewer.scopes` sets them too.
+  - vidcut: Y is the default of the Waveform, and RGB is the default of the Parade. The defaults of Resolve are not measured.
+  - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
+    - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
+  - vidcut: a color difference of zero is at the middle of the scale, code 512.
   - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.

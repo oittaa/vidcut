@@ -3079,6 +3079,11 @@ impl Live {
                 vectorscope,
                 scale,
                 video_levels,
+                waveform_mode,
+                waveform_red,
+                waveform_green,
+                waveform_blue,
+                parade_mode,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
@@ -3086,6 +3091,11 @@ impl Live {
                     vectorscope,
                     scale,
                     video_levels,
+                    waveform_mode,
+                    waveform_red,
+                    waveform_green,
+                    waveform_blue,
+                    parade_mode,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {

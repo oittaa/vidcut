@@ -268,7 +268,7 @@ pub struct ViewerPrefs {
 
 /// The scopes that the viewer shows. Each reads the picture of the viewer,
 /// in the timeline color space. A scope that is off does no work.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Scopes {
     /// The luma of each column of the picture.
@@ -283,6 +283,85 @@ pub struct Scopes {
     /// 64 and white at code 940 of the 10-bit scale. Off: Data Level
     /// Scopes, black at 0 and white at 1023. The picture does not change.
     pub video_levels: bool,
+    /// What the Waveform shows.
+    pub waveform_mode: WaveformMode,
+    /// In RGB mode, the Waveform shows red.
+    pub waveform_red: bool,
+    /// In RGB mode, the Waveform shows green.
+    pub waveform_green: bool,
+    /// In RGB mode, the Waveform shows blue.
+    pub waveform_blue: bool,
+    /// What the Parade shows side by side.
+    pub parade_mode: ParadeMode,
+}
+
+impl Default for Scopes {
+    fn default() -> Self {
+        Self {
+            waveform: false,
+            parade: false,
+            vectorscope: false,
+            scale: ScopeScale::default(),
+            video_levels: false,
+            waveform_mode: WaveformMode::default(),
+            waveform_red: true,
+            waveform_green: true,
+            waveform_blue: true,
+            parade_mode: ParadeMode::default(),
+        }
+    }
+}
+
+/// What the Waveform shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WaveformMode {
+    /// Luma.
+    #[default]
+    Y,
+    /// The two color differences over one another. No color difference is
+    /// at the middle of the scale.
+    Cbcr,
+    /// Red, green and blue over one another, each in its color.
+    Rgb,
+}
+
+impl WaveformMode {
+    pub const ALL: [Self; 3] = [Self::Y, Self::Cbcr, Self::Rgb];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Y => "Y",
+            Self::Cbcr => "CbCr",
+            Self::Rgb => "RGB",
+        }
+    }
+}
+
+/// What the Parade shows side by side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ParadeMode {
+    /// Red, green and blue.
+    #[default]
+    Rgb,
+    /// Luma, red, green and blue.
+    Yrgb,
+    /// Luma and the two color differences. No color difference is at the
+    /// middle of the scale.
+    Ycbcr,
+}
+
+impl ParadeMode {
+    pub const ALL: [Self; 3] = [Self::Rgb, Self::Yrgb, Self::Ycbcr];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rgb => "RGB",
+            Self::Yrgb => "YRGB",
+            Self::Ycbcr => "YCbCr",
+        }
+    }
 }
 
 /// The scale of the Waveform and the Parade. Each one spans the full range
@@ -364,6 +443,11 @@ impl Scopes {
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
             scale: patch.scale.unwrap_or(self.scale),
             video_levels: patch.video_levels.unwrap_or(self.video_levels),
+            waveform_mode: patch.waveform_mode.unwrap_or(self.waveform_mode),
+            waveform_red: patch.waveform_red.unwrap_or(self.waveform_red),
+            waveform_green: patch.waveform_green.unwrap_or(self.waveform_green),
+            waveform_blue: patch.waveform_blue.unwrap_or(self.waveform_blue),
+            parade_mode: patch.parade_mode.unwrap_or(self.parade_mode),
         }
     }
 }
@@ -382,6 +466,16 @@ pub struct ScopesPatch {
     pub scale: Option<ScopeScale>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_levels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_mode: Option<WaveformMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_red: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_green: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_blue: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parade_mode: Option<ParadeMode>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.

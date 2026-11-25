@@ -388,6 +388,10 @@ What they read:
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):
 
 - A compute pass adds one to a counter for each pixel of the canvas (`hits`). There is one entry point for each `Scope`: `waveform`, `parade` and `vectorscope`.
+  - `waveform` reads its mode from `WaveformMode`. In RGB mode, the counters have three planes, one for each color (`planes`). The other modes have one plane.
+  - `parade` puts three or four sections side by side (`sections`). `ParadeMode` gives the value of each section (`parade_value`).
+  - A color difference of zero is at the middle of the scale (`shown_difference`).
+  - A change of the count of planes makes the `Plot` again.
 - A render pass then paints the counters into a `Target` of the scope's own size (`fs`).
   - The brightness is the square root of the count, so that a thin trace still shows.
   - One column of a scope can take more columns of the canvas than the next one. `evened` scales each count for that. Thus the trace has no stripes.

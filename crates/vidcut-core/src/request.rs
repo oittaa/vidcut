@@ -4385,6 +4385,21 @@ pub enum Request {
         /// `false` is Data Level Scopes, the default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         video_levels: Option<bool>,
+        /// What the Waveform shows: `y`, `cbcr` or `rgb`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_mode: Option<crate::preferences::WaveformMode>,
+        /// In RGB mode, the Waveform shows red.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_red: Option<bool>,
+        /// In RGB mode, the Waveform shows green.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_green: Option<bool>,
+        /// In RGB mode, the Waveform shows blue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_blue: Option<bool>,
+        /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parade_mode: Option<crate::preferences::ParadeMode>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
