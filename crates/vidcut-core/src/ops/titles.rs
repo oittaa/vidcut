@@ -2,8 +2,9 @@ use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title, TitleAlign,
-    TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle, Track, TrackKind,
+    Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, SubtitleBackground,
+    Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle,
+    Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -23,7 +24,8 @@ const SHAPED: &str = "a background shape needs a background";
 const SHAPE_SIZE: &str = "a background's width and height are from 0 to 2";
 const SHAPE_CENTER: &str = "a background's center is from -4 to 4";
 const SHAPE_CORNER: &str = "a background's corner is from 0 to 1";
-const SHAPE_OUTLINE: &str = "a background's outline width is from 0 to 30";
+const SHAPE_OUTLINE: &str = "a background's outline width is whole pixels, from 0 to 30";
+const BOX_OPACITY: &str = "a title's background opacity is in steps of 0.01, from 0 to 1";
 const SCROLL_SPACED: &str = "a scroll has no line spacing, tracking or case";
 const POSITION_HANDLED: &str =
     "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
@@ -159,7 +161,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         case: s.case.filter(|c| *c != TitleCase::Mixed),
         color: checked_color(s.color.as_deref(), "title")?,
         outline: checked_outline(s.outline.as_ref())?,
-        background: checked_background(s.background.as_ref())?,
+        background: checked_box(s.background.as_ref())?,
         shape: checked_shape(s)?,
         shadow: s.shadow.as_ref().map(checked_shadow).transpose()?,
     };
@@ -179,6 +181,18 @@ pub fn checked(t: &Title) -> Result<Title> {
         rotation_keys: t.rotation_keys.clone(),
         upper,
     })
+}
+
+fn checked_box(b: Option<&SubtitleBackground>) -> Result<Option<SubtitleBackground>> {
+    let b = checked_background(b)?;
+    let hundredths = |o: f64| (o * 100.0 - (o * 100.0).round()).abs() < 1e-9;
+    if b.as_ref()
+        .and_then(|b| b.opacity)
+        .is_some_and(|o| !hundredths(o))
+    {
+        return Err(Error::invalid(BOX_OPACITY));
+    }
+    Ok(b)
 }
 
 fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
@@ -202,9 +216,9 @@ fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
     if !shape.corner.is_none_or(|v| within(v, 0.0, 1.0)) {
         return Err(Error::invalid(SHAPE_CORNER));
     }
-    if !shape
+    if shape
         .outline_width
-        .is_none_or(|v| within(v, 0.0, Title::BOX_MOST_OUTLINE))
+        .is_some_and(|v| v > Title::BOX_MOST_OUTLINE)
     {
         return Err(Error::invalid(SHAPE_OUTLINE));
     }
@@ -213,7 +227,7 @@ fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
         center: shape.center.filter(|c| *c != [0.0, 0.0]),
         corner: shape.corner,
         outline_color: checked_color(shape.outline_color.as_deref(), "background outline")?,
-        outline_width: shape.outline_width.filter(|v| *v > 0.0),
+        outline_width: shape.outline_width.filter(|v| *v > 0),
     }))
 }
 
