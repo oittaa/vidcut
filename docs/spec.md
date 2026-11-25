@@ -728,8 +728,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - It has the modes RGB and YRGB (p. 3104). Waveform Scale Style also sets its scale (p. 3093).
     - vidcut: it has one band for each channel, from top to bottom. Each band fills the area under its curve in its color.
     - vidcut: the labels of the scale are at the top. Video Level Scopes moves its values as in the Waveform.
-    - vidcut: a bin with four times the mean count fills its band. Resolve's Gain slider sets the height (p. 3104).
-    - vidcut: Histogram Options in the scopes menu sets the mode. RGB is the default. The default of Resolve is not measured.
+    - The height of a bin is linear in its share of the pixels. At the default Gain, a bin with 1/64 of the pixels fills its band (measured in Resolve Studio 21.2).
+    - A taller bin is cut at the top of its band. The Gain slider sets the height (p. 3104).
+    - vidcut: a bin is one column of the scope. The count of bins in Resolve is not measured.
+    - RGB is the default (measured). vidcut: Histogram Options in the scopes menu sets the mode.
   - Waveform Scale Style sets the scale of the Waveform, the Parade and the Histogram (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
