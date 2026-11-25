@@ -3058,6 +3058,10 @@ The transform of the foreground (pp. 2213, 2218):
 - Flip Horizontal mirrors the foreground left to right. Flip Vertical mirrors it top to bottom. Both are off.
 - The order is the flip, Size, Angle and then the move to Center. Each acts about the middle of the foreground.
 - Invert Transform: off. On, the Merge uses the inverse of its transform (p. 2218).
+  - On, a point q of the foreground goes to F × R⁻¹ × (q − c) / s of the background. Thus the flip acts last.
+  - q, c and the result are in pixels from the middle of the frame, with y up. The foreground has the size of the frame.
+  - c is the Center, s is the Size, R turns by the Angle and F is the flip.
+  - Example: Center (0.7, 0.6), Size 0.5 and Angle 30 at 1920 × 1080. The point (96, 54) goes to pixel (407.17, 345.53), with y down.
 - Filter Method: Linear. The foreground is read with a bilinear filter.
 - Edges: Canvas. It sets what is around the foreground (p. 2218):
   - Canvas: clear.
