@@ -224,8 +224,17 @@ flowchart TD
   - It uses the new pictures only. A repeat gets the correction of the frame that it repeats.
   - Each step becomes parts (`parts`): a move, a turn, the log of the scale, a stretch, a shear and the two perspective terms. The path of the camera is the sum of these parts.
     - Why: a sum keeps a steady change on a straight line. A product of the matrices compounds a change of the scale or of the perspective. Then a camera that moves forward gets a path that is not real.
-  - The goal is the path smoothed with Gaussian weights (`smoothed`). At each frame, a straight line goes through the near frames by weighted least squares. Its sigma is Smooth times `SMOOTH_SECS` seconds.
+  - The goal is the path smoothed with Gaussian weights (`smoothed`). At each frame, a straight line goes through the near frames by weighted least squares (`fitted`). Its sigma is Smooth times `SMOOTH_SECS` seconds.
     - Why a line: near an end of the clip, the near frames are on one side only. Their mean lags behind a pan, and the fix becomes large. In the middle of the clip, the line gives the same value as the mean.
+  - A second fit follows fast motion that the camera operator makes, for example a fast pan or the turn of a forward motion.
+    - The first fit gives the speed of the path at each frame.
+    - The second fit weighs each near frame again by its distance from the line through the frame at that speed.
+    - The distance is the mean squared move of the four corners of the picture (`spread`), in units of the picture height.
+    - The weight falls as a Gaussian. Its sigma is Smooth times `SHAKE_RANGE`.
+    - Why: a near frame far from the line is part of a different motion. The first fit takes a fast pan as shake, and its fix then needs a large zoom.
+    - Why the corners: they give one unit for all the parts. A change of the perspective moves the corners as a move does.
+    - `SMOOTH_SECS` and `SHAKE_RANGE` come from 12 measurements of Resolve on seven test clips, at three values of Smooth and two of Cropping Ratio.
+    - With them, the mean zoom of vidcut is within about 10% of the zoom of Resolve in each measurement.
   - The fix of a frame takes the path to the goal (`from_parts`). With Camera Lock, the fix is the inverse of the product of the steps (`locked`). Thus the picture holds the view of the first frame.
   - Cropping Ratio limits the fixes (`limited`). A fix shrinks until the picture keeps that share of its width and height in the frame.
     - The limit is the smallest limit within `NEAR_SECS`, then smoothed. Thus the limit does not jump from frame to frame.

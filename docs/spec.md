@@ -4459,6 +4459,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Stabilize takes less than 5 s for 119 frames of 1080i. Then the button is grey until a value changes.
   - The scripting API has no property of the stabilization.
   - An OpenTimelineIO export keeps nothing of the stabilization.
+  - A higher Smooth gives a larger zoom. Smooth 0.25, 0.5 and 1.0 give a mean zoom of 1.33, 1.50 and 1.67 on a rally clip.
+    - On a crowd clip, they give 1.32, 1.63 and 2.01.
+  - On these two clips, Cropping Ratio 0.25, 0.5 and 0.75 change the zoom by 3% or less.
+    - On a downhill clip with a large correction, Cropping Ratio 0.75 gives a mean zoom of 1.40.
+  - The smoothing follows a fast pan. The crowd clip has pans of more than one picture width in less than 0.5 s. At Smooth 0.25, its zoom stays 1.32.
+  - The smoothing is local in time. The first 150 frames of the crowd clip get the same correction as the first 299 frames, except near the end.
+  - The record is section R14 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.stabilize` analyzes the clip and stores the correction on the clip, with the values that it used.
     - It reads each frame of the file from the In to the Out of the clip.

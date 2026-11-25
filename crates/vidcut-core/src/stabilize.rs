@@ -3,7 +3,8 @@ use std::sync::Arc;
 use crate::analysis::Shake;
 use crate::model::{Stabilized, Stabilizing};
 
-const SMOOTH_SECS: f64 = 2.0;
+const SMOOTH_SECS: f64 = 1.5;
+const SHAKE_RANGE: f64 = 1.2;
 const NEAR_SECS: f64 = 0.5;
 const SEARCH_STEPS: usize = 24;
 const REACH: f64 = 1e-9;
@@ -45,7 +46,13 @@ pub fn steadied(shake: &Shake, values: &Stabilizing, shot: Shot) -> Steadied {
     let fixes = match lock {
         true => locked(&steps),
         false => {
-            let fixes = smoothed(&steps, values.smooth() * SMOOTH_SECS * rate);
+            let smooth = values.smooth();
+            let fixes = smoothed(
+                &steps,
+                smooth * SMOOTH_SECS * rate,
+                smooth * SHAKE_RANGE,
+                aspect,
+            );
             limited(&fixes, values.cropping_ratio(), aspect, rate)
         }
     };
@@ -198,7 +205,7 @@ fn from_parts([x, y, turn, grow, stretch, shear, g, h]: Parts) -> Matrix {
     ]
 }
 
-fn smoothed(steps: &[Matrix], sigma: f64) -> Vec<Matrix> {
+fn smoothed(steps: &[Matrix], sigma: f64, range: f64, aspect: f64) -> Vec<Matrix> {
     let mut path: Vec<Parts> = vec![[0.0; 8]];
     for m in steps {
         let (last, step) = (path[path.len() - 1], parts(m));
@@ -207,6 +214,34 @@ fn smoothed(steps: &[Matrix], sigma: f64) -> Vec<Matrix> {
     if sigma < 0.5 {
         return vec![SAME; path.len()];
     }
+    let (x, y) = (aspect / 2.0, 0.5);
+    let corners = [[-x, -y], [x, -y], [x, y], [-x, y]];
+    let lines = fitted(&path, sigma, |_, _, _| 1.0);
+    let goals = fitted(&path, sigma, |t, at, d| {
+        let off = from_parts(std::array::from_fn(|i| {
+            path[at][i] - path[t][i] - lines[t].1[i] * d
+        }));
+        (-spread(&off, &corners) / (2.0 * range * range)).exp()
+    });
+    (0..path.len())
+        .map(|t| from_parts(std::array::from_fn(|i| goals[t].0[i] - path[t][i])))
+        .collect()
+}
+
+fn spread(m: &Matrix, corners: &[[f64; 2]; 4]) -> f64 {
+    let moves = corners.iter().map(|c| {
+        apply(m, *c).map_or(f64::INFINITY, |[u, v]| {
+            (u - c[0]).powi(2) + (v - c[1]).powi(2)
+        })
+    });
+    moves.sum::<f64>() / corners.len() as f64
+}
+
+fn fitted(
+    path: &[Parts],
+    sigma: f64,
+    weight: impl Fn(usize, usize, f64) -> f64,
+) -> Vec<(Parts, Parts)> {
     let w = weights(sigma);
     let reach = (w.len() / 2) as i64;
     let n = path.len() as i64;
@@ -219,6 +254,7 @@ fn smoothed(steps: &[Matrix], sigma: f64) -> Vec<Matrix> {
                 let at = t + d;
                 if (0..n).contains(&at) {
                     let d = d as f64;
+                    let wk = wk * weight(t as usize, at as usize, d);
                     for (i, v) in path[at as usize].iter().enumerate() {
                         level[i] += wk * v;
                         slope[i] += wk * d * v;
@@ -227,14 +263,15 @@ fn smoothed(steps: &[Matrix], sigma: f64) -> Vec<Matrix> {
                 }
             }
             let det = s0 * s2 - s1 * s1;
-            let here = path[t as usize];
-            from_parts(std::array::from_fn(|i| {
-                let goal = match det > REACH {
-                    true => (s2 * level[i] - s1 * slope[i]) / det,
-                    false => level[i] / s0,
-                };
-                goal - here[i]
-            }))
+            let goal: Parts = std::array::from_fn(|i| match det > REACH {
+                true => (s2 * level[i] - s1 * slope[i]) / det,
+                false => level[i] / s0,
+            });
+            let speed: Parts = std::array::from_fn(|i| match det > REACH {
+                true => (s0 * slope[i] - s1 * level[i]) / det,
+                false => 0.0,
+            });
+            (goal, speed)
         })
         .collect()
 }
