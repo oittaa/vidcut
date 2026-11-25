@@ -5145,9 +5145,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
-  - The keys in force come from one set. The dropdown at the top of the window selects the set, and `keys.use` does the same.
+  - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
   - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set.
-  - The Option menu has Save, Save As New Set…, Export Set and Import Set…. The trash button deletes the set in force.
+  - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124). Export Set and Delete Set list the sets.
+  - vidcut: the Option menu also has Save, under a line.
+  - The trash button deletes the set in force (p. 124). Each delete asks first.
   - Save As New Set… (`keys.save`) saves the keys in force under a name. That set is then in force.
   - Save writes the keys in force into the user's set in force. A built-in set does not change.
   - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force.
