@@ -5418,15 +5418,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
-  - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
-  - With changes, a pick of another set asks first, because the changes are lost. Not measured (case 15 of shortcuts-resolve-runs.md).
-  - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124). Export Set and Delete Set list the sets.
+  - A change of a key changes the keys in force at once ([todo](todo/shortcuts.md)). The dropdown then shows "*" after the name of the set (measured).
+  - A changed key has a button that puts back the key of the set (measured).
+  - With changes, a pick of another set asks "Discard Changes?", with Cancel and Discard. Cancel has the focus (measured).
+  - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124).
+  - Export Set lists all the sets. Delete Set lists the user's sets, and it is gray when the user has no set (measured).
   - vidcut: the Option menu also has Save, under a line.
-  - The trash button deletes the set in force (p. 124). Each delete asks first.
-  - Save As New Set… (`keys.save`) saves the keys in force under a name. That set is then in force.
-  - Save writes the keys in force into the user's set in force. A built-in set does not change. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
-  - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force. Not measured (case 13 of shortcuts-resolve-runs.md).
-  - A delete of the set in force keeps its keys in force, as changes to vidcut's own set. Not measured (case 14 of shortcuts-resolve-runs.md).
+  - The trash button deletes the set in force (p. 124).
+  - Each delete asks first, for example 'Delete "Run A"?', with Cancel and Delete. Cancel has the focus (measured).
+  - Save As New Set… (`keys.save`) asks for a name. The field holds the name of the set in force (measured).
+  - It saves the keys in force under that name. That set is then in force.
+  - Save writes the keys in force into the user's set in force (measured).
+  - On a changed built-in set, Save asks for a name, as Save As New Set… does. A built-in set does not change (measured).
+  - Export Set (`keys.export`) writes a set to a file ([todo](todo/shortcuts.md)). The file name that it offers is the name of the set and " Keys" (measured).
+  - Import Set… (`keys.import`) adds the set of such a file, with the name of the file. The imported set is then in force (measured).
+  - A delete of the set in force puts vidcut's own set in force, with its keys (measured).
   - Reset puts back the keys of the set in force.
   - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
   - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
