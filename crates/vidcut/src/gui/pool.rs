@@ -8,7 +8,7 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Compound, CompoundTarget, Media, Project};
 use vidcut_core::ops::compound;
-use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
+use vidcut_core::request::{Page, PoolMode, PoolSort, ViewerMode};
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::clip_info::scene_shot_take;
@@ -516,7 +516,9 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 
 impl Workspace {
     pub(super) fn pool_keys(&mut self, ctx: &egui::Context) {
-        if !self.pool_focus || self.project().is_none() {
+        let shown = self.left == LeftTab::Pool
+            && !matches!(self.effects_page.page, Page::Effects | Page::Export);
+        if !self.pool_focus || !shown || self.project().is_none() {
             return;
         }
         let bindings = self.snap.bindings.clone();

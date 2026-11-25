@@ -1176,9 +1176,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
              the main story and never has holes. With volume keyframes selected, it removes only \
-             them. With a dissolve selected, it removes the dissolve and its Cross Fade. After a \
-             click in the Media tab, it removes the selected media from the pool instead, after \
-             asking.",
+             them. With a dissolve selected, it removes the dissolve and its Cross Fade.",
         ),
     ),
     own(
@@ -1371,10 +1369,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Action::SelectAll,
         &["Ctrl+A"],
         "Select all",
-        Some(
-            "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
-             shows.",
-        ),
+        Some("Every clip and subtitle on the timeline."),
     ),
     own(
         Trim,
