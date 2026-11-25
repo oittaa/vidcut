@@ -114,10 +114,15 @@ impl Store {
         if tail.hash == hash {
             return Ok(Editor::on_file(project, file, hash));
         }
-        let Some(last) = last_saved(&file, end) else {
+        let Some(mut last) = last_saved(&file, end) else {
             let why = "its last saved project can't be rebuilt from it".to_string();
             return Ok(Editor::unreadable(project, hash, self.trouble(&why)));
         };
+        for job in &mut last.queue {
+            if let Some(now) = project.queue.iter().find(|j| j.id == job.id) {
+                job.status.clone_from(&now.status);
+            }
+        }
         let mut editor = Editor::on_file(last, file, tail.hash);
         editor.record_external(project);
         Ok(editor)

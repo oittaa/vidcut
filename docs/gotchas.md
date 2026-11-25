@@ -704,7 +704,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 - **The render queue of the Deliver page has no undo.**
   - On the Deliver page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add to Render Queue, the X of a job, a drag in the queue, Clear Rendered and Clear All are not undo steps.
-  - vidcut: each change of the render queue is an undo step ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+  - vidcut: each change of the render queue is an undo step, and Undo works on the Export page ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 - **Paste Attributes puts each keyframe one frame early.**
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.

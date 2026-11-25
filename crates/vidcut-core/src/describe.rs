@@ -709,11 +709,6 @@ pub fn describe_at(
             [] => "Clear the status of the render jobs".into(),
             jobs => format!("Clear the status of render jobs {}", jobs.join(", ")),
         },
-        "render.ended" => format!(
-            "Render job {}: {}",
-            d.text("job"),
-            d.params["status"]["state"].as_str().unwrap_or("?")
-        ),
         _ => {
             let p = compact(params);
             if p.is_empty() {

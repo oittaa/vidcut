@@ -527,8 +527,9 @@ The render queue:
 - When the export job ends, the core records its result with `render.ended` (`queue::status`). Without a GUI, `render.start` renders the jobs one after the other, and records each result.
 - After a job of the open timeline completes, `Live::rendered_from` gives the first frame of its range, and the timeline playhead goes there.
 - Each change of the queue is an undo step. `mutate` sends each request of `Request::in_queue` to `ops::render::change`, as it sends other edits to their ops.
-  - `render.ended` is a step too. Why: each change of the project is in the history, and an undo of the status lets the job render again with no `again`.
-  - An undo step changes only the fields of its edit. Thus an undo of a timeline edit keeps the queue.
+  - `render.ended` is not a step. `Editor::recorded` changes the project and its `rev`, and it adds no step. Why: a render is not an edit of the user. A step for it would clear the redo list, and Ctrl+Z after a render would take back only a status.
+  - An undo step changes only the fields of its edit. Thus an undo of a timeline edit keeps the queue, and an undo of a queue step keeps the status of the other jobs.
+  - When another program changes the project file, `Store::load_text` copies the status of each job into the last saved project. Thus the statuses are not in the step of that change.
   - `apply` refuses these requests in a batch. Why: `Live` and the headless session check the files of `render.add` and `render.update` before the core gets them.
 
 Cancel:

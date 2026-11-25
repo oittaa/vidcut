@@ -839,6 +839,7 @@ impl Editor {
             Request::HistoryUnmark { step } => return self.mark(step, None, dry_run),
             Request::HistoryRestore { branch } => return self.restore(branch, dry_run),
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
+            Request::RenderEnded { .. } => return self.recorded(&request, dry_run),
             _ => {}
         }
         let mut working = self.project.clone();
@@ -1265,6 +1266,24 @@ impl Editor {
             "the undo step makes another project as JSON"
         );
         Ok((project, history, moved))
+    }
+
+    fn recorded(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
+        let mut working = self.project.clone();
+        let result = ops::render::change(&mut working, request)?;
+        let changes = diff(&self.project, &working);
+        if !dry_run {
+            working.rev = self.project.rev + 1;
+            self.project = working;
+        }
+        Ok(Response {
+            rev: self.project.rev,
+            changes,
+            result,
+            dry_run,
+            via: String::new(),
+            warnings: Vec::new(),
+        })
     }
 
     fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {

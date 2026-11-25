@@ -5399,7 +5399,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it.
-  - Each change of the queue is an undo step: Add, Update Job, the X, a drag, a new name, Clear Rendered and Clear All. The status that a render records is an undo step too.
+  - Each change of the queue is an undo step. These are Add, Update Job, the X, a drag, a new name, Clear Rendered, Clear All and Clear Status.
+  - The status that a render records is not an undo step.
+  - On the page, Undo, Redo, History and Ctrl+Z work.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
   - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.

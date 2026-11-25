@@ -4027,8 +4027,8 @@ pub enum Request {
     /// `render.start`. The range is fixed now, in frames of the timeline.
     /// The job goes at the bottom. Returns its `id`. An output file that is
     /// there is an error, unless `overwrite`; then the render writes over it.
-    /// Each change of the queue is an undo step, also the status that a
-    /// render records.
+    /// Each change of the queue is an undo step. The status that a render
+    /// records is not.
     #[serde(rename = "render.add")]
     RenderAdd(ExportParams),
     /// Change a job of the render queue, as Update Job after its pencil on
