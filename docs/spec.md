@@ -5061,12 +5061,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It matches the Thumbnail timeline of the Color page (p. 4099).
   - Each clip is one thumbnail with a number, whatever its duration (p. 3106).
   - The clips are numbered by the place of their first frame, from left to right, on all video tracks (p. 3110).
-  - Measured, one case: three clips start together, on V1 (199 frames), V2 and V3 (48 frames each). The order is V2, V3, V1.
+  - Measured: of clips that start together, the clip that ends first goes first. Of clips that also end together, the clip of the lower track goes first.
+  - Four cases were measured. In one, V2 and V3 of 48 frames went before V1 of 199. In another, the order was V1 of 24, V3 of 48, then V2 of 72.
   - Measured: generators, titles and adjustment clips are not in it. A compound clip is in it.
   - Above each thumbnail are the clip number, the source timecode of the first frame of the clip and its track (p. 3110).
   - Measured: the timecode is the start timecode of the media plus the source In. Media with no timecode starts at 00:00:00:00, and so does a compound clip.
   - The thumbnails show the media as it is graded (p. 3109).
-  - Measured, one case: the thumbnail is the first frame of the clip, with its grade. It does not follow the playhead.
+  - Measured: the thumbnail is the first frame of the clip, with its grade. It does not follow the playhead.
   - Under each thumbnail is the codec by default. A double-click on that text cycles the codec, the clip name and the version (pp. 3110–3111).
   - Measured: the codec is the Video Codec of the media pool, like "H.264 High L4.0" or "Apple ProRes 422". An EXR sequence shows "EXR", and a compound clip "Compound Clip".
   - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
@@ -5074,6 +5075,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The clips of a disabled track are not in the Thumbnail timeline (p. 3107; measured).
   - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
   - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
+  - Measured: the menu has only these three items, also on a compound clip.
+  - Measured: Mark In sets the In at the first frame of the clip, and Mark Out sets the Out at its last frame. Each switches Entire Timeline to In/Out Range.
+  - Measured: Mark In alone leaves the Out at the end of the timeline.
+  - Measured: Render This Clip sets the In and the Out at the first and the last frame, and switches to In/Out Range. It adds no job.
+  - Measured: with Individual clips, Render This Clip does the same, and Individual clips stays.
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5169,7 +5175,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
   - The text under the clip at the playhead is white. The text under the other clips is grey.
   - A click on a picture moves the playhead to the first frame of the clip.
-  - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out after its last frame.
+  - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
