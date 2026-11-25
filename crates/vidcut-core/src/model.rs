@@ -1758,6 +1758,11 @@ pub struct Track {
     /// D76).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<Duck>,
+    /// The equalizer of the track, after its ducking and before its fader.
+    /// Left out when the track has none, as a new track: then it is off,
+    /// with the usual bands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equalizer: Option<TrackEqualizer>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -8411,6 +8416,35 @@ pub struct Equalizer {
     pub bands: [EqBand; 6],
 }
 
+/// The equalizer of a track: six bands, one after the other, with one
+/// response curve for all of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackEqualizer {
+    /// The switch. Off keeps the bands.
+    pub on: bool,
+    /// The response curve of the bands.
+    pub r#type: EqType,
+    /// Bands 1 to 6, from the low end to the high end.
+    pub bands: [EqBand; 6],
+    /// The slope of band 1 as a `hi_pass` filter, in dB per octave: 6, 12,
+    /// 18 or 24.
+    pub hi_pass_slope: u32,
+    /// The slope of band 6 as a `lo_pass` filter, in dB per octave: 6, 12,
+    /// 18 or 24.
+    pub lo_pass_slope: u32,
+}
+
+/// The response curve of a track equalizer: `earth`, the usual one, or one
+/// of three classic mixing desks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EqType {
+    Earth,
+    Air,
+    Ice,
+    Fire,
+}
+
 /// One band of an equalizer.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EqBand {
@@ -8420,10 +8454,11 @@ pub struct EqBand {
     pub kind: EqKind,
     /// Its frequency in Hz, from 20 to 22000.
     pub freq: f64,
-    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
-    /// `hi_shelf` use it.
+    /// Its gain in dB: on a clip from -70 to 24, on a track from -20 to 20.
+    /// Only `bell`, `lo_shelf` and `hi_shelf` use it.
     pub gain: f64,
-    /// Its width, from 0.3 to 100. Only `bell` uses it.
+    /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// `bell` uses it, and on a track of the `fire` type the shelves too.
     pub q: f64,
 }
 
@@ -10310,6 +10345,7 @@ impl Track {
             volume_db: 0.0,
             voice_isolation: None,
             duck: None,
+            equalizer: None,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),

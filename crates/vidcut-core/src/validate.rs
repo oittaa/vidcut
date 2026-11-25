@@ -123,6 +123,13 @@ pub fn violations(p: &Project) -> Vec<String> {
         {
             v.push(format!("track {}: {}", t.id, e.message));
         }
+        if let Some(why) = t
+            .equalizer
+            .as_ref()
+            .and_then(crate::equalizer::track::problem)
+        {
+            v.push(format!("track {}: {why}", t.id));
+        }
         for x in &t.transitions {
             if !ids.insert(x.id.as_str()) {
                 v.push(format!("duplicate id {}", x.id));

@@ -490,6 +490,7 @@ mod tests {
             video: Vec::new(),
             audio: Vec::new(),
             ducking: Vec::new(),
+            buses: Vec::new(),
             range: (0, 10),
             name: "keys".into(),
             colors: None,

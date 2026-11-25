@@ -460,7 +460,8 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut track set A2 --duck '{}' --download\n  \
          vidcut track set A2 --duck '{\"sources\":[\"V1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
          vidcut track set A2 --duck '{\"on\":false}'\n  \
-         vidcut track set A2 --duck null",
+         vidcut track set A2 --duck null\n  \
+         vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'",
     ),
     (
         "titles.add",

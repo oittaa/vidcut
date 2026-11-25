@@ -460,6 +460,13 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 - A piece has the `equalizer` of its clip when it changes the sound.
   - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
   - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
+- A track with a heard equalizer gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track and the equalizers of their mix.
+  - The inner tracks of a compound clip get the equalizers of the tracks that hold it (`Inner`). The filters are linear, so each inner track can run them alone.
+  - `AudioMix::bused` mixes the lanes of each bus apart. A `Filter` for each equalizer runs on that mix. Then the bus goes into the mix of the plan.
+  - Why: one filter follows the sound of the track through its cross fades and its gaps.
+  - The lanes of a bus get its peaks after the equalizers, for the meters.
+  - A seek clears the filters. A new plan at the same sample keeps the filters of a bus that did not change.
+- `Curve` gives the biquad stages of a clip equalizer and of a track equalizer (`equalizer::track`). `Filter` and `response_db` take either.
 - A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
   - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
