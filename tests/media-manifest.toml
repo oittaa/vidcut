@@ -1,6 +1,10 @@
 # Real-world test media (never committed). `scripts/fetch-test-media.sh`
 # downloads them into $VIDCUT_TEST_DATA/media/<name>/ (default
 # ~/Downloads/vidcut-tmp/media). sha256 is of the extracted media file.
+# `dir` names a folder in the archive that the clip keeps whole. `file` is one
+# file directly in that folder, and sha256 is of that file. `fetch = "browser"`
+# marks a clip whose server refuses curl: get `url` with a click in a web
+# browser on `page`. The script then unpacks and checks it.
 
 [[clip]]
 name = "bbb-1080p30"
@@ -243,3 +247,108 @@ url = "https://upload.wikimedia.org/wikipedia/commons/d/de/Downhill_footage_take
 license = "CC BY-SA 4.0, Cabblers, Wikimedia Commons"
 purpose = "stabilization: 1080p helmet camera, downhill ride"
 sha256 = "a119bd911d0db52597aaace33a379685f3579c4653232e4c6c4357e1b69ca624"
+
+[[clip]]
+name = "braw-ursa12k"
+file = "A002_05241705_C012.braw"
+url = "https://downloads.blackmagicdesign.com/products/blackmagicursaminipro12k/raw/A002_05241705_C012.braw.zip"
+fetch = "browser"
+page = "https://www.blackmagicdesign.com/products/blackmagicraw"
+license = "Blackmagic Design sample clip, no license given; the page says 'All items on this website are copyright Blackmagic Design Pty. Ltd. 2026, all rights reserved.'"
+purpose = "camera RAW: Blackmagic RAW from an URSA Mini Pro 12K"
+sha256 = "99c6d04ad1e885317e75e96050c5e9c382b6ad17632a63c7ac09019a4cd1d9e5"
+
+[[clip]]
+name = "arriraw-alexa-mini"
+file = "M003C003_161207_R00H.mxf"
+url = "https://f.io/vKDLdo1U"
+fetch = "browser"
+page = "https://www.arri.com/en/learn/camera-systems/camera-sample-footage-reference-image"
+license = "ARRI sample footage, no license given; the page says it is 'created for workflow evaluation purposes'"
+purpose = "camera RAW: ARRIRAW in MXF from an ALEXA Mini (folder M003R00H of the share), with the camera tags"
+sha256 = "d5c53d64de616b4392bc03086969f130e0f072dcc519413ac2f0864f71e914d1"
+
+[[clip]]
+name = "proresraw-ronin4d"
+file = "A003C0011_210922_0000.MOV"
+url = "https://terra-1-g.djicdn.com/851d20f7b9f64838a34cd02351370894/330%20showreel/A003C0011_210922_0000.MOV"
+license = "DJI sample clip from the Ronin 4D page, no license given; the page says 'Copyright © 2026 DJI', all rights reserved"
+purpose = "camera RAW: Apple ProRes RAW, 8192x4320 at 60 fps, with DJI data tracks"
+sha256 = "68cf40c9c930645bbc62f483f0446b4ad77ccb666b8c5c16b2d2e9d194743a9b"
+
+[[clip]]
+name = "cinemadng-inspire3"
+dir = "A006C0032_230328_4U1Q"
+file = "A006C0032_230328_4U1Q_000001.DNG"
+url = "https://terra-1-g.djicdn.com/851d20f7b9f64838a34cd02351370894/630sample/nature051-A006C0032_230328_4U1Q.zip"
+license = "DJI sample clip from the Inspire 3 page, no license given; the page says 'Copyright © 2026 DJI', all rights reserved"
+purpose = "camera RAW: CinemaDNG, a folder of 129 frames at 4K 24 fps"
+sha256 = "5ee2158811d40f70a08666933bacda0a18b072bfebf92602d747f647f83c8237"
+
+[[clip]]
+name = "canon-crm-c50"
+file = "A_0001C058X250107_223214HA_CANON.CRM"
+url = "https://www.canon.co.uk/rich-media/A_0001C058X250107_223214HA_CANON.CRM"
+fetch = "browser"
+page = "https://www.canon-europe.com/video-cameras/eos-c50/"
+license = "Canon sample clip, no license given; the page says 'Copyright 2026. All Rights Reserved.' and links its Terms & Conditions"
+purpose = "camera RAW: Cinema RAW Light LT, 6960x4640 at 25 fps, from an EOS C50"
+sha256 = "2c16b4a8c3ffcf53feefa98dd4b460771b162f747345312467791a5a16742841"
+
+[[clip]]
+name = "canon-xfavc-c50"
+file = "A_0001C062A250107_2240217S_CANON.MXF"
+url = "https://www.canon.co.uk/rich-media/A_0001C062A250107_2240217S_CANON.MXF"
+fetch = "browser"
+page = "https://www.canon-europe.com/video-cameras/eos-c50/"
+license = "Canon sample clip, no license given; the page says 'Copyright 2026. All Rights Reserved.' and links its Terms & Conditions"
+purpose = "camera tags: an original XF-AVC MXF whose tags name the EOS C50"
+sha256 = "9421666bfdb5a913e502b965dff96a60afbeee793bc488ce69e4275344e6b982"
+
+[[clip]]
+name = "phantom-cine"
+file = "roll7_FlashCine1.cine"
+url = "https://samples.ffmpeg.org/V-codecs/Phantom_Cine/phantom_cine2/roll7_FlashCine1.cine"
+license = "FFmpeg sample archive, no license given"
+purpose = "camera RAW: Phantom Cine, 1920x1080 Bayer, 2 frames"
+sha256 = "e90669f49616517459744af3fd22740d59aa748cb046e8c6c2c4b3d2166e37c2"
+
+[[clip]]
+name = "mlv-fate-cut"
+file = "M19-0333-cut.MLV"
+url = "https://fate-suite.ffmpeg.org/mlv/M19-0333-cut.MLV"
+license = "FFmpeg FATE suite, no license given"
+purpose = "camera RAW: Magic Lantern MLV, 1472x610 Bayer, cut to 1 frame"
+sha256 = "b8cf9819a7d50d9cf7b55e0c7e1c2c428b3edc17a4b1597a7a82a8505963ed7a"
+
+[[clip]]
+name = "gopro-hero8"
+file = "hero8.mp4"
+url = "https://raw.githubusercontent.com/gopro/gpmf-parser/40a3826be167b7683a1500d68ef8faad560e7148/samples/hero8.mp4"
+license = "Apache-2.0, GoPro gpmf-parser repository"
+purpose = "camera tags: an original HERO8 file with its firmware tag and GPMF track"
+sha256 = "0e068f543ebf59bccb4228e7b5950a4f681753d2bbbf1c838ae60336bc75c1bd"
+
+[[clip]]
+name = "jiku-gt090912-phone0"
+file = "GT_090912_0_1347195124392.mp4"
+url = "https://skulddata.cs.umass.edu/traces/mmsys/2013/jiku/dataset/GT_090912_0_1347195124392.mp4"
+license = "Jiku Mobile Video Dataset (Saini, Venkatagiri, Ooi, Chan, MMSys 2013) in the UMass Trace Repository: CC BY 4.0 unless otherwise specified; the dataset gives no license of its own"
+purpose = "sync by sound: a phone at event GT_090912 with its own microphone, 1080p 24 fps; offsets in protyposis/JikuMVD-SynchronizationGroundTruth"
+sha256 = "5f1ece44265317a160d3fbd5df0e13b2912cc42bc45a75d8ac8f2805ff064246"
+
+[[clip]]
+name = "jiku-gt090912-phone2"
+file = "GT_090912_2_1347195303695.mp4"
+url = "https://skulddata.cs.umass.edu/traces/mmsys/2013/jiku/dataset/GT_090912_2_1347195303695.mp4"
+license = "Jiku Mobile Video Dataset (Saini, Venkatagiri, Ooi, Chan, MMSys 2013) in the UMass Trace Repository: CC BY 4.0 unless otherwise specified; the dataset gives no license of its own"
+purpose = "sync by sound: a phone at event GT_090912 with its own microphone, 480p; offsets in protyposis/JikuMVD-SynchronizationGroundTruth"
+sha256 = "f9d81d9960443acebc99247da6b5078285cf567c71c8f190f12f3da8cd4bb573"
+
+[[clip]]
+name = "jiku-gt090912-phone3"
+file = "GT_090912_3_1347194905864.mp4"
+url = "https://skulddata.cs.umass.edu/traces/mmsys/2013/jiku/dataset/GT_090912_3_1347194905864.mp4"
+license = "Jiku Mobile Video Dataset (Saini, Venkatagiri, Ooi, Chan, MMSys 2013) in the UMass Trace Repository: CC BY 4.0 unless otherwise specified; the dataset gives no license of its own"
+purpose = "sync by sound: a phone at event GT_090912 with its own microphone, 480p 30 fps; offsets in protyposis/JikuMVD-SynchronizationGroundTruth"
+sha256 = "a8b29975d2c86cf1c70baa1bdf97083cb90406f75f46fc04aabe13b621442208"

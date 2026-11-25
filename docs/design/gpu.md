@@ -29,10 +29,13 @@ flowchart LR
   - Direct3D 11 on other GPUs on Windows. VA-API on other GPUs on Linux.
   - VideoToolbox on a Mac.
 - `VIDCUT_HWDEC` sets the decoder for tests.
-- The player uses that decoder. Exports, proxies, renders and tiles use `GpuDecoder::own`, a stream or a device of their own on the same GPU.
+- The player uses that decoder. Exports, proxies, renders, tiles and analyses use `GpuDecoder::own`, a stream or a device of their own on the same GPU.
   - Why: on the player's decoder, their work waits behind playback.
+  - A CUDA stream of `GpuDecoder::own` waits for the default stream of its device (`Waits::ForDefault`).
+  - Why: on a stream that does not wait, NVDEC's JPEG pictures can be the picture before ([gotchas](../gotchas.md#gpu-drivers)).
 - `gpu.acceleration` lets the GPU decode, scale and encode. `gpu.decoding` lets it decode. Both are on by default.
-- `GpuDecoder::why_not` names the streams that the CPU decodes. Stills and image sequences decode on the CPU.
+- `GpuDecoder::why_not` names the streams that the CPU decodes.
+- The draw path decodes stills and image sequences on the CPU (`Source::open`). Other readers, such as `motion.find`, decode them on the GPU where it can.
 - An OpenEXR decodes with the `exr` crate, not with FFmpeg's `exr` decoder ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)):
   - `VideoDecoder` opens FFmpeg's `rawvideo` decoder in its place. Its `send_packet` turns each file into the planes of that decoder (`openexr::Planes`).
   - The pixel format is the format that the probe gets from FFmpeg's `exr` decoder. Thus the frames and their path stay the same.
@@ -303,10 +306,11 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 
 ## GPU layers
 
-`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut: the frame interpolation and the slow face model ([analysis](analysis.md#subjects)).
+`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model and the model of people and vehicles ([analysis](analysis.md#subjects)).
 
 - A `View` is a part of a buffer of 32-bit floats. The channels of a pixel are next to each other.
 - `Ops::conv` is a convolution as a matrix multiply. The bias, a residual and the activation are in the same pass.
+  - A `Res` adds the residual before the activation or after it. A ResNet block adds it before. A YOLOX bottleneck adds it after.
   - `CONV4` loads four channels at a time. `Ops::conv` uses it when the input has a multiple of 16 channels and the output a multiple of 4.
   - Each `View` of a `CONV4` pass starts on a multiple of 4 floats, with a multiple of 4 floats for each pixel. Other convolutions use `CONV`.
 - `ops::layer` makes a `Layer` from the weights of a convolution.
@@ -316,6 +320,7 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
   - Why: Winograd F(4×4, 3×3) does a quarter of the multiplies of a direct convolution. The transforms read and write more memory.
   - The caller gives the two work buffers between the passes.
 - `Ops::pool` keeps the largest value of each window. `Ops::nearest` enlarges with the nearest pixel. `Ops::resize` uses a bilinear filter.
+- An `Act` is the activation of a layer: none, leaky ReLU, PReLU, SiLU, GELU or sigmoid.
 - `ops::arena` plans the work buffers of a network. It refuses a buffer that is larger than the GPU takes.
 - `Kernels` compiles the shaders once for each `compute::Gpu`. The device must have the workgroup memory of `ops::SHARED`.
 - A layer never reads and writes one buffer in one pass. Why: wgpu refuses a buffer that is bound as read-only and as writable in one dispatch.
@@ -410,7 +415,7 @@ The scales (`marks`):
 - With `video_levels`, the Waveform and the Parade move each value to the 10-bit codes from 64 to 940 (`shown` in `scope.wgsl`). The marks stay.
 - A change of the scale or of `video_levels` draws each `Plot` again. `Plots::paint` takes the whole `Scopes`.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
-- With `skin_tone`, the Vectorscope also has a line from the center to the circle at `SKIN_DEGREES`.
+- With `skin_tone`, the Vectorscope also has a line from the center to the circle at `SKIN_DEGREES` (`on_skin`).
 
 A scope that is off:
 

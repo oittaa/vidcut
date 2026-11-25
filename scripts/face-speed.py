@@ -67,7 +67,7 @@ def per_picture(calls):
 
 def steps(err):
     calls, faces = [], 0
-    for n, found, rest in re.findall(r"\[subjects\] model call of (\d+) pictures in \d+ passes, (\d+) faces: (.*)", err):
+    for n, found, rest in re.findall(r"\[subjects\] model call of (\d+) pictures in \d+ passes, (\d+) boxes: (.*)", err):
         calls.append((int(n), {k: float(ms) for k, ms in re.findall(r"(\w+) ([\d.]+) ms", rest)}))
         faces += int(found)
     if not calls:
