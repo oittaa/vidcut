@@ -530,6 +530,11 @@ The bar and the Jobs button:
   - After a delete, the last corrector becomes the current node.
 - A Clip and Timeline switch at the top right selects the grade (`GradeLevel`). In Timeline mode, the palette shows the timeline grade.
   - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
+  - With two or more node stack layers, the switch is a menu with one item for each layer (`grade_switch`, `GradeChoice`). It sends `layer` too.
+  - `EffectsPage::layer` is the shown layer. `Workspace::grade_shown` gives that layer of the clip grade (`Grade::layer`), as `GradeOf::Clip` with the layer number.
+  - The dots at the bottom of the Node Editor (`layer_dots`) and Switch to Node Layer of the Nodes submenu (`layer_menu`) send the same `gui.page`.
+  - A dragged layer goes into the whole clip grade before the preview (`Grade::with_layer`).
+  - A thumbnail of a layer reads the tap with its number in the joined tree (`ShotPlace`, `Grade::layer_start`). A layer with no grade shows the output of the layers under it.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
   - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
 - When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and `at`. Thus a drag is one undo step.

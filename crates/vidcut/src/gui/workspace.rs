@@ -357,6 +357,7 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
+                live::GuiChange::Layer(layer) => self.set_layer(layer)?,
                 live::GuiChange::Palette(palette) => {
                     self.effects_page.palette = palette;
                     self.effects_page.window_name = None;
@@ -493,6 +494,7 @@ impl Workspace {
         live::GuiState {
             page,
             grade: self.effects_page.grading,
+            layer: self.shown_layer(),
             palette: self.effects_page.palette,
             primaries: self.effects_page.primaries,
             window: self.effects_page.window,

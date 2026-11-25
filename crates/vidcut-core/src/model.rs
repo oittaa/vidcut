@@ -475,6 +475,14 @@ pub struct Settings {
     /// out at 1 and 1.
     #[serde(default, skip_serializing_if = "DynamicsProfile::is_usual")]
     pub dynamics_profile: DynamicsProfile,
+    /// The names of the node stack layers of each clip grade, layer 1
+    /// first: 1 to 8 names. Their number is the number of layers. Left out
+    /// at one layer named `L1`.
+    #[serde(
+        default = "Settings::one_layer",
+        skip_serializing_if = "Settings::has_one_layer"
+    )]
+    pub node_stack_layers: Vec<String>,
 }
 
 impl Default for Settings {
@@ -501,6 +509,7 @@ impl Default for Settings {
             color_viewer_lut: MonitorLut::VideoMonitor,
             scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
+            node_stack_layers: Self::one_layer(),
         }
     }
 }
@@ -570,6 +579,18 @@ impl Format {
 }
 
 impl Settings {
+    pub fn one_layer() -> Vec<String> {
+        vec![Self::layer_name(1)]
+    }
+
+    pub fn layer_name(n: usize) -> String {
+        format!("L{n}")
+    }
+
+    fn has_one_layer(names: &[String]) -> bool {
+        names == Self::one_layer()
+    }
+
     pub const MOST_CHANNELS: u16 = 24;
 
     pub fn viewer_lut_file(&self) -> Option<&Path> {
@@ -4222,6 +4243,17 @@ pub struct Grade {
     /// What goes out. Left out when nothing goes out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<GradeLink>,
+    /// The grades of node stack layers 2 and up of a clip grade, in order.
+    /// This grade is layer 1. Each layer takes the picture that the layer
+    /// before it gives. A layer that is not here has one corrector at its
+    /// usual values. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<Grade>,
+    /// The grades of the layers above the project's `node_stack_layers`
+    /// count, in order. They do not act. A higher count gives them back.
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_layers: Vec<Grade>,
 }
 
 /// A link into an input: the node that it leaves and the output of that
@@ -4302,11 +4334,123 @@ impl Grade {
         Self {
             nodes: vec![GradeNode::corrector(source, [0.0, 0.0], frame)],
             output: Some(GradeLink::picture(1)),
+            layers: Vec::new(),
+            kept_layers: Vec::new(),
         }
     }
 
     pub fn is_usual(&self, frame: [f64; 2]) -> bool {
         *self == Self::usual(frame)
+    }
+
+    pub fn layer(&self, n: usize, frame: [f64; 2]) -> Grade {
+        match n {
+            0 | 1 => self.own(),
+            _ => (self.layers.get(n - 2).cloned()).unwrap_or_else(|| Self::usual(frame)),
+        }
+    }
+
+    fn own(&self) -> Grade {
+        Grade {
+            nodes: self.nodes.clone(),
+            output: self.output,
+            layers: Vec::new(),
+            kept_layers: Vec::new(),
+        }
+    }
+
+    pub fn with_layer(&self, n: usize, grade: Grade, frame: [f64; 2]) -> Grade {
+        let mut whole = self.padded(n, frame);
+        match n {
+            0 | 1 => (whole.nodes, whole.output) = (grade.nodes, grade.output),
+            _ => whole.layers[n - 2] = grade,
+        }
+        whole.trim(frame);
+        whole
+    }
+
+    pub fn padded(&self, n: usize, frame: [f64; 2]) -> Grade {
+        let mut whole = self.clone();
+        if whole.layers.len() + 1 < n {
+            whole.layers.resize_with(n - 1, || Self::usual(frame));
+        }
+        whole
+    }
+
+    pub fn below(&self, n: usize, top: Grade, frame: [f64; 2]) -> Grade {
+        let mut whole = self.padded(n, frame);
+        whole.layers.truncate(n.saturating_sub(1));
+        whole.kept_layers.clear();
+        match n {
+            0 | 1 => (whole.nodes, whole.output) = (top.nodes, top.output),
+            _ => whole.layers[n - 2] = top,
+        }
+        whole
+    }
+
+    fn trim(&mut self, frame: [f64; 2]) {
+        while self.kept_layers.last().is_some_and(|l| l.is_usual(frame)) {
+            self.kept_layers.pop();
+        }
+        if self.kept_layers.is_empty() {
+            while self.layers.last().is_some_and(|l| l.is_usual(frame)) {
+                self.layers.pop();
+            }
+        }
+    }
+
+    pub fn counted(&mut self, count: usize, frame: [f64; 2]) {
+        let mut all = std::mem::take(&mut self.layers);
+        all.append(&mut self.kept_layers);
+        let shown = count.saturating_sub(1);
+        if all.len() > shown {
+            self.kept_layers = all.split_off(shown);
+        }
+        self.layers = all;
+        self.trim(frame);
+    }
+
+    pub fn reset_layers(&mut self, frame: [f64; 2]) {
+        let shown = self.layers.len();
+        *self = Grade {
+            layers: vec![Self::usual(frame); shown],
+            kept_layers: std::mem::take(&mut self.kept_layers),
+            ..Self::usual(frame)
+        };
+        self.trim(frame);
+    }
+
+    pub fn layer_start(&self, n: usize) -> u32 {
+        match n {
+            0 | 1 => 0,
+            _ => (0..n - 2).fold(self.last(), |at, i| {
+                at + self.layers.get(i).map_or(1, Grade::last)
+            }),
+        }
+    }
+
+    pub fn stacked(&self) -> Cow<'_, Grade> {
+        if self.layers.is_empty() {
+            return Cow::Borrowed(self);
+        }
+        let mut whole = self.own();
+        for layer in &self.layers {
+            let (start, below) = (whole.last(), whole.output);
+            let moved = |l: GradeLink| match l.node {
+                0 => below,
+                n => Some(GradeLink {
+                    node: n + start,
+                    ..l
+                }),
+            };
+            whole.nodes.extend(layer.nodes.iter().map(|d| GradeNode {
+                inputs: d.inputs.iter().map(|l| l.and_then(moved)).collect(),
+                key_from: d.key_from.and_then(moved),
+                ..d.clone()
+            }));
+            whole.output = layer.output.and_then(moved);
+        }
+        Cow::Owned(whole)
     }
 
     pub fn node(&self, number: u32) -> Option<&GradeNode> {
