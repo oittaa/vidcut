@@ -148,6 +148,11 @@ impl KeyboardUi {
         })
     }
 
+    pub(super) fn select(&mut self, combo: Combo) {
+        self.held = combo.held;
+        self.key = Some(combo.key);
+    }
+
     fn cap(&mut self, ui: &mut egui::Ui, b: &Bindings, cap: Cap, unit: f32) {
         let c = theme::colors();
         let (width, text, on, used) = match cap {
@@ -242,8 +247,8 @@ impl KeyboardUi {
         };
         let found: Vec<(Panel, &'static str)> = Panel::ALL
             .iter()
-            .filter_map(|&p| {
-                let a = b.owner(p, combo)?;
+            .flat_map(|&p| b.owners(p, combo).into_iter().map(move |a| (p, a)))
+            .filter_map(|(p, a)| {
                 let s = SHORTCUTS
                     .iter()
                     .find(|s| matches!(s.keys, Keys::Own(own, _) if own == a))?;

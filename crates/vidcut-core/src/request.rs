@@ -4302,7 +4302,8 @@ pub enum Request {
     /// words where the action's name doesn't say what it does (spec §11).
     /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
     /// key of an action works: `app`, `transcription`, `effects` or
-    /// `color`.
+    /// `color`. `conflicts` gives the keys of an action that another action
+    /// of its level also has, from an imported key file.
     #[serde(rename = "keys.list")]
     KeysList {
         /// Only the actions of this key, like `Ctrl+B`, at each level.
@@ -4388,7 +4389,8 @@ pub enum Request {
     /// Add a key set from a key file, as `keys.export` writes it, and put
     /// it in force. The commands that vidcut does not have are listed in
     /// `unknown_commands`. The keys that vidcut can't use, such as keypad
-    /// keys, are listed in `unusable_keys`.
+    /// keys, are listed in `unusable_keys`. A file can give one key to two
+    /// actions of one level: both keep it, and `conflicts` lists it.
     #[serde(rename = "keys.import")]
     KeysImport {
         path: PathBuf,

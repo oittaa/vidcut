@@ -4,13 +4,13 @@
 
 The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
 
-**A key file that gives one key to two commands:**
+**A press of a key that two actions have:**
 
-- Resolve imports such a file with no question. Both commands keep the key, with a warning mark on each row (case 27 of shortcuts-resolve-runs.md).
-- vidcut gives the key to the command of the file. Another action of that level loses the key.
-- A file that gives one key to two commands of one level fails the import.
-- To do: keep the key on both commands, with a warning mark on each row.
-- To do: the action of a press of such a key, after case 28 of shortcuts-resolve-runs.md.
+- An imported key file can give one key to two actions of one level. Both keep it ([spec §11](../spec.md#11-keyboard-shortcuts)).
+- A press does the first of these actions in the table. The manual tells of a warning dialog instead (p. 126).
+- To do: the action of such a press, after case 28 of shortcuts-resolve-runs.md.
+- The file of the Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point. The built-in set gives V only to Smart Insert.
+- To do: make the built-in set follow case 28 g.
 
 **Meta in the sets of other editors:**
 

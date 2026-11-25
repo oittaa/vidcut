@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::key_sets::{self, KeySet, same};
-use crate::shortcuts::{Action, Bindings, Combo, Custom, Held, key_named};
+use crate::shortcuts::{Action, Bindings, Combo, Conflict, Custom, Held, key_named};
 
 const BASE: &str = "DaVinci Resolve";
 
@@ -130,6 +130,7 @@ const STANDARD: &[(&str, &str)] = &[("Copy", "Ctrl+C"), ("Cut", "Ctrl+X"), ("Pas
 pub struct Read {
     pub base: Option<String>,
     pub keys: Custom,
+    pub conflicts: Vec<Conflict>,
     pub unknown: Vec<String>,
     pub unusable: Vec<String>,
 }
@@ -367,11 +368,18 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
         custom.insert(action, keys);
     }
     custom.extend(own);
-    custom.retain(|action, keys| {
-        let table = action.default_keys();
-        keys.len() != table.len() || keys.iter().any(|k| !table.contains(k))
+    let now = Bindings::of(&custom)?;
+    for &action in Action::ALL {
+        let left_out = mapped(action) && !custom.contains_key(&action);
+        if left_out && !alike(now.keys(action), start.keys(action)) {
+            custom.insert(action, start.keys(action).to_vec());
+        }
+    }
+    let now = Bindings::of(&custom)?;
+    custom.retain(|&action, keys| {
+        !alike(keys, &action.default_keys()) || !now.conflicting(action).is_empty()
     });
-    Bindings::of(&custom)?;
+    read.conflicts = Bindings::of(&custom)?.conflicts();
     read.keys = custom;
     Ok(read)
 }

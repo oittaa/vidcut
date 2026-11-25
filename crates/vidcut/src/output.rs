@@ -697,6 +697,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for key in listed("unusable_keys") {
                 println!("left out a key that vidcut can't use: {key}");
             }
+            for c in r.result["conflicts"].as_array().into_iter().flatten() {
+                let actions: Vec<&str> = c["actions"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                println!(
+                    "{} is on {}",
+                    c["key"].as_str().unwrap_or_default(),
+                    actions.join(" and ")
+                );
+            }
         }
         "preferences.get" | "preferences.set" | "preferences.reset" => {
             let mut lines = Vec::new();

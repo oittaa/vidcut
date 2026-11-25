@@ -407,11 +407,40 @@ fn key_row(
                 if bindings.is_custom(action) {
                     default_keys_button(ui, state, bindings, in_force, action);
                 }
+                conflict_button(ui, state, bindings, action);
             }
         }
     });
     if let Some(taken) = capture.and_then(|c| c.taken) {
         dialog::warn(ui, taken);
+    }
+}
+
+fn conflict_button(
+    ui: &mut egui::Ui,
+    state: &mut PreferencesUi,
+    bindings: &Bindings,
+    action: Action,
+) {
+    let conflicting = bindings.conflicting(action);
+    let Some(&first) = conflicting.first() else {
+        return;
+    };
+    let mut others: Vec<&str> = Vec::new();
+    for &combo in &conflicting {
+        for other in bindings.owners(action.panel(), combo) {
+            if other != action && !others.contains(&other.title()) {
+                others.push(other.title());
+            }
+        }
+    }
+    let warn = RichText::new(icon::WARNING).color(ui.visuals().warn_fg_color);
+    if ui
+        .button(warn)
+        .on_hover_text(format!("Also on {}", others.join(", ")))
+        .clicked()
+    {
+        state.keyboard.select(first);
     }
 }
 
@@ -490,7 +519,8 @@ impl Workspace {
         let Some((combo, owner)) = caught else {
             return true;
         };
-        if let Some(other) = owner.filter(|o| *o != capture.action) {
+        let had = bindings.keys(capture.action).contains(&combo);
+        if let Some(other) = owner.filter(|o| *o != capture.action && !had) {
             capture.taken = Some(format!("{} is used by {}", combo.shown(), other.title()));
             return true;
         }
