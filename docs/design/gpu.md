@@ -303,10 +303,11 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 
 ## GPU layers
 
-`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut: the frame interpolation and the slow face model ([analysis](analysis.md#subjects)).
+`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model and the model of people and vehicles ([analysis](analysis.md#subjects)).
 
 - A `View` is a part of a buffer of 32-bit floats. The channels of a pixel are next to each other.
 - `Ops::conv` is a convolution as a matrix multiply. The bias, a residual and the activation are in the same pass.
+  - A `Res` adds the residual before the activation or after it. A ResNet block adds it before. A YOLOX bottleneck adds it after.
   - `CONV4` loads four channels at a time. `Ops::conv` uses it when the input has a multiple of 16 channels and the output a multiple of 4.
   - Each `View` of a `CONV4` pass starts on a multiple of 4 floats, with a multiple of 4 floats for each pixel. Other convolutions use `CONV`.
 - `ops::layer` makes a `Layer` from the weights of a convolution.
@@ -316,6 +317,7 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
   - Why: Winograd F(4×4, 3×3) does a quarter of the multiplies of a direct convolution. The transforms read and write more memory.
   - The caller gives the two work buffers between the passes.
 - `Ops::pool` keeps the largest value of each window. `Ops::nearest` enlarges with the nearest pixel. `Ops::resize` uses a bilinear filter.
+- An `Act` is the activation of a layer: none, leaky ReLU, PReLU, SiLU, GELU or sigmoid.
 - `ops::arena` plans the work buffers of a network. It refuses a buffer that is larger than the GPU takes.
 - `Kernels` compiles the shaders once for each `compute::Gpu`. The device must have the workgroup memory of `ops::SHARED`.
 - A layer never reads and writes one buffer in one pass. Why: wgpu refuses a buffer that is bound as read-only and as writable in one dispatch.
