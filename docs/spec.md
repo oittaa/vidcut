@@ -6453,6 +6453,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Text 108 pixels of the timeline for Scroll, at any timeline height. Thus a Scroll on a 1280×720 timeline is 108/720 of the picture height.
       - Measured in Resolve Studio 21.2 on 1920×1080, 1366×768, 1280×720, 1024×576 and 2560×1440. A Text title follows the height of the timeline there.
       - The size of a Scroll is a whole number of timeline pixels, from 24 to 4096. An OTIO file with a fraction does not import.
+      - The Inspector keeps the whole-number part of a typed size. Thus 100.4, 100.5 and 100.9 all draw as 100 (measured in Resolve Studio 21.2).
+      - vidcut draws the whole-number part of a Scroll's size, and writes it to OTIO. The style keeps the exact number.
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
     - A Text title and a lower third draw a whole number of timeline pixels for the size. The style keeps the exact number.
@@ -6489,7 +6491,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - vidcut uses the first `VDMX` ratio record that has a character set and a ratio of 1:1, or of all ratios.
       - Without such an entry, the ascent and the descent are `usWinAscent` and `usWinDescent`, each rounded to a whole pixel.
       - These rules give the heights of Windows 11 for 54 of its 57 regular fonts, at sizes from 6 to 399 pixels.
-      - Each measured size gives a whole number for 4/3 of the size. vidcut rounds other sizes to the nearest whole pixel.
+      - 4/3 of the size goes to the nearest whole pixel. Sizes 100, 101 and 109 fit exactly in Arial Black (measured in Resolve Studio 21.2).
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).

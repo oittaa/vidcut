@@ -186,7 +186,7 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> 
                 ranged(
                     plain(
                         "size",
-                        json!(points.round().clamp(24.0, 4096.0) as i64),
+                        json!(Title::scroll_size(points, 1.0).clamp(24.0, 4096.0) as i64),
                         json!(216),
                         "Int",
                     ),
