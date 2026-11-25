@@ -28,6 +28,7 @@ fn build() -> String {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=VIDCUT_CHECKOUT");
     for sources in ["src", "../vidcut-core/src", "../vidcut-av/src"] {
         println!("cargo:rerun-if-changed={sources}");
     }
