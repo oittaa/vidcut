@@ -26,6 +26,8 @@ pub enum JobState {
 pub struct JobOutput {
     pub path: PathBuf,
     pub frames: i64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub more: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -205,12 +207,9 @@ impl JobInfo {
         self.clock = Instant::now();
     }
 
-    pub(crate) fn planned(&mut self, outputs: Vec<(PathBuf, i64)>) {
-        self.total = outputs.iter().map(|o| o.1).sum();
-        self.outputs = outputs
-            .into_iter()
-            .map(|(path, frames)| JobOutput { path, frames })
-            .collect();
+    pub(crate) fn planned(&mut self, outputs: Vec<JobOutput>) {
+        self.total = outputs.iter().map(|o| o.frames).sum();
+        self.outputs = outputs;
     }
 
     pub(crate) fn progressed(&mut self, output: usize, p: Progress) {

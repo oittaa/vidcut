@@ -82,6 +82,34 @@ impl Container {
         matches!(self, Self::Tiff | Self::Exr)
     }
 
+    pub fn takes_video(self, codec: VideoCodec) -> bool {
+        use VideoCodec as V;
+        match self {
+            Self::Mp4 => matches!(codec, V::H264 | V::Hevc | V::Av1 | V::Vp9),
+            Self::Mov => matches!(codec, V::H264 | V::Hevc | V::Prores | V::Dnxhr),
+            Self::Mkv => !matches!(codec, V::Tiff | V::Exr),
+            Self::Webm => matches!(codec, V::Vp9 | V::Av1),
+            Self::Tiff => codec == V::Tiff,
+            Self::Exr => codec == V::Exr,
+            _ => false,
+        }
+    }
+
+    pub fn takes_audio(self, codec: AudioCodec) -> bool {
+        use AudioCodec as A;
+        match self {
+            Self::Mp4 => matches!(codec, A::Aac | A::Mp3 | A::Opus | A::Flac),
+            Self::Mov => matches!(codec, A::Aac | A::PcmS16 | A::PcmS24),
+            Self::Mkv => true,
+            Self::Webm | Self::Ogg => matches!(codec, A::Opus),
+            Self::M4a => matches!(codec, A::Aac),
+            Self::Mp3 => matches!(codec, A::Mp3),
+            Self::Flac => matches!(codec, A::Flac),
+            Self::Wav => matches!(codec, A::PcmS16 | A::PcmS24),
+            Self::Tiff | Self::Exr => false,
+        }
+    }
+
     pub fn from_extension(ext: &str) -> Option<Self> {
         Some(match ext.to_ascii_lowercase().as_str() {
             "mp4" => Self::Mp4,
@@ -718,6 +746,131 @@ pub struct Numbering {
     pub drop_frame: bool,
 }
 
+/// One more file of a render: the frames of `output` in a format of its
+/// own. It has the frame size, the frame rate and the range of `output`,
+/// and the default quality of its codec. It has the audio of `output`
+/// when its format takes that codec, else no audio.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoreOutput {
+    /// The format. The file has the name of `output` with the extension of
+    /// this format.
+    pub container: Container,
+    /// As `video.codec`.
+    pub codec: VideoCodec,
+    /// As `video.encoder`.
+    #[serde(default)]
+    pub encoder: EncoderChoice,
+    /// As `video.profile`: for ProRes, its type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// A folder for the file in the folder of `output`. Two outputs may not
+    /// write the same file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+impl Default for MoreOutput {
+    fn default() -> Self {
+        Self {
+            container: Container::Mp4,
+            codec: VideoCodec::H264,
+            encoder: EncoderChoice::Auto,
+            profile: None,
+            folder: None,
+        }
+    }
+}
+
+impl MoreOutput {
+    pub fn folder(&self) -> Option<&str> {
+        self.folder
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+    }
+
+    pub fn path(&self, output: &Path) -> PathBuf {
+        let dir = output.parent().unwrap_or(Path::new(""));
+        let dir = match self.folder() {
+            Some(folder) => dir.join(folder),
+            None => dir.to_path_buf(),
+        };
+        let mut name = output.file_stem().unwrap_or_default().to_os_string();
+        name.push(".");
+        name.push(self.container.extension());
+        dir.join(name)
+    }
+
+    pub fn check(&self) -> Result<()> {
+        if let Some(folder) = &self.folder {
+            let plain = Path::new(folder.trim())
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+            if !plain || folder.trim().is_empty() {
+                return Err(Error::usage(format!(
+                    "folder {folder:?} must be a folder name or a relative path, with no .."
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn settings(&self, first: &ExportSettings) -> ExportSettings {
+        let mut v = VideoSettings::new(self.codec, self.encoder);
+        v.profile = self.profile.clone();
+        if let Some(f) = &first.video {
+            (v.width, v.height) = (f.width, f.height);
+            v.use_proxy_media = f.use_proxy_media;
+            if f.hdr == HdrMode::Sdr || color::carries_hdr(self.codec) {
+                v.hdr = f.hdr;
+            }
+            let holds_dolby_vision = matches!(self.codec, VideoCodec::Hevc | VideoCodec::Av1);
+            if v.image_bits().is_none() {
+                v.mastering_display = f.mastering_display.clone();
+                v.max_cll = f.max_cll.clone();
+                if holds_dolby_vision || !f.hdr_metadata.dolby_vision() {
+                    v.hdr_metadata = f.hdr_metadata;
+                }
+            } else if matches!(f.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None) {
+                v.hdr_metadata = f.hdr_metadata;
+            }
+            if f.alpha && v.holds_alpha() {
+                v.alpha = true;
+                v.alpha_mode = match v.alpha_modes().contains(&f.alpha_mode) {
+                    true => f.alpha_mode,
+                    false => v.alpha_modes()[0],
+                };
+            }
+            if self.container.image_sequence() {
+                v.filename_digits = f.filename_digits;
+                v.first_frame = f.first_frame;
+            }
+        }
+        let audio = (first.audio.clone()).filter(|a| self.container.takes_audio(a.codec));
+        ExportSettings {
+            container: self.container,
+            video: Some(v),
+            audio,
+            declick: first.declick,
+            render_speed: first.render_speed,
+        }
+    }
+}
+
+pub fn written_twice(output: &Path, more: &[MoreOutput]) -> Option<PathBuf> {
+    let key = |p: &Path| p.to_string_lossy().to_lowercase();
+    let mut seen = vec![key(output)];
+    for m in more {
+        let path = m.path(output);
+        if seen.contains(&key(&path)) {
+            return Some(path);
+        }
+        seen.push(key(&path));
+    }
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Preset {
     pub name: String,
@@ -1052,16 +1205,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         return Err(Error::usage("export needs video or audio"));
     }
     if let Some(v) = &s.video {
-        let ok = match s.container {
-            C::Mp4 => matches!(v.codec, V::H264 | V::Hevc | V::Av1 | V::Vp9),
-            C::Mov => matches!(v.codec, V::H264 | V::Hevc | V::Prores | V::Dnxhr),
-            C::Mkv => !matches!(v.codec, V::Tiff | V::Exr),
-            C::Webm => matches!(v.codec, V::Vp9 | V::Av1),
-            C::Tiff => v.codec == V::Tiff,
-            C::Exr => v.codec == V::Exr,
-            _ => false,
-        };
-        if !ok {
+        if !s.container.takes_video(v.codec) {
             return Err(Error::usage(format!(
                 "{:?} video can't go in {}",
                 v.codec,
@@ -1230,18 +1374,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         )));
     }
     if let Some(a) = &s.audio {
-        let ok = match s.container {
-            C::Mp4 => matches!(a.codec, A::Aac | A::Mp3 | A::Opus | A::Flac),
-            C::Mov => matches!(a.codec, A::Aac | A::PcmS16 | A::PcmS24),
-            C::Mkv => true,
-            C::Webm | C::Ogg => matches!(a.codec, A::Opus),
-            C::M4a => matches!(a.codec, A::Aac),
-            C::Mp3 => matches!(a.codec, A::Mp3),
-            C::Flac => matches!(a.codec, A::Flac),
-            C::Wav => matches!(a.codec, A::PcmS16 | A::PcmS24),
-            C::Tiff | C::Exr => false,
-        };
-        if !ok {
+        if !s.container.takes_audio(a.codec) {
             return Err(Error::usage(format!(
                 "{:?} audio can't go in {}",
                 a.codec,

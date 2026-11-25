@@ -220,6 +220,7 @@ pub fn timeline(
         || !params.set.is_empty()
         || params.encoder.is_some()
         || params.name.is_some()
+        || !params.more_outputs.is_empty()
     {
         return Err(Error::usage(format!(
             "an .{} export writes the edit, not rendered media: it takes only a range and \
@@ -460,6 +461,22 @@ pub struct Output {
     pub color: Option<ColorChoice>,
     pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
     pub subtitles: engine::subtitles::Subtitles,
+    pub more: Vec<More>,
+}
+
+pub struct More {
+    pub path: PathBuf,
+    pub numbering: Numbering,
+    pub asked: ExportSettings,
+    pub settings: ExportSettings,
+    pub color: Option<ColorChoice>,
+    pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
+}
+
+impl More {
+    pub fn written(&self) -> PathBuf {
+        self.settings.first_file(&self.path, self.numbering.first)
+    }
 }
 
 fn subtitle_tracks(p: &Project, params: &ExportParams, how: SubtitlesAs) -> Result<Vec<usize>> {
@@ -583,28 +600,31 @@ fn add_subtitles(
     Ok(())
 }
 
-impl Output {
-    pub fn written(&self) -> PathBuf {
-        self.settings.first_file(&self.path, self.numbering.first)
-    }
+struct Files<'a> {
+    settings: &'a ExportSettings,
+    path: &'a Path,
+    numbering: Numbering,
+    frames: i64,
+}
 
+impl Files<'_> {
     fn named(&self) -> Result<()> {
-        let last = self.plan.frames.max(1) - 1;
+        let last = self.frames.max(1) - 1;
         let file = self
             .settings
-            .first_file(&self.path, self.numbering.first + last);
+            .first_file(self.path, self.numbering.first + last);
         match file.try_exists() {
             Ok(_) => Ok(()),
             Err(e) => Err(Error::usage(format!("{}: {e}", file.display()))),
         }
     }
 
-    pub(crate) fn taken(&self) -> Option<PathBuf> {
+    fn taken(&self) -> Option<PathBuf> {
         if !self.settings.container.image_sequence() {
-            return Some(self.path.clone()).filter(|file| file.exists());
+            return Some(self.path.to_path_buf()).filter(|file| file.exists());
         }
-        let numbers = self.numbering.first..self.numbering.first + self.plan.frames;
-        let first = self.settings.frame_file(&self.path, numbers.start);
+        let numbers = self.numbering.first..self.numbering.first + self.frames;
+        let first = self.settings.frame_file(self.path, numbers.start);
         let dir = first
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
@@ -624,9 +644,39 @@ impl Output {
                         .ok()
                 })
                 .filter(|n| numbers.contains(n))
-                .map(|n| self.settings.frame_file(&self.path, n))
+                .map(|n| self.settings.frame_file(self.path, n))
                 .find(|file| file.exists())
         })
+    }
+}
+
+impl Output {
+    pub fn written(&self) -> PathBuf {
+        self.settings.first_file(&self.path, self.numbering.first)
+    }
+
+    fn files(&self) -> impl Iterator<Item = Files<'_>> {
+        let first = Files {
+            settings: &self.settings,
+            path: &self.path,
+            numbering: self.numbering,
+            frames: self.plan.frames,
+        };
+        let more = self.more.iter().map(|m| Files {
+            settings: &m.settings,
+            path: &m.path,
+            numbering: m.numbering,
+            frames: self.plan.frames,
+        });
+        std::iter::once(first).chain(more)
+    }
+
+    fn named(&self) -> Result<()> {
+        self.files().try_for_each(|f| f.named())
+    }
+
+    pub(crate) fn taken(&self) -> Vec<PathBuf> {
+        self.files().filter_map(|f| f.taken()).collect()
     }
 }
 
@@ -784,6 +834,78 @@ fn check_clip_names(params: &ExportParams) -> Result<()> {
     Ok(())
 }
 
+pub fn refuse_written_twice(params: &ExportParams) -> Result<()> {
+    match vidcut_core::export::written_twice(&params.output, &params.more_outputs) {
+        Some(path) => Err(Error::invalid(format!(
+            "two outputs write {}: give each more output a folder of its own",
+            path.display()
+        ))),
+        None => Ok(()),
+    }
+}
+
+fn more_outputs(
+    params: &ExportParams,
+    settings: &ExportSettings,
+    first: Numbering,
+) -> Result<Vec<More>> {
+    if params.more_outputs.is_empty() {
+        return Ok(Vec::new());
+    }
+    if params.per_clip {
+        return Err(Error::usage(
+            "vidcut does not combine more_outputs with per_clip yet",
+        ));
+    }
+    let Some(v) = &settings.video else {
+        return Err(Error::usage("more_outputs need the video of output"));
+    };
+    if v.bypass_reencode {
+        return Err(Error::usage(
+            "vidcut does not combine more_outputs with video.bypass_reencode yet",
+        ));
+    }
+    let two = match v.passes {
+        Some(n) => n == 2,
+        None => v.bitrate.is_some(),
+    };
+    let runs_twice = v.encoder == vidcut_core::export::EncoderChoice::Cpu
+        && matches!(
+            v.codec,
+            vidcut_core::export::VideoCodec::H264
+                | vidcut_core::export::VideoCodec::Hevc
+                | vidcut_core::export::VideoCodec::Vp9
+        );
+    if two && runs_twice {
+        return Err(Error::usage(
+            "vidcut does not combine more_outputs with two runs of the encoder yet: set              video.passes to 1",
+        ));
+    }
+    let streams = params.subtitles_as == Some(SubtitlesAs::Stream);
+    let mut out = Vec::new();
+    for (i, m) in params.more_outputs.iter().enumerate() {
+        let at = |e: Error| Error::new(e.code, format!("more_outputs[{i}]: {}", e.message));
+        m.check().map_err(at)?;
+        let asked = m.settings(settings);
+        validate(&asked).map_err(at)?;
+        if streams && m.container.subtitle_codec().is_none() {
+            return Err(Error::usage(format!(
+                "more_outputs[{i}]: .{} files hold no subtitle streams",
+                m.container.extension()
+            )));
+        }
+        out.push(More {
+            path: m.path(&params.output),
+            numbering: asked.numbering(first.record, first.drop_frame),
+            settings: asked.clone(),
+            asked,
+            color: None,
+            metadata: None,
+        });
+    }
+    Ok(out)
+}
+
 pub fn prepare(
     p: &Project,
     params: &ExportParams,
@@ -938,6 +1060,7 @@ pub fn prepare(
                 color: None,
                 metadata: None,
                 subtitles: Default::default(),
+                more: Vec::new(),
             });
         }
         if outputs.is_empty() {
@@ -957,9 +1080,13 @@ pub fn prepare(
             color: None,
             metadata: None,
             subtitles: Default::default(),
+            more: Vec::new(),
         });
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
+    if let Some(first) = outputs.first_mut() {
+        first.more = more_outputs(params, &settings, first.numbering)?;
+    }
     let mut proxies_used = Vec::new();
     if settings.video.as_ref().is_some_and(|v| v.use_proxy_media) {
         for o in &mut outputs {
@@ -985,7 +1112,7 @@ pub fn prepare(
         }
         o.named()?;
         if !params.overwrite
-            && let Some(taken) = o.taken()
+            && let Some(taken) = o.taken().first()
         {
             return Err(Error::invalid(format!(
                 "{} exists; pass overwrite to replace it",
@@ -1088,22 +1215,36 @@ fn measure_outputs(
     available: &Availability,
     m: &mut Measuring<'_>,
 ) -> Result<()> {
-    let todo: Vec<usize> = (0..prepared.outputs.len())
-        .filter(|&i| {
-            let o = &prepared.outputs[i];
-            o.metadata.is_some()
-                && o.settings
-                    .video
-                    .as_ref()
-                    .is_some_and(|v| engine::needs_output_light(&o.plan, v))
-        })
-        .collect();
+    let needs = |plan: &RenderPlan, s: &ExportSettings, c: bool| {
+        c && s
+            .video
+            .as_ref()
+            .is_some_and(|v| engine::needs_output_light(plan, v))
+    };
+    let mut todo: Vec<(usize, Option<usize>)> = Vec::new();
+    for (i, o) in prepared.outputs.iter().enumerate() {
+        if needs(&o.plan, &o.settings, o.metadata.is_some()) {
+            todo.push((i, None));
+        }
+        for (k, more) in o.more.iter().enumerate() {
+            if needs(&o.plan, &more.settings, more.metadata.is_some()) {
+                todo.push((i, Some(k)));
+            }
+        }
+    }
     let count = todo.len() as f64;
-    for (done, i) in todo.into_iter().enumerate() {
+    for (done, (i, k)) in todo.into_iter().enumerate() {
         let o = &mut prepared.outputs[i];
+        let (settings, metadata, path) = match k {
+            None => (&mut o.settings, &mut o.metadata, &o.path),
+            Some(k) => {
+                let more = &mut o.more[k];
+                (&mut more.settings, &mut more.metadata, &more.path)
+            }
+        };
         let light = engine::output_light(
             &o.plan,
-            &o.settings,
+            settings,
             available,
             m.decoder,
             &o.subtitles,
@@ -1112,9 +1253,9 @@ fn measure_outputs(
         )
         .map_err(|e| match engine::is_cancelled(&e) {
             true => Error::new(ErrorCode::Cancelled, "export cancelled"),
-            false => av_error(&e, ErrorCode::Export, format!("{}: ", o.path.display())),
+            false => av_error(&e, ErrorCode::Export, format!("{}: ", path.display())),
         })?;
-        if let (Some(c), Some(v)) = (o.metadata.as_mut(), o.settings.video.as_mut()) {
+        if let (Some(c), Some(v)) = (metadata.as_mut(), settings.video.as_mut()) {
             c.measured(light);
             c.apply(v);
         }
@@ -1307,12 +1448,28 @@ fn choose_once(
         o.settings = chosen.settings;
         o.color = chosen.color;
         o.metadata = chosen.metadata;
+        for m in &mut o.more {
+            let chosen = choose_output(
+                &o.plan,
+                &m.asked,
+                (p, &filled),
+                available,
+                (lights, measured),
+                &mut probed,
+                &mut todo,
+            );
+            m.settings = chosen.settings;
+            m.color = chosen.color;
+            m.metadata = chosen.metadata;
+        }
         let fps = o.plan.fps;
-        let Some(v) = o.settings.video.as_ref() else {
-            continue;
-        };
+        let videos: Vec<&VideoSettings> = std::iter::once(&o.settings)
+            .chain(o.more.iter().map(|m| &m.settings))
+            .filter_map(|s| s.video.as_ref())
+            .collect();
         for (piece, _) in o.plan.video.iter().flat_map(render::VideoPiece::layers) {
-            if !engine::makes_hdr10plus(v, &choose_piece_meta(p, &filled, probed.files, piece)) {
+            let meta = choose_piece_meta(p, &filled, probed.files, piece);
+            if !videos.iter().any(|v| engine::makes_hdr10plus(v, &meta)) {
                 continue;
             }
             if let Some(span) = Span::of(piece, fps)
@@ -1491,14 +1648,8 @@ pub fn metadata_shown(m: &Value) -> bool {
     m.is_object() && (m["mode"].as_str() != Some("none") || graded(m))
 }
 
-pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
-    let video = prepared
-        .outputs
-        .first()
-        .map_or(&prepared.settings, |o| &o.settings)
-        .video
-        .as_ref();
-    let video_encoder = video.map(|v| match vidcut_av::export::encode::resolve_video(v, available) {
+fn video_encoder(v: &VideoSettings, available: &Availability) -> Value {
+    match vidcut_av::export::encode::resolve_video(v, available) {
         Ok(e) => {
             let mut out = json!({ "name": e.name, "kind": e.kind, "pixel": vidcut_av::export::encode::pixel_name(e.pixel), "device": e.device, "options": e.options, "passes": e.passes });
             if let Some(speed) = &e.chosen.speed {
@@ -1510,7 +1661,31 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
             out
         }
         Err(err) => json!({ "error": err.to_string() }),
+    }
+}
+
+fn describe_more(m: &More, timeline: (u32, u32), available: &Availability) -> Value {
+    let mut out = json!({
+        "path": m.written(),
+        "settings": m.settings,
+        "video_encoder": m.settings.video.as_ref().map(|v| video_encoder(v, available)),
+        "color": m.color,
+        "metadata": m.metadata,
     });
+    if let Some(r) = m.settings.video.as_ref().and_then(|v| v.rounded(timeline)) {
+        out["rounded"] = json!(r);
+    }
+    out
+}
+
+pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
+    let video = prepared
+        .outputs
+        .first()
+        .map_or(&prepared.settings, |o| &o.settings)
+        .video
+        .as_ref();
+    let video_encoder = video.map(|v| video_encoder(v, available));
     json!({
         "preset": prepared.preset,
         "settings": prepared.settings,
@@ -1547,6 +1722,10 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
                 if !n.refused.is_empty() {
                     out["bypass"]["refused"] = json!(n.refused);
                 }
+            }
+            if !o.more.is_empty() {
+                let timeline = (o.plan.width, o.plan.height);
+                out["more"] = json!(o.more.iter().map(|m| describe_more(m, timeline, available)).collect::<Vec<_>>());
             }
             out
         }).collect::<Vec<_>>(),
@@ -1640,6 +1819,13 @@ pub fn as_preferred(prepared: &mut Prepared, gpu: bool) {
     {
         prepared.encoder_changed = Some(why);
     }
+    for m in prepared.outputs.iter_mut().flat_map(|o| &mut o.more) {
+        for s in [&mut m.asked, &mut m.settings] {
+            if let Some(v) = s.video.as_mut() {
+                preferred(v, gpu);
+            }
+        }
+    }
 }
 
 fn preferred(v: &mut VideoSettings, gpu: bool) -> Option<String> {
@@ -1727,11 +1913,12 @@ pub fn encodable(available: &Availability, gpu: bool) -> Value {
     json!({ "video": video, "audio": audio })
 }
 
-pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
-    settings
-        .video
-        .as_ref()
-        .is_some_and(|v| v.encoder != EncoderChoice::Cpu)
+pub fn needs_gpu_info(prepared: &Prepared) -> bool {
+    let more = prepared.outputs.iter().flat_map(|o| &o.more);
+    std::iter::once(&prepared.settings)
+        .chain(more.map(|m| &m.settings))
+        .filter_map(|s| s.video.as_ref())
+        .any(|v| v.encoder != EncoderChoice::Cpu)
 }
 
 pub fn run(
@@ -1744,15 +1931,26 @@ pub fn run(
     check(prepared, available)?;
     let mut reports = Vec::new();
     for (i, o) in prepared.outputs.iter().enumerate() {
-        if let Some(dir) = o.path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        let paths = std::iter::once(&o.path).chain(o.more.iter().map(|m| &m.path));
+        for dir in paths.filter_map(|p| p.parent().filter(|d| !d.as_os_str().is_empty())) {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::usage(format!("{}: {e}", dir.display())))?;
         }
-        let report = engine::run_decoding_on(
+        let more: Vec<engine::More> = o
+            .more
+            .iter()
+            .map(|m| engine::More {
+                settings: m.settings.clone(),
+                output: m.path.clone(),
+                numbering: m.numbering,
+            })
+            .collect();
+        let made = engine::run_decoding_on(
             &o.plan,
             &o.settings,
             &o.path,
             o.numbering,
+            &more,
             available,
             decoder,
             &o.subtitles,
@@ -1766,20 +1964,28 @@ pub fn run(
                 av_error(&e, ErrorCode::Export, format!("{}: ", o.path.display()))
             }
         })?;
-        reports.push(Report {
-            color: report.color.or_else(|| o.color.clone()),
-            metadata: report.metadata.or_else(|| o.metadata.clone()),
-            ..report
-        });
+        let chosen = std::iter::once((&o.color, &o.metadata))
+            .chain(o.more.iter().map(|m| (&m.color, &m.metadata)));
+        for (report, (color, metadata)) in made.into_iter().zip(chosen) {
+            reports.push(Report {
+                color: report.color.or_else(|| color.clone()),
+                metadata: report.metadata.or_else(|| metadata.clone()),
+                ..report
+            });
+        }
     }
     Ok(reports)
 }
 
 fn check(prepared: &Prepared, available: &Availability) -> Result<()> {
     for o in &prepared.outputs {
-        if let Some(v) = &o.settings.video {
-            vidcut_av::export::encode::resolve_video(v, available)
-                .map_err(|e| av_error(&e, ErrorCode::Export, format!("{}: ", o.path.display())))?;
+        let more = o.more.iter().map(|m| (&m.settings, &m.path));
+        for (settings, path) in std::iter::once((&o.settings, &o.path)).chain(more) {
+            if let Some(v) = &settings.video {
+                vidcut_av::export::encode::resolve_video(v, available).map_err(|e| {
+                    av_error(&e, ErrorCode::Export, format!("{}: ", path.display()))
+                })?;
+            }
         }
     }
     Ok(())

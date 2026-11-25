@@ -385,6 +385,29 @@ pub(super) struct Encoded {
     serial: u64,
 }
 
+#[derive(Default)]
+pub(crate) struct Writing {
+    alpha: bool,
+    premultiplied: bool,
+    written: Option<(u32, u32)>,
+    whole: Option<Wide>,
+    encoded: Encoded,
+}
+
+impl Writing {
+    pub(crate) fn new(
+        alpha: Option<vidcut_core::export::AlphaOut>,
+        written: Option<(u32, u32)>,
+    ) -> Self {
+        Self {
+            alpha: alpha.is_some(),
+            premultiplied: alpha == Some(vidcut_core::export::AlphaOut::Premultiplied),
+            written,
+            ..Self::default()
+        }
+    }
+}
+
 type Slot = Arc<Mutex<Filling>>;
 
 struct Filling {
@@ -468,14 +491,15 @@ impl Screen {
 
     pub(crate) fn keep_alpha(&mut self, alpha: bool) {
         self.alpha = alpha;
+        self.writing.alpha = alpha;
     }
 
     pub(crate) fn premultiply(&mut self, premultiplied: bool) {
-        self.premultiplied = premultiplied;
+        self.writing.premultiplied = premultiplied;
     }
 
     pub(crate) fn write_at(&mut self, size: Option<(u32, u32)>) {
-        self.written = size;
+        self.writing.written = size;
     }
 
     pub(crate) fn spent(&self) -> (Duration, Duration) {
@@ -489,11 +513,39 @@ impl Screen {
         colors: (Option<Hdr>, Option<Hdr>),
         sink: Sink<'_>,
     ) -> Result<frame::Video> {
+        let mut own = std::mem::take(&mut self.writing);
+        let out = self.encoded_with(&mut own, gpu, pixel, colors, sink);
+        self.writing = own;
+        out
+    }
+
+    pub(crate) fn encoded_in(
+        &mut self,
+        writing: Option<&mut Writing>,
+        gpu: &Gpu,
+        pixel: format::Pixel,
+        colors: (Option<Hdr>, Option<Hdr>),
+        sink: Sink<'_>,
+    ) -> Result<frame::Video> {
+        match writing {
+            Some(w) => self.encoded_with(w, gpu, pixel, colors, sink),
+            None => self.encoded(gpu, pixel, colors, sink),
+        }
+    }
+
+    fn encoded_with(
+        &mut self,
+        writing: &mut Writing,
+        gpu: &Gpu,
+        pixel: format::Pixel,
+        colors: (Option<Hdr>, Option<Hdr>),
+        sink: Sink<'_>,
+    ) -> Result<frame::Video> {
         let drawn = self
             .wide
             .as_ref()
             .ok_or_else(|| Error::Invalid("nothing was drawn for the encoder".into()))?;
-        if let Some(size) = self.written {
+        if let Some(size) = writing.written {
             let most = gpu.device.limits().max_texture_dimension_2d;
             if size.0 > most || size.1 > most {
                 return Err(Error::Invalid(format!(
@@ -501,30 +553,31 @@ impl Screen {
                     size.0, size.1
                 )));
             }
-            if self
+            if writing
                 .whole
                 .as_ref()
                 .is_none_or(|w| w.size != size || w.hdr != drawn.hdr)
             {
-                self.whole = Some(Wide::new(gpu, size, drawn.hdr));
+                writing.whole = Some(Wide::new(gpu, size, drawn.hdr));
             }
         }
-        let whole = self.written.and(self.whole.as_ref());
+        let whole = writing.written.and(writing.whole.as_ref());
         let wide = whole.unwrap_or(drawn);
         let size = wide.size;
         let mut layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
-        if self.alpha
+        if writing.alpha
             && layout
                 .planes
                 .iter()
                 .any(|p| matches!(p.kind, ALPHA | AYUV | RGBA | FLOAT_ALPHA))
         {
-            layout.alpha = match self.premultiplied {
+            layout.alpha = match writing.premultiplied {
                 true => KEEPS_PREMULTIPLIED,
                 false => KEEPS_STRAIGHT,
             };
         }
+        let encoded = &mut writing.encoded;
         let target = sink.target();
         let deep = pixel == format::Pixel::RGB48LE;
         if target == Target::Held && pixel != format::Pixel::RGB24 && !deep {
@@ -533,9 +586,9 @@ impl Screen {
             )));
         }
         let key = Some((pixel, size, colors.0, colors.1, target, layout.alpha));
-        if self.encoded.key != key {
-            self.encoded.key = None;
-            self.encoded.slots.clear();
+        if encoded.key != key {
+            encoded.key = None;
+            encoded.slots.clear();
             let mut offset = 0;
             let mut made_all = Vec::new();
             for p in &layout.planes {
@@ -544,27 +597,26 @@ impl Screen {
                     .next_multiple_of(u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT));
                 made_all.push(m);
             }
-            self.encoded.made = made_all;
+            encoded.made = made_all;
             if let Sink::Cuda(device, _) = &sink {
                 for _ in 0..SLOTS {
                     let shared = shared_out(gpu, device, offset)?;
                     let filling = Filling { shared, work: None };
-                    self.encoded.slots.push(Arc::new(Mutex::new(filling)));
+                    encoded.slots.push(Arc::new(Mutex::new(filling)));
                 }
-                self.encoded.next = 0;
+                encoded.next = 0;
             }
-            self.encoded.key = key;
+            encoded.key = key;
         }
         let clock = Instant::now();
         let slot = match &sink {
             Sink::Cuda(..) => {
-                let slot = self
-                    .encoded
+                let slot = encoded
                     .slots
-                    .get(self.encoded.next)
+                    .get(encoded.next)
                     .cloned()
                     .ok_or_else(|| Error::Invalid("no memory is shared with CUDA".into()))?;
-                self.encoded.next = (self.encoded.next + 1) % self.encoded.slots.len();
+                encoded.next = (encoded.next + 1) % encoded.slots.len();
                 let mut filling = lock(&slot);
                 filling.finish(None)?;
                 let buffer = filling.shared.buffer().clone();
@@ -586,7 +638,7 @@ impl Screen {
         if let Some(to) = whole {
             scale_whole(gpu, drawn, to, &mut encoder);
         }
-        for (i, (plane, m)) in layout.planes.iter().zip(&self.encoded.made).enumerate() {
+        for (i, (plane, m)) in layout.planes.iter().zip(&encoded.made).enumerate() {
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut encoding"),
                 layout: &gpu.encoders().layout,
@@ -642,7 +694,7 @@ impl Screen {
                 },
             );
         }
-        let held = match (&sink, self.encoded.made.first()) {
+        let held = match (&sink, encoded.made.first()) {
             (
                 Sink::Held,
                 Some(Made {
@@ -656,9 +708,9 @@ impl Screen {
             Sink::Cuda(_, frames) => {
                 let (slot, _) =
                     slot.ok_or_else(|| Error::Invalid("no memory is shared with CUDA".into()))?;
-                self.handed(gpu, frames, submission, slot)?
+                handed(encoded, gpu, frames, submission, slot)?
             }
-            Sink::Memory => self.read_back(gpu, pixel, size, submission)?,
+            Sink::Memory => read_back(encoded, gpu, pixel, size, submission)?,
             Sink::Surface(f) => {
                 wait(&gpu.device, submission)?;
                 f
@@ -672,87 +724,84 @@ impl Screen {
         crate::color::tag_frame(&mut out, colors.1);
         Ok(out)
     }
+}
 
-    fn handed(
-        &mut self,
-        gpu: &Gpu,
-        frames: &CudaFrames,
-        submission: wgpu::SubmissionIndex,
-        slot: Slot,
-    ) -> Result<frame::Video> {
-        let mut out = frames.fresh()?;
-        let planes: Vec<PlaneCopy> = self
-            .encoded
-            .made
-            .iter()
-            .map(|m| PlaneCopy {
-                offset: m.offset,
-                pitch: u64::from(m.padded),
-                row_bytes: u64::from(m.row),
-                rows: u64::from(m.size.1),
-            })
-            .collect();
-        let into = crate::export::video::frame_ref(&out)?;
-        self.encoded.serial += 1;
-        let serial = self.encoded.serial;
-        lock(&slot).work = Some(Work {
-            device: gpu.device.clone(),
-            submission,
-            planes,
-            into,
-            serial,
+fn handed(
+    encoded: &mut Encoded,
+    gpu: &Gpu,
+    frames: &CudaFrames,
+    submission: wgpu::SubmissionIndex,
+    slot: Slot,
+) -> Result<frame::Video> {
+    let mut out = frames.fresh()?;
+    let planes: Vec<PlaneCopy> = encoded
+        .made
+        .iter()
+        .map(|m| PlaneCopy {
+            offset: m.offset,
+            pitch: u64::from(m.padded),
+            row_bytes: u64::from(m.row),
+            rows: u64::from(m.size.1),
+        })
+        .collect();
+    let into = crate::export::video::frame_ref(&out)?;
+    encoded.serial += 1;
+    let serial = encoded.serial;
+    lock(&slot).work = Some(Work {
+        device: gpu.device.clone(),
+        submission,
+        planes,
+        into,
+        serial,
+    });
+    super::carried::carry(&mut out, Handed { slot, serial }, &HANDED)?;
+    Ok(out)
+}
+
+fn read_back(
+    encoded: &Encoded,
+    gpu: &Gpu,
+    pixel: format::Pixel,
+    size: (u32, u32),
+    submission: wgpu::SubmissionIndex,
+) -> Result<frame::Video> {
+    let buffers: Vec<&wgpu::Buffer> = encoded
+        .made
+        .iter()
+        .filter_map(|m| m.buffer.as_ref())
+        .collect();
+    let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<(), wgpu::BufferAsyncError>>();
+    for buffer in &buffers {
+        let tx = tx.clone();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
         });
-        super::carried::carry(&mut out, Handed { slot, serial }, &HANDED)?;
-        Ok(out)
     }
-
-    fn read_back(
-        &self,
-        gpu: &Gpu,
-        pixel: format::Pixel,
-        size: (u32, u32),
-        submission: wgpu::SubmissionIndex,
-    ) -> Result<frame::Video> {
-        let buffers: Vec<&wgpu::Buffer> = self
-            .encoded
-            .made
-            .iter()
-            .filter_map(|m| m.buffer.as_ref())
-            .collect();
-        let (tx, rx) =
-            std::sync::mpsc::channel::<std::result::Result<(), wgpu::BufferAsyncError>>();
-        for buffer in &buffers {
-            let tx = tx.clone();
-            buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-                let _ = tx.send(r);
-            });
-        }
-        drop(tx);
-        wait(&gpu.device, submission)?;
-        for r in rx {
-            r.map_err(|e| Error::Invalid(format!("the GPU gave no frame back: {e}")))?;
-        }
-        let mut out = frame::Video::new(pixel, size.0, size.1);
-        for (i, (m, buffer)) in self.encoded.made.iter().zip(&buffers).enumerate() {
-            let stride = out.stride(i);
-            let rows = out.data_mut(i);
-            {
-                let mapped = buffer
-                    .slice(..)
-                    .get_mapped_range()
-                    .map_err(|e| Error::Invalid(format!("the GPU's frame can't be read: {e}")))?;
-                let n = (m.row as usize).min(stride);
-                for y in 0..m.size.1 as usize {
-                    let from = y * m.padded as usize;
-                    let to = y * stride;
-                    rows[to..to + n].copy_from_slice(&mapped[from..from + n]);
-                }
+    drop(tx);
+    wait(&gpu.device, submission)?;
+    for r in rx {
+        r.map_err(|e| Error::Invalid(format!("the GPU gave no frame back: {e}")))?;
+    }
+    let mut out = frame::Video::new(pixel, size.0, size.1);
+    for (i, (m, buffer)) in encoded.made.iter().zip(&buffers).enumerate() {
+        let stride = out.stride(i);
+        let rows = out.data_mut(i);
+        {
+            let mapped = buffer
+                .slice(..)
+                .get_mapped_range()
+                .map_err(|e| Error::Invalid(format!("the GPU's frame can't be read: {e}")))?;
+            let n = (m.row as usize).min(stride);
+            for y in 0..m.size.1 as usize {
+                let from = y * m.padded as usize;
+                let to = y * stride;
+                rows[to..to + n].copy_from_slice(&mapped[from..from + n]);
             }
-            buffer.unmap();
         }
-        crate::copies::down(&out);
-        Ok(out)
+        buffer.unmap();
     }
+    crate::copies::down(&out);
+    Ok(out)
 }
 
 fn scale_whole(gpu: &Gpu, from: &Wide, to: &Wide, encoder: &mut wgpu::CommandEncoder) {

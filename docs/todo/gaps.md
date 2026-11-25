@@ -23,7 +23,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - The keyframe tracks inside a corrector track (pp. 3458–3459)
 - The keyframes of a grade that Apply Grade or a still of the Gallery takes. vidcut has neither (p. 3464)
 - Post Group Node Stack Layer, and Copy Active Layer and the node stack layers of a still of the Gallery. vidcut has no groups and no Gallery (pp. 3400–3401)
-- On the Export page: Estimated File Size, additional outputs, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
+- On the Export page: Estimated File Size, the Data burn-in of an additional output, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
 - On the Export page: the Thumbnail timeline, the clip filter and Render This Clip (pp. 4128–4129)
 - In the render queue: Show All Projects (p. 4132) and Review Before Upload (p. 4108)
 - In the render queue: Reveal in Media Storage in the right-click menu, and Refresh in the "..." menu (pp. 4131–4132)

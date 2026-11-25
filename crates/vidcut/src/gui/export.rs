@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
     AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
-    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
+    ExportSettings, HdrMetadata, HdrMode, MoreOutput, VideoCodec, VideoSettings, apply_overrides,
+    validate,
 };
 use vidcut_core::request::{
     ExportParams, FindSpeech, ImportMode, LevelsFrom, SubtitleFormat, SubtitlesAs, UniqueAs,
@@ -195,6 +196,7 @@ pub struct ExportUi {
     pub(super) editing: Option<String>,
     pub(super) edit_wanted: Option<String>,
     pub(super) leave_edit: Option<super::export_page::LeaveEdit>,
+    pub(super) duplicate_paths: bool,
     pub(super) focus_name: bool,
     pub(super) job_details: bool,
     pub(super) queue: Option<super::export_page::QueueStep>,
@@ -239,6 +241,7 @@ impl ExportUi {
         self.editing = None;
         self.edit_wanted = None;
         self.leave_edit = None;
+        self.duplicate_paths = false;
         self.queue = None;
         self.renaming = None;
     }
@@ -251,6 +254,7 @@ impl ExportUi {
                 Some(QueueStep::ReRender { .. } | QueueStep::Replace { .. })
             )
             || self.leave_edit.is_some()
+            || self.duplicate_paths
             || self.starting.as_ref().is_some_and(|s| {
                 !s.offline.is_empty() || s.weights || (!s.existing.is_empty() && s.rename.is_none())
             })
@@ -354,6 +358,8 @@ pub(super) struct Render {
     subtitle_tracks: Vec<String>,
     subtitle_format: SubtitleFormat,
     pub(super) tab: Tab,
+    pub(super) more: Vec<MoreOutput>,
+    pub(super) output_tab: usize,
 }
 
 pub(super) struct SavePreset {
@@ -610,6 +616,8 @@ impl Render {
             subtitle_tracks: Vec::new(),
             subtitle_format: SubtitleFormat::Srt,
             tab: Tab::Video,
+            more: Vec::new(),
+            output_tab: 0,
         }
     }
 
@@ -686,9 +694,22 @@ impl Render {
             (None, None) => Vec::new(),
         };
         self.subtitle_format = e.subtitle_format.unwrap_or(SubtitleFormat::Srt);
+        self.more = e.more_outputs.clone();
+        self.output_tab = 0;
         self.error = None;
         self.save = None;
         Ok(())
+    }
+
+    pub(super) fn add_output(&mut self) {
+        if self.settings.video.is_none() {
+            let c = self.settings.container;
+            self.settings.video = (self.stashed_video.take())
+                .or(self.base.video.clone())
+                .or(Some(new_video(c)));
+            fit_codecs(&mut self.settings);
+        }
+        self.more.push(MoreOutput::default());
     }
 
     pub(super) fn output(&self) -> PathBuf {
@@ -779,6 +800,9 @@ impl Render {
             } else if self.subtitle_format != SubtitleFormat::Srt {
                 p["subtitle_format"] = json!(self.subtitle_format);
             }
+        }
+        if !self.more.is_empty() {
+            p["more_outputs"] = json!(self.more);
         }
         p
     }
@@ -1151,6 +1175,9 @@ impl Workspace {
                         if let Some(id) = r.result["id"].as_str() {
                             self.export.selected = vec![id.to_string()];
                         }
+                        if let Some(d) = &mut self.export.render {
+                            d.output_tab = 0;
+                        }
                         self.export.editing = None;
                         if let Some(job) = s.update.and_then(|u| u.next)
                             && let Err(e) = self.edit_job(&job)
@@ -1217,6 +1244,10 @@ impl Workspace {
         d: &mut Render,
         update: Option<Update>,
     ) {
+        if vidcut_core::export::written_twice(&d.output(), &d.more).is_some() {
+            self.export.duplicate_paths = true;
+            return;
+        }
         let mut params = d.params();
         if let Some(u) = &update {
             params["job"] = json!(u.job);
@@ -2234,6 +2265,9 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
     let mut rows = Vec::new();
     for o in &j.outputs {
         rows.push(("Writes", o.path.display().to_string()));
+        for more in &o.more {
+            rows.push(("Writes", more.display().to_string()));
+        }
     }
     if let Some(n) = speech_of(j) {
         rows.extend(speech_rows(&n));
@@ -2801,9 +2835,9 @@ fn format_row(ui: &mut egui::Ui, d: &mut Render) {
     super::dialog::row(ui, "Export Video", |ui| {
         let mut on = d.settings.video.is_some();
         let sequence = d.settings.container.image_sequence();
-        let can_choose = !d.settings.container.audio_only() && !sequence;
+        let can_choose = !d.settings.container.audio_only() && !sequence && d.more.is_empty();
         let r = ui.add_enabled(can_choose, egui::Checkbox::without_text(&mut on));
-        if !can_choose {
+        if !can_choose && d.more.is_empty() {
             super::dialog::why(
                 ui,
                 format!(
@@ -2832,7 +2866,9 @@ fn format_row(ui: &mut egui::Ui, d: &mut Render) {
             .selected_text(d.settings.container.extension())
             .show_ui(ui, |ui| {
                 for c in CONTAINERS {
-                    ui.selectable_value(&mut d.settings.container, c, c.extension());
+                    if d.more.is_empty() || !c.audio_only() {
+                        ui.selectable_value(&mut d.settings.container, c, c.extension());
+                    }
                 }
             });
         if d.settings.container != before {
@@ -2853,6 +2889,99 @@ fn format_row(ui: &mut egui::Ui, d: &mut Render) {
             fit_codecs(&mut d.settings);
         }
     });
+}
+
+pub(super) fn more_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value) {
+    let k = d.output_tab.saturating_sub(1);
+    let planned = (d.plan_result.as_ref())
+        .and_then(|r| r.as_ref().ok())
+        .map(|p| p["outputs"][0]["more"][k]["video_encoder"].clone())
+        .unwrap_or_default();
+    let Some(m) = d.more.get_mut(k) else {
+        return;
+    };
+    let create = ui.button("Create Additional Output").clicked();
+    super::dialog::form(ui, "export-more", |ui| {
+        super::dialog::row(ui, "Video Format", |ui| {
+            let before = m.container;
+            egui::ComboBox::from_id_salt("export-more-container")
+                .selected_text(m.container.extension())
+                .show_ui(ui, |ui| {
+                    for c in CONTAINERS.into_iter().filter(|c| !c.audio_only()) {
+                        ui.selectable_value(&mut m.container, c, c.extension());
+                    }
+                });
+            if m.container != before && !m.container.takes_video(m.codec) {
+                m.codec = video_codecs(m.container)[0];
+                m.profile = None;
+            }
+        });
+        super::dialog::row(ui, "Codec", |ui| {
+            egui::ComboBox::from_id_salt("export-more-vcodec")
+                .selected_text(name(&m.codec))
+                .show_ui(ui, |ui| {
+                    for c in video_codecs(m.container) {
+                        let why = why_video(can, *c, m.encoder);
+                        if choice(ui, &mut m.codec, *c, name(c), why).changed() {
+                            m.profile = None;
+                        }
+                    }
+                });
+        });
+        if fixed_format(m.codec) {
+            super::dialog::row(ui, "Type", |ui| {
+                let usual = match planned["profile"].as_str() {
+                    Some(p) => format!("default ({p})"),
+                    None => "default".to_string(),
+                };
+                egui::ComboBox::from_id_salt("export-more-profile")
+                    .selected_text(m.profile.clone().unwrap_or(usual.clone()))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut m.profile, None, usual);
+                        for p in profiles(m.codec) {
+                            ui.selectable_value(&mut m.profile, Some(p.to_string()), *p);
+                        }
+                    });
+            });
+        } else {
+            super::dialog::row(ui, "Encoder", |ui| {
+                let auto = match planned["kind"].as_str() {
+                    Some(k) => format!("auto ({k})"),
+                    None => "auto".to_string(),
+                };
+                let encoder = |e: &EncoderChoice| match e {
+                    EncoderChoice::Auto => auto.clone(),
+                    _ => name(e),
+                };
+                egui::ComboBox::from_id_salt("export-more-encoder")
+                    .selected_text(encoder(&m.encoder))
+                    .show_ui(ui, |ui| {
+                        for &e in [EncoderChoice::Auto, EncoderChoice::Cpu]
+                            .iter()
+                            .chain(GPU_ENCODERS)
+                        {
+                            let why = why_video(can, m.codec, e);
+                            choice(ui, &mut m.encoder, e, encoder(&e), why);
+                        }
+                    });
+            });
+        }
+        super::dialog::row(ui, "File Subfolder", |ui| {
+            let mut text = m.folder.clone().unwrap_or_default();
+            let edit = egui::TextEdit::singleline(&mut text).desired_width(220.0);
+            if ui.add(edit).changed() {
+                m.folder = (!text.trim().is_empty()).then_some(text);
+            }
+        });
+    });
+    let delete = ui.button("Delete Output").clicked();
+    if create {
+        d.more.push(MoreOutput::default());
+    }
+    if delete {
+        d.more.remove(k);
+        d.output_tab = k;
+    }
 }
 
 pub(super) fn video_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value, size: (u32, u32)) {
