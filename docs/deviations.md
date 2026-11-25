@@ -362,7 +362,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - vidcut does not have Text+ and Fusion titles.
   - Markup in the text of a title styles words: `<b>`, `<i>`, `<u>` and `<font color face size>`.
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
-  - The Position, Zoom, Rotation and Opacity of a title take keyframes ([todo](todo/keyframes.md#titles)). Its shadow and background do not.
+  - The Position, Zoom, Rotation and Opacity of a title take keyframes ([spec §8.14](spec.md#814-titles-pp-762764-11761178)). Its shadow and background do not.
 - **Why:**
   - Text+ and Fusion titles are Fusion compositions with text tools. The compositions of vidcut have no text tool (spec §8.19).
   - Markup in the text is what a script writes and reads.
@@ -1373,7 +1373,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
 - **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#effect-freeze)).
+- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
 
 ## X153. Every clip pans as on a stereo track
 
