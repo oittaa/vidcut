@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use vidcut_core::analysis::{Shake, Shaky};
@@ -214,73 +215,70 @@ fn pyramid(gray: Gray) -> Vec<Gray> {
     levels
 }
 
-fn boxed(v: &[f32], w: usize, h: usize) -> Vec<f32> {
-    let r = 2;
-    let mut across = vec![0.0; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let span = x.saturating_sub(r)..=(x + r).min(w - 1);
-            across[y * w + x] = span.map(|k| v[y * w + k]).sum();
-        }
-    }
-    let mut out = vec![0.0; w * h];
-    for y in 0..h {
-        let span = y.saturating_sub(r)..=(y + r).min(h - 1);
-        for x in 0..w {
-            out[y * w + x] = span.clone().map(|k| across[k * w + x]).sum();
-        }
-    }
-    out
-}
-
 fn corners(g: &Gray) -> Vec<[f32; 2]> {
     let (w, h) = (g.w, g.h);
     if w <= 2 * EDGE || h <= 2 * EDGE {
         return Vec::new();
     }
-    let (mut xx, mut xy, mut yy) = (vec![0.0; w * h], vec![0.0; w * h], vec![0.0; w * h]);
-    for y in 1..h - 1 {
-        for x in 1..w - 1 {
-            let i = y * w + x;
-            let gx = (g.px[i + 1] - g.px[i - 1]) * 0.5;
-            let gy = (g.px[i + w] - g.px[i - w]) * 0.5;
-            (xx[i], xy[i], yy[i]) = (gx * gx, gx * gy, gy * gy);
-        }
-    }
-    let (xx, xy, yy) = (boxed(&xx, w, h), boxed(&xy, w, h), boxed(&yy, w, h));
-    let mut score = vec![0.0f32; w * h];
-    let mut top = 0.0f32;
-    for y in EDGE..h - EDGE {
-        for x in EDGE..w - EDGE {
-            let i = y * w + x;
-            let (a, b, c) = (xx[i], xy[i], yy[i]);
-            let least = (a + c) / 2.0 - (((a - c) / 2.0).powi(2) + b * b).sqrt();
-            score[i] = least;
-            top = top.max(least);
-        }
-    }
     let (cols, rows) = GRID;
     let (inner_w, inner_h) = (w - 2 * EDGE, h - 2 * EDGE);
-    let mut out = Vec::new();
-    for r in 0..rows {
-        for c in 0..cols {
-            let (x0, x1) = (EDGE + c * inner_w / cols, EDGE + (c + 1) * inner_w / cols);
-            let (y0, y1) = (EDGE + r * inner_h / rows, EDGE + (r + 1) * inner_h / rows);
-            let mut best = (0.0f32, 0, 0);
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    let s = score[y * w + x];
-                    if s > best.0 {
-                        best = (s, x, y);
-                    }
-                }
+    let cells: Vec<Mutex<(f32, usize, usize)>> =
+        (0..cols * rows).map(|_| Mutex::new((0.0, 0, 0))).collect();
+    crate::pool::run(cells.len(), &|i| {
+        let (r, c) = (i / cols, i % cols);
+        let xs = (EDGE + c * inner_w / cols, EDGE + (c + 1) * inner_w / cols);
+        let ys = (EDGE + r * inner_h / rows, EDGE + (r + 1) * inner_h / rows);
+        *crate::pool::lock(&cells[i]) = best(g, xs, ys);
+    });
+    let cells: Vec<(f32, usize, usize)> = cells
+        .into_iter()
+        .map(|c| c.into_inner().unwrap_or_else(|e| e.into_inner()))
+        .collect();
+    let top = cells.iter().fold(0.0f32, |top, c| top.max(c.0));
+    cells
+        .into_iter()
+        .filter(|c| c.0 > QUALITY * top && c.0 > 0.0)
+        .map(|(_, x, y)| [x as f32, y as f32])
+        .collect()
+}
+
+fn best(g: &Gray, (x0, x1): (usize, usize), (y0, y1): (usize, usize)) -> (f32, usize, usize) {
+    let r = 2;
+    let (left, top) = (x0 - r, y0 - r);
+    let (pw, ph) = (x1 - x0 + 2 * r, y1 - y0 + 2 * r);
+    let n = pw * ph;
+    let (mut xx, mut xy, mut yy) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+    for j in 0..ph {
+        for i in 0..pw {
+            let at = (top + j) * g.w + left + i;
+            let gx = (g.px[at + 1] - g.px[at - 1]) * 0.5;
+            let gy = (g.px[at + g.w] - g.px[at - g.w]) * 0.5;
+            (xx[j * pw + i], xy[j * pw + i], yy[j * pw + i]) = (gx * gx, gx * gy, gy * gy);
+        }
+    }
+    let across = |v: &[f32]| -> Vec<f32> {
+        let mut out = vec![0.0f32; n];
+        for j in 0..ph {
+            for i in r..pw - r {
+                out[j * pw + i] = (i - r..=i + r).map(|k| v[j * pw + k]).sum();
             }
-            if best.0 > QUALITY * top && best.0 > 0.0 {
-                out.push([best.1 as f32, best.2 as f32]);
+        }
+        out
+    };
+    let (xx, xy, yy) = (across(&xx), across(&xy), across(&yy));
+    let down =
+        |v: &[f32], i: usize, j: usize| -> f32 { (j - r..=j + r).map(|k| v[k * pw + i]).sum() };
+    let mut found = (0.0f32, 0, 0);
+    for j in r..ph - r {
+        for i in r..pw - r {
+            let (a, b, c) = (down(&xx, i, j), down(&xy, i, j), down(&yy, i, j));
+            let least = (a + c) / 2.0 - (((a - c) / 2.0).powi(2) + b * b).sqrt();
+            if least > found.0 {
+                found = (least, left + i, top + j);
             }
         }
     }
-    out
+    found
 }
 
 fn on_level(v: f32, level: usize) -> f32 {
@@ -347,20 +345,25 @@ fn follow(from: &[Gray], to: &[Gray], p: [f32; 2]) -> Option<[f32; 2]> {
 }
 
 fn pairs(before: &[Gray], after: &[Gray]) -> Pairs {
-    let mut out = Vec::new();
-    for p in corners(&before[0]) {
-        let Some(q) = follow(before, after, p) else {
-            continue;
-        };
-        let Some(back) = follow(after, before, q) else {
-            continue;
-        };
-        if (back[0] - p[0]).hypot(back[1] - p[1]) > RETURN {
-            continue;
-        }
-        out.push((p, q));
+    let starts = corners(&before[0]);
+    let found: Vec<Mutex<Option<[f32; 2]>>> = starts.iter().map(|_| Mutex::new(None)).collect();
+    crate::pool::run(starts.len(), &|i| {
+        *crate::pool::lock(&found[i]) = followed(before, after, starts[i]);
+    });
+    starts
+        .into_iter()
+        .zip(found)
+        .filter_map(|(p, q)| Some((p, q.into_inner().unwrap_or_else(|e| e.into_inner())?)))
+        .collect()
+}
+
+fn followed(before: &[Gray], after: &[Gray], p: [f32; 2]) -> Option<[f32; 2]> {
+    let q = follow(before, after, p)?;
+    let back = follow(after, before, q)?;
+    match (back[0] - p[0]).hypot(back[1] - p[1]) > RETURN {
+        true => None,
+        false => Some(q),
     }
-    out
 }
 
 fn moved(pairs: &[([f32; 2], [f32; 2])], (w, h): (u32, u32), mode: StabilizeMode) -> [f32; 8] {
