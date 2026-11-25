@@ -4339,8 +4339,7 @@ pub enum Request {
         overwrite: bool,
     },
     /// Delete one of your key sets. Built-in sets can't be deleted. When the
-    /// set is in force, its keys stay in force, as changes to vidcut's own
-    /// keys.
+    /// set is in force, vidcut's own set is put in force.
     #[serde(rename = "keys.delete")]
     KeysDelete { name: String },
     /// Write a key set to a file, for another computer (`keys.import`). A
@@ -4351,8 +4350,8 @@ pub enum Request {
         set: String,
         path: PathBuf,
     },
-    /// Add a key set from a file that `keys.export` wrote. The set is not
-    /// put in force (`keys.use`).
+    /// Add a key set from a file that `keys.export` wrote, and put it in
+    /// force.
     #[serde(rename = "keys.import")]
     KeysImport {
         path: PathBuf,
