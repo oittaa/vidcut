@@ -730,7 +730,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
   - The Parade has the modes RGB, YRGB and YCbCr (p. 3102). It shows the graphs of a mode side by side.
   - vidcut: Waveform Options and Parade Options in the scopes menu set the modes. `viewer.scopes` sets them too.
-  - vidcut: Y is the default of the Waveform, and RGB is the default of the Parade. The defaults of Resolve are not measured.
+  - RGB is the default of the Waveform and of the Parade. R, G and B are on (measured in Resolve Studio 21.2).
   - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
     - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
   - vidcut: a color difference of zero is at the middle of the scale, code 512.
