@@ -189,6 +189,7 @@ pub(crate) enum Act {
     None,
     Leaky(f32),
     Prelu,
+    Silu,
     Gelu,
     Sigmoid,
 }
@@ -199,6 +200,7 @@ impl Act {
             Act::None => (0, 0.0),
             Act::Leaky(a) => (1, a),
             Act::Prelu => (2, 0.0),
+            Act::Silu => (3, 0.0),
             Act::Gelu => (4, 0.0),
             Act::Sigmoid => (5, 0.0),
         }
@@ -455,7 +457,7 @@ pub(crate) struct Kernels {
     four: bool,
 }
 
-const HEADER: &str = r#"
+pub(crate) const HEADER: &str = r#"
 struct P { v: array<vec4<u32>, 16> }
 @group(0) @binding(0) var<uniform> p: P;
 
@@ -486,6 +488,7 @@ fn act(v: f32, code: u32, a: f32, pa: f32) -> f32 {
     switch code {
         case 1u: { return select(v * a, v, v >= 0.0); }
         case 2u: { return select(v * pa, v, v >= 0.0); }
+        case 3u: { return v / (1.0 + exp(-v)); }
         case 4u: { return 0.5 * v * (1.0 + erf(v * 0.7071067811865476)); }
         case 5u: { return 1.0 / (1.0 + exp(-v)); }
         default: { return v; }
@@ -599,6 +602,9 @@ fn put(m: u32, n0: u32, v4: vec4<f32>) {
                 v += res[rb + ((b * oh + y) * ow + x) * rstr + rat + c];
             }
             v = act(v, code, la, alpha[co]);
+            if (rmode == 2u) {
+                v += res[rb + ((b * oh + y) * ow + x) * rstr + rat + c];
+            }
             dst[ob + ((b * oh + y) * ow + x) * ostr + oat + c] = v;
         }
     }
@@ -853,7 +859,11 @@ fn put(m: u32, co: u32, acc: vec4<f32>) {
     if (u(29u) == 1u) {
         v += res[(u(30u) + pix * u(33u) + u(34u) + co) / 4u];
     }
-    dst[(ob + pix * ostr + oat + co) / 4u] = act4(v, alpha[co / 4u]);
+    v = act4(v, alpha[co / 4u]);
+    if (u(29u) == 2u) {
+        v += res[(u(30u) + pix * u(33u) + u(34u) + co) / 4u];
+    }
+    dst[(ob + pix * ostr + oat + co) / 4u] = v;
 }
 
 @compute @workgroup_size(128)
@@ -1197,6 +1207,9 @@ fn put(b: u32, y: u32, x: u32, co: u32, v0: f32) {
         v += res[u(14u) + ((b * oh + y) * ow + x) * u(17u) + u(18u) + co];
     }
     v = act(v, u(11u), f(12u), alpha[co]);
+    if (u(13u) == 2u) {
+        v += res[u(14u) + ((b * oh + y) * ow + x) * u(17u) + u(18u) + co];
+    }
     dst[ob + ((b * oh + y) * ow + x) * ostr + oat + co] = v;
 }
 
@@ -1933,6 +1946,7 @@ pub(crate) struct Ops<'a, 'p> {
 pub(crate) enum Res<'v> {
     None,
     Before(&'v View),
+    After(&'v View),
 }
 
 fn words(parts: &[&[u32]]) -> Vec<u32> {
@@ -2006,6 +2020,7 @@ impl Ops<'_, '_> {
         let (mode, r) = match res {
             Res::None => (0, self.k.dummy_view()),
             Res::Before(r) => (1, r.clone()),
+            Res::After(r) => (2, r.clone()),
         };
         let (code, leak) = w.act.code();
         let p = words(&[
@@ -2052,6 +2067,7 @@ impl Ops<'_, '_> {
         let (mode, r) = match res {
             Res::None => (0, self.k.dummy_view()),
             Res::Before(v) => (1, v.clone()),
+            Res::After(v) => (2, v.clone()),
         };
         let m = src.n * qh * qw;
         let mut p = words(&[

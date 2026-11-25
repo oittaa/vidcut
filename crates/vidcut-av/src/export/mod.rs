@@ -519,7 +519,7 @@ pub(crate) fn gpu_output(
         return None;
     }
     let device = crate::cuda::CudaDevice::open()
-        .and_then(|d| d.with_own_stream())
+        .and_then(|d| d.with_own_stream(crate::cuda::share::Waits::Never))
         .ok()?;
     let frames = crate::cuda::CudaFrames::new(&device, gpu_pixel(enc), w, h).ok()?;
     Some((device, frames))

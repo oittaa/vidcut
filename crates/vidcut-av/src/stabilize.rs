@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use vidcut_core::analysis::{Shake, Shaky};
@@ -8,6 +9,8 @@ use vidcut_core::render::RenderPlan;
 use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::tracking::{Reader, Shown, going};
+
+mod gpu;
 
 const SIDE: f64 = 640.0;
 const LEVELS: usize = 4;
@@ -29,15 +32,94 @@ pub fn name() -> &'static str {
     "steady2"
 }
 
+type Pairs = Vec<([f32; 2], [f32; 2])>;
+
+enum Seen {
+    First,
+    Same,
+    Moved(Pairs),
+}
+
+type Step = Option<[f32; 8]>;
+
+enum Measuring {
+    Cpu {
+        older: Option<Vec<Gray>>,
+        newer: Option<Vec<Gray>>,
+    },
+    Gpu(Box<gpu::Measuring>),
+}
+
+impl Measuring {
+    fn next(
+        &mut self,
+        frame: &frame::Video,
+        size: (u32, u32),
+        mode: StabilizeMode,
+    ) -> Result<Option<Step>> {
+        match self {
+            Self::Gpu(g) => Ok(match g.seen(frame)? {
+                Seen::First => None,
+                Seen::Same => Some(None),
+                Seen::Moved(pairs) => Some(Some(moved(&pairs, size, mode))),
+            }),
+            Self::Cpu { older, newer } => {
+                let job = crate::first::yields();
+                let (made, step) = std::thread::scope(|scope| -> Result<_> {
+                    let making = std::thread::Builder::new()
+                        .name("vidcut-pyramid".into())
+                        .spawn_scoped(scope, || {
+                            if job {
+                                crate::first::as_job();
+                            }
+                            pyramid(Gray::of(frame))
+                        })?;
+                    let step = judged(older.as_deref(), newer.as_deref(), mode);
+                    let made = making
+                        .join()
+                        .unwrap_or_else(|e| std::panic::resume_unwind(e));
+                    Ok((made, step))
+                })?;
+                *older = newer.replace(made);
+                Ok(step)
+            }
+        }
+    }
+
+    fn last(&self, mode: StabilizeMode) -> Option<Step> {
+        match self {
+            Self::Gpu(_) => None,
+            Self::Cpu { older, newer } => judged(older.as_deref(), newer.as_deref(), mode),
+        }
+    }
+}
+
+fn judged(before: Option<&[Gray]>, after: Option<&[Gray]>, mode: StabilizeMode) -> Option<Step> {
+    let (before, after) = (before?, after?);
+    let size = (before[0].w as u32, before[0].h as u32);
+    Some(match repeats(&before[0], &after[0]) {
+        true => None,
+        false => Some(moved(&pairs(before, after), size, mode)),
+    })
+}
+
 pub fn measure(
     plan: &RenderPlan,
     look: &Shaky,
     gpu: Option<&crate::hw::GpuDecoder>,
     source: &Path,
+    on_gpu: bool,
 ) -> Result<Shake> {
     crate::cancel::stop()?;
     let _turn = crate::turns::cpu_analysis()?;
     let size = working(plan.width, plan.height);
+    let mut measuring = match on_gpu {
+        true => Measuring::Gpu(Box::new(gpu::Measuring::start(size)?)),
+        false => Measuring::Cpu {
+            older: None,
+            newer: None,
+        },
+    };
     let reader = Reader { plan, size, gpu };
     let (lo, hi) = (look.frames.0.max(0), look.frames.1.min(plan.frames));
     if hi <= lo {
@@ -51,7 +133,6 @@ pub fn measure(
     let Some(mut run) = going(reader.run(lo, hi))? else {
         return Err(stopped());
     };
-    let mut last: Option<Vec<Gray>> = None;
     let mut steps = Vec::new();
     for done in 0..hi - lo {
         let frame = match going(run.next_frame())? {
@@ -65,16 +146,10 @@ pub fn measure(
             Some(Some(f)) => f,
         };
         crate::cancel::stop()?;
-        let levels = pyramid(Gray::of(&frame));
-        if let Some(before) = &last {
-            steps.push(match repeats(&before[0], &levels[0]) {
-                true => None,
-                false => Some(step(before, &levels, look.mode)),
-            });
-        }
-        last = Some(levels);
+        steps.extend(measuring.next(&frame, size, look.mode)?);
         shown.report(done as usize + 1);
     }
+    steps.extend(measuring.last(look.mode));
     Ok(Shake { size, steps })
 }
 
@@ -180,73 +255,70 @@ fn pyramid(gray: Gray) -> Vec<Gray> {
     levels
 }
 
-fn boxed(v: &[f32], w: usize, h: usize) -> Vec<f32> {
-    let r = 2;
-    let mut across = vec![0.0; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let span = x.saturating_sub(r)..=(x + r).min(w - 1);
-            across[y * w + x] = span.map(|k| v[y * w + k]).sum();
-        }
-    }
-    let mut out = vec![0.0; w * h];
-    for y in 0..h {
-        let span = y.saturating_sub(r)..=(y + r).min(h - 1);
-        for x in 0..w {
-            out[y * w + x] = span.clone().map(|k| across[k * w + x]).sum();
-        }
-    }
-    out
-}
-
 fn corners(g: &Gray) -> Vec<[f32; 2]> {
     let (w, h) = (g.w, g.h);
     if w <= 2 * EDGE || h <= 2 * EDGE {
         return Vec::new();
     }
-    let (mut xx, mut xy, mut yy) = (vec![0.0; w * h], vec![0.0; w * h], vec![0.0; w * h]);
-    for y in 1..h - 1 {
-        for x in 1..w - 1 {
-            let i = y * w + x;
-            let gx = (g.px[i + 1] - g.px[i - 1]) * 0.5;
-            let gy = (g.px[i + w] - g.px[i - w]) * 0.5;
-            (xx[i], xy[i], yy[i]) = (gx * gx, gx * gy, gy * gy);
-        }
-    }
-    let (xx, xy, yy) = (boxed(&xx, w, h), boxed(&xy, w, h), boxed(&yy, w, h));
-    let mut score = vec![0.0f32; w * h];
-    let mut top = 0.0f32;
-    for y in EDGE..h - EDGE {
-        for x in EDGE..w - EDGE {
-            let i = y * w + x;
-            let (a, b, c) = (xx[i], xy[i], yy[i]);
-            let least = (a + c) / 2.0 - (((a - c) / 2.0).powi(2) + b * b).sqrt();
-            score[i] = least;
-            top = top.max(least);
-        }
-    }
     let (cols, rows) = GRID;
     let (inner_w, inner_h) = (w - 2 * EDGE, h - 2 * EDGE);
-    let mut out = Vec::new();
-    for r in 0..rows {
-        for c in 0..cols {
-            let (x0, x1) = (EDGE + c * inner_w / cols, EDGE + (c + 1) * inner_w / cols);
-            let (y0, y1) = (EDGE + r * inner_h / rows, EDGE + (r + 1) * inner_h / rows);
-            let mut best = (0.0f32, 0, 0);
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    let s = score[y * w + x];
-                    if s > best.0 {
-                        best = (s, x, y);
-                    }
-                }
+    let cells: Vec<Mutex<(f32, usize, usize)>> =
+        (0..cols * rows).map(|_| Mutex::new((0.0, 0, 0))).collect();
+    crate::pool::run(cells.len(), &|i| {
+        let (r, c) = (i / cols, i % cols);
+        let xs = (EDGE + c * inner_w / cols, EDGE + (c + 1) * inner_w / cols);
+        let ys = (EDGE + r * inner_h / rows, EDGE + (r + 1) * inner_h / rows);
+        *crate::pool::lock(&cells[i]) = best(g, xs, ys);
+    });
+    let cells: Vec<(f32, usize, usize)> = cells
+        .into_iter()
+        .map(|c| c.into_inner().unwrap_or_else(|e| e.into_inner()))
+        .collect();
+    let top = cells.iter().fold(0.0f32, |top, c| top.max(c.0));
+    cells
+        .into_iter()
+        .filter(|c| c.0 > QUALITY * top && c.0 > 0.0)
+        .map(|(_, x, y)| [x as f32, y as f32])
+        .collect()
+}
+
+fn best(g: &Gray, (x0, x1): (usize, usize), (y0, y1): (usize, usize)) -> (f32, usize, usize) {
+    let r = 2;
+    let (left, top) = (x0 - r, y0 - r);
+    let (pw, ph) = (x1 - x0 + 2 * r, y1 - y0 + 2 * r);
+    let n = pw * ph;
+    let (mut xx, mut xy, mut yy) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+    for j in 0..ph {
+        for i in 0..pw {
+            let at = (top + j) * g.w + left + i;
+            let gx = (g.px[at + 1] - g.px[at - 1]) * 0.5;
+            let gy = (g.px[at + g.w] - g.px[at - g.w]) * 0.5;
+            (xx[j * pw + i], xy[j * pw + i], yy[j * pw + i]) = (gx * gx, gx * gy, gy * gy);
+        }
+    }
+    let across = |v: &[f32]| -> Vec<f32> {
+        let mut out = vec![0.0f32; n];
+        for j in 0..ph {
+            for i in r..pw - r {
+                out[j * pw + i] = (i - r..=i + r).map(|k| v[j * pw + k]).sum();
             }
-            if best.0 > QUALITY * top && best.0 > 0.0 {
-                out.push([best.1 as f32, best.2 as f32]);
+        }
+        out
+    };
+    let (xx, xy, yy) = (across(&xx), across(&xy), across(&yy));
+    let down =
+        |v: &[f32], i: usize, j: usize| -> f32 { (j - r..=j + r).map(|k| v[k * pw + i]).sum() };
+    let mut found = (0.0f32, 0, 0);
+    for j in r..ph - r {
+        for i in r..pw - r {
+            let (a, b, c) = (down(&xx, i, j), down(&xy, i, j), down(&yy, i, j));
+            let least = (a + c) / 2.0 - (((a - c) / 2.0).powi(2) + b * b).sqrt();
+            if least > found.0 {
+                found = (least, left + i, top + j);
             }
         }
     }
-    out
+    found
 }
 
 fn on_level(v: f32, level: usize) -> f32 {
@@ -312,29 +384,38 @@ fn follow(from: &[Gray], to: &[Gray], p: [f32; 2]) -> Option<[f32; 2]> {
     (inside(q[0], to[0].w) && inside(q[1], to[0].h)).then_some(q)
 }
 
-fn step(before: &[Gray], after: &[Gray], mode: StabilizeMode) -> [f32; 8] {
-    let (w, h) = (before[0].w as f64, before[0].h as f64);
+fn pairs(before: &[Gray], after: &[Gray]) -> Pairs {
+    let starts = corners(&before[0]);
+    let found: Vec<Mutex<Option<[f32; 2]>>> = starts.iter().map(|_| Mutex::new(None)).collect();
+    crate::pool::run(starts.len(), &|i| {
+        *crate::pool::lock(&found[i]) = followed(before, after, starts[i]);
+    });
+    starts
+        .into_iter()
+        .zip(found)
+        .filter_map(|(p, q)| Some((p, q.into_inner().unwrap_or_else(|e| e.into_inner())?)))
+        .collect()
+}
+
+fn followed(before: &[Gray], after: &[Gray], p: [f32; 2]) -> Option<[f32; 2]> {
+    let q = follow(before, after, p)?;
+    let back = follow(after, before, q)?;
+    match (back[0] - p[0]).hypot(back[1] - p[1]) > RETURN {
+        true => None,
+        false => Some(q),
+    }
+}
+
+fn moved(pairs: &[([f32; 2], [f32; 2])], (w, h): (u32, u32), mode: StabilizeMode) -> [f32; 8] {
+    let (w, h) = (f64::from(w), f64::from(h));
     let centered = |[x, y]: [f32; 2]| {
         [
             (f64::from(x) + 0.5 - w / 2.0) / h,
             (f64::from(y) + 0.5 - h / 2.0) / h,
         ]
     };
-    let mut from = Vec::new();
-    let mut to = Vec::new();
-    for p in corners(&before[0]) {
-        let Some(q) = follow(before, after, p) else {
-            continue;
-        };
-        let Some(back) = follow(after, before, q) else {
-            continue;
-        };
-        if (back[0] - p[0]).hypot(back[1] - p[1]) > RETURN {
-            continue;
-        }
-        from.push(centered(p));
-        to.push(centered(q));
-    }
+    let from: Vec<[f64; 2]> = pairs.iter().map(|(p, _)| centered(*p)).collect();
+    let to: Vec<[f64; 2]> = pairs.iter().map(|(_, q)| centered(*q)).collect();
     let m = fitted(mode, &from, &to, INLIER / h).unwrap_or(SAME);
     std::array::from_fn(|i| (m[i] / m[8]) as f32)
 }

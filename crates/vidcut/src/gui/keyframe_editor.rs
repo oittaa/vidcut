@@ -1771,6 +1771,25 @@ impl Workspace {
             at.is_some_and(|at| tray.into_iter().chain(panel).any(|r| r.contains(at)));
     }
 
+    pub(super) fn select_editor_keys(&mut self, all: bool) -> bool {
+        if !self.key_editor.focused || !self.keys_in_view() {
+            return false;
+        }
+        let marks = match all {
+            false => Vec::new(),
+            true => self
+                .project_shared()
+                .and_then(|p| {
+                    let id = self.key_editor.clip.as_deref()?;
+                    p.key_holder(id)
+                })
+                .map(|clip| live_marks(&lanes_of(&clip, false), None))
+                .unwrap_or_default(),
+        };
+        self.key_editor.selected = marks;
+        true
+    }
+
     pub(super) fn copy_editor_keys(&mut self, cut: bool) -> bool {
         if !self.key_editor.focused || self.key_editor.selected.is_empty() {
             return false;
@@ -2283,6 +2302,8 @@ impl Workspace {
         let marks = self.key_editor.selected.clone();
         let (_, takes) = marks_eases(clip, lanes, &marks);
         let mut eased = None;
+        let turns = marks.iter().filter(|m| !fixed(m.param)).count() > 1;
+        let mut reverse = false;
         let editor = &mut self.key_editor;
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2317,6 +2338,11 @@ impl Workspace {
                             ui.radio_value(&mut editor.graph_scale, scale, label);
                         }
                     });
+                    let r = ui.add_enabled(turns, egui::Button::new("Reverse Keyframes"));
+                    if r.clicked() {
+                        reverse = true;
+                        ui.close();
+                    }
                 });
                 if most > 1.0 {
                     ui.spacing_mut().slider_width = ZOOM_W;
@@ -2405,6 +2431,32 @@ impl Workspace {
         if let Some(e) = eased {
             send_parts(self, ease_parts(clip, lanes, &marks, e));
         }
+        if reverse {
+            self.reverse_editor_keys(clip);
+        }
+    }
+
+    fn reverse_editor_keys(&mut self, clip: &Clip) {
+        let marks: Vec<Mark> = (self.key_editor.selected.iter().copied())
+            .filter(|m| !fixed(m.param))
+            .collect();
+        let times = marks.iter().map(|m| clip.key_time(m.frame));
+        let (lo, hi) = times.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), t| {
+            (a.min(t), b.max(t))
+        });
+        let keys: Vec<Value> = unique_params(&marks)
+            .into_iter()
+            .map(|param| json!({ "param": param, "frames": frames_of(&marks, param) }))
+            .collect();
+        for m in &mut self.key_editor.selected {
+            if !fixed(m.param) {
+                m.frame = clip.key_at(lo + hi - clip.key_time(m.frame)).round() as i64;
+            }
+        }
+        self.send(
+            "keyframes.reverse",
+            json!({ "clip": clip.id, "keys": keys }),
+        );
     }
 
     fn ruler(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, plot: Plot) {

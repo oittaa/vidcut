@@ -321,6 +321,11 @@ impl Workspace {
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::ColorTool => self.show_color_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
+            GuiPanel::TitleText => {
+                if let Err(e) = self.type_title_text() {
+                    self.say(format!("Title Text: {e}"));
+                }
+            }
             GuiPanel::SelectTool => self.open_select_tool(),
             GuiPanel::Equalizer => {}
         }
@@ -351,6 +356,7 @@ impl Workspace {
                 {
                     return Err("Open a project first".into());
                 }
+                live::GuiChange::Show(GuiPanel::TitleText) => self.type_title_text()?,
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Equalizer(track) => self.open_track_equalizer(&track)?,
                 live::GuiChange::Close(panel) => self.close_panel(panel),
@@ -361,6 +367,7 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
+                live::GuiChange::Layer(layer) => self.set_layer(layer)?,
                 live::GuiChange::Palette(palette) => {
                     self.effects_page.palette = palette;
                     self.effects_page.window_name = None;
@@ -443,6 +450,7 @@ impl Workspace {
             }
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
+            GuiPanel::TitleText => self.stop_title_text(),
             GuiPanel::SelectTool => self.close_select_tool(),
             GuiPanel::Equalizer => self.close_track_equalizer(),
         }
@@ -491,6 +499,7 @@ impl Workspace {
                 tool.is_none() && self.timeline.picture_grab.color,
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
+            (GuiPanel::TitleText, self.typing_title_text()),
             (GuiPanel::SelectTool, self.select_tool_open()),
             (GuiPanel::Equalizer, self.track_equalizer_open()),
         ];
@@ -499,6 +508,7 @@ impl Workspace {
         live::GuiState {
             page,
             grade: self.effects_page.grading,
+            layer: self.shown_layer(),
             palette: self.effects_page.palette,
             primaries: self.effects_page.primaries,
             window: self.effects_page.window,
@@ -1900,6 +1910,10 @@ impl Workspace {
         }
         let all = fired.pressed(Action::SelectAll);
         let nothing = fired.pressed(Action::SelectNothing);
+        let (all, nothing) = match (all || nothing) && self.select_editor_keys(all) {
+            true => (false, false),
+            false => (all, nothing),
+        };
         if (all || nothing) && self.pool_focus {
             let media: Vec<String> = match self.project() {
                 Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)
