@@ -585,7 +585,8 @@ The bar and the Jobs button:
     - An effect that comes to a clip that is not selected changes nothing in the Inspector.
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. With only several titles selected, it shows no section. A section that closes puts its changes in first.
 - The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
-- The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::fitted`, as in an export.
+- The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The mapped size comes from `place::mapped`, with the scaling of the clip, as in an export.
+  - The handles in the viewer use the same rectangle (`mapped_content`).
   - A picture from the handles, the wheel or the Inspector goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each change is one undo step: one `picture.set`, or an `apply` of one `picture.set` for each clip. Reset sends `picture.clear`.
   - Why the `apply`: a `position` holds X and Y, so Position X goes with the Y of each clip. A crop in pixels is a different fraction of each picture.
@@ -899,6 +900,9 @@ Order:
 - Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
+- `Workspace::ui` keeps `Workspace::asking` in `Workspace::asked` before `Workspace::keys`. Normalize Audio Levels, Set Speed Change and Change Clip Speed apply at Enter only while `Workspace::asked` is false.
+  - Why: `Workspace::keys` returns while a widget has the focus, before it removes the keys of a question. A question that gives its button the focus thus keeps Enter, and Enter presses that button.
+  - The question closes in the same frame, before the timeline panel draws these windows. Thus they read the value from the start of the frame.
 
 The Keyboard Customization window:
 

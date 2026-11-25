@@ -307,7 +307,7 @@ pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
 fn shape_of(p: &Project, c: &Clip, m: Option<&Media>) -> picture::Shape {
     let frame = (p.width(), p.height());
     match m.and_then(|m| m.info.video.as_ref()) {
-        Some(v) if c.compound.is_none() => picture::Shape::of(v, frame),
+        Some(v) if c.compound.is_none() => picture::Shape::of(v, frame, p.scaling()),
         _ => picture::Shape::whole(frame),
     }
 }

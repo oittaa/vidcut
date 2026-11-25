@@ -877,11 +877,101 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
     Ok(added)
 }
 
+fn oldest_taker(g: &mut Grade, from: GradeLink) -> Option<&mut Option<GradeLink>> {
+    let Grade { nodes, output } = g;
+    nodes
+        .iter_mut()
+        .flat_map(|d| d.inputs.iter_mut().chain([&mut d.key_from]))
+        .chain([output])
+        .filter(|v| **v == Some(from))
+        .min_by_key(|v| v.map(|l| l.made))
+}
+
+fn stamped(before: &Grade, g: &mut Grade) {
+    let made = before
+        .nodes
+        .iter()
+        .flat_map(|d| d.links())
+        .chain(before.output);
+    let mut next = made.map(|l| l.made + 1).max().unwrap_or(0);
+    let mut fresh = |v: &mut Option<GradeLink>, was: Option<GradeLink>| {
+        if let Some(l) = v {
+            l.made = match was {
+                Some(w) if w == *l => w.made,
+                _ => {
+                    next += 1;
+                    next - 1
+                }
+            };
+        }
+    };
+    for (k, d) in g.nodes.iter_mut().enumerate() {
+        let old = before.nodes.get(k);
+        for (i, v) in d.inputs.iter_mut().enumerate() {
+            fresh(v, old.and_then(|o| o.inputs.get(i).copied().flatten()));
+        }
+        fresh(&mut d.key_from, old.and_then(|o| o.key_from));
+    }
+    fresh(&mut g.output, before.output);
+}
+
+fn walked(g: &mut Grade) -> Vec<u32> {
+    let count = g.nodes.len();
+    let mut out: Vec<Vec<(u32, u32)>> = vec![Vec::new(); count + 1];
+    for (d, k) in g.nodes.iter().zip(1..) {
+        for l in d.links() {
+            if let Some(o) = out.get_mut(l.node as usize) {
+                o.push((l.made, k));
+            }
+        }
+    }
+    let mut seen = vec![false; count + 1];
+    let mut order = vec![0];
+    let mut i = 0;
+    while let Some(&at) = order.get(i) {
+        let next = &mut out[at as usize];
+        next.sort_by_key(|(made, _)| *made);
+        for &(_, k) in next.iter() {
+            if !std::mem::replace(&mut seen[k as usize], true) {
+                order.push(k);
+            }
+        }
+        i += 1;
+    }
+    order.extend((1..=count as u32).filter(|k| !seen[*k as usize]));
+    let mut number = vec![0; count + 1];
+    for (new, &old) in order.iter().enumerate() {
+        number[old as usize] = new as u32;
+    }
+    let mut nodes: Vec<Option<GradeNode>> =
+        std::mem::take(&mut g.nodes).into_iter().map(Some).collect();
+    g.nodes = (order[1..].iter())
+        .filter_map(|&k| nodes[k as usize - 1].take())
+        .collect();
+    let moved = |v: &mut Option<GradeLink>| {
+        if let Some(l) = v
+            && let Some(&m) = number.get(l.node as usize)
+        {
+            l.node = m;
+        }
+    };
+    for d in &mut g.nodes {
+        d.inputs.iter_mut().for_each(moved);
+        moved(&mut d.key_from);
+    }
+    moved(&mut g.output);
+    number
+}
+
+pub fn added_number(g: &Grade, kind: GradeAdd, n: Option<u32>, frame: [f64; 2]) -> Option<u32> {
+    grown(&mut g.clone(), kind, (n, None), None, frame).ok()
+}
+
 pub fn add(
     p: &mut Project,
     of: &GradeOf,
     kind: GradeAdd,
-    (n, place): (Option<u32>, Option<[f64; 2]>),
+    at: (Option<u32>, Option<[f64; 2]>),
     window: Option<WindowKind>,
 ) -> Result<Value> {
     if window.is_some() && kind == GradeAdd::KeyMixer {
@@ -890,84 +980,100 @@ pub fn add(
     let frame = p.frame_size();
     let mut made = 0;
     edited(p, of, |g| {
-        let added = g.last() + 1;
-        let around = |g: &Grade| -> Result<(GradeLink, [f64; 2])> {
-            let n = n.ok_or_else(|| Error::usage("give `node`, the node it goes beside"))?;
-            let d = g.node(n).ok_or_else(|| no_node(n))?;
-            let key = d.takes_keys();
-            Ok((GradeLink { node: n, key }, d.place))
-        };
-        let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
-        made = match kind {
-            GradeAdd::Serial => {
-                let (from, [x, y]) = around(g)?;
-                shifted(g, x + 1.0);
-                g.nodes
-                    .push(GradeNode::corrector(Some(from), [x + 1.0, y], frame));
-                retake(g, from, Some(GradeLink::picture(added)), added);
-                added
-            }
-            GradeAdd::Before => {
-                let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
-                let input = node(g, n)?.inputs.first().copied().flatten();
-                shifted(g, x);
-                g.nodes.push(GradeNode::corrector(input, [x, y], frame));
-                if let Some(first) = node(g, n)?.inputs.first_mut() {
-                    *first = Some(GradeLink::picture(added));
-                }
-                added
-            }
-            GradeAdd::Parallel | GradeAdd::Layer => {
-                let (from, _) = around(g)?;
-                beside(g, from.node, kind, frame)?
-            }
-            GradeAdd::Append => {
-                let at = match g.output.and_then(|o| g.node(o.node)) {
-                    Some(d) => [d.place[0] + 1.0, d.place[1]],
-                    None => {
-                        let right = g.nodes.iter().map(|d| d.place[0] + 1.0).fold(0.0, f64::max);
-                        [right, 0.0]
-                    }
-                };
-                g.nodes.push(GradeNode::corrector(g.output, at, frame));
-                g.output = Some(GradeLink::picture(added));
-                added
-            }
-            GradeAdd::Corrector => {
-                let at = place.unwrap_or([0.0, below]);
-                g.nodes.push(GradeNode::corrector(None, at, frame));
-                added
-            }
-            GradeAdd::Outside => {
-                let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
-                values(node(g, n)?, n)?;
-                shifted(g, x + 1.0);
-                let (from, to) = (GradeLink::picture(n), GradeLink::picture(added));
-                let mut outside = GradeNode::corrector(Some(from), [x + 1.0, y], frame);
-                outside.key_from = Some(GradeLink::key(n));
-                outside.key_input.invert = true;
-                g.nodes.push(outside);
-                retake(g, from, Some(to), added);
-                added
-            }
-            GradeAdd::KeyMixer => {
-                let at = place.unwrap_or([0.0, below]);
-                let mix = vec![KeyMix::default(); 2];
-                let tool = GradeTool::KeyMixer { mix };
-                g.nodes.push(GradeNode::mixer(tool, vec![None; 2], at));
-                added
-            }
-        };
-        if let Some(w) = window {
-            let d = node(g, made)?;
-            let first = WindowKind::ALL.iter().position(|k| *k == w);
-            let on = (first.and_then(|i| d.windows.get_mut(i)))
-                .ok_or_else(|| Error::invalid(format!("node {made} has no such window")))?;
-            on.on = true;
-        }
+        made = grown(g, kind, at, window, frame)?;
         Ok(())
     })?;
     Ok(json!({ "node": made }))
+}
+
+fn grown(
+    g: &mut Grade,
+    kind: GradeAdd,
+    (n, place): (Option<u32>, Option<[f64; 2]>),
+    window: Option<WindowKind>,
+    frame: [f64; 2],
+) -> Result<u32> {
+    let before = g.clone();
+    let added = g.last() + 1;
+    let around = |g: &Grade| -> Result<(GradeLink, [f64; 2])> {
+        let n = n.ok_or_else(|| Error::usage("give `node`, the node it goes beside"))?;
+        let d = g.node(n).ok_or_else(|| no_node(n))?;
+        Ok((GradeLink::new(n, d.takes_keys()), d.place))
+    };
+    let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
+    let made = match kind {
+        GradeAdd::Serial => {
+            let (from, [x, y]) = around(g)?;
+            shifted(g, x + 1.0);
+            if let Some(v) = oldest_taker(g, from) {
+                *v = Some(GradeLink::picture(added));
+            }
+            g.nodes
+                .push(GradeNode::corrector(Some(from), [x + 1.0, y], frame));
+            added
+        }
+        GradeAdd::Before => {
+            let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
+            let input = node(g, n)?.inputs.first().copied().flatten();
+            shifted(g, x);
+            g.nodes.push(GradeNode::corrector(input, [x, y], frame));
+            if let Some(first) = node(g, n)?.inputs.first_mut() {
+                *first = Some(GradeLink::picture(added));
+            }
+            added
+        }
+        GradeAdd::Parallel | GradeAdd::Layer => {
+            let (from, _) = around(g)?;
+            beside(g, from.node, kind, frame)?
+        }
+        GradeAdd::Append => {
+            let at = match g.output.and_then(|o| g.node(o.node)) {
+                Some(d) => [d.place[0] + 1.0, d.place[1]],
+                None => {
+                    let right = g.nodes.iter().map(|d| d.place[0] + 1.0).fold(0.0, f64::max);
+                    [right, 0.0]
+                }
+            };
+            g.nodes.push(GradeNode::corrector(g.output, at, frame));
+            g.output = Some(GradeLink::picture(added));
+            added
+        }
+        GradeAdd::Corrector => {
+            let at = place.unwrap_or([0.0, below]);
+            g.nodes.push(GradeNode::corrector(None, at, frame));
+            added
+        }
+        GradeAdd::Outside => {
+            let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
+            values(node(g, n)?, n)?;
+            shifted(g, x + 1.0);
+            let from = GradeLink::picture(n);
+            if let Some(v) = oldest_taker(g, from) {
+                *v = Some(GradeLink::picture(added));
+            }
+            let mut outside = GradeNode::corrector(Some(from), [x + 1.0, y], frame);
+            outside.key_from = Some(GradeLink::key(n));
+            outside.key_input.invert = true;
+            g.nodes.push(outside);
+            added
+        }
+        GradeAdd::KeyMixer => {
+            let at = place.unwrap_or([0.0, below]);
+            let mix = vec![KeyMix::default(); 2];
+            let tool = GradeTool::KeyMixer { mix };
+            g.nodes.push(GradeNode::mixer(tool, vec![None; 2], at));
+            added
+        }
+    };
+    if let Some(w) = window {
+        let d = node(g, made)?;
+        let first = WindowKind::ALL.iter().position(|k| *k == w);
+        let on = (first.and_then(|i| d.windows.get_mut(i)))
+            .ok_or_else(|| Error::invalid(format!("node {made} has no such window")))?;
+        on.on = true;
+    }
+    stamped(&before, g);
+    Ok(walked(g)[made as usize])
 }
 
 fn renumbered(g: &mut Grade, gone: u32) {
@@ -1319,8 +1425,9 @@ pub fn connect(
     if key && from.is_none() {
         return Err(Error::usage("`key` needs `from`"));
     }
-    let from = from.map(|node| GradeLink { node, key });
+    let from = from.map(|node| GradeLink::new(node, key));
     edited(p, of, |g| {
+        let before = g.clone();
         if let Some(f) = from.filter(|f| f.node > g.last()) {
             return Err(no_node(f.node));
         }
@@ -1329,6 +1436,7 @@ pub fn connect(
                 return Err(Error::invalid("the output has one input"));
             }
             g.output = from;
+            stamped(&before, g);
             return Ok(());
         }
         if from.is_some_and(|f| f.node == n) {
@@ -1359,6 +1467,7 @@ pub fn connect(
         if crate::grade::order(g).is_none() {
             return Err(Error::invalid("that link makes a loop"));
         }
+        stamped(&before, g);
         Ok(())
     })
 }

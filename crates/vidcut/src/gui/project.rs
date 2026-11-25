@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use vidcut_core::Project;
 use vidcut_core::luts::LutList;
 use vidcut_core::model::{
-    DynamicsProfile, Hdr, MonitorLut, ProjectRetime, ProjectUpscaler, TimelineColors,
+    DynamicsProfile, Hdr, MonitorLut, ProjectRetime, ProjectUpscaler, Scaling, TimelineColors,
     TimelineSettings,
 };
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
@@ -29,6 +29,8 @@ const SIDE_FIELD: (u32, u32) = (1, 99999);
 
 const START_HOURS: [i64; 3] = [0, 1, 10];
 
+const SCALINGS: [Scaling; 4] = [Scaling::Crop, Scaling::Fill, Scaling::Fit, Scaling::Stretch];
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Format {
     width: u32,
@@ -37,6 +39,7 @@ pub(super) struct Format {
     drop_frame: bool,
     start: String,
     colors: TimelineColors,
+    scaling: Scaling,
     auto: Option<Hdr>,
     retime: ProjectRetime,
     upscaler: ProjectUpscaler,
@@ -80,6 +83,7 @@ impl Default for Format {
             drop_frame: false,
             start: "01:00:00:00".into(),
             colors: TimelineColors::Auto,
+            scaling: Scaling::Fit,
             auto: None,
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
@@ -118,6 +122,7 @@ impl Format {
             drop_frame: s.drop_frame,
             start: p.timecode(0),
             colors: s.timeline_colors,
+            scaling: s.scaling,
             auto: vidcut_core::render::auto_colors(p),
             retime: p.settings.retime,
             upscaler: p.settings.upscaler,
@@ -146,6 +151,7 @@ impl Format {
             drop_frame: own.drop_frame,
             start: tc,
             colors: own.timeline_colors,
+            scaling: own.scaling,
             ..Self::of(p)
         }
     }
@@ -165,6 +171,7 @@ impl Format {
             "height": self.height,
             "drop_frame": self.drop_frame(),
             "timeline_colors": self.colors,
+            "scaling": self.scaling,
         }))
     }
 
@@ -183,7 +190,30 @@ impl Format {
         if self.colors != was.colors {
             set.insert("timeline_colors".into(), json!(self.colors));
         }
+        if self.scaling != was.scaling {
+            set.insert("scaling".into(), json!(self.scaling));
+        }
         Value::Object(set)
+    }
+
+    pub(super) fn edit_scaling(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new(ui.scope_id().with("scaling"))
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                let label = ui.label("Mismatched Resolution Files");
+                egui::ComboBox::from_id_salt("timeline scaling")
+                    .selected_text(self.scaling.title())
+                    .width(240.0)
+                    .show_ui(ui, |ui| {
+                        for s in SCALINGS {
+                            ui.selectable_value(&mut self.scaling, s, s.title());
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                ui.end_row();
+            });
     }
 
     fn edit_ai(&mut self, ui: &mut egui::Ui) {
@@ -803,6 +833,7 @@ impl Workspace {
             .open(&mut open)
             .show(ctx, |ui| {
                 format.edit(ui, (!empty).then_some("only with no timelines"));
+                format.edit_scaling(ui);
                 lut_action = format.colors_grid(ui, Some(luts));
                 format.edit_ai(ui);
                 format.edit_dynamics(ui);
@@ -846,6 +877,9 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.colors != was.colors {
         set.insert("timeline_colors".into(), json!(now.colors));
+    }
+    if now.scaling != was.scaling {
+        set.insert("scaling".into(), json!(now.scaling));
     }
     if now.retime != was.retime {
         set.insert("retime".into(), json!(now.retime));

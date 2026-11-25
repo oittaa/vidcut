@@ -304,6 +304,14 @@ fn retime(v: &Value) -> String {
         .map_or_else(|_| word(v), |r| r.title().to_string())
 }
 
+fn scaling(v: &Value) -> String {
+    if let Ok(s) = serde_json::from_value::<crate::model::ClipScaling>(v.clone()) {
+        return s.title().to_string();
+    }
+    serde_json::from_value::<crate::model::Scaling>(v.clone())
+        .map_or_else(|_| word(v), |s| s.title().to_string())
+}
+
 fn on_off(v: &Value) -> String {
     match v.as_bool() {
         Some(true) => "On".into(),
@@ -639,6 +647,7 @@ impl Words<'_> {
         s.usual("opacity", "Opacity", &percent, json!(1.0), |q| {
             json!(q.opacity)
         });
+        s.put("scaling", "Scaling", &scaling, |q| json!(q.scaling));
         if let Some(zoom) = p.get("dynamic_zoom") {
             let on = json!(!zoom.is_null());
             s.add("Dynamic Zoom", &on, &raw, Value::Null, |q| {
@@ -956,6 +965,9 @@ impl Words<'_> {
             json!(x.timeline_colors)
         });
         s.put("retime", "Retime Process", &retime, |x| json!(x.retime));
+        s.put("scaling", "Mismatched Resolution Files", &scaling, |x| {
+            json!(x.scaling)
+        });
         s.put("upscaler", "Upscaler", &upscaler, |x| json!(x.upscaler));
         s.put("render_cache", "Render Cache", &word, |x| {
             json!(x.render_cache)

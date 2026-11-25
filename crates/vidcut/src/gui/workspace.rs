@@ -123,6 +123,7 @@ pub struct Workspace {
     pub(super) export: super::export::ExportUi,
     pub(super) show_mixer: bool,
     pub(super) key_tray: bool,
+    pub(super) asked: bool,
     pub(super) effects_page: super::effects_page::EffectsPage,
     pub(super) mixer: super::mixer::Mixer,
     pub(super) preferences: super::preferences::PreferencesUi,
@@ -233,6 +234,7 @@ impl Workspace {
             export: Default::default(),
             show_mixer: false,
             key_tray: false,
+            asked: false,
             effects_page: Default::default(),
             mixer: Default::default(),
             preferences: Default::default(),
@@ -2217,6 +2219,7 @@ impl Workspace {
         if let Some(tiles) = &mut self.tiles {
             tiles.begin_frame(&ctx, self.snap.project());
         }
+        self.asked = self.asking();
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);

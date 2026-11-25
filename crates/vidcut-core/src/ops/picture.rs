@@ -6,13 +6,13 @@ use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
     ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
-    CellShape, Clip, CompositeMode, Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
-    EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite, ImageFormat, Mask,
-    MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern,
-    Picture, PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen,
-    Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind, Tracker, TrackerMerge,
-    TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    CellShape, Clip, ClipScaling, CompositeMode, Composition, Crop, DynamicZoom, Effect,
+    EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow,
+    GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite,
+    ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
+    NoiseColoring, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
+    ShadingElement, Sharpen, Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind,
+    Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput, StabilizationSet};
 
@@ -1390,6 +1390,7 @@ pub struct PictureChange {
     pub stabilization: Option<StabilizationSet>,
     pub composite_mode: Option<CompositeMode>,
     pub opacity: Option<f64>,
+    pub scaling: Option<ClipScaling>,
 }
 
 impl PictureChange {
@@ -1474,10 +1475,13 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     if let Some(o) = change.opacity {
         p.opacity = Some(o);
     }
+    if let Some(s) = change.scaling {
+        p.scaling = s;
+    }
     p
 }
 
-const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, switch, Dynamic Zoom, composite mode, opacity or stabilization";
+const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, switch, Dynamic Zoom, composite mode, opacity, scaling or stabilization";
 
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i64>) -> Result<()> {
     if change.is_empty() {
@@ -1543,6 +1547,10 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
             picture.composite_mode = next.composite_mode;
             wrote = true;
         }
+        if change.scaling.is_some() {
+            picture.scaling = next.scaling;
+            wrote = true;
+        }
         if !wrote {
             continue;
         }
@@ -1573,6 +1581,7 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
                 effects: old.effects.clone(),
                 composition: old.composition.clone(),
                 grade: old.grade.clone(),
+                scaling: old.scaling,
                 ..Picture::default()
             },
         };
@@ -1601,6 +1610,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             effects: old.effects,
             composition: old.composition,
             grade: old.grade,
+            scaling: old.scaling,
             stabilization: old.stabilization,
             ..Picture::default()
         },
@@ -1676,6 +1686,7 @@ pub fn shown(c: &Clip) -> Value {
         "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
         "composite_mode": p.mode(),
         "opacity": p.opaque(),
+        "scaling": p.scaling,
         "stabilization": stabilization_shown(p.stabilization.as_ref()),
         "effects": p.effects.iter().map(effect_shown).collect::<Vec<_>>(),
     })

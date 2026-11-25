@@ -639,7 +639,7 @@ fn least_span(param: KeyParam) -> f64 {
 }
 
 fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
-    let ([w, h], [fw, fh]) = (f.frame, f.fitted);
+    let ([w, h], [fw, fh]) = (f.frame, f.mapped);
     match param {
         KeyParam::Position
         | KeyParam::TextPosition
@@ -679,7 +679,7 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
 }
 
 fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
-    let ([w, h], [fw, fh]) = (f.frame, f.fitted);
+    let ([w, h], [fw, fh]) = (f.frame, f.mapped);
     match param {
         KeyParam::Position
         | KeyParam::TextPosition

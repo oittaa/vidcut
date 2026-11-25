@@ -200,6 +200,7 @@ impl Workspace {
             ui.checkbox(&mut n.use_project, "Use Project Settings");
             ui.add_enabled_ui(!n.use_project, |ui| {
                 n.format.edit(ui, None);
+                n.format.edit_scaling(ui);
                 n.format.edit_colors(ui);
             });
             let ok = n.format.start().is_some()
@@ -250,6 +251,7 @@ impl Workspace {
             ui.add_enabled_ui(!e.use_project, |ui| {
                 e.format
                     .edit(ui, locked.then_some("only while the timeline is empty"));
+                e.format.edit_scaling(ui);
                 e.format.edit_colors(ui);
             });
             let changes = changes(&e);
