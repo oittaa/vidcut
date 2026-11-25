@@ -23,7 +23,7 @@ const FULL_AT: u64 = 16;
 
 const PARAMS: usize = 224;
 
-const SKIN_DEGREES: f64 = 123.0;
+const SKIN_DEGREES: f64 = 123.14;
 
 const DASHED_NITS: [f64; 3] = [26.0, 203.0, 2000.0];
 

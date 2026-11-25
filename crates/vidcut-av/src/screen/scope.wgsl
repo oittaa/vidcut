@@ -18,6 +18,7 @@ struct Params {
 @group(0) @binding(3) var<storage, read> counted: array<u32>;
 
 const GRID: vec3<f32> = vec3<f32>(0.3, 0.3, 0.3);
+const SKIN: vec3<f32> = vec3<f32>(0.247, 0.247, 0.247);
 
 const DASH: u32 = 4u;
 
@@ -183,6 +184,16 @@ fn ruled(p: vec2<f32>) -> bool {
     return false;
 }
 
+fn on_skin(p: vec2<f32>) -> bool {
+    if params.parts.w != 1u {
+        return false;
+    }
+    let d = p - floor(vec2<f32>(params.size) * 0.5);
+    let along = dot(d, params.skin.xy);
+    let off = abs(d.x * params.skin.y - d.y * params.skin.x);
+    return along > 0.0 && along < params.chroma.z && off < 0.75;
+}
+
 fn on_graticule(p: vec2<f32>) -> bool {
     let middle = floor(vec2<f32>(params.size) * 0.5);
     let d = p - middle;
@@ -193,13 +204,6 @@ fn on_graticule(p: vec2<f32>) -> bool {
     }
     if far < circle && (d.x == 0.0 || d.y == 0.0) {
         return true;
-    }
-    if params.parts.w == 1u {
-        let along = dot(d, params.skin.xy);
-        let off = abs(d.x * params.skin.y - d.y * params.skin.x);
-        if along > 0.0 && along < circle && off < 0.75 {
-            return true;
-        }
     }
     let half_box = params.chroma.w;
     for (var i = 0u; i < 6u; i++) {
@@ -226,7 +230,8 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
                 most = max(most, hit(x + dx, y + dy) * 0.5);
             }
         }
-        let grid = select(vec3<f32>(0.0), GRID, on_graticule(p));
+        let skin = select(vec3<f32>(0.0), SKIN, on_skin(p));
+        let grid = select(skin, GRID, on_graticule(p));
         return vec4<f32>(max(grid, vec3<f32>(level(most))), 1.0);
     }
     var color = vec3<f32>(0.0);
