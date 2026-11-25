@@ -181,6 +181,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A pasted keyframe can be past the clip's ends (p. 1258).
       - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
+    - The ⋯ menu has Reverse Keyframes (pp. 1264, 1267). It runs the selected keyframes backward over their span.
+      - Each keyframe goes as far from the last as it was from the first. It keeps its value, and it stays selected.
+      - Its In and Out handles change places. Thus Ease In becomes Ease Out.
+      - The span is that of all the selected keyframes. Thus the timing between the values stays.
+      - A reversed keyframe takes the place of a keyframe on its new frame.
+      - Speed keyframes do not reverse. `keyframes.reverse` does this.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
       - A button is off when no selected keyframe takes its ease.
@@ -719,7 +725,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
   - vidcut: the View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
   - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
-  - vidcut: the Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - The Waveform has the modes Y, CbCr and RGB (p. 3103).
+    - Y shows luma. CbCr shows the two color differences over one another. RGB shows red, green and blue over one another (p. 3097).
+    - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
+  - The Parade has the modes RGB, YRGB and YCbCr (p. 3102). It shows the graphs of a mode side by side.
+  - vidcut: Waveform Options and Parade Options in the scopes menu set the modes. `viewer.scopes` sets them too.
+  - vidcut: Y is the default of the Waveform, and RGB is the default of the Parade. The defaults of Resolve are not measured.
+  - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
+    - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
+  - vidcut: a color difference of zero is at the middle of the scale, code 512.
   - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
@@ -1216,6 +1230,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Speed Change controls of the Inspector set the same (pp. 736–737).
   - vidcut: the Speed section of the Inspector tab (X70).
   - vidcut: the window also sets Retime Process (X93).
+  - Keyframes: Maintain Timing or Stretch to Fit (p. 1217).
+    - Maintain Timing keeps each keyframe at its frame of the clip.
+    - Stretch to Fit keeps each Transform, Crop and Composite keyframe on its source frame. The volume, the pan and the effects keep their timing.
+    - Thus at twice the speed, the keyframes are half as far apart. Their handles change in the same ratio.
+    - A change of direction puts the keyframes in the opposite order. Their In and Out handles change places.
+    - A freeze frame keeps the timing. A clip that was a freeze frame keeps it too.
+    - `edit.change_speed` takes `keyframes`: `maintain` or `stretch`.
 - **Change Clip Duration** (Ctrl+D, p. 693; Resolve Studio 21.1.1):
   - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
   - End runs to the end of the media.
@@ -1855,13 +1876,16 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D65, D66.
 - **Editing** (pp. 763–764, 1176):
   - A double-click on the text of a title in the viewer edits the text there.
+  - The text is edited in place, inside a plain outline. Typing changes the Rich Text field of the Inspector at once (measured in Resolve Studio 21.2).
   - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
-  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section and a text box at the title.
-    - Typing in the box changes the title in the viewer and the text of the Title section at once.
-    - The box closes when it loses the focus, for example with Esc or a click outside it. Then one `titles.set` puts the change in.
+  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
+    - The double-click puts the caret at the pointer. A click or a drag in the text moves the caret or selects letters.
+    - A typed letter takes the style of the letter before it. At the start of a line, it takes the style of the letter after it.
+    - The edit ends with Esc or a click outside the title. Then one `titles.set` puts the change in.
+    - `gui.show` with `title_text` starts the edit, and `gui.close` ends it.
   - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
   - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
@@ -2918,6 +2942,8 @@ The shapes:
   - The ends: Flat, Rounded or Square. Usual: Rounded. Flat stops at the end point. Square goes on past it with a square end. Rounded ends in a half circle.
   - With Solid off, Position and Length show under Border Style. Usual: 0 and 1.
   - Length 0.5 with Position 0 draws the band from the middle of the left side, over the top, to the middle of the right side.
+  - vidcut: Border Style has the joins, as one switch of Bevel, Round and Miter. The joins act on the sharp corners. With Corner Radius above 0, the corners stay round.
+  - vidcut has no ends, Position and Length yet ([todo](todo/effects-page.md)).
 - Polygon (p. 2483): its points, from its center. X is a fraction of W. Y is a fraction of H, up.
   - Size: 1, from 0 to 1000000. The slider goes to 5. The points move out from the center by this.
   - Z Rotation, X Rotation and Y Rotation: 0. Measured: Z turns the shape counterclockwise in square pixels. Then X tilts it, and then Y.
@@ -3061,11 +3087,18 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
 
 YIQ: Y = 0.299 R + 0.587 G + 0.114 B. I = 0.596 R − 0.274 G − 0.322 B. Q = 0.212 R − 0.523 G + 0.311 B.
 
-vidcut, with a mode other than Normal:
+The rows of the sliders change with the mode (measured in Resolve Studio 21.2):
 
-- Alpha Gain multiplies fa first.
-- Subtractive/Additive then multiplies F by s + (1 − s) × fa.
-- Burn In multiplies fa by 1 − u in the cover of the background.
+- Normal with Over: Subtractive/Additive, Alpha Gain, Burn In and Blend. Normal with another Operator: the same rows without Burn In.
+- Screen and the 25 other modes: Gain and Blend.
+- Gain is Alpha Gain with another name. It keeps its value when the mode changes.
+- Resolve also shows Clamp Coverage under Blend with Normal and with Screen.
+
+With a mode other than Normal (measured in Resolve Studio 21.2):
+
+- Subtractive/Additive and Burn In do not act. A value set under Normal changes nothing.
+- Gain multiplies F and fa. Then the sum of the mode follows. With Normal, Alpha Gain multiplies only fa.
+- vidcut: a Burn In set under Over also acts with another Operator of Normal. This case is not measured.
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
@@ -5363,7 +5396,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - macOS keeps the keys of the manual.
 - Shortcuts do nothing while a text field has focus, or while a modal question shows.
 - Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
-- The table gives the default keys. The Keyboard Customization window (p. 121), `keys.set` and `keys.reset` change them.
+- The table gives the default keys. The Keyboard Customization window (p. 121), `keys.set`, `keys.reset` and `keys.use` change them.
 - File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
@@ -5372,6 +5405,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
+- Key sets (pp. 122, 124):
+  - A key set gives keys to actions. vidcut's own set is the table.
+  - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
+  - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
+  - With changes, a pick of another set asks first, because the changes are lost. Not measured (case 15 of shortcuts-resolve-runs.md).
+  - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124). Export Set and Delete Set list the sets.
+  - vidcut: the Option menu also has Save, under a line.
+  - The trash button deletes the set in force (p. 124). Each delete asks first.
+  - Save As New Set… (`keys.save`) saves the keys in force under a name. That set is then in force.
+  - Save writes the keys in force into the user's set in force. A built-in set does not change. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
+  - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force. Not measured (case 13 of shortcuts-resolve-runs.md).
+  - A delete of the set in force keeps its keys in force, as changes to vidcut's own set. Not measured (case 14 of shortcuts-resolve-runs.md).
+  - Reset puts back the keys of the set in force.
+  - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
+  - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
+  - The keys of these sets are not measured against the presets of Resolve (case 17 of shortcuts-resolve-runs.md).
+  - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
   - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.
@@ -6334,8 +6384,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Zoom draws the letters as the bigger font. The height of a line is its height at zoom 1, in whole pixels, times the zoom (same renders).
     - A scroll keeps hinted letters (measured in Resolve Studio 21.1.2). Subtitles keep them too.
     - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
-    - The distance between the lines of a scroll is 4/3 of `usWinAscent` plus `usWinDescent`, plus 10 timeline pixels. This holds also for a font that sets `USE_TYPO_METRICS`.
-    - This fits Resolve Studio 21.1.2 within 1.5 pixels with six fonts and with eight sizes of Arial. Times New Roman is 4.5 pixels too near.
+    - A scroll spaces its lines by the Windows line height of the font at 4/3 of the size, plus 10 timeline pixels.
+      - That line height is the hinted ascent plus descent of the font, in whole pixels. This holds also for a font that sets `USE_TYPO_METRICS`.
+      - Measured in Resolve Studio 21.2: Times New Roman, Arial and Georgia at sizes 48 to 144, and seven other fonts at 108. Each fits exactly.
+      - Thus Times New Roman at 108 has 164 + 10 = 174 pixels. Its `usWin` heights give only 159.5 + 10.
+      - The font's `VDMX` table gives the ascent and the descent at a size below 255 pixels.
+      - vidcut uses the first `VDMX` ratio record that has a character set and a ratio of 1:1, or of all ratios.
+      - Without such an entry, the ascent and the descent are `usWinAscent` and `usWinDescent`, each rounded to a whole pixel.
+      - These rules give the heights of Windows 11 for 54 of its 57 regular fonts, at sizes from 6 to 399 pixels.
+      - Each measured size gives a whole number for 4/3 of the size. vidcut rounds other sizes to the nearest whole pixel.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
@@ -6403,6 +6460,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A top row moves the lines down by half of one line's height. A bottom row moves them up by that much.
     - That height is the font's ascent plus its descent, as above. The number of lines does not change the move.
     - Gabriola sets `USE_TYPO_METRICS`. Its rows move by its typographic heights, not by the `usWin` heights of its line distance.
+    - Cascadia Code also sets it. Its rows move by 63 pixels at 108, half of its typographic height of 125.5 (measured in Resolve Studio 21.2).
     - A line wider than the box wraps at 90% of the picture width ([X137](deviations.md#x137-a-scroll-line-wider-than-the-picture-wraps)).
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
   - `<font>` takes a `color`, a `face`, a `size`, a `spacing`, a `tracking` and a `case`.
@@ -6868,7 +6926,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.
-    - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
+    - A speed change keeps each keyframe at its frame of the clip, as volume does (D81). Stretch to Fit in Change Clip Speed keeps it on its source frame ([§8.6](#86-trimming-pp-693-716-718-726732)).
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - That picture has the size of the frame, and it is made first. These facts follow (measured in Resolve Studio 21.2.0):

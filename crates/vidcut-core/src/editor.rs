@@ -4238,6 +4238,7 @@ fn mutate(
             speed,
             ripple,
             at,
+            keyframes,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -4245,7 +4246,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            ops::change_speed(p, &ids, *speed, *ripple, at)?;
+            ops::change_speed(p, &ids, *speed, (*ripple, at), *keyframes)?;
             if *download && !dry_run {
                 ready_retimes(env, p, &ids)?;
             }
@@ -4510,6 +4511,11 @@ fn mutate(
                 })?;
             }
             json!({ "clip": id, "keyframes": copied })
+        }
+        Request::KeyframesReverse { clip, keys } => {
+            let id = resolve_holder(p, clip, playhead)?;
+            let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
+            json!({ "clip": id, "keyframes": ops::keyframes::reverse(p, &id, &picks)? })
         }
         Request::KeyframesPaste {
             clips,

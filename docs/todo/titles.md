@@ -7,11 +7,6 @@
 - Position, zoom, rotation and opacity take keyframes ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)).
 - vidcut reads and writes them in OTIO in Resolve's shape ([D67](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
-## Text in the viewer
-
-- Edit the text of a title in place in the viewer, inside a plain outline, as Resolve does ([X52](../deviations.md#x52-titles-come-from-a-titles-tab-and-are-edited-in-the-inspector)).
-- vidcut opens a text field over the title until then.
-
 ## Tracking
 
 - Measure a tracking with a fraction of a pixel at a zoom. vidcut takes the step of 1/64 of a pixel before the zoom.
@@ -20,8 +15,7 @@
 ## Font heights
 
 - **Scroll:**
-  - In Times New Roman at 108, the line distance is 174 pixels in Resolve and 169.5 in vidcut. The other measured fonts fit within 1.5 pixels. Find the reason.
-  - Only Gabriola sets `USE_TYPO_METRICS` among the measured fonts. Measure one more such font, for the line distance and for the rows.
+  - Measure the line distance at a size that is not a multiple of 3. vidcut rounds 4/3 of the size to the nearest whole pixel.
   - vidcut keeps the exact size of a Scroll, because its rounding is not measured. Measure a Scroll at a size with a fraction.
 - **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
 - **Gabriola:** the letters are 0.3 pixels left of Resolve, and the rows match. Find the reason.

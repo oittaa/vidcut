@@ -14,7 +14,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - KeyKode in the timecode menu of the viewer (pp. 713–714)
 - The Solo icon of a track header, between Lock and Mute ([§5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718))
 - The Histogram and the other scopes (pp. 3093, 3097)
-- The Y, CbCr and RGB overlays of the Waveform (p. 3097), and RGB, YRGB and YCbCr in the Parade (p. 3102)
+- Colorize, Extents and the sliders of each scope (pp. 3102–3104)
 - The skin tone line of the Vectorscope (p. 3098)
 - Copy and paste of the Equalizer settings of a clip (p. 745; [§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779))
 - Keyframes of the Angle and the Border of an Edge Wipe. Resolve can keyframe them. vidcut keeps one value of each ([§8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173))

@@ -12,6 +12,7 @@ use crate::export::Progress;
 use crate::ffmpeg::{format, frame, software::scaling};
 use crate::models::{self, Fetch, Need};
 
+mod net;
 pub mod ppocr;
 pub mod retinaface;
 pub mod yolox;
@@ -127,16 +128,22 @@ fn each(
 }
 
 impl Net {
-    fn load(subject: Subject, model: FindModel, path: &Path, size: (u32, u32)) -> Result<Self> {
-        Ok(match subject {
+    fn load(
+        (subject, model): (Subject, FindModel),
+        path: &Path,
+        size: (u32, u32),
+        on_gpu: bool,
+    ) -> Result<Self> {
+        let things = |classes| yolox::Model::load(path, classes, size, on_gpu).map(Self::Things);
+        match subject {
             Subject::Face if slow(subject, model) => {
-                Self::Faces(Box::new(retinaface::Model::load(path, size)?))
+                Ok(Self::Faces(Box::new(retinaface::load(path, size)?)))
             }
-            Subject::Face => Self::Face(yunet::Model::load(path, size)?),
-            Subject::Text => Self::Text(ppocr::Model::load(path, size)?),
-            Subject::Person => Self::Things(yolox::Model::load(path, yolox::PEOPLE, size)?),
-            Subject::Vehicle => Self::Things(yolox::Model::load(path, yolox::VEHICLES, size)?),
-        })
+            Subject::Face => Ok(Self::Face(yunet::Model::load(path, size)?)),
+            Subject::Text => Ok(Self::Text(ppocr::Model::load(path, size)?)),
+            Subject::Person => things(yolox::PEOPLE),
+            Subject::Vehicle => things(yolox::VEHICLES),
+        }
     }
 
     fn size(&self) -> (usize, usize) {
@@ -148,10 +155,11 @@ impl Net {
         }
     }
 
-    fn probe(&self, dir: &Path, pictures: &[Vec<f32>]) -> Result<()> {
+    fn probe(&self, dir: &Path, pictures: &[Vec<f32>], content: (usize, usize)) -> Result<()> {
         match self {
             Self::Faces(m) => m.probe(dir, pictures),
-            _ => Ok(()),
+            Self::Things(m) => m.probe(dir, pictures, content),
+            Self::Face(_) | Self::Text(_) => Ok(()),
         }
     }
 
@@ -160,7 +168,7 @@ impl Net {
             Self::Face(m) => each(pictures, &|p| m.find(p)),
             Self::Faces(m) => m.find(pictures),
             Self::Text(m) => each(pictures, &|p| m.find(p, content)),
-            Self::Things(m) => each(pictures, &|p| m.find(p, content)),
+            Self::Things(m) => m.found(pictures, content),
         }
     }
 }
@@ -211,12 +219,22 @@ pub fn get_ready(dir: &Path, subject: Subject, model: FindModel, download: bool)
     Ok(())
 }
 
-pub fn inspect(dir: &Path, subject: Subject, model: FindModel, download: bool) -> Result<()> {
+pub fn inspect(
+    dir: &Path,
+    (subject, model): (Subject, FindModel),
+    download: bool,
+    on_gpu: bool,
+) -> Result<()> {
     get_ready(dir, subject, model, download)?;
     let file = file(subject, model);
     models::verify(dir, &[file])?;
     let side = side(subject, model);
-    Net::load(subject, model, &dir.join(file.name), (side, side)).map(drop)
+    let path = dir.join(file.name);
+    Net::load((subject, model), &path, (side, side), on_gpu).map(drop)
+}
+
+pub fn uses_gpu(subject: Subject, model: FindModel, gpu: bool) -> bool {
+    slow(subject, model) || (gpu && matches!(subject, Subject::Person | Subject::Vehicle))
 }
 
 pub(crate) fn fitted(decoded: &frame::Video, turn: u16, most: u32) -> (u32, u32) {
@@ -315,7 +333,7 @@ struct Looking {
 impl Looking {
     fn start(
         (subject, model): (Subject, FindModel),
-        path: &Path,
+        (path, on_gpu): (&Path, bool),
         (first, turn): (&frame::Video, u16),
         wanted: Option<u32>,
     ) -> Result<Self> {
@@ -323,7 +341,7 @@ impl Looking {
         let most = wanted.map_or(side(subject, model), |s| s.min(source));
         let content = fitted(first, turn, most);
         Ok(Self {
-            model: Net::load(subject, model, path, content)?,
+            model: Net::load((subject, model), path, content, on_gpu)?,
             content,
             turn,
             scaler: None,
@@ -409,7 +427,7 @@ pub fn find(
     source: &Input,
     subject: Subject,
     look: Look,
-    gpu: Option<&crate::hw::GpuDecoder>,
+    (gpu, on_gpu): (Option<&crate::hw::GpuDecoder>, bool),
     dir: &Path,
 ) -> Result<Detections> {
     crate::cancel::stop()?;
@@ -449,7 +467,7 @@ pub fn find(
                         None => {
                             let seeing = Looking::start(
                                 (subject, look.model),
-                                &weights,
+                                (&weights, on_gpu),
                                 (&decoded, turn),
                                 look.side,
                             )?;
@@ -477,7 +495,8 @@ pub fn find(
             if let Some(dir) = &dump
                 && out.found.is_empty()
             {
-                seeing.model.probe(dir, &waiting)?;
+                let content = (seeing.content.0 as usize, seeing.content.1 as usize);
+                seeing.model.probe(dir, &waiting, content)?;
             }
             let asked = Instant::now();
             out.found.extend(seeing.found(&waiting)?);
@@ -494,11 +513,16 @@ pub fn find(
     }
     crate::debug!(
         "subjects",
-        "{}: {} pictures of {frames} frames in {:.2} s, {:.2} s of it in the model on {batch} threads",
+        "{}: {} pictures of {frames} frames in {:.2} s, {:.2} s of it in the model on the {}, {batch} pictures a call",
         source.path().display(),
         out.pts.len(),
         started.elapsed().as_secs_f64(),
-        in_model.as_secs_f64()
+        in_model.as_secs_f64(),
+        if uses_gpu(subject, look.model, on_gpu) {
+            "GPU"
+        } else {
+            "CPU"
+        }
     );
     Ok(out)
 }

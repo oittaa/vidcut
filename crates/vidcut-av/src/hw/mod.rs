@@ -388,7 +388,7 @@ impl GpuDecoder {
 
     pub fn own(&self) -> Result<Self> {
         match &self.cuda {
-            Some(cuda) => Self::nvdec(cuda.with_own_stream()?),
+            Some(cuda) => Self::nvdec(cuda.with_own_stream(crate::cuda::share::Waits::ForDefault)?),
             None => Self::open(self.kind, &self.on),
         }
     }
