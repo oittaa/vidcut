@@ -38,30 +38,25 @@ pub struct Steadied {
 pub fn steadied(shake: &Shake, values: &Stabilizing, shot: Shot) -> Steadied {
     let (w, h) = shake.size;
     let aspect = f64::from(w.max(1)) / f64::from(h.max(1));
-    let steps: Vec<Matrix> = shake.steps.iter().map(widened).collect();
-    let mut path = vec![SAME];
-    for m in &steps {
-        let last = path[path.len() - 1];
-        path.push(times(m, &last));
-    }
+    let steps: Vec<Matrix> = shake.steps.iter().flatten().map(widened).collect();
+    let all = shake.steps.len() + 1;
+    let rate = shot.fps * (steps.len() + 1) as f64 / all as f64;
     let lock = values.camera_lock;
-    let goal = match lock {
-        true => vec![SAME; path.len()],
-        false => smoothed(&path, values.smooth() * SMOOTH_SECS * shot.fps),
-    };
-    let fixes: Vec<Matrix> = goal
-        .iter()
-        .zip(&path)
-        .map(|(g, c)| times(g, &inverse(c)))
-        .collect();
     let fixes = match lock {
-        true => fixes,
-        false => limited(&fixes, values.cropping_ratio(), aspect, shot.fps),
+        true => locked(&steps),
+        false => {
+            let fixes = smoothed(&steps, values.smooth() * SMOOTH_SECS * rate);
+            limited(&fixes, values.cropping_ratio(), aspect, rate)
+        }
     };
     let strength = if lock { 1.0 } else { values.strength() };
     let fixes: Vec<Matrix> = fixes.iter().map(|f| blend(f, strength)).collect();
+    let least = match lock {
+        true => Stabilizing::CROPPING_RATIO.0,
+        false => values.cropping_ratio(),
+    };
     let zoom = if values.zoom {
-        zoom_for(&fixes, aspect)
+        zoom_for(&fixes, aspect, least)
     } else {
         1.0
     };
@@ -72,14 +67,22 @@ pub fn steadied(shake: &Shake, values: &Stabilizing, shot: Shot) -> Steadied {
         .enumerate()
         .map(|(t, m)| times(&times(&forward[t + 1], m), &inverse(&forward[t])))
         .collect();
-    let frames = forward.iter().map(|f| to_uv(&inverse(f), aspect)).collect();
+    let shown: Vec<[f32; 8]> = forward.iter().map(|f| to_uv(&inverse(f), aspect)).collect();
+    let picture = shake.steps.iter().scan(0, |at, s| {
+        *at += usize::from(s.is_some());
+        Some(*at)
+    });
+    let frames = std::iter::once(0)
+        .chain(picture)
+        .map(|k| shown[k])
+        .collect();
     Steadied {
         made: Stabilized {
             with: values.normal(),
             first: shot.first,
             frames: Arc::new(frames),
         },
-        frames: forward.len(),
+        frames: all,
         zoom,
         before: moved(&steps, aspect, shot.height),
         after: moved(&after, aspect, shot.height),
@@ -151,28 +154,87 @@ fn weights(sigma: f64) -> Vec<f64> {
         .collect()
 }
 
-fn smoothed(path: &[Matrix], sigma: f64) -> Vec<Matrix> {
+fn locked(steps: &[Matrix]) -> Vec<Matrix> {
+    let mut path = vec![SAME];
+    for m in steps {
+        let last = path[path.len() - 1];
+        path.push(times(m, &last));
+    }
+    path.iter().map(inverse).collect()
+}
+
+type Parts = [f64; 8];
+
+fn parts(m: &Matrix) -> Parts {
+    let [a, b, x, c, d, y, g, h, _] = *m;
+    let (even, odd) = ((a + d) / 2.0, (c - b) / 2.0);
+    let size = even.hypot(odd).max(REACH);
+    [
+        x,
+        y,
+        odd.atan2(even),
+        size.ln(),
+        (a - d) / 2.0 / size,
+        (b + c) / 2.0 / size,
+        g,
+        h,
+    ]
+}
+
+fn from_parts([x, y, turn, grow, stretch, shear, g, h]: Parts) -> Matrix {
+    let size = grow.exp();
+    let (cos, sin) = (size * turn.cos(), size * turn.sin());
+    let (stretch, shear) = (size * stretch, size * shear);
+    [
+        cos + stretch,
+        shear - sin,
+        x,
+        sin + shear,
+        cos - stretch,
+        y,
+        g,
+        h,
+        1.0,
+    ]
+}
+
+fn smoothed(steps: &[Matrix], sigma: f64) -> Vec<Matrix> {
+    let mut path: Vec<Parts> = vec![[0.0; 8]];
+    for m in steps {
+        let (last, step) = (path[path.len() - 1], parts(m));
+        path.push(std::array::from_fn(|i| last[i] + step[i]));
+    }
     if sigma < 0.5 {
-        return path.to_vec();
+        return vec![SAME; path.len()];
     }
     let w = weights(sigma);
     let reach = (w.len() / 2) as i64;
     let n = path.len() as i64;
     (0..n)
         .map(|t| {
-            let mut sum = [0.0; 9];
-            let mut total = 0.0;
+            let (mut level, mut slope) = ([0.0; 8], [0.0; 8]);
+            let (mut s0, mut s1, mut s2) = (0.0, 0.0, 0.0);
             for (k, wk) in w.iter().enumerate() {
-                let at = t + k as i64 - reach;
+                let d = k as i64 - reach;
+                let at = t + d;
                 if (0..n).contains(&at) {
-                    let m = &path[at as usize];
-                    for (s, v) in sum.iter_mut().zip(m) {
-                        *s += wk * v;
+                    let d = d as f64;
+                    for (i, v) in path[at as usize].iter().enumerate() {
+                        level[i] += wk * v;
+                        slope[i] += wk * d * v;
                     }
-                    total += wk;
+                    (s0, s1, s2) = (s0 + wk, s1 + wk * d, s2 + wk * d * d);
                 }
             }
-            normalized(sum.map(|s| s / total))
+            let det = s0 * s2 - s1 * s1;
+            let here = path[t as usize];
+            from_parts(std::array::from_fn(|i| {
+                let goal = match det > REACH {
+                    true => (s2 * level[i] - s1 * slope[i]) / det,
+                    false => level[i] / s0,
+                };
+                goal - here[i]
+            }))
         })
         .collect()
 }
@@ -231,8 +293,7 @@ fn limited(fixes: &[Matrix], share: f64, aspect: f64, fps: f64) -> Vec<Matrix> {
         .collect()
 }
 
-fn zoom_for(fixes: &[Matrix], aspect: f64) -> f64 {
-    let least = Stabilizing::CROPPING_RATIO.0;
+fn zoom_for(fixes: &[Matrix], aspect: f64, least: f64) -> f64 {
     let backs: Vec<Matrix> = fixes.iter().map(inverse).collect();
     let share = largest(least, 1.0, |q| backs.iter().all(|b| fits(b, q, aspect)));
     1.0 / share

@@ -10,7 +10,7 @@ use crate::ffmpeg::frame;
 use crate::tracking::{Reader, Shown, going};
 
 const SIDE: f64 = 640.0;
-const LEVELS: usize = 3;
+const LEVELS: usize = 4;
 const GRID: (usize, usize) = (24, 14);
 const EDGE: usize = 8;
 const HALF: i32 = 6;
@@ -23,9 +23,10 @@ const INLIER: f64 = 1.5;
 const TRIES: usize = 400;
 const LEAST: usize = 8;
 const SEED: u64 = 0x9e37_79b9_7f4a_7c15;
+const REPEAT: f32 = 0.25;
 
 pub fn name() -> &'static str {
-    "steady1"
+    "steady2"
 }
 
 pub fn measure(
@@ -66,12 +67,26 @@ pub fn measure(
         crate::cancel::stop()?;
         let levels = pyramid(Gray::of(&frame));
         if let Some(before) = &last {
-            steps.push(step(before, &levels, look.mode));
+            steps.push(match repeats(&before[0], &levels[0]) {
+                true => None,
+                false => Some(step(before, &levels, look.mode)),
+            });
         }
         last = Some(levels);
         shown.report(done as usize + 1);
     }
     Ok(Shake { size, steps })
+}
+
+fn repeats(before: &Gray, after: &Gray) -> bool {
+    let n = before.px.len().max(1) as f32;
+    let apart: f32 = before
+        .px
+        .iter()
+        .zip(&after.px)
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+    apart / n < REPEAT
 }
 
 fn stopped() -> Error {

@@ -211,21 +211,26 @@ flowchart TD
 - `stabilize::measure` in vidcut-av measures, on the CPU:
   - The `Reader` of the tracker reads the frames of the plan at a working size. It decodes on the GPU when GPU decoding is on.
   - Each frame becomes gray, with a pyramid of `LEVELS` levels.
+  - A frame that differs from the frame before by less than `REPEAT` on average repeats that frame. A repeat has no step.
+    - Why: a repeat shows no new moment. A step of zero would show a stop of the camera, and the correction would move the repeat.
   - `corners` takes the best corner of each cell of a `GRID`. `follow` follows each corner to the next frame with the Lucas–Kanade method, on the pyramid.
   - Each corner is also followed back. A corner that does not come back within `RETURN` is dropped.
   - `fitted` fits the motion of the mode to the corners with RANSAC (`TRIES`, `INLIER`). Then it fits that motion again to the corners that agree with it, by least squares.
     - Translation fits a move. Similarity fits a move, a turn and a zoom. Perspective fits a homography.
   - A pair of frames with fewer than `LEAST` corners that agree gets no motion.
-  - The result is a `Shake`: one step for each pair of frames. A step is in units of the picture height, from the center of the picture.
+  - The result is a `Shake`: one step for each pair of frames, or none for a repeat. A step is in units of the picture height, from the center of the picture.
   - Why a method of our own: the deshake filter of FFmpeg finds only moves and turns. vid.stab has no perspective, and many FFmpeg builds do not have it.
 - `stabilize::steadied` in the core decides:
-  - The path of the camera is the product of the steps.
-  - The goal is the path smoothed with a Gaussian. Its sigma is Smooth times `SMOOTH_SECS` seconds. With Camera Lock, the goal is the view of the first frame.
-  - The fix of a frame takes the path to the goal.
+  - It uses the new pictures only. A repeat gets the correction of the frame that it repeats.
+  - Each step becomes parts (`parts`): a move, a turn, the log of the scale, a stretch, a shear and the two perspective terms. The path of the camera is the sum of these parts.
+    - Why: a sum keeps a steady change on a straight line. A product of the matrices compounds a change of the scale or of the perspective. Then a camera that moves forward gets a path that is not real.
+  - The goal is the path smoothed with Gaussian weights (`smoothed`). At each frame, a straight line goes through the near frames by weighted least squares. Its sigma is Smooth times `SMOOTH_SECS` seconds.
+    - Why a line: near an end of the clip, the near frames are on one side only. Their mean lags behind a pan, and the fix becomes large. In the middle of the clip, the line gives the same value as the mean.
+  - The fix of a frame takes the path to the goal (`from_parts`). With Camera Lock, the fix is the inverse of the product of the steps (`locked`). Thus the picture holds the view of the first frame.
   - Cropping Ratio limits the fixes (`limited`). A fix shrinks until the picture keeps that share of its width and height in the frame.
     - The limit is the smallest limit within `NEAR_SECS`, then smoothed. Thus the limit does not jump from frame to frame.
   - Strength scales each fix. Camera Lock uses the whole fix, with no limit.
-  - With Zoom on, one zoom for the whole clip keeps the edges out of each frame (`zoom_for`).
+  - With Zoom on, one zoom for the whole clip keeps the edges out of each frame (`zoom_for`). The zoom is at most one over Cropping Ratio. With Camera Lock, it is at most one over the smallest Cropping Ratio.
   - The correction of each frame is the inverse of its fix, in the coordinates of the picture (`Stabilized`).
   - `before` and `after` give the mean motion and the mean shake of five points of the picture, in pixels of the picture height.
 - Where the data is:
