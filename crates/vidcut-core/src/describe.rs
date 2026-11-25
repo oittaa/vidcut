@@ -698,6 +698,17 @@ pub fn describe_at(
         "gui.timeline" => format!("Timeline view: {}", compact(params)),
         "gui.screenshot" => "Screenshot".into(),
         "jobs.cancel" => format!("Cancel job {}", d.text("job")),
+        "render.add" => format!("Add {} to the render queue", d.file("output")),
+        "render.update" => format!("Update render job {}", d.text("job")),
+        "render.remove" => format!("Delete render jobs {}", d.list("jobs").join(", ")),
+        "render.move" => format!("Move render job {} to {}", d.text("job"), d.text("to")),
+        "render.rename" => format!("Rename render job {} to {}", d.text("job"), d.text("name")),
+        "render.clear" if d.flag("all") => "Clear the render queue".into(),
+        "render.clear" => "Clear the rendered jobs".into(),
+        "render.clear_status" => match d.list("jobs").as_slice() {
+            [] => "Clear the status of the render jobs".into(),
+            jobs => format!("Clear the status of render jobs {}", jobs.join(", ")),
+        },
         _ => {
             let p = compact(params);
             if p.is_empty() {
