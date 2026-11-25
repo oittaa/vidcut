@@ -10,6 +10,11 @@ struct Params {
     how: vec4<u32>,
     parts: vec4<u32>,
     skin: vec4<f32>,
+    plot: vec4<f32>,
+    to_xyz: array<vec4<f32>, 3>,
+    from_xyz: array<vec4<f32>, 3>,
+    chart: vec4<u32>,
+    curve: array<vec4<f32>, 78>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -29,6 +34,20 @@ const RED: vec3<f32> = vec3<f32>(1.0, 0.25, 0.25);
 const GREEN: vec3<f32> = vec3<f32>(0.25, 1.0, 0.25);
 
 const BLUE: vec3<f32> = vec3<f32>(0.35, 0.45, 1.0);
+
+const CHART_LINE: f32 = 190.0 / 255.0;
+
+const GAMUT_LINE: f32 = 76.0 / 255.0;
+
+const WHITE_POINT: f32 = 229.0 / 255.0;
+
+const WHITE_RADIUS: f32 = 0.0047;
+
+const LEAST_RADIUS: f32 = 2.0;
+
+const AXIS_STEP: f32 = 0.025;
+
+const AXIS_TICK: f32 = 0.011;
 
 fn shown(v: f32) -> f32 {
     return params.levels.x + params.levels.y * v;
@@ -150,6 +169,47 @@ fn histogram(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var b = 0u; b < params.parts.x; b++) {
         add(bin(band_value(c, b)), b);
     }
+}
+
+fn linear(c: vec3<f32>) -> vec3<f32> {
+    if params.chart.x == 0u {
+        return pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.4));
+    }
+    return decode(c, params.chart.x, 1.0);
+}
+
+fn uv_of(xy: vec2<f32>) -> vec2<f32> {
+    let d = -2.0 * xy.x + 12.0 * xy.y + 3.0;
+    return vec2<f32>(4.0 * xy.x, 9.0 * xy.y) / d;
+}
+
+fn xy_of(uv: vec2<f32>) -> vec2<f32> {
+    let d = 6.0 * uv.x - 16.0 * uv.y + 12.0;
+    return vec2<f32>(9.0 * uv.x, 4.0 * uv.y) / d;
+}
+
+fn chart_place(xy: vec2<f32>) -> vec2<f32> {
+    let c = select(xy, uv_of(xy), params.how.w == 1u);
+    let r = params.plot;
+    return vec2<f32>(r.x + c.x * (r.z - r.x), r.w - c.y * (r.w - r.y));
+}
+
+@compute @workgroup_size(16, 16)
+fn chromaticity(@builtin(global_invocation_id) id: vec3<u32>) {
+    if outside(id) {
+        return;
+    }
+    let l = linear(color_at(id));
+    let xyz = vec3<f32>(dot(params.to_xyz[0].xyz, l), dot(params.to_xyz[1].xyz, l), dot(params.to_xyz[2].xyz, l));
+    let sum = xyz.x + xyz.y + xyz.z;
+    if sum <= 1e-6 {
+        return;
+    }
+    let at = chart_place(xyz.xy / sum);
+    if at.x < 0.0 || at.y < 0.0 || at.x >= f32(params.size.x) || at.y >= f32(params.size.y) {
+        return;
+    }
+    add(u32(at.x), u32(at.y));
 }
 
 @vertex
@@ -287,21 +347,103 @@ fn on_graticule(p: vec2<f32>) -> bool {
     return false;
 }
 
+fn spread(x: i32, y: i32) -> f32 {
+    var most = hit(x, y);
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            most = max(most, hit(x + dx, y + dy) * 0.5);
+        }
+    }
+    return most;
+}
+
+fn chart_color(p: vec2<f32>) -> vec3<f32> {
+    let r = params.plot;
+    let c = vec2<f32>((p.x + 0.5 - r.x) / (r.z - r.x), (r.w - p.y - 0.5) / (r.w - r.y));
+    let xy = select(c, xy_of(c), params.how.w == 1u);
+    let y = max(xy.y, 1e-4);
+    let xyz = vec3<f32>(xy.x / y, 1.0, (1.0 - xy.x - xy.y) / y);
+    let rgb = max(vec3<f32>(dot(params.from_xyz[0].xyz, xyz), dot(params.from_xyz[1].xyz, xyz), dot(params.from_xyz[2].xyz, xyz)), vec3<f32>(0.0));
+    let peak = max(max(rgb.r, rgb.g), max(rgb.b, 1e-6));
+    return pow(rgb / peak, vec3<f32>(1.0 / 2.2));
+}
+
+fn point(i: u32) -> vec2<f32> {
+    let v = params.curve[i / 2u];
+    return select(v.xy, v.zw, i % 2u == 1u);
+}
+
+fn near(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> bool {
+    let ab = b - a;
+    let t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+    return length(p - (a + t * ab)) < 0.75;
+}
+
+fn chart_line(p: vec2<f32>) -> f32 {
+    let locus = params.chart.y;
+    let planck = params.chart.z;
+    let gamut = locus + planck;
+    let side = params.plot.z - params.plot.x;
+    let white = length(p - point(gamut + 3u));
+    if abs(white - max(side * WHITE_RADIUS, LEAST_RADIUS)) < 0.75 {
+        return WHITE_POINT;
+    }
+    for (var i = 0u; i < locus; i++) {
+        if near(p, point(i), point((i + 1u) % locus)) {
+            return CHART_LINE;
+        }
+    }
+    let ticks = gamut + 4u;
+    for (var i = 0u; i < params.chart.w; i++) {
+        if near(p, point(ticks + 2u * i), point(ticks + 2u * i + 1u)) {
+            return CHART_LINE;
+        }
+    }
+    for (var i = 1u; i < planck; i++) {
+        if near(p, point(locus + i - 1u), point(locus + i)) {
+            return CHART_LINE;
+        }
+    }
+    for (var i = 0u; i < 3u; i++) {
+        if near(p, point(gamut + i), point(gamut + (i + 1u) % 3u)) {
+            return GAMUT_LINE;
+        }
+    }
+    return 0.0;
+}
+
+fn on_chart_grid(p: vec2<f32>) -> bool {
+    let r = params.plot;
+    if p.x < floor(r.x) || p.x > r.z || p.y < floor(r.y) || p.y > r.w {
+        return false;
+    }
+    let side = r.z - r.x;
+    let g = vec2<f32>(p.x - r.x, r.w - p.y);
+    let tenth = round(g * 10.0 / side);
+    let line = abs(g - tenth * side / 10.0);
+    if (line.x < 0.5 && tenth.x > 0.0) || (line.y < 0.5 && tenth.y > 0.0) {
+        return true;
+    }
+    let step = side * AXIS_STEP;
+    let tick = abs(g - round(g / step) * step);
+    let reach = side * AXIS_TICK;
+    return (tick.x < 0.5 && g.y < reach) || (tick.y < 0.5 && g.x < reach);
+}
+
 @fragment
 fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     let p = floor(at.xy);
     let x = i32(p.x);
     let y = i32(p.y);
     if params.how.x == 2u {
-        var most = hit(x, y);
-        for (var dy = -1; dy <= 1; dy++) {
-            for (var dx = -1; dx <= 1; dx++) {
-                most = max(most, hit(x + dx, y + dy) * 0.5);
-            }
-        }
         let skin = select(vec3<f32>(0.0), SKIN, on_skin(p));
         let grid = select(skin, GRID, on_graticule(p));
-        return vec4<f32>(max(grid, vec3<f32>(level(most))), 1.0);
+        return vec4<f32>(max(grid, vec3<f32>(level(spread(x, y)))), 1.0);
+    }
+    if params.how.x == 4u {
+        let grid = select(vec3<f32>(0.0), GRID, on_chart_grid(p));
+        let lines = max(grid, vec3<f32>(chart_line(p)));
+        return vec4<f32>(max(lines, chart_color(p) * level(spread(x, y))), 1.0);
     }
     if params.how.x == 3u {
         let grid = select(vec3<f32>(0.0), GRID, ruled(p));

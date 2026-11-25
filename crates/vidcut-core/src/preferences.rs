@@ -285,6 +285,8 @@ pub struct Scopes {
     pub vectorscope: bool,
     /// How many pixels have each value, one band for each channel.
     pub histogram: bool,
+    /// The chromaticity of the picture against the gamut of the timeline.
+    pub chromaticity: bool,
     /// The scale at the left of the Waveform and the Parade.
     pub scale: ScopeScale,
     /// Video Level Scopes: the Waveform and the Parade show black at code
@@ -305,6 +307,8 @@ pub struct Scopes {
     pub skin_tone: bool,
     /// The bands of the Histogram.
     pub histogram_mode: HistogramMode,
+    /// The graph of the CIE Chromaticity scope.
+    pub chromaticity_mode: ChromaticityMode,
 }
 
 impl Default for Scopes {
@@ -314,6 +318,7 @@ impl Default for Scopes {
             parade: false,
             vectorscope: false,
             histogram: false,
+            chromaticity: false,
             scale: ScopeScale::default(),
             video_levels: false,
             waveform_mode: WaveformMode::default(),
@@ -323,6 +328,7 @@ impl Default for Scopes {
             parade_mode: ParadeMode::default(),
             skin_tone: false,
             histogram_mode: HistogramMode::default(),
+            chromaticity_mode: ChromaticityMode::default(),
         }
     }
 }
@@ -349,6 +355,28 @@ impl WaveformMode {
             Self::Y => "Y",
             Self::Cbcr => "CbCr",
             Self::Rgb => "RGB",
+        }
+    }
+}
+
+/// The graph of the CIE Chromaticity scope.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChromaticityMode {
+    /// CIE 1931 xy.
+    #[default]
+    Xy,
+    /// CIE 1976 u'v'.
+    Uv,
+}
+
+impl ChromaticityMode {
+    pub const ALL: [Self; 2] = [Self::Xy, Self::Uv];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Xy => "CIE 1931 xy",
+            Self::Uv => "CIE 1976 uv",
         }
     }
 }
@@ -447,14 +475,16 @@ pub enum Scope {
     Parade,
     Vectorscope,
     Histogram,
+    Chromaticity,
 }
 
 impl Scope {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Waveform,
         Self::Parade,
         Self::Vectorscope,
         Self::Histogram,
+        Self::Chromaticity,
     ];
 
     pub fn name(self) -> &'static str {
@@ -463,6 +493,7 @@ impl Scope {
             Self::Parade => "Parade",
             Self::Vectorscope => "Vectorscope",
             Self::Histogram => "Histogram",
+            Self::Chromaticity => "CIE Chromaticity",
         }
     }
 }
@@ -474,6 +505,7 @@ impl Scopes {
             Scope::Parade => self.parade,
             Scope::Vectorscope => self.vectorscope,
             Scope::Histogram => self.histogram,
+            Scope::Chromaticity => self.chromaticity,
         }
     }
 
@@ -487,6 +519,7 @@ impl Scopes {
             parade: patch.parade.unwrap_or(self.parade),
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
             histogram: patch.histogram.unwrap_or(self.histogram),
+            chromaticity: patch.chromaticity.unwrap_or(self.chromaticity),
             scale: patch.scale.unwrap_or(self.scale),
             video_levels: patch.video_levels.unwrap_or(self.video_levels),
             waveform_mode: patch.waveform_mode.unwrap_or(self.waveform_mode),
@@ -496,6 +529,7 @@ impl Scopes {
             parade_mode: patch.parade_mode.unwrap_or(self.parade_mode),
             skin_tone: patch.skin_tone.unwrap_or(self.skin_tone),
             histogram_mode: patch.histogram_mode.unwrap_or(self.histogram_mode),
+            chromaticity_mode: patch.chromaticity_mode.unwrap_or(self.chromaticity_mode),
         }
     }
 }
@@ -530,6 +564,10 @@ pub struct ScopesPatch {
     pub histogram: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub histogram_mode: Option<HistogramMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chromaticity: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chromaticity_mode: Option<ChromaticityMode>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.

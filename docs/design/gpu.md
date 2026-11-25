@@ -379,7 +379,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 
 ## The scopes
 
-The Waveform, the Parade, the Vectorscope and the Histogram show the picture that the viewer draws ([spec §4.5](../spec.md#45-other-viewer-features)).
+The Waveform, the Parade, the Vectorscope, the Histogram and the CIE Chromaticity scope show the picture that the viewer draws ([spec §4.5](../spec.md#45-other-viewer-features)).
 
 What they read:
 
@@ -392,12 +392,19 @@ What they read:
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):
 
-- A compute pass adds one to a counter for each pixel of the canvas (`hits`). There is one entry point for each `Scope`: `waveform`, `parade`, `vectorscope` and `histogram`.
+- A compute pass adds one to a counter for each pixel of the canvas (`hits`). There is one entry point for each `Scope`: `waveform`, `parade`, `vectorscope`, `histogram` and `chromaticity`.
   - `waveform` reads its mode from `WaveformMode`. In RGB mode, the counters have three planes, one for each color (`planes`). The other modes have one plane.
   - `parade` puts three or four sections side by side (`sections`). `ParadeMode` gives the value of each section (`parade_value`).
   - A color difference of zero is at the middle of the scale (`shown_difference`).
   - A change of the count of planes makes the `Plot` again.
   - `histogram` adds one to the bin of each band (`band_value`). A bin is one column of the scope. Its scale lines are columns.
+  - `chromaticity` makes each pixel linear (`linear`) and converts it to XYZ with the primaries of the timeline (`timeline_to_xyz`). It adds one at the place of its chromaticity (`chart_place`).
+  - `linear` uses `decode` of `transfer.wgsl`. The picture shader and the scope shader both start with that file. Thus there is one copy of the curves.
+  - The render pass paints each place of the chart in the color of its chromaticity (`chart_color`).
+  - `curve_points` gives the lines of the chart: the horseshoe (`LOCUS`), the black body locus (`PLANCK`), the gamut and the white point.
+  - The two tables come from the CIE 1931 2-degree observer. `wave_ticks` adds a tick outside the horseshoe each 10 nm.
+  - `chart_line` paints these lines. `on_chart_grid` paints the grid and the ticks of the axes.
+  - `chart_marks` gives the labels of the axes, the name of the gamut and its coordinates. The name of the gamut and its coordinates have their own color (`TEXT_COLOR`).
 - A render pass then paints the counters into a `Target` of the scope's own size (`fs`).
   - The brightness is the square root of the count, so that a thin trace still shows.
   - One column of a scope can take more columns of the canvas than the next one. `evened` scales each count for that. Thus the trace has no stripes.
