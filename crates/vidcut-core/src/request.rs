@@ -13,8 +13,8 @@ use crate::model::{
     EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType,
-    Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
+    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PictureTool, PictureTransition,
+    PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
     SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
     TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
@@ -6667,6 +6667,9 @@ pub struct NodeChange {
     /// How far a mask's edge moves out, from -1 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How a mask joins its own mask with the masks on its effect mask input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// Off, a mask is only a band about its edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<bool>,

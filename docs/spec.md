@@ -2780,10 +2780,11 @@ A mask with a mask on its effect mask input (p. 2474):
   - Invert: i + n − 2 × i × n.
   - Copy: n. Ignore: i.
   - Replace: n, the same as Copy. The manual says that the areas where n is 0 keep i (p. 2465) ([gotchas](gotchas.md#resolves-fusion-page)).
+    - vidcut follows the manual: n where n is above 0, else i.
   - The forms agree with the reads within 0.00001. The new mask of the reads has Level 0.7.
   - A delete of the input mask stops the render of the mask and of the tool after it ([gotchas](gotchas.md#resolves-fusion-page)).
 - The manual says that Level and Invert act on the whole mask (p. 2491). The render shows otherwise. vidcut follows the render.
-- vidcut: Merge is the only mode ([todo](todo/effects-page.md)).
+- vidcut: the Paint Mode row shows only when a mask is on the effect mask input. A mask with nothing on that input is its own shape n.
 
 The Image tab of a mask (pp. 2500–2501). Measured in Resolve Studio 21.2:
 

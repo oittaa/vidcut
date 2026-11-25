@@ -727,7 +727,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand.
   - Replace gives the same mask as Copy in each read.
   - Where the new mask is 0 and the input mask is 1, Replace gives 0.
   - The manual says that the areas that are zero in the new mask do not change the input mask (p. 2465).
-  - vidcut has no Paint Mode yet. The [todo](todo/effects-page.md) follows the manual ([spec §8.19](spec.md#the-masks)).
+  - vidcut follows the manual: Replace gives n where n is above 0, else the input mask ([spec §8.19](spec.md#the-masks)).
 - **The Luminance and the Hue channels of an effect mask swap red and blue.**
   - Luminance gives 0.114 × R + 0.587 × G + 0.299 × B. These are the Rec. 601 weights with red and blue swapped.
   - Hue gives the hue of (B, G, R). Thus red gives 240° and blue gives 0°.
