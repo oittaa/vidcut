@@ -144,6 +144,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - The box replaces the selection, also with Shift or Ctrl.
       - One box takes the keyframes of all the values in it.
     - Delete removes the selected keyframes (p. 1258).
+    - After a click in the tab or the tray, Ctrl+A selects all the keyframes of the shown item (p. 1262). Ctrl+Shift+A clears that selection.
+      - Elsewhere, these keys select all the clips or none.
+      - A request acts on all the keyframes of a clip when it names no frames.
     - Mark > Move Selected Keyframes Left and Right move the selected keyframes by one frame (p. 1258). They send `keyframes.move`.
     - Mark > Move Selected Keyframes Up and Down change their values by one step. They send `keyframes.set` with `by`.
       - The manual says that a step is one unit (p. 4343). The step of each value is measured.

@@ -1771,6 +1771,25 @@ impl Workspace {
             at.is_some_and(|at| tray.into_iter().chain(panel).any(|r| r.contains(at)));
     }
 
+    pub(super) fn select_editor_keys(&mut self, all: bool) -> bool {
+        if !self.key_editor.focused || !self.keys_in_view() {
+            return false;
+        }
+        let marks = match all {
+            false => Vec::new(),
+            true => self
+                .project_shared()
+                .and_then(|p| {
+                    let id = self.key_editor.clip.as_deref()?;
+                    p.key_holder(id)
+                })
+                .map(|clip| live_marks(&lanes_of(&clip, false), None))
+                .unwrap_or_default(),
+        };
+        self.key_editor.selected = marks;
+        true
+    }
+
     pub(super) fn copy_editor_keys(&mut self, cut: bool) -> bool {
         if !self.key_editor.focused || self.key_editor.selected.is_empty() {
             return false;

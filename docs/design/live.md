@@ -697,6 +697,7 @@ The bar and the Jobs button:
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
 - Without the keys, Ctrl+V pastes no keyframes.
+- With the keys, Select All and Select Nothing change the selected marks, not the clips (`Workspace::select_editor_keys`).
 - `clip.paste_attributes` without `from` and `copied` takes the first clip of the clipboard. The live core fills it in (`edit_at`).
   - Each copy of clips gives `Snapshot::copied_clip`: its name, the boxes to check and a count of the copies.
   - `Workspace::attributes_window` keeps the last choices for the same copy (`PasteChoice`).
