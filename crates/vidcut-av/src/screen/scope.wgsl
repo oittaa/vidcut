@@ -14,7 +14,7 @@ struct Params {
     to_xyz: array<vec4<f32>, 3>,
     from_xyz: array<vec4<f32>, 3>,
     chart: vec4<u32>,
-    curve: array<vec4<f32>, 43>,
+    curve: array<vec4<f32>, 78>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -34,11 +34,19 @@ const GREEN: vec3<f32> = vec3<f32>(0.25, 1.0, 0.25);
 
 const BLUE: vec3<f32> = vec3<f32>(0.35, 0.45, 1.0);
 
-const LOCUS_LINE: f32 = 0.75;
+const CHART_LINE: f32 = 190.0 / 255.0;
 
-const PLANCK_LINE: f32 = 0.5;
+const GAMUT_LINE: f32 = 76.0 / 255.0;
 
-const GAMUT_LINE: f32 = 0.6;
+const WHITE_POINT: f32 = 229.0 / 255.0;
+
+const WHITE_RADIUS: f32 = 0.0047;
+
+const LEAST_RADIUS: f32 = 2.0;
+
+const AXIS_STEP: f32 = 0.025;
+
+const AXIS_TICK: f32 = 0.011;
 
 fn shown(v: f32) -> f32 {
     return params.levels.x + params.levels.y * v;
@@ -370,25 +378,32 @@ fn near(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> bool {
 fn chart_line(p: vec2<f32>) -> f32 {
     let locus = params.chart.y;
     let planck = params.chart.z;
+    let gamut = locus + planck;
+    let side = params.plot.z - params.plot.x;
+    let white = length(p - point(gamut + 3u));
+    if abs(white - max(side * WHITE_RADIUS, LEAST_RADIUS)) < 0.75 {
+        return WHITE_POINT;
+    }
     for (var i = 0u; i < locus; i++) {
         if near(p, point(i), point((i + 1u) % locus)) {
-            return LOCUS_LINE;
+            return CHART_LINE;
+        }
+    }
+    let ticks = gamut + 4u;
+    for (var i = 0u; i < params.chart.w; i++) {
+        if near(p, point(ticks + 2u * i), point(ticks + 2u * i + 1u)) {
+            return CHART_LINE;
         }
     }
     for (var i = 1u; i < planck; i++) {
         if near(p, point(locus + i - 1u), point(locus + i)) {
-            return PLANCK_LINE;
+            return CHART_LINE;
         }
     }
-    let gamut = locus + planck;
     for (var i = 0u; i < 3u; i++) {
         if near(p, point(gamut + i), point(gamut + (i + 1u) % 3u)) {
             return GAMUT_LINE;
         }
-    }
-    let white = length(p - point(gamut + 3u));
-    if abs(white - 3.0) < 0.75 || white < 1.0 {
-        return 1.0;
     }
     return 0.0;
 }
@@ -398,10 +413,17 @@ fn on_chart_grid(p: vec2<f32>) -> bool {
     if p.x < floor(r.x) || p.x > r.z || p.y < floor(r.y) || p.y > r.w {
         return false;
     }
-    let step = (r.zw - r.xy) / 10.0;
-    let g = vec2<f32>(p.x - r.x, r.w - p.y) / step;
-    let off = abs(g - round(g)) * step;
-    return off.x < 0.5 || off.y < 0.5;
+    let side = r.z - r.x;
+    let g = vec2<f32>(p.x - r.x, r.w - p.y);
+    let tenth = round(g * 10.0 / side);
+    let line = abs(g - tenth * side / 10.0);
+    if (line.x < 0.5 && tenth.x > 0.0) || (line.y < 0.5 && tenth.y > 0.0) {
+        return true;
+    }
+    let step = side * AXIS_STEP;
+    let tick = abs(g - round(g / step) * step);
+    let reach = side * AXIS_TICK;
+    return (tick.x < 0.5 && g.y < reach) || (tick.y < 0.5 && g.x < reach);
 }
 
 @fragment

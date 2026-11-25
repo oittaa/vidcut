@@ -214,7 +214,10 @@ impl Workspace {
                 for (i, line) in lines.into_iter().enumerate() {
                     let y = top + row * i as f32;
                     let align = Align2([align.x(), Align::Min]);
-                    painter.text(pos2(at.x, y), align, line, font.clone(), dim);
+                    let color = mark
+                        .color
+                        .map_or(dim, |[r, g, b]| Color32::from_rgb(r, g, b));
+                    painter.text(pos2(at.x, y), align, line, font.clone(), color);
                 }
             }
             let (corner, align) = match scope {

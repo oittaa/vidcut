@@ -337,8 +337,8 @@ fn timeline(hdr: Option<Hdr>) -> Primaries {
     }
 }
 
-pub fn timeline_primaries(hdr: Option<Hdr>) -> [(f64, f64); 3] {
-    timeline(hdr).xy()
+pub fn bt709_primaries() -> [(f64, f64); 3] {
+    Primaries::Bt709.xy()
 }
 
 pub fn timeline_to_xyz(hdr: Option<Hdr>) -> [[f64; 3]; 3] {

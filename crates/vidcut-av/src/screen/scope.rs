@@ -6,7 +6,7 @@ use vidcut_core::preferences::{
 
 use super::{Gpu, TARGET, Target, begin, make_target};
 use crate::color::{
-    Colors, D65, Matrix, shader_colors, timeline_from_xyz, timeline_primaries, timeline_to_xyz,
+    Colors, D65, Matrix, bt709_primaries, shader_colors, timeline_from_xyz, timeline_to_xyz,
 };
 
 pub const SMALLEST: u32 = 16;
@@ -27,7 +27,7 @@ const FULL_AT: u64 = 16;
 
 const HISTOGRAM_SHARE: u64 = 64;
 
-const PARAMS: usize = 1040;
+const PARAMS: usize = 1600;
 
 const SKIN_DEGREES: f64 = 123.0;
 
@@ -51,7 +51,15 @@ const CHART_STEP: f64 = 0.2;
 
 const LABEL_GAP: f64 = 3.0;
 
-const CURVE: usize = 43;
+const CURVE: usize = 78;
+
+const WAVE_STEP: usize = 2;
+
+const WAVE_TICK: f64 = 0.0095;
+
+const GAMUT_NAME: &str = "Rec.709";
+
+const TEXT_COLOR: [u8; 3] = [152, 152, 152];
 
 const LOCUS: [[f64; 2]; 65] = [
     [0.1741, 0.0050],
@@ -121,9 +129,10 @@ const LOCUS: [[f64; 2]; 65] = [
     [0.7347, 0.2653],
 ];
 
-const PLANCK: [[f64; 2]; 17] = [
-    [0.6527, 0.3445],
+const PLANCK: [[f64; 2]; 21] = [
+    [0.5998, 0.3850],
     [0.5857, 0.3931],
+    [0.5551, 0.4064],
     [0.5267, 0.4133],
     [0.4770, 0.4137],
     [0.4369, 0.4041],
@@ -139,6 +148,9 @@ const PLANCK: [[f64; 2]; 17] = [
     [0.2637, 0.2673],
     [0.2565, 0.2576],
     [0.2525, 0.2522],
+    [0.2472, 0.2447],
+    [0.2426, 0.2380],
+    [0.2399, 0.2340],
 ];
 
 const DASHED_NITS: [f64; 3] = [26.0, 203.0, 2000.0];
@@ -232,6 +244,7 @@ pub struct Mark {
     pub at: [f32; 2],
     pub align: [f32; 2],
     pub shift: [f32; 2],
+    pub color: Option<[u8; 3]>,
 }
 
 fn nits_marks(nits: &[f64], code: fn(f64) -> f64) -> Vec<(String, f64)> {
@@ -310,26 +323,41 @@ fn on_chart(rect: [f64; 4], [u, v]: [f64; 2]) -> [f64; 2] {
     ]
 }
 
-fn gamut_name(colors: Option<Hdr>) -> &'static str {
-    match colors {
-        Some(_) => "Rec.2020",
-        None => "Rec.709",
-    }
-}
-
-fn curve_points(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<[f64; 2]> {
-    let rect = plot_rect(size);
-    let gamut = timeline_primaries(colors).map(|(x, y)| [x, y]);
-    LOCUS
-        .iter()
-        .chain(&PLANCK)
-        .chain(&gamut)
-        .chain([&[D65.0, D65.1]])
-        .map(|&p| on_chart(rect, chart_xy(prefs, p)))
+fn wave_ticks(locus: &[[f64; 2]], white: [f64; 2], side: f64) -> Vec<[f64; 2]> {
+    let last = locus.len() - 1;
+    (0..locus.len())
+        .step_by(WAVE_STEP)
+        .flat_map(|i| {
+            let (before, at, after) = (
+                locus[i.saturating_sub(1)],
+                locus[i],
+                locus[(i + 1).min(last)],
+            );
+            let mut out = [after[1] - before[1], before[0] - after[0]];
+            if out[0] * (at[0] - white[0]) + out[1] * (at[1] - white[1]) < 0.0 {
+                out = [-out[0], -out[1]];
+            }
+            let reach = side * WAVE_TICK / out[0].hypot(out[1]).max(f64::EPSILON);
+            [at, [at[0] + out[0] * reach, at[1] + out[1] * reach]]
+        })
         .collect()
 }
 
-fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark> {
+fn curve_points(prefs: Scopes, size: (u32, u32)) -> Vec<[f64; 2]> {
+    let rect = plot_rect(size);
+    let gamut = bt709_primaries().map(|(x, y)| [x, y]);
+    let white = [D65.0, D65.1];
+    let place = |p: &[f64; 2]| on_chart(rect, chart_xy(prefs, *p));
+    let locus: Vec<[f64; 2]> = LOCUS.iter().map(place).collect();
+    let ticks = wave_ticks(&locus, place(&white), rect[2] - rect[0]);
+    locus
+        .into_iter()
+        .chain(PLANCK.iter().chain(&gamut).chain([&white]).map(place))
+        .chain(ticks)
+        .collect()
+}
+
+fn chart_marks(prefs: Scopes, size: (u32, u32)) -> Vec<Mark> {
     let rect = plot_rect(size);
     let (w, h) = (f64::from(size.0), f64::from(size.1));
     let shifted = |label: String, [x, y]: [f64; 2], align: [f32; 2], shift: [f32; 2]| Mark {
@@ -337,8 +365,13 @@ fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark
         at: [(x / w) as f32, (y / h) as f32],
         align,
         shift,
+        color: Some(TEXT_COLOR),
     };
     let mark = |label, at, align| shifted(label, at, align, [0.0, 0.0]);
+    let axis = |label, at, align| Mark {
+        color: None,
+        ..mark(label, at, align)
+    };
     let mut marks = Vec::new();
     for i in 0..=5 {
         let v = f64::from(i) * CHART_STEP;
@@ -347,10 +380,10 @@ fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark
             _ => format!("{v:.1}"),
         };
         let below = [on_chart(rect, [v, 0.0])[0], rect[3] + LABEL_GAP];
-        marks.push(mark(label.clone(), below, [0.5, 0.0]));
+        marks.push(axis(label.clone(), below, [0.5, 0.0]));
         if i > 0 {
             let left = [rect[0] - LABEL_GAP, on_chart(rect, [0.0, v])[1]];
-            marks.push(mark(label, left, [1.0, 0.5]));
+            marks.push(axis(label, left, [1.0, 0.5]));
         }
     }
     let (across, up) = match prefs.chromaticity_mode {
@@ -358,19 +391,20 @@ fn chart_marks(colors: Option<Hdr>, prefs: Scopes, size: (u32, u32)) -> Vec<Mark
         ChromaticityMode::Uv => ("U", "V"),
     };
     let corner = [rect[2], rect[3] + LABEL_GAP];
-    marks.push(shifted(
-        across.to_string(),
-        corner,
-        [0.0, 0.0],
-        [ACROSS_SHIFT, 0.0],
-    ));
+    marks.push(Mark {
+        color: None,
+        ..shifted(across.to_string(), corner, [0.0, 0.0], [ACROSS_SHIFT, 0.0])
+    });
     let top = [rect[0] - LABEL_GAP, rect[1]];
-    marks.push(shifted(up.to_string(), top, [1.0, 0.5], [UP_SHIFT, 0.0]));
-    let name = gamut_name(colors);
-    let gamut = timeline_primaries(colors);
+    marks.push(Mark {
+        color: None,
+        ..shifted(up.to_string(), top, [1.0, 0.5], [UP_SHIFT, 0.0])
+    });
+    let name = GAMUT_NAME;
+    let gamut = bt709_primaries();
     let green = on_chart(rect, chart_xy(prefs, [gamut[1].0, gamut[1].1]));
-    let beside = [green[0] - LABEL_GAP, green[1] - LABEL_GAP];
-    marks.push(mark(name.to_string(), beside, [1.0, 1.0]));
+    let beside = [green[0] - LABEL_GAP, green[1]];
+    marks.push(mark(name.to_string(), beside, [1.0, 0.5]));
     let coordinates = |(x, y): (f64, f64)| {
         let [u, v] = chart_xy(prefs, [x, y]);
         format!("{u:.4}, {v:.4}")
@@ -443,6 +477,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 at: [0.0, from_top(v) as f32],
                 align: [0.0, 1.0],
                 shift: [0.0, 0.0],
+                color: None,
             })
             .collect(),
         Scope::Histogram => levels(prefs.scale, colors)
@@ -452,9 +487,10 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 at: [v as f32, 0.0],
                 align: [0.5, 0.0],
                 shift: [0.0, 0.0],
+                color: None,
             })
             .collect(),
-        Scope::Chromaticity => chart_marks(colors, prefs, size),
+        Scope::Chromaticity => chart_marks(prefs, size),
         Scope::Vectorscope => {
             let unit = per_unit(size);
             hue_points(colors)
@@ -467,6 +503,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                     ],
                     align: [0.5, 0.5],
                     shift: [0.0, 0.0],
+                    color: None,
                 })
                 .collect()
         }
@@ -602,10 +639,10 @@ fn params(
         n(transfer),
         n(LOCUS.len() as u32),
         n(PLANCK.len() as u32),
-        n(0),
+        n(LOCUS.len().div_ceil(WAVE_STEP) as u32),
     ]);
     let mut curve = vec![f(0.0); CURVE * 4];
-    for (slot, p) in curve.chunks_mut(2).zip(curve_points(colors, prefs, size)) {
+    for (slot, p) in curve.chunks_mut(2).zip(curve_points(prefs, size)) {
         slot[0] = f(p[0]);
         slot[1] = f(p[1]);
     }
