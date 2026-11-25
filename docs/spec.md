@@ -74,11 +74,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A Keyframes tab sits beside the Inspector.
   - The Timeline menu opens that tab.
   - `gui.show keyframes` opens that tab.
+  - Resolve opens the editor in a window of its own only on the Edit page (p. 1260).
   - The tab shows the item selected first, a clip or a subtitle.
   - When that item leaves the selection, the tab shows the next item selected, not the earliest on the timeline. Clips and subtitles share this order. Resolve Studio 21.1.2 shows this with three titles.
   - **Tracks** (pp. 1255–1256):
     - Each value that can have keyframes has a track, in a group for its section.
     - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
+    - Volume and Pan are tracks in an Audio group, as in Resolve Studio 21.1.1.
     - Speed is one track, in a Speed group. It shows the speed keyframes of the clip (D48, [X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
     - The ⋯ menu has Display All Parameters and Display Parameters with Keyframes. All is the default.
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
@@ -159,12 +161,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A row with a keyframe at the playhead does not change.
       - The Volume row takes a keyframe also outside the clip (measured in Resolve Studio 21.1.2). A held key adds once.
       - The Speed row takes a keyframe only inside the clip, after its first frame.
-      - The manual says that the context picks the value (pp. 1254–1255). In Resolve Studio 21.1.2, the selected row picks it.
+      - The manual says that Add Keyframe works also during playback, and that the context picks the value (pp. 1254–1255). Its order is the retime controls, the open curve of the editor, the Inspector control changed last, and the audio gain.
+      - In Resolve Studio 21.1.2, the selected row picks it.
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
     - Mark > Delete All Keyframes removes the selected keyframes. With none selected, it asks first. Then it removes all the keyframes of the selected rows.
       - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)). Cancel has the focus.
     - These three items act on the clip that the tab shows.
+    - Resolve's Mark menu also has Add Static Keyframe (Ctrl+]) and a Keyframe Timeline Mode submenu. On the Cut page, both are off (measured in Resolve Studio 21.1.2).
     - With the tab and the tray closed, they act on the speed keyframes of the selected clips (D48, X94).
     - With the tray open, the tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe (X94).
     - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
@@ -178,6 +182,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
       - A button is off when no selected keyframe takes its ease.
       - The eases are the curves of the volume line (X74). The anchor point's keyframes take no ease (D92).
+    - In Resolve Studio 21.1.1, a right-click on a keyframe of the editor opens no menu, on the Cut page and on the Edit page.
     - vidcut: a right-click on a keyframe also sets the ease. On a selected keyframe, it sets the ease of all the selected keyframes.
     - vidcut: with two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
       - In a selection, Ease In removes the Out handle of a first keyframe, and it gets no In handle. Ease Out on a last keyframe does the opposite (measured in Resolve Studio 21.2).
@@ -196,7 +201,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The tray has a track for each value of the item selected first that has keyframes. Its time is the time of the lower timeline.
     - Its tracks work as the tracks of the Keyframes tab, with Reset Keyframes and without the curve. They share the selection of the tab.
     - `gui.show keyframe_tray` opens the tray. `gui.close keyframe_tray` closes it.
-    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md)):
+    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md#buildable)):
       - A divider that changes the height of the tray.
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
@@ -717,7 +722,17 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
   - Measured: 10-bit has a line each 128, 12-bit each 512, Percentage each 10, and mV each 100.
   - Measured: HDR has lines at 0, 1, 10, 100, 1000 and 10000 nits on the PQ curve.
+  - Measured: HDR also has dashed lines with no label between those lines.
+    - The figure on p. 3092 shows them at 26, 203 and 2000 nits, to the precision of the figure. vidcut draws them there.
+    - The exact nits are not measured in Resolve.
   - On an HLG timeline, HDR uses the nits of the HLG curve. This is not measured in Resolve.
+    - vidcut draws no dashed lines on an HLG timeline.
+  - The same menu has Video Level Scopes and Data Level Scopes (p. 3095). Data Level Scopes is the default (measured).
+    - Video Level Scopes changes only what the scopes show. The monitor and the export do not change (p. 3095).
+    - The figure on p. 3095 shows full-range white at code 940 of the 10-bit scale with Video Level Scopes.
+    - vidcut: with Video Level Scopes, the Waveform and the Parade show black at code 64 and white at code 940. The marks of the scale stay.
+    - `viewer.scopes` with `video_levels` sets it.
+    - Not measured in Resolve: the marks of Percentage, mV and HDR with Video Level Scopes, and the Vectorscope with Video Level Scopes.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
@@ -1530,7 +1545,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - When no control is on, a new subtitle track takes it.
     - A pasted cue trims a cue that it partly covers. vidcut applies the whole rule of Add New.
   - Details: D56, D57, D78, D79; deviation X43.
-- **Keyframes** ([measured](todo/keyframes.md#subtitles)):
+- **Keyframes** (measured in Resolve Studio 21.1.2):
   - A cue acts as a picture as large as the frame. It takes the Transform, Crop and Composite keyframes of a clip (§8.15, D75), without an anchor point, flips, Dynamic Zoom, composite mode or effects.
   - The Inspector of a cue has no Keyframe buttons. The Keyframes tab and the keyframe tray show the item selected first, a cue or a clip.
   - Each cue has its own keyframes. They count frames from its start, and can be before or after the cue.
@@ -1540,6 +1555,34 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A join needs a shared edit point: each cue starts where the cue before it ends. Otherwise the join is refused.
   - A join keeps only the text, the words and the keyframes of the first cue.
   - The viewer and a burn-in show the keyframes. A subtitle stream and a subtitle file hold no keyframes.
+  - **The measurements** (Resolve Studio 21.1.2):
+    - The Inspector of a subtitle has only the Caption and Track tabs, with no Keyframe buttons.
+    - The Keyframes panel of a subtitle lists these values, and adds keyframes on them:
+      - Transform: Zoom X and Y, Position X and Y, Rotation, Pitch and Yaw. It has no Anchor Point.
+      - Cropping: Left, Right, Top, Bottom and Softness.
+      - Composite: Opacity.
+    - An Opacity keyframe dims the subtitle.
+    - Zoom and Rotation act about the middle of the picture. A small positive Rotation moves bottom text to the right.
+    - Position X is in pixels. A keyframe at 500 moved the subtitle about 503 pixels.
+    - A positive Pitch enlarges bottom text and moves it down. A positive Yaw lowers the left end and raises the right end.
+    - Crop Left is in pixels of the frame width, up to 1920. At about 968, it cuts the text at the middle of the frame. The rest stays in place.
+    - Softness fades the text at the cropped edge.
+    - The arrows of a row went from 14 s to 15 s to 18 s, outside the subtitle, and back to 15 s.
+    - A ripple delete of Track 1 inside a subtitle:
+      - A subtitle from 12 s to 20 s has keys at 13, 15 and 18 s. A cut from 14 s to 16 s gives 12–14 (keys 13, 15, 18) and 14–18 (keys 11, 13, 16).
+      - Then a cut from 13 s to 15 s gives 12–13 (keys 13, 15, 18) and 13–16 (keys 9, 11, 14).
+      - A subtitle from 27 s to 30 s with no keys, cut from 28 s to 29 s, gives 27–28 and 28–29.
+    - Timeline > Join Clips:
+      - The parts 2–6 s and 6–10 s have keys at 4 s and at 8 s. The join gives 2–10 s, with the key at 4 s only.
+      - With different text, the result keeps the text of the first part.
+      - With a gap, the join gives the error that the clips "don't share an edit point".
+    - The Keyframes panel shows the item selected first:
+      - A clip, then Ctrl+subtitle, shows the clip. A subtitle, then Ctrl+clip, shows the subtitle.
+      - A later subtitle, then Ctrl+an earlier one, shows the later one.
+    - A typed In on a subtitle leaves each keyframe on its timeline frame.
+    - A double-click in a row of the Keyframes panel adds no keyframe.
+    - A burn-in render shows the keyframes, the crop and the softness.
+    - An OTIO export leaves the subtitle tracks out. Thus these keyframes reach no file.
 - **Import** (pp. 1230–1231):
   - `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips, with a badge.
   - Any media import, or Import Subtitle, brings them in.
@@ -1846,19 +1889,67 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - An OTIO import drops a `LinearTimeWarp` on a title.
   - vidcut: a title clip has the Transform, Cropping, Dynamic Zoom and Composite sections of a clip (§8.15). `picture.set` sets them.
   - vidcut: a title takes no speed, as a generator (§8.17). Its right-click menu has no Change Speed and no Add Speed Point.
-- **Keyframes** ([todo](todo/keyframes.md#titles)):
-  - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
-  - vidcut: the Keyframes tab of a title has the rows of its clip's picture. It also has the rows Text Position, Text Zoom and Text Rotation. The text of a scroll has only Text Position.
-    - A lower third with its lines apart has the text rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom and Lower Rotation.
-  - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
-  - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
+- **Keyframes** (measured in Resolve Studio 21.1.2, on Text, a lower third and Scroll, with renders and OTIO exports):
+  - These values take keyframes, play them and export them:
+    - the position, Zoom X and Y and the rotation of the `Rich Text` group
+    - the position of the `Text` group of a scroll
+    - the opacity of the clip's `Composite` effect, from 0 to 100
+  - Between two keyframes with no handles, each value changes evenly.
+  - A key time counts from the first frame that the clip shows.
+  - A position goes from −4 to 4 on each axis, from the bottom left. A move of x from −0.5 to 1.5 plays.
+  - A key of Zoom, Rotation or Opacity takes `InBez` and `OutBez`. A position key takes handles too (D67).
+  - **The path of the position:**
+    - The path between two position keys is a cubic. P1 = P0 + `OutBez`, and P2 = P3 + `InBez`. A key with no handle gives a handle of zero.
+    - The title moves at one speed along that path. The fraction of the time between the keys is the fraction of the length of the path.
+    - The length is in fractions of the picture, not in pixels.
+    - Six sets of handles, with each frame rendered, fit this rule with a largest error of 0.00074 of the picture.
+  - **The ease menu:** a right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
     - The first key has Linear and Ease Out. The last key has Linear and Ease In.
     - A middle key has Linear, Ease In, Ease Out and Ease In and Out. A lone key has only Linear.
-    - A check mark is on the current item.
-    - On Position, the handles are an eighth of the difference between the two neighbors of the key. They stay when a value changes.
+    - Three Zoom keys at 30, 60 and 90 show these items. A lone Rotation key has only Linear.
+    - A check mark is on the current item. A new choice replaces the old one.
     - On Zoom, Rotation and Opacity, a handle is flat and a third of the gap to the neighbor.
-  - vidcut: the Across, Zoom and Rotation rows of the Title section have the Keyframe button. The Opacity row of the Composite section has it too.
-  - vidcut: the Across button holds the keyframes of Across and Down.
+      - On a gap of 30 frames, Ease In writes `[-10, 0]`, and Ease Out writes `[10, 0]`. Zoom writes them on X and on Y.
+    - On Position, the menu writes these handles, in fractions of the picture, with Y from the bottom as in the file:
+      - The `OutBez` of a key is (the value of the next key − the value of the previous key) / 8. Its `InBez` is minus that value.
+      - A missing neighbor counts as (0, 0). The gap between the keys and the distance between them do not change the values.
+    - Ease In sets only `InBez`. Ease Out sets only `OutBez`. Ease In and Out sets both.
+    - Linear removes the handles of that key. The handles of its neighbors stay.
+    - The menu reads the neighbors when the user chooses the item. A later change of a value does not change the stored handles.
+  - A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
+  - A title that is copied and pasted keeps its keys and handles.
+    - In the measured paste, the paste took the range between the marks of the timeline. The keys moved by the same amount.
+  - The Keyframes panel of a title has only the rows of the clip. A key on the Position of the Title tab has no row.
+  - The Inspector also has Keyframe buttons on these values of a title:
+    - Drop Shadow: Offset, Blur and Opacity
+    - Background: Outline Width, Width, Height, Corner Radius, Center and Opacity
+    - the Transform and Cropping of the clip
+  - vidcut does not key the shadow and the background yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+- **Keyframes in vidcut:**
+  - A Text title and a lower third take keyframes on the position, the zoom and the rotation of the text: `text_position`, `text_zoom` and `text_rotation`. A scroll takes them only on the position of its text.
+  - Each line of a lower third takes its own keyframes. `upper_position`, `lower_position` and the like in the `keyframes` requests name the line.
+  - The picture of the clip takes keyframes as on a media clip, with the same names. Its opacity is the opacity of the whole title.
+  - The Keyframes tab of a title has the rows of its clip's picture. It also has the rows Text Position, Text Zoom and Text Rotation. The text of a scroll has only Text Position.
+    - A lower third with its lines apart has the text rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom and Lower Rotation.
+    - In that tab, Position has no curve button and no ease.
+  - The Across, Zoom and Rotation rows of the Title section have the Keyframe button. A lower third has these buttons on each line. The Opacity row of the Composite section has it too.
+  - The Across button holds the keyframes of Across and Down.
+  - The right-click menu of these buttons has the items of the measured menu. It sends `keyframes.set`.
+    - On Position, the check mark is on the item that the sides with a handle give.
+    - On Zoom and Rotation, it is on the item that the handles give. A key with other handles has no check mark.
+  - A scroll's Position key has no menu, and `keyframes.set` gives it no handles. No measurement gives them.
+  - Play and export draw the position along the path of its handles.
+  - `keyframes.set` and `keyframes.add` with `ease` write the measured handles on the chosen position keys. `keyframes.list` shows the handles as `in` and `out`, with Y from the top.
+  - An ease that the place of the key does not offer follows the rule of the other values. The side with no neighbor gets no handle, and the old handles of the key go.
+  - `keyframes.set` refuses `in` and `out` on the position keys of a title. Their handles are points in the picture, not frames and a value.
+  - `edit.copy`, `edit.cut` and `edit.paste` carry the keys and the handles with the title.
+  - `keyframes.copy` and `keyframes.cut` return the handles of a position key as `in_point` and `out_point`. `keyframes.paste` puts them on the position key of a title, as they are.
+  - `titles.set` and the handles of the viewer put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
+  - With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
+  - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
+  - A switch to Scroll drops the zoom and rotation keyframes and the position handles.
+  - A `look` in `titles.set` keeps the keyframes and the position handles. A look that makes a scroll drops what a switch to Scroll drops.
+  - A `look` adds no keyframe. Its number for a value with keyframes shows when the last of them goes.
 - **Later** (X53):
   - Text+ and Fusion titles (p. 1178)
   - animation
@@ -1924,6 +2015,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The flips have no keyframes.
   - Dynamic Zoom has no Keyframe button. Its two boxes stay at the ends of the clip.
   - A Keyframe button sits between Previous and Next arrows on each keyed value (X70).
+  - Resolve's Inspector also has a Keyframe button between Previous and Next arrows on each group (measured in Resolve Studio 21.1.1).
+    - The groups with buttons are Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, and Volume and Pan.
+    - The text of the Video panel names no Keyframe buttons for Transform, Cropping or Dynamic Zoom (pp. 734–737).
+    - vidcut does not have the buttons on Transform, Crop, Composite and Audio yet ([todo](todo/keyframes.md#buildable)).
   - A right-click on the button sets the ease. The ease is the volume curve (X74).
   - After the first keyframe, a change at another frame adds a keyframe.
   - This applies to the Inspector and to the viewer handles.
@@ -2309,6 +2404,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Measured in Resolve Studio 21.2, with a Bezier spline on the inputs of each plugin:
     - Each slider and each number of a color takes a curve. Blend takes a curve too.
     - The switches take no curve. Film Grain Freeze is the exception.
+    - On the Fusion page, Film Grain Freeze takes a curve from 0 to 1. Freeze is on where the curve is 0.5 or more.
+    - A frozen frame shows the grain of the latest Freeze keyframe at or before it.
+    - Not measured: the grain of a frozen frame before the first Freeze keyframe, and Freeze keys in the Inspector of the Cut page.
     - Mosaic Blur Position and Vignette Center are one point.
   - Not measured: the Keyframe button of a group, its ease menu and the curves of effect keyframes in the Inspector. The manual gives the facts above.
 - **Keyframes of effect values in vidcut:**
@@ -2783,10 +2881,11 @@ A mask with a mask on its effect mask input (p. 2474):
   - Invert: i + n − 2 × i × n.
   - Copy: n. Ignore: i.
   - Replace: n, the same as Copy. The manual says that the areas where n is 0 keep i (p. 2465) ([gotchas](gotchas.md#resolves-fusion-page)).
+    - vidcut follows the manual: n where n is above 0, else i.
   - The forms agree with the reads within 0.00001. The new mask of the reads has Level 0.7.
   - A delete of the input mask stops the render of the mask and of the tool after it ([gotchas](gotchas.md#resolves-fusion-page)).
 - The manual says that Level and Invert act on the whole mask (p. 2491). The render shows otherwise. vidcut follows the render.
-- vidcut: Merge is the only mode ([todo](todo/effects-page.md)).
+- vidcut: the Paint Mode row shows only when a mask is on the effect mask input. A mask with nothing on that input is its own shape n.
 
 The Image tab of a mask (pp. 2500–2501). Measured in Resolve Studio 21.2:
 
@@ -3765,6 +3864,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
   - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. A current node that is not selected stays. The last corrector then becomes the current node.
+  - vidcut: with selected points of a curve window, these keys delete the points and no node ([§8.23](#823-windows-pp-32653279)).
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
@@ -4026,6 +4126,15 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
   - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
+  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([gaps](todo/gaps.md)).
+  - The header of a node track has an Enable/Disable button, a Lock button and an Auto-Keyframe button (p. 3454).
+  - Enable/Disable turns the node off or on. A locked node takes no changes, and the Node Editor shows a lock on it (p. 3454).
+  - With Auto-Keyframe on, each change to a value of the node adds a Dynamic keyframe (pp. 3454, 3461).
+  - Without Auto-Keyframe, a change goes to a keyframe that is there, by the playhead rule below (p. 3461).
+  - vidcut: the three buttons are at the right of the name of each node track. They send `grade.set` with `on`, `locked` and `auto_key`.
+  - vidcut: with `auto_key`, a change on a frame where the node has no keyframe first adds a Dynamic keyframe there. The new keyframe takes the values that the picture has on its frame, and the change then goes to it.
+  - vidcut: the changes of `grade.set`, `grade.printer`, `grade.clear` with `node` or `keep_nodes`, `grade.auto_color`, `grade.window.set` and a `grade.window.paste` onto a window of the same shape do so. A change of the window list does not.
+  - Not measured: where Resolve keeps the Auto-Keyframe state, and whether a reset adds a keyframe. vidcut keeps it in the node.
 - **Dynamic and Static keyframes** (pp. 3456–3459):
   - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).
   - Mark > Make Static Keyframe (Command-]) adds a Static keyframe (p. 3457).
@@ -4096,6 +4205,10 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
   - vidcut: a drag in the Master track moves the keyframe of each corrector on that frame. A drag in a node track moves the keyframe of that node.
   - vidcut: a drag sends `grade.keys.move`. A corrector has one keyframe on a frame at most. Thus a move onto another keyframe of that corrector fails.
+  - A drag of a box around keyframes selects them, in red. A drag of one of them moves them all (p. 3462).
+  - vidcut: a box selects the keyframes of the track where it starts. A drag of a selected keyframe moves the selection of its track. The menu of a selected keyframe changes or deletes the whole selection of its track.
+  - Playback > Next > Keyframe (]) and Playback > Previous > Keyframe ([) move the playhead to the next or the previous keyframe (p. 3462).
+  - vidcut: on the Color page, ] and [ go to the next and the previous keyframe of the grade, in all nodes.
   - Mark > Delete Keyframe (Option-]) deletes every keyframe at the playhead (p. 3463).
   - Delete Selected Keyframe in the menu of a keyframe deletes only that keyframe (p. 3463).
   - Mark > Delete All Keyframes deletes every keyframe of the clip (p. 3463).
@@ -4107,6 +4220,11 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
 - **The timeline grade** (p. 3465):
   - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
   - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.
+  - Add EDL Marks on Tracks is in the menu of a Corrector track of the timeline grade. It adds a Static keyframe at each edit point of the timeline (p. 3465).
+  - Delete EDL Marks on Tracks removes only those marks. The other keyframes stay (p. 3465).
+  - vidcut: `grade.keys.add` and `grade.keys.remove` with `edl`. The menu of each track of the timeline grade has the two items. The Master track acts on each node.
+  - vidcut: the marks go where a clip starts or ends on a video track, after the first frame and before the end. A node that has a keyframe on that frame keeps it.
+  - Not measured: which edits count, and whether the marks go on the right-clicked track only. vidcut puts them on the track of the menu.
   - Measured in Resolve Studio 21.2: an edit of the timeline does not move them. After a ripple delete, they stay on their timeline frames.
   - vidcut: the same.
 - vidcut: the viewer, the export, `frame.render` and the storyboard give each frame the grade of its own frame.
@@ -4261,11 +4379,33 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
-  - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box. A dashed box with 8 handles stays around them.
+  - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box.
+    - The box is the dragged rectangle, with 8 handles: 4 corners and 4 side middles. It stays after the drag.
+    - The selected points and their softness points are blue.
     - A drag of a selected point moves all the selected points and the box.
     - A drag of a side handle scales the selected points about the opposite side.
-    - Delete with two selected points removed one of them. A second Delete removed nothing.
-  - vidcut: Shift and a drag box are not there yet ([todo](todo/color-page.md)).
+    - A drag of a corner handle scales the selected points about the opposite corner, by the same amount on the two axes.
+      - In two drags, the scale was the smaller of the two ratios of the pointer.
+      - Shift or Alt during the drag changes nothing.
+    - The softness points move with their points. Their distance from the curve does not change.
+    - Ctrl+Z gives back the points. The box keeps its new size.
+    - A press 3 px outside a corner takes the handle. A press 8 px outside it clears the selection.
+    - These clear the selection and the box: a click on an empty place, a change of the palette or of the node, and Escape.
+    - A click on a point that is not selected selects that point alone, with its softness points and no box.
+    - The box has no control to turn the points.
+    - Delete with two selected points removed one of them. A second Delete removed nothing. This is a fault of Resolve ([gotchas](gotchas.md#resolves-edits)).
+    - Not measured: the Bezier handles of the selected points.
+  - vidcut: Shift and a drag from any place on the current curve draw a dashed box. The points in the box are selected while the drag goes on.
+    - The box is the dragged rectangle, in the axes of the frame, with 8 square handles. The selected points and their softness points are blue.
+    - A drag of a selected point moves the selected points, their Bezier handles and the box.
+    - A drag of a side handle scales the selected points, their handles and the box about the opposite side.
+    - A drag of a corner handle scales them about the opposite corner, by the smaller of the two ratios of the pointer.
+    - The softness points keep their distance from their points.
+    - A press within 6 px of a handle takes it. Undo gives back the points, and the box keeps its size.
+    - Delete and Shift+Backspace remove each selected point, as p. 3274 says. They then remove no node.
+    - A click or a drag outside the selected points and the handles clears the selection. So do Escape and a change of the window, the node or the palette.
+    - A click on a point that is not selected then selects that point alone, with no box.
+    - `grade.window.set` with `points` gives the same results to a script.
   - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
   - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
     - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
@@ -4300,7 +4440,6 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: an added, removed or converted window changes the window list of each keyframe.
   - vidcut: the Window palette and the viewer show the windows of the keyframe that a change goes to.
     - Not measured: the outline in the viewer of Resolve between two keyframes.
-  - The Shift box comes later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 
@@ -5689,6 +5828,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - With the Keyframes tab and the keyframe tray closed, the keyframe items of the Mark menu act on speed keyframes.
   - **Inspector:** these facts come from Resolve Studio 21.1.2:
     - The header of the Speed Change group has a keyframe diamond between < and > buttons. The diamond is red with the playhead on a speed keyframe.
+    - The speed tool of the viewer has its own Keyframe button (measured in Resolve Studio 21.1.1).
     - Change Speed and Frames per Second show and change the speed of the section under the playhead.
     - The Direction buttons act on that section. In one check, Reverse played it backward to the media's first frame ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
     - The Duration field shows the section's length in one check and the clip's length in two others. The reason is not measured.
@@ -6321,6 +6461,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The opacity of a title is the `opacity` of the clip's `Composite` effect, in percent.
     - Resolve draws it (checked at 50%).
     - A `Cross Dissolve` at its edge fades it there, as in vidcut (checked frame by frame).
+  - **Keyframes:**
+    - vidcut writes the keyframes in the `Key Frames` of each parameter, on the `Rich Text` group of each line of a lower third. It reads the keyframes of each line from its own group.
+    - Position keys convert as the plain position does.
+    - A plain position key exports as `{"30": {"Value": [0.5, 0.5], "Variant Type": "POINTF"}}`.
+    - A key with a handle adds `"OutBez": {"OutBez": [x, y], "Variant Type": "POINTF"}`, or the same with `InBez`. The numbers are fractions of the picture (measured in Resolve Studio 21.1.2).
+    - Resolve's import keeps these handles. vidcut reads them as the handles of the position, and writes them back, with Y turned over.
+    - A scroll reads and writes no position handles, because no measurement gives them.
+    - The `vidcut` metadata holds the keyframes on source frames, as for a picture.
   - The `Title` itself also goes in the `vidcut` metadata of the clip. Thus vidcut reads its own titles back exactly.
   - Resolve drops this metadata.
   - **Import:** a Resolve title of those kinds comes in as a title, with these parts:
@@ -6435,7 +6583,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - If you name such a look, you get that reason.
   - The application of a look is one change that you can undo:
     - `track.set` with `look` sets the style of a track (Apply Look on a subtitle track header).
-    - `titles.add` and `titles.set` with `look` set all of a title except its text and its keyframes ([todo](todo/keyframes.md#titles)). The fields given go on top.
+    - `titles.add` and `titles.set` with `look` set all of a title except its text and its keyframes (§8.14). The fields given go on top.
     - `subtitles.transcribe` takes any subtitle look.
   - In the Subtitle Track and Title sections of the Inspector:
     - The Look list fills the fields. It shows the look that they match, or Custom.
@@ -6603,6 +6751,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Position stores X on the keyframe and Y beside it, one Y for each keyframe.
     - Zoom and the anchor point do the same. The other values store one value.
     - The curve between two keyframes is the volume Bezier curve (X74).
+    - Renders of Resolve Studio 21.1.1 show a change in the value itself. A Zoom from 0.1 to 0.4 over 30 frames is 0.25 at the middle. Position, Rotation and the crop change in the same way.
     - A handle value moves the key's own value.
     - Position Y, zoom Y and anchor Y keep the handle frames and use a value offset of 0.
     - Before the first keyframe the value is the first. After the last it is the last.
@@ -6712,6 +6861,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The anchor point of Transform becomes the `anchor`.
     - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
     - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
+      - X and Y keys on different frames are such keyframes ([todo](todo/keyframes.md#needs-a-resolve-run)). So are anchor point keys with Bezier handles.
+    - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys, and gives the same keys.
+    - Resolve Studio 21.2 imports a file that vidcut writes with these keys. It renders and exports the same keys.
     - Pitch and yaw are played, with or without keyframes (D93).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.

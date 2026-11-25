@@ -1625,7 +1625,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Action::DeleteNode,
         &["Shift+Backspace", "Delete"],
         "Delete the selected nodes",
-        Some("The nodes after them get lower numbers. The last corrector becomes current."),
+        Some(
+            "The nodes after them get lower numbers. The last corrector becomes current. With selected points of a curve window, it deletes those points.",
+        ),
     ),
     own(
         Color,

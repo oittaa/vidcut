@@ -4353,6 +4353,12 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// Auto-Keyframe of a corrector or a key mixer: a change to the node
+    /// on a frame where it has no keyframe first adds a Dynamic keyframe
+    /// there. That keyframe holds the values that the picture has on its
+    /// frame. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_key: bool,
     /// The windows of a corrector, in the order of the window list. They
     /// make the key of the corrector. A corrector has a linear, a circle, a
     /// polygon and a gradient window first, off at first, which stay. The
@@ -4376,6 +4382,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: GradeWindow::fixed(frame),
         }
     }
@@ -4393,6 +4400,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: Vec::new(),
         }
     }
@@ -4785,6 +4793,11 @@ pub struct GradeKey {
     /// mixer leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// A mark of Add EDL Marks on Tracks, on an edit of the timeline.
+    /// Delete EDL Marks on Tracks removes only these marks. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edl: bool,
 }
 
 /// What a keyframe does up to the next keyframe.
@@ -6127,6 +6140,10 @@ pub struct Mask {
     /// of the picture. Below 0, the edge moves in. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How its own mask joins the masks on its effect mask input. With
+    /// nothing on that input, the mask is its own mask. Usual: `merge`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// On, the mask is the part outside its shape. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
@@ -6189,6 +6206,37 @@ pub struct Mask {
     /// covers nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<[f64; 2]>,
+}
+
+/// How a mask joins its own mask n with the masks i on its effect mask
+/// input. n is its shape after `invert` and `level`. c is its shape before
+/// `level`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaintMode {
+    /// n + i × (1 − c).
+    #[default]
+    Merge,
+    /// i + n, at most 1.
+    Add,
+    /// i − n, at least 0.
+    Subtract,
+    /// The smaller of i and n.
+    Minimum,
+    /// The larger of i and n.
+    Maximum,
+    /// (i + n) / 2.
+    Average,
+    /// i × n.
+    Multiply,
+    /// n where n is above 0, else i.
+    Replace,
+    /// i + n − 2 × i × n: n turns i over.
+    Invert,
+    /// n.
+    Copy,
+    /// i.
+    Ignore,
 }
 
 /// Which parts a polygon whose sides cross covers.
