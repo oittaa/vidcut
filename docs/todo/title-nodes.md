@@ -32,5 +32,4 @@ The Text+ tool and the Merge tool of the compositions get the rest of their cont
 
 **To measure in Resolve:**
 
-- Dissolve at a Blend below 1.
 - Invert Transform, also with a flip.

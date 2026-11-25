@@ -3103,7 +3103,7 @@ The controls of the sums (pp. 2213–2217):
   - vidcut: the Apply Mode of a tracker's Merge shows the same groups.
 - Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
-- Blend mixes the background with the result (p. 2217).
+- Blend mixes the background with the result (p. 2217): BG × (1 − Blend) + result × Blend.
 
 The Operators of Normal give FG × x + BG × y (p. 2215):
 
@@ -3155,7 +3155,9 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
 - On FG and BG:
   - Hypotenuse: √(FG² + BG²).
   - Geometric: 2 × FG × BG / (FG + BG), and 0 where FG + BG is 0.
-- Dissolve: the same as Normal with Over.
+- Dissolve: the same as Normal with Over. The manual calls it an average of the two pictures (p. 2213).
+  - At a Blend below 1, Dissolve mixes the colors with Blend. It does not take pixels at random.
+  - Example: a background of (1, 0, 0, 1) and a foreground of (0, 1, 0, 0.5) give (0.875, 0.25, 0, 1) at Blend 0.25.
 
 YIQ: Y = 0.299 R + 0.587 G + 0.114 B. I = 0.596 R − 0.274 G − 0.322 B. Q = 0.212 R − 0.523 G + 0.311 B.
 
