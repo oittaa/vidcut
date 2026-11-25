@@ -9,13 +9,12 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 - Case 27 of shortcuts-resolve-runs.md: how Resolve reads a key file that vidcut writes.
 - Does Resolve read Esc and Ins, the comment lines of vidcut, and a key that another command has?
 - Which import line does Resolve write for a preset that it saved from another built-in preset?
-- Case 17 measured the keys of the built-in presets. The files are in `$VIDCUT_TEST_DATA/fixtures/keys`.
 
-**Sets of other editors:**
+**Meta in the sets of other editors:**
 
-- The Avid Media Composer set has 15 actions. The documents that were read show most keys as pictures.
-- To do: read the Media Composer Editing Guide. It gives the keys for the marks, markers, Add Edit, Lift, Extract and trim.
-- The Pro Tools set has 6 actions. Most Pro Tools keys act on a time range or depend on the edit mode, so they do not match a vidcut action.
+- The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. On the other systems, vidcut has no such modifier.
+- A set file has one form for all systems, so the set gives Delete Marker no key.
+- To do: give Delete Marker Control+M on macOS.
 
 **Key sets and panels:**
 

@@ -526,11 +526,11 @@ The render queue:
 - In a running GUI, `Live::start_queue` starts one export job for each queue job, from the top. `JobInfo::render` names the queue job.
 - When the export job ends, the core records its result with `render.ended` (`queue::status`). Without a GUI, `render.start` renders the jobs one after the other, and records each result.
 - After a job of the open timeline completes, `Live::rendered_from` gives the first frame of its range, and the timeline playhead goes there.
-- A change of the queue is not an undo step. `Editor::apply` sends each request of `Request::in_queue` to `ops::render::change`. It changes the project and its `rev`, but it adds no step.
-  - The store saves the project as it saves an edit. The history file then gets only the hash of the new project file.
-  - An undo step changes only the fields of its edit. Thus an undo keeps the queue.
-  - When another program changes the project file, `Store::load_text` copies the queue into the last saved project. Thus the queue is not in the step of that change.
-  - `apply` refuses these requests in a batch.
+- Each change of the queue is an undo step. `mutate` sends each request of `Request::in_queue` to `ops::render::change`, as it sends other edits to their ops.
+  - `render.ended` is not a step. `Editor::recorded` changes the project and its `rev`, and it adds no step. Why: a render is not an edit of the user. A step for it would clear the redo list, and Ctrl+Z after a render would take back only a status.
+  - An undo step changes only the fields of its edit. Thus an undo of a timeline edit keeps the queue, and an undo of a queue step keeps the status of the other jobs.
+  - When another program changes the project file, `Store::load_text` copies the status of each job into the last saved project. Thus the statuses are not in the step of that change.
+  - `apply` refuses these requests in a batch. Why: `Live` and the headless session check the files of `render.add` and `render.update` before the core gets them.
 
 Cancel:
 
@@ -860,10 +860,14 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - A gray picture reads the source for its alpha. Thus the source stays until the last `Gray` pass.
     - `grade::passed` takes a gray picture as a picture from the source. A Parallel Mixer with a gray picture on an input thus has the source as its base.
   - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
-    - A corrector folds the key of its windows first, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A corrector folds the key of its windows first, then the key of its qualifier, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A qualifier at its usual values is no step. The Matte of the Qualifier row folds as a Matte input. The Mask of the row folds as a Mask input.
     - The last step clamps the key and applies the Key Output.
   - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
+  - A `Qualify` pass makes the key of a qualifier with `fs_key_qualify`, from the picture that comes into the node (`Qualifying`).
+    - A node with only a qualifier, with its three parts on and the Qualifier row at its usual values, keeps its one `Qualify` pass. It applies the Key Output.
+    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
   - `cut_off` tells if a corrector takes its key input from the key output of a corrector that is off. Its key is then 0, and it reads no key from its links.
@@ -987,7 +991,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
 - `GradeNode::keys` holds the keyframes of a corrector or a Key Mixer (`GradeNode::takes_keyframes`), in the order of their frames.
   - The other mixers have none.
   - Each `GradeKey` holds every value of the node, its `GradeKeyKind`, and its `start` and `end`.
-  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `KeyOutput` and its windows.
+  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `Qualifier`, its `KeyOutput` and its windows.
   - The values of a Key Mixer are a `KeyMix` for each input and its `KeyOutput`.
   - The window list of each keyframe has the shapes of the window list of the node. `ops::grade::checked` refuses other lists.
   - The mix list of each keyframe has one `KeyMix` for each input of the node. `ops::grade::checked` refuses other lists.
@@ -1005,6 +1009,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Why: on a circle, the radius moves in a straight line (spec §8.23).
   - On, Invert, Mask, the name, and a point list of another length keep the value of the keyframe before the frame.
 - `GradeNode::key_input_at` and `GradeNode::mix_at` give the Key Input and the mix of a Key Mixer in the same way (`KeyInput::blended`, `KeyMix::blended`).
+- `GradeNode::qualifier_at` gives the qualifier in the same way (`Qualifier::blended`). The switches and the buttons keep the value of the keyframe before the frame.
   - Invert, Mask and Matte keep the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
@@ -1029,6 +1034,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Each point of a polygon or a curve is one value, and so is each softness move of a curve.
   - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
 - The `key_input_` fields of `grade.set` change the Key Input in the same way (`GradeNode::change_key_input_at`, `KeyInput::carried`).
+- The `qualifier_` fields change the qualifier in the same way (`GradeNode::change_qualifier_at`, `Qualifier::carried`).
+  - A Width or a Soft alone moves the other value by the measured rule (`Qualifier::with_hue_width`, `Qualifier::with_hue_soft`).
+  - A request with both takes them as they are. Thus `ops::grade::checked` refuses a Soft above 2 times the Width.
 - The `mix_` fields change an input of a Key Mixer in the same way (`GradeNode::change_mix_at`, `KeyMix::carried`).
   - `grade.connect` and `grade.input.remove` change each mix list (`GradeNode::mix_lists_mut`).
 - All of these changes use one rule (`GradeNode::keyed_change`).

@@ -3851,6 +3851,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
   - vidcut: the Key badge shows when the Key Output is not at its usual values.
+  - vidcut: each palette has its own badge (p. 3390). The Qualifier badge shows when the HSL values are not at their usual values.
 - **Thumbnails** (pp. 3385, 3390):
   - Each corrector node has a thumbnail. The badges are under the thumbnail (p. 3390).
   - Show Thumbnails in the option menu of the Node Editor turns the thumbnails off or on. Without thumbnails, the nodes are shorter (p. 3385).
@@ -3917,7 +3918,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K, Alt+O and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -4102,7 +4103,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
   - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
-  - vidcut: the Qualifier controls come later ([todo](todo/color-page.md)).
+  - vidcut: the Key palette has the Qualifier row after the Key Output ([§8.28](#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 - **Key Input, Key Mixer and Outside node** (pp. 3388–3389, 3417–3420, 3431–3437):
   - Each corrector has a key input and a key output. They are blue, below the RGB input and the RGB output (p. 3388).
   - A link from a key output to a key input gives the key of one node to another node.
@@ -4144,7 +4145,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
-  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside.
+  - Add Outside has no key, as measured. The key list of the built-in set of Resolve Studio 21.2 also gives it no key. The manual gives Alt+O (p. 3417).
   - vidcut: the menu of a Key Mixer and its Add Node submenu are as measured.
   - vidcut: Alt+S and Shift+S do nothing on a Key Mixer. Thus its Add Node submenu shows no shortcuts.
   - Not measured: the shortcuts in the Add Node submenu of a Key Mixer.
@@ -4829,6 +4831,60 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
   - [design](design/analysis.md#stabilization) gives the method.
 
+### 8.28 Qualifier (pp. 3238–3256, 3263, 3436; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Qualifier palette pulls a key from the colors of the picture. Its modes are 3D, HSL, RGB and Luma (p. 3239).
+  - HSL is the usual mode. The Matte Finesse controls refine the key of each mode (p. 3241).
+  - HSL has a range and a softness for hue, saturation and luma (p. 3253).
+  - The Hue, Sat and Lum switches at the left of each control turn that part on or off (p. 3254).
+  - The HSL values are Hue Center, Width, Soft and Symmetry, Sat Low, High, Low Soft and High Soft, and the same four for Lum (p. 3254).
+  - A lower Symmetry makes the softness at the right of the hue range steeper. A higher one makes the left side steeper (p. 3254).
+  - The Invert button of the palette inverts the key of the palette (p. 3263).
+  - The Qualifier Invert of the Key palette also inverts the key of the palette. The Output Invert inverts the key of the whole node (p. 3263).
+  - A qualifier key and a window give the intersection of the two keys (p. 3263).
+  - The Key palette has the Qualifier controls (p. 3436).
+- Measured (float renders, YRGB, Rec.709 timeline, no color management):
+  - The usual values are Hue Center 50, Width 100, Soft 0 and Sym 50. Sat and Lum have Low 0, High 100, L.Soft 0 and H.Soft 0. The three switches are on.
+  - A new node with HSL and the usual values gives the key 1 at each pixel.
+  - Each HSL value goes from 0 to 100. A typed value past an end takes that end. A Low above its High stays.
+  - Hue Soft is at most 2 times Width. A larger Soft raises Width to half the Soft. A Width below half the Soft lowers Soft to 2 times Width.
+  - A typed Soft shows 0.1 more after a clip switch ([gotchas](gotchas.md#resolves-edits)).
+  - Hue is the Rec. 601 chroma angle atan2(Cr, Cb) in degrees. Y = 0.299 R + 0.587 G + 0.114 B, Cb = (B − Y) / 1.772 and Cr = (R − Y) / 1.402.
+  - A gray pixel has the hue 0. Thus Center 95 with Width 30 keys gray, and Center 40 with Width 10 does not.
+  - Hue Center c is at 3.6 c degrees. The key is 1 to lo = max(0, 1.8 (Width − Soft)) degrees from the center, and 0 from hi = 1.8 (Width + Soft).
+  - Sym: the side of larger angle keeps the part clamp((Sym − 30) / 20, 0, 1) of the soft span. The other side keeps clamp((70 − Sym) / 20, 0, 1).
+    - A side with no span ends hard at lo.
+  - Sat = 0.4115 hypot(Cb, Cr). Lum = 0.5 + Y / 4. Thus Lum 0 to 100 is Y −2 to 2.
+  - A Sat or Lum edge E with the softness s goes from max(0, E − s / 2) to min(1, E + s / 2). Soft 0 gives a hard edge at E.
+  - In each soft span, the key is 1 − smoothstep(t). t is 0 at the inner end and 1 at the outer end.
+  - The key is the product of the parts that are on. With all three parts off, the key is 1.
+  - The Invert of the palette gives 1 minus the key.
+  - The Key palette has a Qualifier row: an Invert button, a Matte or Mask button, Gain and Offset.
+    - The usual values are Invert off, Matte, Gain 1 and Offset 0. Gain goes from 0 to 2, and Offset from −1 to 1.
+  - With the three switches on and the Qualifier row at its usual values, the key goes out as it is.
+  - Else the key goes through Q of the Key Input ([§8.21](#821-color-page-nodes-pp-33853399-34093415)). Gain 0.5 and Offset 0.2 give Q(0.5 k + 0.2). The row's Invert gives Q(1 − k).
+    - Thus a switch that changes nothing, such as Lum off at Low 0 and High 100, changes the soft shape.
+  - With a window w in the node, the qualifier key x folds as a key input does ([§8.21](#821-color-page-nodes-pp-33853399-34093415)). x is the key after the Gain, the Offset and the Invert of the row.
+    - Matte gives clamp(1 − U(1 − Q(w), 1 − x)). Mask gives clamp(U(Q(w), x)).
+    - With the usual circle, Matte gives 0 at each pixel of the test frame, and Mask gives a mean of 0.12276.
+  - The Matte Finesse values and their ranges are in the measurement record. Their effects are not measured.
+  - The record is section Q1 of `fixtures/color/NOTES.md` in the test data.
+- vidcut:
+  - Qualifier at the top of the palette selects the Qualifier palette. It has the HSL mode, with the measured key.
+  - The palette has Invert, and the switch and the four values of each part.
+  - The Key palette has the Qualifier row after the Key Output: Invert, Matte, Gain and Offset.
+  - `grade.set` with the `qualifier_` values. It refuses a value past an end, and a Soft above 2 times Width.
+    - A change of Width or Soft alone moves the other value as measured.
+  - A typed Soft stays as it is.
+  - The qualifier reads the picture that comes into the corrector. A gray pixel has the hue 0.
+  - Renders of the 16 measured cases H0 to K4 match Resolve within 1.2e-3. Only one 8 x 8 block of J1, J2 and K2 is above 6e-4.
+  - A qualifier at its usual values gives no key.
+  - Each keyframe of a corrector holds its qualifier. The values blend as the values of the corrector do. The switches and the buttons change on the frame of the next keyframe.
+  - Reset in the Qualifier palette resets the HSL values. Reset in the Key palette also resets the Qualifier row.
+  - The node shows a Qualifier badge when the HSL values are not at their usual values. The Qualifier row counts for the Key badge.
+  - The 3D, RGB and Luma modes, the pickers and Matte Finesse come later ([todo](todo/color-page.md)).
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -5430,7 +5486,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the Cut page, Alt+X with In/Out Range sets Entire Timeline, which clears the marks.
   - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
-  - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
+  - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it.
+  - Each change of the queue is an undo step. These are Add, Update Job, the X, a drag, a new name, Clear Rendered, Clear All and Clear Status.
+  - The status that a render records is not an undo step.
+  - On the page, Undo, Redo, History and Ctrl+Z work.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
   - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
@@ -5513,6 +5572,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A key that has an action with the modifiers that are on has a lighter color. The picture on p. 122 shows a diagonal and a number on such a key instead. Not measured (case 24 of shortcuts-resolve-runs.md).
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
+  - The table gives the keys of the built-in DaVinci Resolve preset of Resolve Studio 21.2 (measured, case 17 of shortcuts-resolve-runs.md). This applies to the actions that have a command of Resolve. The keypad keys are not in it yet ([todo](todo/egui-keypad-keys.md)).
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
   - The changes of keys and the picks of a set in the window make a draft. The keys in force change only at Save (measured).
   - The dropdown shows "*" after the name of the set when the keys of the window differ from that set (measured).
@@ -5556,8 +5616,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A delete of the set in force puts vidcut's own set in force, with its keys (measured).
   - Reset puts back the keys of the set in force.
   - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
-  - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
-  - The keys of these sets are not measured against the presets of Resolve (case 17 of shortcuts-resolve-runs.md).
+  - A set of another editor gives the keys of the Resolve preset of the same name (measured, case 17). This applies to the actions that have a command of Resolve.
+  - The presets of Adobe Premiere Pro, Apple Final Cut Pro X and Avid Media Composer leave out 20 of these commands. The Pro Tools preset leaves out 3.
+  - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
+  - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
+  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
+  - The actions that have no command of Resolve keep their keys from the table, as the next rule tells.
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
@@ -5589,7 +5653,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Shift+F12† | Append |
 | Ctrl+\ or Ctrl+B | Split at playhead: the selected clips and subtitles there, or with nothing selected, every clip there |
 | Ctrl+T | Dissolve (§8.11) |
-| Delete / Backspace | Delete (ripples on Track 1); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
+| Delete / Backspace / Shift+Backspace | Delete (ripples on Track 1, p. 725); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
 | [ / ] | Previous / next volume keyframe of the selected clips (D85) |
 | Alt+click on the volume line | Add a volume keyframe (X73) |
 
@@ -5621,7 +5685,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Alt+wheel | Zoom the lower timeline |
 | Ctrl+wheel | Move along the timeline |
 | Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| Ctrl+Z or ` / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
 | Shift+Ctrl+N | New bin |
 | Alt+F / Shift+F / Esc† | Enhanced viewer / full screen / exit |
@@ -6497,6 +6561,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Text 108 pixels of the timeline for Scroll, at any timeline height. Thus a Scroll on a 1280×720 timeline is 108/720 of the picture height.
       - Measured in Resolve Studio 21.2 on 1920×1080, 1366×768, 1280×720, 1024×576 and 2560×1440. A Text title follows the height of the timeline there.
       - The size of a Scroll is a whole number of timeline pixels, from 24 to 4096. An OTIO file with a fraction does not import.
+      - The Inspector keeps the whole-number part of a typed size. Thus 100.4, 100.5 and 100.9 all draw as 100 (measured in Resolve Studio 21.2).
+      - vidcut draws the whole-number part of a Scroll's size, and writes it to OTIO. The style keeps the exact number.
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
     - A Text title and a lower third draw a whole number of timeline pixels for the size. The style keeps the exact number.
@@ -6533,7 +6599,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - vidcut uses the first `VDMX` ratio record that has a character set and a ratio of 1:1, or of all ratios.
       - Without such an entry, the ascent and the descent are `usWinAscent` and `usWinDescent`, each rounded to a whole pixel.
       - These rules give the heights of Windows 11 for 54 of its 57 regular fonts, at sizes from 6 to 399 pixels.
-      - Each measured size gives a whole number for 4/3 of the size. vidcut rounds other sizes to the nearest whole pixel.
+      - 4/3 of the size goes to the nearest whole pixel. Sizes 100, 101 and 109 fit exactly in Arial Black (measured in Resolve Studio 21.2).
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).

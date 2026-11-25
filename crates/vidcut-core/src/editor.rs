@@ -839,10 +839,8 @@ impl Editor {
             Request::HistoryUnmark { step } => return self.mark(step, None, dry_run),
             Request::HistoryRestore { branch } => return self.restore(branch, dry_run),
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
+            Request::RenderEnded { .. } => return self.recorded(&request, dry_run),
             _ => {}
-        }
-        if request.in_queue() {
-            return self.queue(&request, dry_run);
         }
         let mut working = self.project.clone();
         let mut parts = Vec::new();
@@ -1270,7 +1268,7 @@ impl Editor {
         Ok((project, history, moved))
     }
 
-    fn queue(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
+    fn recorded(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
         let mut working = self.project.clone();
         let result = ops::render::change(&mut working, request)?;
         let changes = diff(&self.project, &working);
@@ -6288,6 +6286,7 @@ fn mutate(
             });
             json!({ "media": media, "stream": stream, "start": start, "end": end, "person": person })
         }
+        queued if queued.in_queue() => ops::render::change(p, queued)?,
         other => {
             return Err(Error::internal(format!(
                 "{} is not a mutation",
