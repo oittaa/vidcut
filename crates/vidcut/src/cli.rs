@@ -8,6 +8,7 @@ use vidcut_core::request::{Client, ClientKind, method_names, protocol_schema, re
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
+    ("keys.list", &["key"]),
     ("keys.set", &["action", "keys"]),
     ("keys.reset", &["action"]),
     ("keys.use", &["set"]),
