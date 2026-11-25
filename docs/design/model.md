@@ -807,6 +807,7 @@ Writing:
 
 - A track can carry a `TrackEqualizer`. It holds `on`, the `EqType`, six `EqBand` values as a clip equalizer has, and the slopes of the pass filters.
 - `track.set` takes a `TrackEqualizerSet`. Its fields replace their own (`equalizer::track::patched`).
+- A Q goes to a whole step, and the band keeps the Q of that step (`equalizer::track::stepped`). `patched` and the Equalizer window both use it.
 - `equalizer::track::problem` is the check that `validate::violations` and the import of an OTIO file share.
 - An OTIO file carries the `TrackEqualizer` in the `vidcut` metadata of its track.
 - [export](export.md#sound) tells how it plays.

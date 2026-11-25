@@ -8157,6 +8157,7 @@ pub struct EqBandSet {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain: Option<f64>,
     /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// A track keeps the Q of its step of 1/15: 0.55 becomes 8/15.
     /// `bell` uses it, and on a track of the `fire` type the shelves too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub q: Option<f64>,
