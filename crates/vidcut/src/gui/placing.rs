@@ -3,13 +3,14 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    AutoColor, Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind,
-    ZoomBox,
+    AutoColor, Clip, ClipScaling, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project,
+    TrackKind, ZoomBox,
 };
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::picture::{has_picture, takes_effects, zoom_shown};
 use vidcut_core::place::{
-    Extent, Level, Mixes, Placing, anchored, apply, flipped, frame_back, window_back,
+    Extent, Level, Mixes, Placing, anchored, apply, flipped, frame_back, map_of, mapped_rect,
+    window_back,
 };
 use vidcut_core::render::{Placed, Run, VideoPiece};
 
@@ -362,6 +363,15 @@ fn content(p: &Project, media: &str, (w, h): (f64, f64)) -> [f64; 4] {
     }
 }
 
+fn mapped_content(p: &Project, c: &Clip, scaling: ClipScaling, frame: (f64, f64)) -> [f64; 4] {
+    let to = scaling.or(p.scaling());
+    let map = p
+        .media(&c.media)
+        .and_then(|m| m.info.video.as_ref())
+        .and_then(|v| map_of(v, to, (p.width(), p.height())));
+    mapped_rect(content(p, &c.media, frame), map, frame)
+}
+
 fn pixels_of(p: &Project, media: &str, frame: (f64, f64)) -> (f64, f64) {
     p.media(media)
         .and_then(|m| m.info.video.as_ref())
@@ -371,7 +381,12 @@ fn pixels_of(p: &Project, media: &str, frame: (f64, f64)) -> (f64, f64) {
         })
 }
 
-fn extent_of(p: &Project, c: &Clip, at: i64, frame: (f64, f64)) -> Extent {
+fn extent_of(
+    p: &Project,
+    c: &Clip,
+    (at, scaling): (i64, ClipScaling),
+    frame: (f64, f64),
+) -> Extent {
     let own = |media: &str| Extent {
         rect: content(p, media, frame),
         grid: pixels_of(p, media, frame),
@@ -398,7 +413,10 @@ fn extent_of(p: &Project, c: &Clip, at: i64, frame: (f64, f64)) -> Extent {
         });
         outer.map(|o| o.mix.extent)
     });
-    mixed.unwrap_or_else(|| own(&c.media))
+    mixed.unwrap_or_else(|| Extent {
+        rect: mapped_content(p, c, scaling, frame),
+        grid: pixels_of(p, &c.media, frame),
+    })
 }
 
 fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Option<Shown> {
@@ -408,9 +426,9 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         of: c.duration,
         held: false,
     };
-    let fit = content(p, &c.media, (w, h));
+    let fit = mapped_content(p, c, shown.scaling, (w, h));
     let pixels = pixels_of(p, &c.media, (w, h));
-    let extent = extent_of(p, c, at, (w, h));
+    let extent = extent_of(p, c, (at, shown.scaling), (w, h));
     let placing = |placed: &[Placed]| Placing::over(placed, (w, h), (fit, pixels), extent);
     let level_of = |x: Picture| placing(&[Placed::at(c, x, run, at)]).level;
     let placed = [Placed::at(c, shown.clone(), run, at)];
@@ -970,9 +988,10 @@ impl Workspace {
                     of: c.duration,
                     held: false,
                 };
-                let fit = content(&p, &c.media, (w, h));
+                let picture = c.picture.clone().unwrap_or_default();
+                let fit = mapped_content(&p, c, picture.scaling, (w, h));
                 let pixels = pixels_of(&p, &c.media, (w, h));
-                let placed = Placed::at(c, c.picture.clone().unwrap_or_default(), run, at);
+                let placed = Placed::at(c, picture, run, at);
                 let worked = placed.for_effects();
                 let level = Placing::new(std::slice::from_ref(&*worked), (w, h), fit, pixels).level;
                 window_back(&level.back, fit, (w, h))
@@ -1394,6 +1413,9 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     }
     if a.mode() != b.mode() {
         params["composite_mode"] = json!(b.mode());
+    }
+    if a.scaling != b.scaling {
+        params["scaling"] = json!(b.scaling);
     }
     for (key, x, y) in [
         ("crop_left", a.crop.left, b.crop.left),

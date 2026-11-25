@@ -5,8 +5,9 @@ use crate::model::{
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
     FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
     GradientType, Mask, MaskChannel, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, Pattern, Picture, PivotType, ReferenceTime, ShadingElement, Sharpen, TextPlus,
-    Tool, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
+    NoiseColoring, Pattern, Picture, PivotType, ReferenceTime, Scaling, ShadingElement, Sharpen,
+    TextPlus, Tool, Tracker, TrackerMerge, TrackerOperation, VideoInfo, Vignette, VignetteMode,
+    VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -19,6 +20,7 @@ type Weighed = (Places, f64);
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_REACH: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
+const SAME_MAP: f64 = 1e-9;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Level {
@@ -1701,6 +1703,8 @@ fn whole_pixels(part: f64, pixels: f64) -> f64 {
 fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -> Level {
     let sampled = placed.picture.sampled(placed.source as f64);
     let p = &sampled;
+    let [cx, cy, cw, ch] = extent.within(fitted);
+    let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
     let [ax, ay] = p.pivot();
@@ -1716,7 +1720,6 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
-    let [cx, cy, cw, ch] = extent.within(fitted);
     let (gw, gh) = extent.grid;
     let crop = [
         cx + whole_pixels(c0.left, gw) * cw,
@@ -1916,6 +1919,7 @@ impl Placing {
         let p = &placed[0];
         let [zx, zy] = p.picture.scale_at(p.source as f64);
         let mut own = level(p, frame, fitted, extent);
+        let fitted = p.mapped_rect(fitted, frame);
         let unzoomed = p
             .zoomed()
             .map_or(Picture::MIDDLE, |b| flipped(&p.picture, b.center));
@@ -2319,6 +2323,61 @@ pub fn fitted(
     [(fw - sw) / 2.0, (fh - sh) / 2.0, sw, sh]
 }
 
+pub fn mapped(
+    scaling: Scaling,
+    (w, h): (u32, u32),
+    sar: (i32, i32),
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> [f64; 4] {
+    let fit = fitted((w, h), sar, rotation, (out_w, out_h));
+    let across = match sar.0 > 0 && sar.1 > 0 {
+        true => f64::from(sar.0) / f64::from(sar.1),
+        false => 1.0,
+    };
+    let (dw, dh) = (f64::from(w) * across, f64::from(h));
+    let (sw, sh) = if rotation % 180 == 90 {
+        (dh, dw)
+    } else {
+        (dw, dh)
+    };
+    let (fw, fh) = (f64::from(out_w), f64::from(out_h));
+    if sw <= 0.0 || sh <= 0.0 {
+        return fit;
+    }
+    let [kx, ky] = match scaling {
+        Scaling::Fit => return fit,
+        Scaling::Crop => [1.0, 1.0],
+        Scaling::Fill => [(fw / sw).max(fh / sh); 2],
+        Scaling::Stretch => [fw / sw, fh / sh],
+    };
+    let (mw, mh) = (sw * kx, sh * ky);
+    [(fw - mw) / 2.0, (fh - mh) / 2.0, mw, mh]
+}
+
+pub fn mapped_rect(rect: [f64; 4], map: Option<[f64; 2]>, (w, h): (f64, f64)) -> [f64; 4] {
+    match map {
+        None => rect,
+        Some([kx, ky]) => {
+            let (mw, mh) = (rect[2] * kx, rect[3] * ky);
+            [(w - mw) / 2.0, (h - mh) / 2.0, mw, mh]
+        }
+    }
+}
+
+pub fn map_of(v: &VideoInfo, scaling: Scaling, frame: (u32, u32)) -> Option<[f64; 2]> {
+    let (size, sar) = ((v.width, v.height), (v.sar[0], v.sar[1]));
+    if scaling.is_fit() || size.0 == 0 || size.1 == 0 {
+        return None;
+    }
+    let [_, _, fw, fh] = fitted(size, sar, v.rotation, frame);
+    let [_, _, mw, mh] = mapped(scaling, size, sar, v.rotation, frame);
+    let k = [mw / fw, mh / fh];
+    let usable = k.iter().all(|x| x.is_finite() && *x > 0.0);
+    let same = k.iter().all(|x| (x - 1.0).abs() < SAME_MAP);
+    (usable && !same).then_some(k)
+}
+
 fn uncovered(quad: &[[f64; 2]; 4], [x, y]: [f64; 2]) -> f64 {
     let (mut left, mut right, mut near) = (false, false, f64::INFINITY);
     for i in 0..4 {
@@ -2358,7 +2417,8 @@ pub fn fills(m: &Media, frame: (u32, u32)) -> bool {
 pub fn detail(placed: &[Placed]) -> f64 {
     placed.first().map_or(1.0, |p| {
         let near = p.picture.dynamic_zoom.map_or(1.0, |z| z.closest());
-        p.picture.largest_zoom() / near
+        let [mx, my] = p.mapped.unwrap_or([1.0, 1.0]);
+        p.picture.largest_zoom() * mx.max(my) / near
     })
 }
 
@@ -2370,6 +2430,7 @@ mod tests {
         let placed = Placed {
             clip: "c1".into(),
             picture,
+            mapped: None,
             run: None,
             source: 0,
             frame: 0,
@@ -2405,6 +2466,7 @@ mod tests {
                 effects: vec![effect],
                 ..Picture::default()
             },
+            mapped: None,
             run: None,
             source: 30,
             frame: 0,
@@ -2446,6 +2508,7 @@ mod tests {
         let placed = Placed {
             clip: "c1".into(),
             picture,
+            mapped: None,
             run: None,
             source: 0,
             frame: 0,

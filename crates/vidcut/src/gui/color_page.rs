@@ -887,7 +887,7 @@ fn inlet(g: &Grade, to: Port, slot: usize) -> Option<bool> {
 
 fn link_of((from, out): (Port, usize)) -> Option<GradeLink> {
     let key = out == KEY_PORT;
-    from_number(from).map(|node| GradeLink { node, key })
+    from_number(from).map(|node| GradeLink::new(node, key))
 }
 
 fn gives(g: &Grade, from: Port, key: bool) -> bool {
@@ -2318,7 +2318,11 @@ impl Workspace {
         }
     }
 
-    fn select_coming(&mut self, n: u32) {
+    fn select_added(&mut self, g: &Grade, add: GradeAdd, node: Option<u32>) {
+        let frame = self.project().map_or([0.0; 2], Project::frame_size);
+        let Some(n) = vidcut_core::ops::grade::added_number(g, add, node, frame) else {
+            return;
+        };
         self.effects_page.pick_grade(vec![n], false);
         self.effects_page.grade_coming = Some((n, Instant::now()));
     }
@@ -2556,7 +2560,7 @@ impl Workspace {
         if let Some(w) = window {
             more["window"] = json!(w);
         }
-        self.select_coming(g.last() + 1);
+        self.select_added(g, add, node);
         self.send("grade.add", params(of, "clip", more));
     }
 
@@ -2670,7 +2674,7 @@ impl Workspace {
                     FieldAct::KeyMixer => GradeAdd::KeyMixer,
                     _ => GradeAdd::Corrector,
                 };
-                self.select_coming(g.last() + 1);
+                self.select_added(g, add, None);
                 ("grade.add", json!({ "add": add, "place": at }))
             }
             FieldAct::KeepNodes => {

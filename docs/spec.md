@@ -1937,6 +1937,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Retime and Scaling has Retime Process, Motion Estimation, Scaling and Resize Filter (pp. 739–740).
   - vidcut: Retime Process is in its Speed section, with AI models in the place of Optical Flow (X93).
   - vidcut: the project's Retime Process is in Project Settings. Its default is Auto, not Nearest (X93).
+  - vidcut: Scaling is in a Scaling group after Composite ([input scaling](#input-scaling-pp-292293)).
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
@@ -3724,11 +3725,19 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
-  - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395.
+  - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395. After each new node, all the nodes get new numbers.
+    - The numbers come from a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
+    - A mixer takes a number, but the Node Editor shows none.
     - Nodes 1, 2 and 4 are in series. Nodes 1 and 2 give their keys to Key Mixer 3, and it gives its key to node 4.
     - Alt+S at node 1 then gives a new node 3. The old node 2 becomes 5, and the mixer becomes 2.
-    - The 5 measured cases fit one rule: a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
-  - vidcut: a new node gets the next number, as the manual says ([todo](todo/color-page.md)).
+    - Nodes 1 to 4 are in series. Alt+L at node 2 gives a new node 3 and a Layer Mixer 4. The old nodes 3 and 4 become 5 and 6.
+    - A new link does not change the numbers. In nodes 1 to 4 in series, the link from node 3 to node 4 goes, and node 1 then feeds node 4.
+    - Alt+S at node 1 then puts the new node on the older link, between node 1 and node 2. Node 1 still feeds the old node 4.
+    - The old node 4 becomes 2, and the new node is 3. The old nodes 2 and 3 become 4 and 5.
+    - In one case, a node with no link from the source came last.
+  - vidcut: the same rule. Each link holds the order in which it was made (`made`).
+  - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
+  - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
@@ -6428,7 +6437,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It does not give the units, the order in which they work, or how a placed clip plays over the tracks below.
   - The order, and how a placed clip plays, match Resolve's renders.
   - **Order:**
-    - The picture of a clip is fitted into the frame.
+    - The picture of a clip goes into the frame by its scaling ([input scaling](#input-scaling-pp-292293)).
     - Then it is cropped, flipped, leaned by pitch and yaw, zoomed, turned and moved, in that order (D93).
     - Its composite mode then mixes it with the tracks below.
     - The soft edges of the crop and the opacity fade that mix over the tracks below.
@@ -6464,7 +6473,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The composite mode of the incoming clip has no effect during the transition (measured in Resolve Studio 21.2.0).
   - **Soft edges and opacity** (measured in Resolve Studio 21.1.1, with 16-bit renders):
     - Opacity mixes the clip with what is below it: below + (clip − below) × opacity.
-    - The fade of Softness is |Softness| × the width of the fitted picture / 400 pixels, rounded down. The zoom scales it with the picture.
+    - The fade of Softness is |Softness| × the width of the mapped picture / 400 pixels, rounded down ([input scaling](#input-scaling-pp-292293)). The zoom scales it with the picture.
     - Above 0, each cropped side fades out over what it cuts off. The edge of the picture still cuts it. Thus a side that is not cropped stays hard.
     - Below 0, all four sides fade in over the picture, cropped or not. The crop still cuts it.
     - Across the fade, the coverage follows a smoothstep. It is full over the first eighth of the fade.
@@ -6524,6 +6533,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The flips mirror the picture left to right and top to bottom.
     - The crop cuts each side by a fraction of the source picture, from 0 to 1. The sides have no limit together. A crop of the whole picture shows nothing of it.
     - `crop_softness` is from −100 to 100, as Softness in Resolve. Usual: 0.
+    - `scaling` is `project`, `crop`, `fit`, `fill` or `stretch` ([input scaling](#input-scaling-pp-292293)). Usual: `project`.
     - `composite_mode` is `normal` or the name of another mode in snake case, for example `color_dodge`. Usual: `normal`.
     - `opacity` is from 0 to 1. Usual: 1.
     - Values at their usual place are left out of the project file.
@@ -6636,13 +6646,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `edit.copy` and `edit.paste` carry the picture of a clip.
   - **OTIO:**
     - The picture goes in the `vidcut` metadata of the clip.
-    - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
+    - It also goes in Resolve's Transform, Cropping and Retime and Scaling.
     - An import takes vidcut's own metadata. Else it reads those effects.
-    - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes the `anchor` ([gotchas](gotchas.md#resolves-otio-files)).
+    - The `scale` of Retime and Scaling is the `scaling` of the clip ([gotchas](gotchas.md#resolves-otio-files)).
+    - The anchor point of Transform becomes the `anchor`.
     - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
     - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
     - Pitch and yaw are played, with or without keyframes (D93).
-    - Anchor point keyframes are read only on a picture that Retime and Scaling leaves at its fitted size (D92).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
   - **Dynamic Zoom.** The manual gives the boxes and the eases, not the units or the timing.
@@ -6998,7 +7008,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus the picture zooms and turns about one point of the screen for the whole clip.
   - An anchor point on the content would move across the screen while the box moves.
   - **OTIO:** an import reads the anchor point of Resolve's Transform as `anchor`. An export writes it back.
-  - With a crop, fill or stretch, the move that the scaling makes about the middle goes into `position` ([gotchas](gotchas.md#resolves-otio-files)).
   - **Keyframes:** the anchor point is one keyframe for X and Y, as Position is (D75).
     - Each key in the `Key Frames` of `transformationAnchorPoint` is a `POINTF`, as the keys of `dynamicZoomCenter` are.
     - On a 1920×1080 clip, the key's value is `[X / 1920, Y / 1080]`, with the signs of the Inspector.
@@ -7007,8 +7016,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Thus vidcut's anchor point keyframes are linear. `keyframes.add` and `keyframes.set` refuse an ease or handles on them.
     - Resolve imports its own file with anchor point keys and gives the same keys.
     - The facts about these keys are measured in Resolve Studio 21.1.2.
-    - An import reads these keys only when Retime and Scaling leaves the picture at its fitted size, and only without Bezier handles.
-    - With a crop, fill or stretch, the move of the anchor point goes into `position`. Thus `position` would need keys of its own.
+    - An import reads these keys only without Bezier handles.
   - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.
 - **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
   - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
@@ -7381,6 +7389,37 @@ These facts are measured in Resolve Studio 21.1.2, in a default project that sca
 - 1920 x 1080 in a timeline of 1921 x 1081 has the factor 1921 / 1920 and a bar of 0.21875 of a pixel. The edge rows read a part of their value.
 - A picture with pixels that are not square, or with a rotation in its file, was not measured.
   - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels.
+
+### Input scaling (pp. 292–293)
+
+- The Image Scaling panel of Project Settings sets how a picture of another size goes into the frame (pp. 292–293).
+- Its row is Mismatched resolution files. It has four values:
+  - Center crop with no resizing: the picture keeps its size. A smaller picture has black around it, and a larger picture is cut.
+  - Scale full frame with crop: the picture fills the frame, and the excess is cut.
+  - Scale entire image to fit: the default. The picture fits in the frame, with bars at two sides.
+  - Stretch frame to all corners: the picture fills the frame on each axis.
+- A timeline with its own settings has its own value.
+- The Scaling row of the Inspector sets the value of a clip (pp. 739–740). It is in the group Retime and Scaling.
+  - Its menu is Project Settings, Crop, Fit, Fill and Stretch.
+  - Project Settings uses the value of the timeline.
+  - Crop, Fill, Fit and Stretch give the same pixels as the four timeline values, in that order.
+- These facts are measured in Resolve Studio 21.2, in timelines of 1920 x 1080 and 3840 x 2160:
+  - The source is sw x sh, and the timeline is W x H.
+  - Each map puts the middle of the picture on the middle of the frame. It rounds no place and no size.
+  - Crop: the scale is 1. For example, 1281 x 545 in 1920 x 1080 has its top left at x 319.5, y 267.5.
+  - Fit: the scale is min(W / sw, H / sh) on both axes ([the fit to the timeline](#the-fit-to-the-timeline)).
+  - Fill: the scale is max(W / sw, H / sh) on both axes.
+  - Stretch: the scale is W / sw across and H / sh down.
+  - Zoom multiplies the scale of the map on each axis.
+  - Position X moves the picture by X × (mapped width / W). Position Y moves it by Y × (mapped height / H).
+  - The mapped size is the size before the zoom.
+- vidcut:
+  - `project.set`, `timeline.new` and `timeline.set` take `scaling`: `crop`, `fit`, `fill` or `stretch`. Usual: `fit`.
+  - `picture.set` takes `scaling` for its clips: `project`, `crop`, `fit`, `fill` or `stretch`.
+  - The map uses the size of the media file. A proxy or an upscale does not change it.
+  - The crop, the anchor point and the Dynamic Zoom boxes are in fractions of the mapped picture.
+  - Position X and Y are in frame pixels (X70). Thus a new scaling keeps the place of a moved picture.
+  - Bypass re-encode copies no frame of a clip with another map than the fit.
 
 ### The limit for a thin bar
 

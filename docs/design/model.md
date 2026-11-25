@@ -21,7 +21,7 @@ classDiagram
     ripple_on
     auto_format, use_proxies, render_cache
     fillers, timeline_colors
-    retime, upscaler
+    scaling, retime, upscaler
   }
   class Timeline {
     id, name, bin
@@ -173,7 +173,7 @@ Timelines (spec §3):
     - While one is open, `Project::checked_out_compound` names it. `Project::format` uses its `fps` and `drop_frame`, and `Project::start_tc` gives `Compound::start_tc`.
   - `Project::checked_out_timeline` and `Project::sheet_key` name what is checked out. Exports while open export that compound clip with no `project` metadata, and `steps::since` reads `sheets_of` including open compounds.
   - The file and the history hold each timeline and compound with its contents (`Project::whole_timeline`, `Project::sheets`, `Project::take_sheets`). Thus a diff names the sheet that changed.
-- `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame and color space. Without it, the timeline uses the project's.
+- `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame, color space and `Scaling`. Without it, the timeline uses the project's.
   - `Project::fps`, `width`, `height`, `start_tc` and `counts_drop_frame` give the values of the open timeline. `Settings` holds the project's own values.
   - `Project::flat_settings` gives `Settings` with the format of the open timeline. The export, the render cache and ducking use it.
 - A timeline in the project locks the project's frame rate and drop-frame (`project_set`). A timeline with its own settings changes them only while it has no clips (`ops::timelines::set`).
@@ -647,10 +647,11 @@ Writing:
   - its flips
   - a `Crop` of each side, and the softness of its edges (`crop_softness`)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
+  - its `scaling` (`ClipScaling`): the timeline's `Scaling`, or its own
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`). Effects (`Glow`, `Vignette`, `GrainComposite`) and `GradeTool::LayerMixer` take `BlendMode`, which has only the 27 blend modes.
   - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur`, a `MosaicBlur`, a `Glow`, a `FilmGrain`, a `Vignette` or a `Sharpen` ([export](export.md#effects))
   - its `composition`: the nodes that work on its own picture before all of the above ([compositions](#compositions))
-- Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
+- Each value is left out at its usual value. A picture that `Picture::is_usual` accepts only goes into the frame by the timeline's `Scaling`.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
   - `position_keys` holds X, and `position_y` holds Y, one number for each keyframe. Zoom and the anchor point do the same.
@@ -857,7 +858,7 @@ The metadata:
 | `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, with the motion paths of its composition, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
-| `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling (`otio::picture`), and Dynamic Zoom, fitted, in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
+| `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
 | `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`compound_links`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
 | `Resolve_OTIO` on markers | `Note` |

@@ -585,7 +585,8 @@ The bar and the Jobs button:
     - An effect that comes to a clip that is not selected changes nothing in the Inspector.
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. With only several titles selected, it shows no section. A section that closes puts its changes in first.
 - The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
-- The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::fitted`, as in an export.
+- The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The mapped size comes from `place::mapped`, with the scaling of the clip, as in an export.
+  - The handles in the viewer use the same rectangle (`mapped_content`).
   - A picture from the handles, the wheel or the Inspector goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each change is one undo step: one `picture.set`, or an `apply` of one `picture.set` for each clip. Reset sends `picture.clear`.
   - Why the `apply`: a `position` holds X and Y, so Position X goes with the Y of each clip. A crop in pixels is a different fraction of each picture.

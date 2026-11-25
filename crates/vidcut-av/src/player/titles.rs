@@ -184,6 +184,7 @@ pub(crate) fn placed(origin: [i32; 2], made: (u32, u32), size: (u32, u32), m: Mo
     Placed {
         clip: String::new(),
         picture,
+        mapped: None,
         run: None,
         source: 0,
         frame: 0,

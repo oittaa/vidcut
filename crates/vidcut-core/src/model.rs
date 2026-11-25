@@ -278,6 +278,10 @@ pub struct TimelineSettings {
     /// The timeline color space (decision D50); left out when `auto`.
     #[serde(default, skip_serializing_if = "TimelineColors::is_auto")]
     pub timeline_colors: TimelineColors,
+    /// How the pictures of its clips go into its frame, for the clips that
+    /// follow it; left out at `fit`.
+    #[serde(default, skip_serializing_if = "Scaling::is_fit")]
+    pub scaling: Scaling,
 }
 
 impl TimelineSettings {
@@ -288,6 +292,7 @@ impl TimelineSettings {
             height: s.height,
             drop_frame: s.drop_frame,
             timeline_colors: s.timeline_colors,
+            scaling: s.scaling,
         }
     }
 
@@ -425,6 +430,11 @@ pub struct Settings {
     /// The timeline color space (decision D50); left out when `auto`.
     #[serde(default, skip_serializing_if = "TimelineColors::is_auto")]
     pub timeline_colors: TimelineColors,
+    /// How the pictures of clips go into the frame of each timeline that
+    /// uses the project's settings, for the clips that follow it; left out
+    /// at `fit`.
+    #[serde(default, skip_serializing_if = "Scaling::is_fit")]
+    pub scaling: Scaling,
     /// The Retime Process of the clips that follow the project; left out
     /// when `auto`.
     #[serde(default, skip_serializing_if = "ProjectRetime::is_auto")]
@@ -481,6 +491,7 @@ impl Default for Settings {
             use_proxies: false,
             fillers: BTreeMap::new(),
             timeline_colors: TimelineColors::Auto,
+            scaling: Scaling::Fit,
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
             render_cache: RenderCache::Off,
@@ -2686,6 +2697,103 @@ impl ProjectRetime {
     }
 }
 
+/// How a picture of another size than the frame goes into the frame. Each
+/// way keeps the middle of the picture on the middle of the frame, and
+/// rounds no size or place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Scaling {
+    /// At its own size: one pixel of its media on one pixel of the frame.
+    /// A smaller picture leaves bars around it, and a larger one is cut.
+    Crop,
+    /// As large as fits in the frame, the same on both axes. A picture of
+    /// another shape leaves bars.
+    #[default]
+    Fit,
+    /// As small as covers the frame, the same on both axes. A picture of
+    /// another shape is cut.
+    Fill,
+    /// The width of the frame across and its height down.
+    Stretch,
+}
+
+impl Scaling {
+    pub const ALL: [Self; 4] = [Self::Crop, Self::Fit, Self::Fill, Self::Stretch];
+
+    pub fn is_fit(&self) -> bool {
+        *self == Self::Fit
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Crop => "Center Crop with No Resizing",
+            Self::Fit => "Scale Entire Image to Fit",
+            Self::Fill => "Scale Full Frame with Crop",
+            Self::Stretch => "Stretch Frame to All Corners",
+        }
+    }
+}
+
+/// A clip's scaling: the timeline's, or one of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipScaling {
+    /// The scaling of the timeline settings.
+    #[default]
+    Project,
+    Crop,
+    Fit,
+    Fill,
+    Stretch,
+}
+
+impl ClipScaling {
+    pub const ALL: [Self; 5] = [
+        Self::Project,
+        Self::Crop,
+        Self::Fit,
+        Self::Fill,
+        Self::Stretch,
+    ];
+
+    pub fn is_project(&self) -> bool {
+        *self == Self::Project
+    }
+
+    pub fn own(self) -> Option<Scaling> {
+        match self {
+            Self::Project => None,
+            Self::Crop => Some(Scaling::Crop),
+            Self::Fit => Some(Scaling::Fit),
+            Self::Fill => Some(Scaling::Fill),
+            Self::Stretch => Some(Scaling::Stretch),
+        }
+    }
+
+    pub fn of(s: Scaling) -> Self {
+        match s {
+            Scaling::Crop => Self::Crop,
+            Scaling::Fit => Self::Fit,
+            Scaling::Fill => Self::Fill,
+            Scaling::Stretch => Self::Stretch,
+        }
+    }
+
+    pub fn or(self, timeline: Scaling) -> Scaling {
+        self.own().unwrap_or(timeline)
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Project => "Project Settings",
+            Self::Crop => "Crop",
+            Self::Fit => "Fit",
+            Self::Fill => "Fill",
+            Self::Stretch => "Stretch",
+        }
+    }
+}
+
 /// A clip's speed (decision D48): sections that each play at one speed,
 /// on the clip's retimed source. A speed keyframe starts each section
 /// after the first.
@@ -3740,9 +3848,10 @@ impl Title {
 /// Where a clip's picture goes over the frame, and the effects on it:
 /// footage, a still, an image sequence, a compound clip or a generator,
 /// which has no effects. A field left out is at its usual value; at all of
-/// them the picture is fitted into the frame. The tracks below show wherever
-/// it doesn't cover the frame: in the bars around a picture of another shape,
-/// around it, where it is cropped and through its soft edges and its opacity.
+/// them the picture goes into the frame by the scaling of the timeline. The
+/// tracks below show wherever it doesn't cover the frame: in the bars around
+/// a picture of another size, around it, where it is cropped and through its
+/// soft edges and its opacity.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the
@@ -3849,7 +3958,7 @@ pub struct Picture {
     /// How soft the edges of the crop are, from -100 to 100. Above 0, each
     /// cropped edge fades out over what it cuts off. Below 0, all four edges
     /// fade in over the picture, cropped or not. The fade is |softness| / 400
-    /// of the width of the picture fitted into the frame, before the zoom.
+    /// of the width that its scaling gives the picture, before the zoom.
     /// Usual: 0. With `crop_softness_keys`, the softness at a frame is that
     /// curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3861,6 +3970,11 @@ pub struct Picture {
     /// nothing. Usual: on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub crop_off: bool,
+    /// How the picture goes into the frame before its crop and its
+    /// transform: its size and its place about the middle of the frame.
+    /// Left out at `project`, the scaling of the timeline.
+    #[serde(default, skip_serializing_if = "ClipScaling::is_project")]
+    pub scaling: ClipScaling,
     /// A slow push or pull and pan across the clip, from a start box to an
     /// end box. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3898,7 +4012,7 @@ pub struct Picture {
 /// its picture goes nowhere, or nothing goes out, the grade does nothing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Grade {
-    /// The nodes, in the order they were added.
+    /// The nodes, in the order of their numbers.
     pub nodes: Vec<GradeNode>,
     /// What goes out. Left out when nothing goes out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3909,7 +4023,7 @@ pub struct Grade {
 /// node. A key that goes into an RGB input or the output is a gray
 /// picture: R, G and B are the key. A picture that goes into a key input
 /// gives its Rec. 709 luma, 0.2126 R + 0.7152 G + 0.0722 B, as the key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct GradeLink {
     /// The number of the node, or 0 for the picture that comes into the
     /// grade.
@@ -3918,16 +4032,39 @@ pub struct GradeLink {
     /// corrector and a key mixer have a key output. Left out when not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub key: bool,
+    /// The order in which the links were made: a link made later has a
+    /// higher number. After each new node, the nodes get their numbers in
+    /// the order of a walk from the picture that comes in, one step of
+    /// links at a time, with the links of each node in this order. Left
+    /// out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub made: u32,
 }
 
+impl PartialEq for GradeLink {
+    fn eq(&self, other: &Self) -> bool {
+        (self.node, self.key) == (other.node, other.key)
+    }
+}
+
+impl Eq for GradeLink {}
+
 impl GradeLink {
+    pub fn new(node: u32, key: bool) -> Self {
+        Self { node, key, made: 0 }
+    }
+
     pub fn picture(node: u32) -> Self {
-        Self { node, key: false }
+        Self::new(node, false)
     }
 
     pub fn key(node: u32) -> Self {
-        Self { node, key: true }
+        Self::new(node, true)
     }
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Grade {
@@ -9360,6 +9497,7 @@ impl Project {
             height: f.height,
             drop_frame: f.drop_frame,
             timeline_colors: f.timeline_colors,
+            scaling: f.scaling,
             ..self.settings.clone()
         }
     }
@@ -9472,6 +9610,10 @@ impl Project {
 
     pub fn timeline_colors(&self) -> TimelineColors {
         self.format().timeline_colors
+    }
+
+    pub fn scaling(&self) -> Scaling {
+        self.format().scaling
     }
 
     pub fn start_tc(&self) -> i64 {
