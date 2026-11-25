@@ -1,5 +1,5 @@
 use eframe::egui::{self, RichText};
-use vidcut_core::shortcuts::{Bindings, Combo, Held, Panel, key_name, key_named};
+use vidcut_core::shortcuts::{Bindings, Combo, Held, Keys, Panel, SHORTCUTS, key_name, key_named};
 
 use super::theme;
 
@@ -141,7 +141,7 @@ fn label(key: &str) -> &str {
 }
 
 impl KeyboardUi {
-    pub(super) fn combo(&self) -> Option<Combo> {
+    fn combo(&self) -> Option<Combo> {
         self.key.map(|key| Combo {
             held: self.held,
             key,
@@ -240,12 +240,32 @@ impl KeyboardUi {
         let Some(combo) = self.combo() else {
             return;
         };
-        let used = Panel::ALL.iter().any(|&p| b.owner(p, combo).is_some());
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(combo.shown()).strong());
-            if !used {
-                ui.label(RichText::new("No Action").color(c.text_dim));
-            }
-        });
+        let found: Vec<(Panel, &'static str)> = Panel::ALL
+            .iter()
+            .filter_map(|&p| {
+                let a = b.owner(p, combo)?;
+                let s = SHORTCUTS
+                    .iter()
+                    .find(|s| matches!(s.keys, Keys::Own(own, _) if own == a))?;
+                Some((p, s.title))
+            })
+            .collect();
+        ui.label(RichText::new("Active Key").strong());
+        egui::Grid::new("active-key")
+            .num_columns(3)
+            .spacing([16.0, 4.0])
+            .show(ui, |ui| {
+                if found.is_empty() {
+                    ui.label(combo.shown());
+                    ui.label(RichText::new("No Action").color(c.text_dim));
+                    ui.end_row();
+                }
+                for (p, title) in found {
+                    ui.label(combo.shown());
+                    ui.label(title);
+                    ui.label(RichText::new(p.title()).color(c.text_dim));
+                    ui.end_row();
+                }
+            });
     }
 }

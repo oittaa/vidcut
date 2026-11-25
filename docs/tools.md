@@ -220,6 +220,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It reads the picture through the Scopes LUT of the project, as the scopes of the GUI do. A file that cannot be read is an error.
 - The PNG has the lines of the scale, with no text.
 - The answer names `colors`, which is the timeline color space. It gives `marks`, with the label and the place of each line of the scale.
+- The answer also gives `scale` and `video_levels`, from the preferences.
 
 **The refusals of Upscale:** `scripts/upscale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
 
@@ -262,7 +263,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
   - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
   - `content.npy`: the width and the height of the picture content, in pixels of the model input.
-  - With the slow face model, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+  - With a model on the GPU, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+    - The models on the GPU are the slow face model, and YOLOX-S with `gpu.acceleration` on.
   - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
   - A check against an ONNX runtime reads them.
 - `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.
