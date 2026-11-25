@@ -336,6 +336,7 @@ pub fn run_with(
             waveform_green,
             waveform_blue,
             parade_mode,
+            skin_tone,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
@@ -348,6 +349,7 @@ pub fn run_with(
                 waveform_green: *waveform_green,
                 waveform_blue: *waveform_blue,
                 parade_mode: *parade_mode,
+                skin_tone: *skin_tone,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }
@@ -391,11 +393,12 @@ pub fn run_with(
                 envelope.dry_run,
             )?)
         }
-        Request::RenderAdd(params) => {
+        Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } => {
             let store = open(project)?;
             let env = AvEnv::for_project(store.path());
             let editor = store.load_project()?;
-            let files = crate::queue::existing(editor.project(), params, &env.proxy_dir())?;
+            let job = crate::queue::updated(&envelope.request);
+            let files = crate::queue::existing(editor.project(), job, params, &env.proxy_dir())?;
             if envelope.dry_run {
                 answer(json!({ "existing": files }))
             } else {

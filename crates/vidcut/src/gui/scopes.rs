@@ -88,6 +88,12 @@ impl Workspace {
                 }
             }
         });
+        ui.menu_button("Vectorscope Options", |ui| {
+            let mut on = self.snap.scopes.skin_tone;
+            if ui.checkbox(&mut on, "Show Skin Tone Indicator").clicked() {
+                self.send("viewer.scopes", json!({ "skin_tone": on }));
+            }
+        });
         ui.menu_button("Waveform Scale Style", |ui| {
             let now = self.snap.scopes.scale;
             for scale in ScopeScale::ALL {

@@ -730,20 +730,23 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
   - The Parade has the modes RGB, YRGB and YCbCr (p. 3102). It shows the graphs of a mode side by side.
   - vidcut: Waveform Options and Parade Options in the scopes menu set the modes. `viewer.scopes` sets them too.
-  - vidcut: Y is the default of the Waveform, and RGB is the default of the Parade. The defaults of Resolve are not measured.
+  - RGB is the default of the Waveform and of the Parade. R, G and B are on (measured in Resolve Studio 21.2).
   - vidcut: a graph of red, green or blue is in its color. A graph of Y, Cb or Cr is white.
     - Resolve's Colorize changes the colors of the graphs (p. 3103). vidcut has no Colorize ([gaps](todo/gaps.md)).
   - vidcut: a color difference of zero is at the middle of the scale, code 512.
+  - The Vectorscope has Show Skin Tone Indicator (p. 3103). It shows a line at the traditional In-phase angle, a guide for average skin tone.
+    - The line goes from the center to the circle, at 123.14 degrees counterclockwise from the Cb axis (measured in Resolve Studio 21.2).
+    - Its color is dark gray (63, 63, 63) with the Graticule slider at the middle. It is off by default (measured).
+    - vidcut: Vectorscope Options in the scopes menu turns it on. `viewer.scopes` with `skin_tone` turns it on too.
   - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
   - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
   - Measured: 10-bit has a line each 128, 12-bit each 512, Percentage each 10, and mV each 100.
   - Measured: HDR has lines at 0, 1, 10, 100, 1000 and 10000 nits on the PQ curve.
   - Measured: HDR also has dashed lines with no label between those lines.
-    - The figure on p. 3092 shows them at 26, 203 and 2000 nits, to the precision of the figure. vidcut draws them there.
-    - The exact nits are not measured in Resolve.
-  - On an HLG timeline, HDR uses the nits of the HLG curve. This is not measured in Resolve.
-    - vidcut draws no dashed lines on an HLG timeline.
+    - Measured: the dashed lines are at 26, 203 and 2000 nits. The figure on p. 3092 shows them there too.
+  - Measured: HDR is the same scale on a Rec.2100 ST2084, a Rec.2100 HLG and a Rec.709 timeline. It uses the PQ curve.
+    - The manual says that without color management, the HDR scale always shows HDR levels (p. 256).
   - The same menu has Video Level Scopes and Data Level Scopes (p. 3095). Data Level Scopes is the default (measured).
     - Video Level Scopes changes only what the scopes show. The monitor and the export do not change (p. 3095).
     - The figure on p. 3095 shows full-range white at code 940 of the 10-bit scale with Video Level Scopes.
@@ -3106,7 +3109,8 @@ With a mode other than Normal (measured in Resolve Studio 21.2):
 
 - Subtractive/Additive and Burn In do not act. A value set under Normal changes nothing.
 - Gain multiplies F and fa. Then the sum of the mode follows. With Normal, Alpha Gain multiplies only fa.
-- vidcut: a Burn In set under Over also acts with another Operator of Normal. This case is not measured.
+
+With Normal, Burn In acts only with the Over operator (measured in Resolve Studio 21.2). With another Operator, a value set under Over changes nothing.
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
@@ -3888,6 +3892,19 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Alt+S at node 1 then puts the new node on the older link, between node 1 and node 2. Node 1 still feeds the old node 4.
     - The old node 4 becomes 2, and the new node is 3. The old nodes 2 and 3 become 4 and 5.
     - In one case, a node with no link from the source came last.
+    - Nodes 1 to 4 are in series. Alt+P at node 2 gives the numbers of Alt+L, with a Parallel Mixer 4.
+    - Alt+K at node 6, the last node, then adds node 7 between node 6 and the Node Tree output.
+    - Alt+K with node 2 selected then adds node 8 between node 7 and the output. Thus Alt+K does not use the selected node.
+  - Measured in 8 cases: Alt+K draws the new node one column right of the last node, on the same row. The selected node does not change the place.
+    - The last node is the node before the output. It can be a Parallel Mixer or a Layer Mixer.
+    - A dragged last node moves the place with it.
+    - When a node is in that place, the new node goes one row down, until the place is free. Two cases showed this.
+    - A column is about 1.5 node widths, and a row is about 1.25 node heights.
+    - The new node becomes the selected node.
+  - vidcut: Alt+P and Alt+K give the measured numbers and links.
+  - vidcut: Alt+K draws the new node one grid column right of the last node. While a node has that grid place, the new node goes one row down.
+  - vidcut: on the Color page, a grid column is 1.5 node widths and a grid row is 1.25 node heights. This is the same with and without thumbnails.
+  - vidcut: the Effects page keeps its own grid. Its pitch in Fusion is not measured.
   - vidcut: the same rule. Each link holds the order in which it was made (`made`).
   - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
   - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
@@ -3910,6 +3927,14 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: this occurs with a Parallel Mixer and a Layer Mixer, with two inputs, and with three inputs of which one is empty.
   - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
   - Measured: after a delete, the last corrector is the current node.
+  - Measured: in nodes 1 to 4 in series, the delete of node 2 gives nodes 1, 2 (old 3) and 3 (old 4).
+    - Node 1 feeds the new node 2. Node 3 is then the current node.
+  - Measured: Alt+P at node 2, then the delete of the new node 3, removes the Parallel Mixer too.
+    - Nodes 1 to 4 are in series again. Node 4 is then the current node.
+  - Measured: Alt+P at node 2, then the delete of the Parallel Mixer, gives nodes 1, 2, 3, 4 (old 5) and 5 (old 6). Node 3 is the parallel node.
+    - Node 1 still feeds nodes 2 and 3. Nothing takes the pictures of nodes 2 and 3.
+    - Node 4 has no input link. It feeds node 5, and node 5 feeds the output.
+    - Node 3, which was the current node, stays the current node.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
@@ -3918,6 +3943,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
+  - vidcut: the three measured deletes give the same numbers, links and current node.
 - **The Nodes submenu** (pp. 3392, 3395):
   - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
   - Measured in Resolve Studio 21.2: the submenu has six groups of items:
@@ -5087,7 +5113,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - **Range:** the timeline In–Out range if it is set, else the whole timeline.
 - **Output:** one file. Individual clips are for the Export page (§10.1).
 - **Preset models** (Deliver page):
-  - H.264 Master (QuickTime, AAC 320 kb/s)
+  - H.264 Master (QuickTime, AAC)
   - H.265 Master (Main10)
   - ProRes 422 HQ (LPCM audio)
   - YouTube 720p–2160p (MP4, H.264 High)
@@ -5101,12 +5127,18 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
-  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
+  - Measured in Resolve Studio 21.2: the YouTube and Tencent presets set AAC to 320 kb/s.
+  - Measured: TikTok, H.264 Master, H.265 Master, Vimeo, Dropbox, Replay and Presentations have no AAC rate. They keep the rate that was set before them.
+  - Measured: the rate of the preset is the rate of the file. An imported preset with 384 to 512 kb/s loads as 320 kb/s.
+  - The YouTube presets set AAC to 320 kb/s. TikTok, H.264 Master, H.265 Master and Vimeo keep the AAC rate that was set before them.
+  - A preset with no AAC rate and nothing set before, as in a script, gives 320 kb/s.
   - H.264 and H.265 round an odd side up to even. The side is of the timeline or of a custom size.
     - A size of 1281 x 721 gives a file of 1282 x 722. A size of 1281 x 720 gives a file of 1282 x 720.
     - With a timeline of an odd side, one factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
     - With a custom size, the picture fits into the rounded size with one draw.
-    - Resolve Studio 21.1.2 writes these sizes at 1281 x 721 with H.264 and H.265, on a timeline and as a custom size. It writes 258 x 258 for 257 x 257 with H.264. Other odd sizes were not measured.
+    - Measured in Resolve Studio 21.2 with H.264 and H.265 on the CPU: each odd side goes up by one. This is so on a timeline and as a custom size.
+    - 1279 x 719 gives 1280 x 720, and 853 x 481 gives 854 x 482. 1001 x 1001 gives 1002 x 1002, and 257 x 257 gives 258 x 258.
+    - Measured: a timeline of 1279 x 719 leaves the bottom row and the left and right columns part dark. As a custom size, the edges are full.
     - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
@@ -5311,6 +5343,30 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: I near the end of a clip goes to the start of that clip, not to the nearest clip start.
   - Measured: with clips on V1 and V2 under the playhead, I and O snap to the V2 clip. In a gap, they set no mark.
   - Measured: Add to Render Queue leaves the playhead. After a render, the playhead is at the In.
+- **Thumbnail timeline** (pp. 3106–3111, 4097, 4099, 4128–4129):
+  - The Thumbnail timeline is over the timeline of the page. The Clips button hides or shows it (p. 4097; measured).
+  - It matches the Thumbnail timeline of the Color page (p. 4099).
+  - Each clip is one thumbnail with a number, whatever its duration (p. 3106).
+  - The clips are numbered by the place of their first frame, from left to right, on all video tracks (p. 3110).
+  - Measured: of clips that start together, the clip that ends first goes first. Of clips that also end together, the clip of the lower track goes first.
+  - Four cases were measured. In one, V2 and V3 of 48 frames went before V1 of 199. In another, the order was V1 of 24, V3 of 48, then V2 of 72.
+  - Measured: generators, titles and adjustment clips are not in it. A compound clip is in it.
+  - Above each thumbnail are the clip number, the source timecode of the first frame of the clip and its track (p. 3110).
+  - Measured: the timecode is the start timecode of the media plus the source In. Media with no timecode starts at 00:00:00:00, and so does a compound clip.
+  - The thumbnails show the media as it is graded (p. 3109).
+  - Measured: the thumbnail is the first frame of the clip, with its grade. It does not follow the playhead.
+  - Under each thumbnail is the codec by default. A double-click on that text cycles the codec, the clip name and the version (pp. 3110–3111).
+  - Measured: the codec is the Video Codec of the media pool, like "H.264 High L4.0" or "Apple ProRes 422". An EXR sequence shows "EXR", and a compound clip "Compound Clip".
+  - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
+  - Measured: of the clips at the playhead, the clip of the top track has the outline. Its text is white, and the text of the others is grey.
+  - The clips of a disabled track are not in the Thumbnail timeline (p. 3107; measured).
+  - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
+  - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
+  - Measured: the menu has only these three items, also on a compound clip.
+  - Measured: Mark In sets the In at the first frame of the clip, and Mark Out sets the Out at its last frame. Each switches Entire Timeline to In/Out Range.
+  - Measured: Mark In alone leaves the Out at the end of the timeline.
+  - Measured: Render This Clip sets the In and the Out at the first and the last frame, and switches to In/Out Range. It adds no job.
+  - Measured: with Individual clips, Render This Clip does the same, and Individual clips stays.
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5332,6 +5388,22 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A render again of a completed job writes over its file with no other prompt (measured).
   - After Clear Render Status, a render over a file with the same name asks first: "Replace Existing File?", with Cancel and Replace (measured).
   - The X removes a job with no prompt (p. 4131; measured). A drag by the handle moves a job, with no ghost row (measured).
+  - A pencil is at the right of each job, beside the X (measured).
+  - A click on the pencil puts the settings of the job in the Render Settings. The timeline gets the range of the job (p. 4132).
+  - Measured: the pencil of a job of another timeline opens that timeline. The pencil of a job of the entire timeline sets Entire Timeline.
+  - Update Job then shows at the bottom of the Render Settings. It changes the job (p. 4132).
+  - Measured: during an edit, the bottom row has Cancel, Update Job and Add New Job, from left to right. It takes the place of Add to Render Queue.
+  - Measured: Cancel ends the edit. The job does not change, and the Render Settings keep the changes.
+  - Measured: Update Job keeps the status of the job. A completed job stays completed.
+  - Measured: after Update Job, no job is edited, and the job stays selected.
+  - Add New Job adds a job with the changes, and the first job does not change (p. 4132).
+  - Measured: Add New Job selects the new job. Then no job is edited.
+  - A click on the pencil again without Update Job asks Save, Cancel or Don't Save (p. 4132).
+  - Measured: a click on the pencil of the edited job asks nothing. The edit stays, and the File Name field gets the focus.
+  - Measured: a click on the pencil of another job asks "Update Render Job?". The text is "Job 40 is being edited and has unsaved changes.", also with no changes.
+  - Measured: the buttons are Discard Changes, Cancel and Update Job. Update Job has the focus.
+  - Measured: Cancel keeps the edit. Discard Changes edits the other job. Update Job changes the edited job, then edits the other job.
+  - Measured: while jobs render, a click on a pencil does nothing, and the click is not kept. The pencil and the X of the job that renders are dim.
   - A click in the empty part of the queue clears the selection (measured).
   - The right-click menu has Reveal in Media Storage, Open File Location and Clear Render Status (pp. 4131–4132; measured). Clear Render Status acts on all selected jobs (p. 4131).
   - The "..." menu has Show All Projects, Refresh, Show Job Details, Review Before Upload, Clear Rendered and Clear All (measured). Clear All asks nothing.
@@ -5353,13 +5425,25 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the Cut page, Alt+X with In/Out Range sets Entire Timeline, which clears the marks.
   - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
-  - The queue is `render.add`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
+  - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
   - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
   - Each render is a job, and Jobs shows it too ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - A job that failed shows "Failed:" and the error, in red.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
+  - The pencil of a job puts its settings in the Render Settings. `gui.page` with `edit_job` does the same.
+  - The timeline of the job opens. A job of the whole timeline sets Entire Timeline. A job of a part sets the marks of its range and In/Out Range.
+  - Cancel, Update Job and Add New Job then take the place of Add to Render Queue. The pencil of the job shows that it is picked.
+  - Cancel ends the edit. The job does not change, and the Render Settings keep the changes. `edit_job` with `""` does the same.
+  - Update Job is `render.update`. The job keeps its place, its name and its status. Add New Job is `render.add`.
+  - Each of them asks first about files that are there, as Add does. After each of them, no job is edited.
+  - Update Job keeps the job selected. Add New Job selects the new job.
+  - A click on the pencil of the edited job puts the focus in File Name.
+  - A click on the pencil of another job asks "Update Render Job?", with Discard Changes, Cancel and Update Job.
+  - Update Job changes the edited job, then edits the other job. Discard Changes edits the other job. Cancel keeps the edit.
+  - While jobs render, the pencils are greyed, and `edit_job` refuses a job. A job that is removed, or that starts to render, is not edited.
+  - Before the Render Settings are ready, `edit_job` waits for them. A switch to another page ends the wait.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - With Individual clips, the File tab has Filename Uses, Custom Name, File Suffix, Unique Names, Source Frame Count and File Subfolder.
   - Then Filename Digits, First Frame for image sequences, Replace Files, Separate Folders, Source Folder Levels, Count Levels and Render Speed.
@@ -5380,6 +5464,20 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Render Speed limits the export to that number of frames in each second. Maximum gives no limit. The menu has the measured numbers.
   - `render_speed` of the settings takes each number from 1. Left out, it is Maximum.
   - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
+  - The Thumbnail timeline is over the timeline of the page. Clips in the toolbar of the timeline hides or shows it. `gui.page` with `clips` does the same.
+  - It has a picture of each clip of the video tracks that are on, in the order of their first frames. Generators, titles and adjustment clips are not in it.
+  - Of clips that start together, the clip that ends first goes first. Of clips that also end together, the clip of the lower track goes first.
+  - Above each picture are the number of the clip, the source timecode of its first frame and its track.
+  - The timecode is the start timecode of the media plus the source In. Without a start timecode, and for a compound clip, it starts at 00:00:00:00.
+  - The picture is the first frame of the clip, with the grade of the clip. The clip's transform and the timeline grade are not in it.
+  - A change of the grade makes the picture again. A compound clip has no picture.
+  - Under each picture is the codec of the clip, or its name. A double-click on that text changes it for all clips. `clip_label` of `gui.page` sets it.
+  - The codec is the one that the media pool shows. A compound clip shows "Compound Clip".
+  - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
+  - The text under the clip at the playhead is white. The text under the other clips is grey.
+  - A click on a picture moves the playhead to the first frame of the clip.
+  - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
+  - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
@@ -5411,15 +5509,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
-  - A change of a key changes the keys in force at once. The dropdown then shows "(Changed)" after the name of the set. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
-  - With changes, a pick of another set asks first, because the changes are lost. Not measured (case 15 of shortcuts-resolve-runs.md).
-  - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124). Export Set and Delete Set list the sets.
+  - A change of a key changes the keys in force at once ([todo](todo/shortcuts.md)). The dropdown then shows "*" after the name of the set (measured).
+  - A changed key has a button that puts back the key of the set (measured).
+  - With changes, a pick of another set asks "Discard Changes?", with Cancel and Discard. Cancel has the focus (measured).
+  - The Option menu at the right of the dropdown has Save As New Set…, Import Set…, Export Set and Delete Set, in this order (p. 124).
+  - Export Set lists all the sets. Delete Set lists the user's sets, and it is gray when the user has no set (measured).
   - vidcut: the Option menu also has Save, under a line.
-  - The trash button deletes the set in force (p. 124). Each delete asks first.
-  - Save As New Set… (`keys.save`) saves the keys in force under a name. That set is then in force.
-  - Save writes the keys in force into the user's set in force. A built-in set does not change. Not measured (cases 15 and 16 of shortcuts-resolve-runs.md).
-  - Export Set (`keys.export`) writes a set to a file. Import Set… (`keys.import`) adds the set of such a file. The imported set is not put in force. Not measured (case 13 of shortcuts-resolve-runs.md).
-  - A delete of the set in force keeps its keys in force, as changes to vidcut's own set. Not measured (case 14 of shortcuts-resolve-runs.md).
+  - The trash button deletes the set in force (p. 124).
+  - Each delete asks first, for example 'Delete "Run A"?', with Cancel and Delete. Cancel has the focus (measured).
+  - Save As New Set… (`keys.save`) asks for a name. The field holds the name of the set in force (measured).
+  - It saves the keys in force under that name. That set is then in force.
+  - Save writes the keys in force into the user's set in force (measured).
+  - On a changed built-in set, Save asks for a name, as Save As New Set… does. A built-in set does not change (measured).
+  - Export Set (`keys.export`) writes a set to a file ([todo](todo/shortcuts.md)). The file name that it offers is the name of the set and " Keys" (measured).
+  - Import Set… (`keys.import`) adds the set of such a file, with the name of the file. The imported set is then in force (measured).
+  - A delete of the set in force puts vidcut's own set in force, with its keys (measured).
   - Reset puts back the keys of the set in force.
   - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
   - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
@@ -6360,7 +6464,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The font of the burn-in (D61).
     - White, with no outline and no background (measured in Resolve Studio 21.1.2).
     - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
-    - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
+    - Text 108 pixels of the timeline for Scroll, at any timeline height. Thus a Scroll on a 1280×720 timeline is 108/720 of the picture height.
+      - Measured in Resolve Studio 21.2 on 1920×1080, 1366×768, 1280×720, 1024×576 and 2560×1440. A Text title follows the height of the timeline there.
+      - The size of a Scroll is a whole number of timeline pixels, from 24 to 4096. An OTIO file with a fraction does not import.
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
     - A Text title and a lower third draw a whole number of timeline pixels for the size. The style keeps the exact number.
@@ -6375,8 +6481,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - That step is measured with 8 fonts at 24 sizes where it gives a different height from the exact sum.
     - A line's baseline in a Text title or a lower third is the ascent below the line's top. The gap goes below the text.
     - The middle of a block rounds to a whole pixel. The top of the block goes up by the anchor's part of the height. Then it goes down to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts at four sizes).
-    - The left of a block starts at its middle, rounded to a whole pixel. It goes left by the anchor's part of the width. That width is the whole pixels of the widest line (same renders).
-    - In Resolve Studio 21.1.2, some blocks are half a pixel from this rule, as "HHH" at anchor middle in Arial 96. The reason is not known.
+    - The left of a block starts at its middle, rounded to a whole pixel. It goes left by the anchor's part of the width.
+    - That width is the width of the widest line, rounded down to a whole pixel, plus 1 pixel.
+      - Measured in Resolve Studio 21.2 in Arial 96: "HH", "To" and "fH" at the left and right anchors, and "HHH" also at the middle.
+      - "fH" is 96 pixels wide at zoom 1, and its block is 97 pixels.
     - Each line sits in the block by the exact difference from the widest line, with no rounding (same renders).
     - The letters of a Text title or a lower third have no hinting. Their advances are the font's own (same renders).
     - The font's kerning also goes across a space, a hyphen and a slash, inside one style. A change of style stops it, and tracking keeps it (measured in Resolve Studio 21.1.2).
@@ -6408,9 +6516,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Below the size in the font's `LTSH` table for X, it is the width from the font's hinting for one-bit drawing.
       - Otherwise, it is the font's own width of X, rounded.
     - The space on a letter goes toward 0, to a step of 1/64 of a pixel.
-    - A negative value does not go after the last letter of a line. Thus it does not make the block narrower there.
+    - After the last letter of a line, a negative value takes 1 pixel at most off the block (measured in Resolve Studio 21.2).
     - These rules are measurements in Resolve Studio 21.1.2 on Windows, with 12 fonts at sizes 24 to 384.
-    - In these renders, some blocks with a negative value are up to 1 pixel from this rule, as "Ab" in Arial 96. The reason is not known.
+    - A block is wider than these rules when a letter at an end has ink outside its advance. The size of this pad is not known.
     - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
     - `small` draws small letters as capitals at 0.7 of the size in whole pixels at zoom 1, rounded to a whole pixel. The zoom scales it (measured in Resolve Studio 21.1.2).
@@ -6430,7 +6538,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The right end starts as that distance plus the width of the words. It then follows the same steps as the left end.
     - The edge of the block cuts the line. Thus a line at the start of the block starts at the first whole pixel.
     - At other places, each end can cover part of a pixel.
-    - The width of the words has a negative tracking after the last letter of a line. The width of the block does not.
+    - The width of the words has a negative tracking after the last letter of a line. The width of the block has 1 pixel of it at most.
     - The middle of `<u>` is under the baseline by a third of the thickness plus 1/2, rounded up, plus 1/2 pixel.
     - That distance comes from the thickness at zoom 1, and the zoom scales it.
     - The middle of `<s>` is a third of the ascent over the baseline. The middle of `<o>` is the ascent over the baseline.
