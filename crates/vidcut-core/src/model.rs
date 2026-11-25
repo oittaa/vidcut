@@ -4211,8 +4211,9 @@ impl Stabilization {
 /// A grade: the nodes of the color page. The picture comes in, goes through
 /// the nodes that the inputs join, and goes out from the link `output`.
 /// A node's number is its place in `nodes`, from 1. The number 0 is the
-/// picture that comes into the grade. While a node has an empty input, or
-/// its picture goes nowhere, or nothing goes out, the grade does nothing.
+/// picture that comes into the grade. While a corrector or a splitter has
+/// an empty input, a parallel mixer, a layer mixer or a combiner has no
+/// input with a link, or nothing goes out, the grade does nothing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Grade {
     /// The nodes, in the order of their numbers.
@@ -4242,11 +4243,15 @@ pub struct GradeLink {
     /// out at 0.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub made: u32,
+    /// The RGB output of a splitter that the link leaves: 0 red, 1 green,
+    /// 2 blue. Left out at 0, the one RGB output of the other nodes.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub output: u8,
 }
 
 impl PartialEq for GradeLink {
     fn eq(&self, other: &Self) -> bool {
-        (self.node, self.key) == (other.node, other.key)
+        (self.node, self.key, self.output) == (other.node, other.key, other.output)
     }
 }
 
@@ -4254,7 +4259,12 @@ impl Eq for GradeLink {}
 
 impl GradeLink {
     pub fn new(node: u32, key: bool) -> Self {
-        Self { node, key, made: 0 }
+        Self {
+            node,
+            key,
+            made: 0,
+            output: 0,
+        }
     }
 
     pub fn picture(node: u32) -> Self {
@@ -4264,6 +4274,21 @@ impl GradeLink {
     pub fn key(node: u32) -> Self {
         Self::new(node, true)
     }
+
+    pub fn split(node: u32, output: u8) -> Self {
+        Self {
+            output,
+            ..Self::new(node, false)
+        }
+    }
+
+    pub fn leaves_picture_of(&self, node: u32) -> bool {
+        self.node == node && !self.key
+    }
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
 }
 
 fn is_zero_u32(n: &u32) -> bool {
@@ -4309,8 +4334,9 @@ pub struct GradeNode {
     #[serde(flatten)]
     pub tool: GradeTool,
     /// What comes into each input, in order, or null for nothing. A
-    /// corrector has one input, its RGB input. A mixer has one or more.
-    /// The inputs of a key mixer are key inputs.
+    /// corrector and a splitter have one input, an RGB input. A combiner
+    /// has three: red, green and blue. A mixer has one or more. The inputs
+    /// of a key mixer are key inputs.
     pub inputs: Vec<Option<GradeLink>>,
     /// Off, a corrector passes on the picture that comes into it, and a
     /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
@@ -4353,6 +4379,12 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// Auto-Keyframe of a corrector or a key mixer: a change to the node
+    /// on a frame where it has no keyframe first adds a Dynamic keyframe
+    /// there. That keyframe holds the values that the picture has on its
+    /// frame. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_key: bool,
     /// The windows of a corrector, in the order of the window list. They
     /// make the key of the corrector. A corrector has a linear, a circle, a
     /// polygon and a gradient window first, off at first, which stay. The
@@ -4376,6 +4408,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: GradeWindow::fixed(frame),
         }
     }
@@ -4393,6 +4426,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: Vec::new(),
         }
     }
@@ -4785,6 +4819,11 @@ pub struct GradeKey {
     /// mixer leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// A mark of Add EDL Marks on Tracks, on an edit of the timeline.
+    /// Delete EDL Marks on Tracks removes only these marks. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edl: bool,
 }
 
 /// What a keyframe does up to the next keyframe.
@@ -4847,13 +4886,40 @@ pub enum GradeTool {
         /// order.
         mix: Vec<KeyMix>,
     },
+    /// It splits the picture on its one input into its channels. RGB
+    /// output 0 gives red, 1 green and 2 blue, each as a gray picture: R, G
+    /// and B are that channel. It has no key input and no key output.
+    Splitter,
+    /// It joins three pictures into one: red from input 0, green from
+    /// input 1 and blue from input 2. The alpha comes from the first input
+    /// that has a link. An input with no link gives 0 to its channel. At
+    /// least one input needs a link. It has no key input or key output.
+    Combiner,
 }
 
 impl GradeTool {
     pub fn is_mixer(&self) -> bool {
         !matches!(self, Self::Corrector(_))
     }
+
+    pub fn takes_inputs(&self) -> bool {
+        matches!(
+            self,
+            Self::ParallelMixer | Self::LayerMixer { .. } | Self::KeyMixer { .. }
+        )
+    }
+
+    pub fn outputs(&self) -> u8 {
+        match self {
+            Self::Splitter => SPLIT_OUTPUTS,
+            _ => 1,
+        }
+    }
 }
+
+pub const SPLIT_OUTPUTS: u8 = 3;
+
+pub const COMBINER_INPUTS: usize = 3;
 
 /// A primary correction: the numbers of the Primaries palette. Each value
 /// keeps its own channel order, `[red, green, blue]`, with the master
@@ -6127,6 +6193,10 @@ pub struct Mask {
     /// of the picture. Below 0, the edge moves in. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How its own mask joins the masks on its effect mask input. With
+    /// nothing on that input, the mask is its own mask. Usual: `merge`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// On, the mask is the part outside its shape. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
@@ -6189,6 +6259,37 @@ pub struct Mask {
     /// covers nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<[f64; 2]>,
+}
+
+/// How a mask joins its own mask n with the masks i on its effect mask
+/// input. n is its shape after `invert` and `level`. c is its shape before
+/// `level`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaintMode {
+    /// n + i × (1 − c).
+    #[default]
+    Merge,
+    /// i + n, at most 1.
+    Add,
+    /// i − n, at least 0.
+    Subtract,
+    /// The smaller of i and n.
+    Minimum,
+    /// The larger of i and n.
+    Maximum,
+    /// (i + n) / 2.
+    Average,
+    /// i × n.
+    Multiply,
+    /// n where n is above 0, else i.
+    Replace,
+    /// i + n − 2 × i × n: n turns i over.
+    Invert,
+    /// n.
+    Copy,
+    /// i.
+    Ignore,
 }
 
 /// Which parts a polygon whose sides cross covers.

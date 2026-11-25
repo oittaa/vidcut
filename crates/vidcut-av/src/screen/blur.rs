@@ -5,7 +5,7 @@ use vidcut_core::grade::{
 use vidcut_core::lru::{ByBytes, Lru};
 use vidcut_core::model::{
     ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MaskChannel, MergeEdges,
-    MergeOperator, NoiseColoring,
+    MergeOperator, NoiseColoring, PaintMode,
 };
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
@@ -87,6 +87,12 @@ const MIX_PARALLEL: f64 = 0.0;
 const MIX_SHARPEN: f64 = 2.0;
 
 const MIX_LAYER: f64 = 1.0;
+
+const MIX_SPREAD: f64 = 3.0;
+
+const MIX_TAKE: f64 = 4.0;
+
+const MIX_CLEAR: f64 = 5.0;
 
 const SHOT_TAPS: u32 = 16;
 
@@ -731,11 +737,16 @@ fn mask_made<'a>(
         }
         let to = kept.map_or(0, |k| 1 - k);
         let start = kept.map_or(&room[1].view, |k| &room[k].view);
+        let paint = match kept {
+            Some(_) => shape.paint,
+            None => PaintMode::Copy,
+        };
+        let mode = PaintMode::ALL.iter().position(|m| *m == paint);
         let how = [
             shape.level,
             flag(shape.invert),
             flag(kept.is_none()),
-            0.0,
+            mode.unwrap_or_default() as f64,
             by[0],
             by[1],
             0.0,
@@ -2185,6 +2196,27 @@ fn pass_into(
                 encoder,
             );
         }
+        GradePass::Spread { on, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*on], at[*on]),
+            (&scratch[0], [MIX_SPREAD, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
+        GradePass::Take { on, from, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*from], at[*on]),
+            (&scratch[0], [MIX_TAKE, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
+        GradePass::Clear { on, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*on], at[*on]),
+            (&scratch[0], [MIX_CLEAR, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
     }
 }
 
