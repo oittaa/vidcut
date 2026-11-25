@@ -4,12 +4,16 @@
 
 The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
 
-**Key sets to measure:**
+**Key sets, open differences:**
 
-- The manual does not tell these rules (p. 124). Cases 13 to 16 of shortcuts-resolve-runs.md measure them.
-- After Import Preset, is the imported preset in force?
-- After a delete of the preset in force, which preset and which keys are in force?
-- How does a preset keep the changes to its keys?
+- The owner decides each item. Cases 13 and 15 of shortcuts-resolve-runs.md measured them in Resolve Studio 21.2.
+- In Resolve, the changes and the set picks in the window are a draft until Save.
+  - With a draft, the window has Cancel and Save. Cancel and a close ask "Discard Changes?".
+  - When the window opens again, it shows the keys that were saved last.
+  - vidcut puts each change and each set pick in force at once. The preferences keep the changes.
+- Resolve writes a key file as lines of `command := Key | Key`, with the command names of Resolve.
+  - The file starts with `import "DaVinci Resolve"` and holds only the changed commands.
+  - vidcut writes a TOML file with the same content, with the names of its actions.
 
 **Meta in the sets of other editors:**
 
@@ -19,7 +23,6 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **Key sets and panels:**
 
-- The on-screen keyboard. A click on a key and its modifiers shows the commands of that key (p. 122).
 - Keys per panel. One key does different things in different panels (pp. 123–124).
   - Only the Transcription window has its own level.
 
