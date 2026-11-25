@@ -483,6 +483,7 @@ impl Workspace {
             && offline.is_none()
             && played.is_some()
             && !self.window_controls(ui, &area_resp, picture)
+            && !self.reframe_controls(ui, &area_resp, picture)
             && !self.picture_controls(ui, &area_resp, picture)
         {
             self.title_controls(ui, &area_resp, picture);

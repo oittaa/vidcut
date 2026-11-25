@@ -648,8 +648,13 @@ The bar and the Jobs button:
   - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
   - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
 - `Workspace::reframe_section` shows the Smart Reframe section for the selected clips of video files (`ops::picture::reframable`).
-  - `Reframing` keeps the Mode, the Subject and Smooth in the `Inspector`. They are not in the project.
+  - `Reframing` keeps the Object of Interest, the Mode, the Subject, Smooth and the box in the `Inspector`. They are not in the project.
   - Reframe sends one `picture.reframe` for all the clips, through `Workspace::ask`. Thus a missing model is asked for first.
+  - With Reference Point and one clip, the request has the box as `reference` and the playhead as `at`. The model to ask for is then the tracker's.
+- `Workspace::reframe_controls` draws the Smart Reframe box on the viewer and moves it.
+  - It shows while `Grab.reframe` is on and no other viewer tool is on (`Workspace::reframe_shown`).
+  - The box is in fractions of the frame, as `reference` is. A drag changes only the `Reframing`, and sends no request.
+  - `Workspace::show_reframe_tool` turns it on: from the Target button, the Smart Reframe button of the Tools row (`Workspace::reframe_tool_button`) and `gui.show`.
   - `picture.reframe` runs as a job of kind `reframe`. Reframe is grey while such a job runs.
 - With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
 - `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.

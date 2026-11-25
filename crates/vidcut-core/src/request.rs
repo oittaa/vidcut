@@ -4690,8 +4690,10 @@ pub enum Request {
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), the
     /// viewer's `color_tool` (the switch, Auto Color and Reset of the Auto
-    /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
-    /// Dynamic Zoom, Color and their buttons, or `select_tool` (a tool to
+    /// Color tool of node 1), the viewer's `smart_reframe` box (the
+    /// `reference` that Reframe sends), `tools`, the viewer's row of
+    /// Transform, Crop, Dynamic Zoom, Color, Smart Reframe and their
+    /// buttons, or `select_tool` (a tool to
     /// add on the effects page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
@@ -6250,8 +6252,11 @@ pub enum GuiPanel {
     /// The viewer's Color tool on the selected clip: the switch, Auto Color
     /// and Reset of the Auto Color tool of node 1.
     ColorTool,
-    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Color, the
-    /// flips, Swap, the ease, Auto Color and Reset.
+    /// The viewer's Smart Reframe box: the box on the frame that Reframe
+    /// sends as the `reference` of `picture.reframe`.
+    SmartReframe,
+    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom, Color and
+    /// Smart Reframe, the flips, Swap, the ease, Auto Color and Reset.
     Tools,
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.

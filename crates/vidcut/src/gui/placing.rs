@@ -107,6 +107,7 @@ pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
     pub(crate) row: bool,
     pub(crate) color: bool,
+    pub(crate) reframe: bool,
     held: Option<Held>,
     wheel: Option<Wheeled>,
     landing: Option<(String, Picture, Instant, Picture)>,
@@ -770,16 +771,18 @@ impl Workspace {
     pub(super) fn show_picture_tool(&mut self, tool: PictureTool) {
         self.timeline.picture_grab.tool = Some(tool);
         self.timeline.picture_grab.color = false;
+        self.timeline.picture_grab.reframe = false;
         self.select_shown();
     }
 
     pub(super) fn show_color_tool(&mut self) {
         self.timeline.picture_grab.tool = None;
         self.timeline.picture_grab.color = true;
+        self.timeline.picture_grab.reframe = false;
         self.select_shown();
     }
 
-    fn select_shown(&mut self) {
+    pub(super) fn select_shown(&mut self) {
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let Some(p) = self.project_shared() else {
             return;
@@ -823,6 +826,7 @@ impl Workspace {
             node.corrector_at(frame)?.auto_color.clone()
         });
         self.color_tool_button(ui, graded.is_some(), kept.as_ref());
+        self.reframe_tool_button(ui, clip.as_ref().map(|(id, _)| id.as_str()));
         let Some(tool) = self.timeline.picture_grab.tool else {
             if self.timeline.picture_grab.color {
                 ui.separator();

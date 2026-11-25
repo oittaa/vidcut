@@ -318,6 +318,7 @@ impl Workspace {
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::ColorTool => self.show_color_tool(),
+            GuiPanel::SmartReframe => self.show_reframe_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
             GuiPanel::SelectTool => self.open_select_tool(),
         }
@@ -438,6 +439,7 @@ impl Workspace {
                 }
             }
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
+            GuiPanel::SmartReframe => self.timeline.picture_grab.reframe = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
             GuiPanel::SelectTool => self.close_select_tool(),
         }
@@ -485,6 +487,7 @@ impl Workspace {
                 GuiPanel::ColorTool,
                 tool.is_none() && self.timeline.picture_grab.color,
             ),
+            (GuiPanel::SmartReframe, self.reframe_shown()),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
             (GuiPanel::SelectTool, self.select_tool_open()),
         ];

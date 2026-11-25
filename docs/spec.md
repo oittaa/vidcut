@@ -4595,12 +4595,19 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes, in pixels of the frame. The usual value is 1 pixel.
   - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point and the flips of each frame, and they stay.
   - Each `picture.reframe` is one undo step, "Smart Reframe".
-  - The Video tab of the Inspector has the Smart Reframe section, below Transform: Mode, Subject, Smooth and Reframe.
-    - Reframe asks to download the model of the subject when it is not on this computer.
+  - The Video tab of the Inspector has the Smart Reframe section, below Transform: Object of Interest, Mode, Subject, Smooth and Reframe.
+    - Object of Interest is Auto or Reference Point. With more than one clip selected, it is grey at Auto.
+    - With Reference Point, Subject does not show. The Target button sets the viewer to its Smart Reframe box.
+    - Reframe asks to download the model of the subject, or of the tracker, when it is not on this computer.
     - Reframe is grey while a Smart Reframe runs.
-    - The section has no Object of Interest and the viewer has no box yet. `reference` does the same in a request.
+  - The viewer's Smart Reframe box has four corner handles and a center dot.
+    - A drag inside the box moves it. A drag of a corner changes its size, and the opposite corner stays.
+    - The box stays inside the frame.
+    - With Reference Point, Reframe sends the box as `reference`, with the frame at the playhead as `at`.
+    - The Tools row of the viewer has Smart Reframe too. `gui.show` with `smart_reframe` shows the box.
+    - The first box is at the middle of the frame. It has a quarter of the width of the frame and half of its height.
   - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
-  - Not measured: a clip with Position keyframes, a zoom, a rotation or a Dynamic Zoom before Reframe; a clip with a speed change; more clips with a shot change.
+  - Not measured: a clip with Position keyframes, a zoom, a rotation or a Dynamic Zoom before Reframe; a clip with a speed change; more clips with a shot change; the first box in the viewer.
   - [design](design/analysis.md#smart-reframe) gives the method.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
