@@ -711,8 +711,9 @@ pub struct Player {
 #[serde(default, deny_unknown_fields)]
 pub struct Gpu {
     /// Use the GPU to decode, scale and encode: in the preview, exports and
-    /// proxies. Off, all of it runs on the CPU, even when an export names a
-    /// GPU encoder.
+    /// proxies. It also finds people and vehicles, measures the shake and
+    /// transcribes. Off, all of it runs on the CPU, even when an export
+    /// names a GPU encoder.
     pub acceleration: bool,
     /// While `acceleration` is on, decode H.264, HEVC, AV1 and VP9 on the
     /// GPU in the viewer, exports and proxies, and all but H.264 in the

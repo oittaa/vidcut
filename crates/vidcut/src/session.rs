@@ -39,7 +39,8 @@ fn models_check(id: &str, download: bool) -> Result<Value> {
         )));
     }
     let dir = crate::paths::models_dir();
-    let inspected = vidcut_av::models::inspect(model, &dir, download)
+    let gpu = crate::preferences::gpu_acceleration();
+    let inspected = vidcut_av::models::inspect(model, &dir, download, gpu)
         .map_err(|e| export::av_error(&e, ErrorCode::Media, String::new()))?;
     let found = &inspected.found;
     let differences = catalog::differences(model, found);
