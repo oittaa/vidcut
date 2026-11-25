@@ -4023,6 +4023,15 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
   - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
+  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([gaps](todo/gaps.md)).
+  - The header of a node track has an Enable/Disable button, a Lock button and an Auto-Keyframe button (p. 3454).
+  - Enable/Disable turns the node off or on. A locked node takes no changes, and the Node Editor shows a lock on it (p. 3454).
+  - With Auto-Keyframe on, each change to a value of the node adds a Dynamic keyframe (pp. 3454, 3461).
+  - Without Auto-Keyframe, a change goes to a keyframe that is there, by the playhead rule below (p. 3461).
+  - vidcut: the three buttons are at the right of the name of each node track. They send `grade.set` with `on`, `locked` and `auto_key`.
+  - vidcut: with `auto_key`, a change on a frame where the node has no keyframe first adds a Dynamic keyframe there. The new keyframe takes the values that the picture has on its frame, and the change then goes to it.
+  - vidcut: the changes of `grade.set`, `grade.printer`, `grade.clear` with `node` or `keep_nodes`, `grade.auto_color`, `grade.window.set` and a `grade.window.paste` onto a window of the same shape do so. A change of the window list does not.
+  - Not measured: where Resolve keeps the Auto-Keyframe state, and whether a reset adds a keyframe. vidcut keeps it in the node.
 - **Dynamic and Static keyframes** (pp. 3456–3459):
   - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).
   - Mark > Make Static Keyframe (Command-]) adds a Static keyframe (p. 3457).
@@ -4093,6 +4102,10 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
   - vidcut: a drag in the Master track moves the keyframe of each corrector on that frame. A drag in a node track moves the keyframe of that node.
   - vidcut: a drag sends `grade.keys.move`. A corrector has one keyframe on a frame at most. Thus a move onto another keyframe of that corrector fails.
+  - A drag of a box around keyframes selects them, in red. A drag of one of them moves them all (p. 3462).
+  - vidcut: a box selects the keyframes of the track where it starts. A drag of a selected keyframe moves the selection of its track. The menu of a selected keyframe changes or deletes the whole selection of its track.
+  - Playback > Next > Keyframe (]) and Playback > Previous > Keyframe ([) move the playhead to the next or the previous keyframe (p. 3462).
+  - vidcut: on the Color page, ] and [ go to the next and the previous keyframe of the grade, in all nodes.
   - Mark > Delete Keyframe (Option-]) deletes every keyframe at the playhead (p. 3463).
   - Delete Selected Keyframe in the menu of a keyframe deletes only that keyframe (p. 3463).
   - Mark > Delete All Keyframes deletes every keyframe of the clip (p. 3463).
@@ -4104,6 +4117,11 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
 - **The timeline grade** (p. 3465):
   - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
   - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.
+  - Add EDL Marks on Tracks is in the menu of a Corrector track of the timeline grade. It adds a Static keyframe at each edit point of the timeline (p. 3465).
+  - Delete EDL Marks on Tracks removes only those marks. The other keyframes stay (p. 3465).
+  - vidcut: `grade.keys.add` and `grade.keys.remove` with `edl`. The menu of each track of the timeline grade has the two items. The Master track acts on each node.
+  - vidcut: the marks go where a clip starts or ends on a video track, after the first frame and before the end. A node that has a keyframe on that frame keeps it.
+  - Not measured: which edits count, and whether the marks go on the right-clicked track only. vidcut puts them on the track of the menu.
   - Measured in Resolve Studio 21.2: an edit of the timeline does not move them. After a ripple delete, they stay on their timeline frames.
   - vidcut: the same.
 - vidcut: the viewer, the export, `frame.render` and the storyboard give each frame the grade of its own frame.
