@@ -29,10 +29,13 @@ flowchart LR
   - Direct3D 11 on other GPUs on Windows. VA-API on other GPUs on Linux.
   - VideoToolbox on a Mac.
 - `VIDCUT_HWDEC` sets the decoder for tests.
-- The player uses that decoder. Exports, proxies, renders and tiles use `GpuDecoder::own`, a stream or a device of their own on the same GPU.
+- The player uses that decoder. Exports, proxies, renders, tiles and analyses use `GpuDecoder::own`, a stream or a device of their own on the same GPU.
   - Why: on the player's decoder, their work waits behind playback.
+  - A CUDA stream of `GpuDecoder::own` waits for the default stream of its device (`Waits::ForDefault`).
+  - Why: on a stream that does not wait, NVDEC's JPEG pictures can be the picture before ([gotchas](../gotchas.md#gpu-drivers)).
 - `gpu.acceleration` lets the GPU decode, scale and encode. `gpu.decoding` lets it decode. Both are on by default.
-- `GpuDecoder::why_not` names the streams that the CPU decodes. Stills and image sequences decode on the CPU.
+- `GpuDecoder::why_not` names the streams that the CPU decodes.
+- The draw path decodes stills and image sequences on the CPU (`Source::open`). Other readers, such as `motion.find`, decode them on the GPU where it can.
 - An OpenEXR decodes with the `exr` crate, not with FFmpeg's `exr` decoder ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)):
   - `VideoDecoder` opens FFmpeg's `rawvideo` decoder in its place. Its `send_packet` turns each file into the planes of that decoder (`openexr::Planes`).
   - The pixel format is the format that the probe gets from FFmpeg's `exr` decoder. Thus the frames and their path stay the same.
