@@ -102,6 +102,8 @@ pub enum GuiChange {
     Window(usize),
     QueueJobs(Vec<String>),
     JobDetails(bool),
+    Clips(bool),
+    ClipLabel(vidcut_core::request::ClipLabel),
     EditJob(Option<String>),
     Nodes(Vec<String>, bool),
     Element(u8),
@@ -198,6 +200,8 @@ pub struct GuiState {
     pub windows: Vec<GuiPanel>,
     pub jobs: Vec<String>,
     pub job_details: bool,
+    pub clips: bool,
+    pub clip_label: vidcut_core::request::ClipLabel,
     pub edit_job: Option<String>,
 }
 
@@ -3595,6 +3599,8 @@ impl Live {
                 window,
                 jobs,
                 job_details,
+                clips,
+                clip_label,
                 edit_job,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
@@ -3604,6 +3610,8 @@ impl Live {
                     .chain(window.map(GuiChange::Window))
                     .chain(jobs.map(GuiChange::QueueJobs))
                     .chain(job_details.map(GuiChange::JobDetails))
+                    .chain(clips.map(GuiChange::Clips))
+                    .chain(clip_label.map(GuiChange::ClipLabel))
                     .collect();
                 changes.push(GuiChange::Page(page));
                 if let Some(job) = edit_job {

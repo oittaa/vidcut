@@ -1789,7 +1789,7 @@ fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let op = i32(merging.how.y);
     let fa = fore.a;
     let ba = back.a;
-    let keep = select(1.0, 1.0 - merging.slide.z, mode == 0);
+    let keep = select(1.0, 1.0 - merging.slide.z, mode == 0 && op == 0);
     switch mode {
         case 0: {
             return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, op);

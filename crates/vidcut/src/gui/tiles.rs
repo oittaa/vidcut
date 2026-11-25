@@ -376,6 +376,35 @@ impl Tiles {
 
     pub fn job(&self, p: &Project, m: &Media, key: &TileKey, width: u32) -> Option<Job> {
         let piece = vidcut_core::render::media_frame(p, m, key.frame);
+        let disk = (self.disk && m.subclip.is_none()).then(|| {
+            let block = key.frame.div_euclid(TILE_BLOCK);
+            let (origin, look) = self.look_of(p, m);
+            let path = thumbcache::tile_block(&origin, key.height, block, &look);
+            BlockFile { path, origin }
+        });
+        Some(self.job_of(p, m, piece, key, width, disk))
+    }
+
+    pub fn clip_job(
+        &self,
+        p: &Project,
+        m: &Media,
+        piece: VideoPiece,
+        key: &TileKey,
+        width: u32,
+    ) -> Job {
+        self.job_of(p, m, piece, key, width, None)
+    }
+
+    fn job_of(
+        &self,
+        p: &Project,
+        m: &Media,
+        piece: VideoPiece,
+        key: &TileKey,
+        width: u32,
+        disk: Option<BlockFile>,
+    ) -> Job {
         let mut pieces = Vec::new();
         let proxy = m.fresh_proxy().map(|x| x.path_in(&self.proxies));
         if let (Some(proxy), VideoPiece::Source { path, image, .. }) = (proxy, &piece)
@@ -396,20 +425,15 @@ impl Tiles {
             pieces.push(from_proxy);
         }
         pieces.push(piece);
-        Some(Job {
+        Job {
             key: key.clone(),
             epoch: self.epochs.get(&key.media).copied().unwrap_or(0),
             width,
             fps: p.fps(),
             pieces,
-            disk: (self.disk && m.subclip.is_none()).then(|| {
-                let block = key.frame.div_euclid(TILE_BLOCK);
-                let (origin, look) = self.look_of(p, m);
-                let path = thumbcache::tile_block(&origin, key.height, block, &look);
-                BlockFile { path, origin }
-            }),
+            disk,
             thumbs: None,
-        })
+        }
     }
 
     pub fn end_frame(&mut self) {

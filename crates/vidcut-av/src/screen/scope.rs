@@ -1,4 +1,4 @@
-use vidcut_core::generators::{hlg_code, pq_code};
+use vidcut_core::generators::pq_code;
 use vidcut_core::model::Hdr;
 use vidcut_core::preferences::{
     ChromaticityMode, HistogramMode, ParadeMode, Scope, ScopeScale, Scopes, WaveformMode,
@@ -30,6 +30,8 @@ const HISTOGRAM_SHARE: u64 = 64;
 const PARAMS: usize = 1616;
 
 const SKIN_DEGREES: f64 = 123.14;
+
+const HDR_NITS: [f64; 6] = [0.0, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 
 const PLOT_TOP: f64 = 0.04;
 
@@ -251,8 +253,8 @@ pub struct Mark {
     pub color: Option<[u8; 3]>,
 }
 
-fn nits_marks(nits: &[f64], code: fn(f64) -> f64) -> Vec<(String, f64)> {
-    nits.iter().map(|&n| (n.to_string(), code(n))).collect()
+fn nits_marks(nits: &[f64]) -> Vec<(String, f64)> {
+    nits.iter().map(|&n| (n.to_string(), pq_code(n))).collect()
 }
 
 fn steps(count: u32, label: impl Fn(u32) -> u32) -> Vec<(String, f64)> {
@@ -261,22 +263,19 @@ fn steps(count: u32, label: impl Fn(u32) -> u32) -> Vec<(String, f64)> {
         .collect()
 }
 
-fn levels(scale: ScopeScale, colors: Option<Hdr>) -> Vec<(String, f64)> {
+fn levels(scale: ScopeScale) -> Vec<(String, f64)> {
     match scale {
         ScopeScale::TenBit => steps(8, |i| (i * 128).min(1023)),
         ScopeScale::TwelveBit => steps(8, |i| (i * 512).min(4095)),
         ScopeScale::Percent => steps(10, |i| i * 10),
         ScopeScale::Millivolts => steps(7, |i| i * 100),
-        ScopeScale::Hdr => match colors {
-            Some(Hdr::Hlg) => nits_marks(&[0.0, 10.0, 100.0, 203.0, 1000.0], hlg_code),
-            None | Some(Hdr::Pq) => nits_marks(&[0.0, 1.0, 10.0, 100.0, 1000.0, 10000.0], pq_code),
-        },
+        ScopeScale::Hdr => nits_marks(&HDR_NITS),
     }
 }
 
-fn dashed(scale: ScopeScale, colors: Option<Hdr>) -> Vec<f64> {
-    match (scale, colors) {
-        (ScopeScale::Hdr, None | Some(Hdr::Pq)) => DASHED_NITS.map(pq_code).to_vec(),
+fn dashed(scale: ScopeScale) -> Vec<f64> {
+    match scale {
+        ScopeScale::Hdr => DASHED_NITS.map(pq_code).to_vec(),
         _ => Vec::new(),
     }
 }
@@ -474,7 +473,7 @@ fn per_unit((w, h): (u32, u32)) -> f64 {
 
 pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u32)) -> Vec<Mark> {
     match scope {
-        Scope::Waveform | Scope::Parade => levels(prefs.scale, colors)
+        Scope::Waveform | Scope::Parade => levels(prefs.scale)
             .into_iter()
             .map(|(label, v)| Mark {
                 label,
@@ -484,7 +483,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 color: Some(SCALE_COLOR),
             })
             .collect(),
-        Scope::Histogram => levels(prefs.scale, colors)
+        Scope::Histogram => levels(prefs.scale)
             .into_iter()
             .map(|(label, v)| Mark {
                 label,
@@ -540,12 +539,9 @@ fn params(
     let (labeled, lines) = match scope {
         Scope::Vectorscope | Scope::Chromaticity => (0, Vec::new()),
         _ => {
-            let labeled: Vec<f64> = levels(prefs.scale, colors)
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect();
+            let labeled: Vec<f64> = levels(prefs.scale).into_iter().map(|(_, v)| v).collect();
             let count = labeled.len();
-            (count, [labeled, dashed(prefs.scale, colors)].concat())
+            (count, [labeled, dashed(prefs.scale)].concat())
         }
     };
     for (row, v) in rows.iter_mut().zip(&lines) {
