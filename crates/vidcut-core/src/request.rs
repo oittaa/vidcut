@@ -5114,6 +5114,72 @@ pub struct GradeNodeChange {
     /// -1 to 1. Above 0 the blur is less high, and below 0 less wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_input_blur_ratio: Option<f64>,
+    /// The Hue Center of the HSL qualifier of a corrector, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_center: Option<f64>,
+    /// The Hue Width of the HSL qualifier, from 0 to 100. A width below half
+    /// the Hue Soft lowers the Hue Soft to 2 times the width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_width: Option<f64>,
+    /// The Hue Soft of the HSL qualifier, from 0 to 100. A soft above 2
+    /// times the Hue Width raises the Hue Width to half the soft.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_soft: Option<f64>,
+    /// The Hue Symmetry of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_sym: Option<f64>,
+    /// The Sat Low of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_low: Option<f64>,
+    /// The Sat High of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_high: Option<f64>,
+    /// The Sat Low Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_low_soft: Option<f64>,
+    /// The Sat High Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_high_soft: Option<f64>,
+    /// The Lum Low of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_low: Option<f64>,
+    /// The Lum High of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_high: Option<f64>,
+    /// The Lum Low Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_low_soft: Option<f64>,
+    /// The Lum High Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_high_soft: Option<f64>,
+    /// The hue part of the HSL qualifier is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue: Option<bool>,
+    /// The saturation part of the HSL qualifier is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat: Option<bool>,
+    /// The luminance part of the HSL qualifier is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum: Option<bool>,
+    /// The key of the HSL qualifier is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_invert: Option<bool>,
+    /// The gain of the key of the qualifier in the key of the corrector,
+    /// from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_gain: Option<f64>,
+    /// The offset of the key of the qualifier in the key of the corrector,
+    /// from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_offset: Option<f64>,
+    /// The key of the qualifier, after its gain and offset, is turned over:
+    /// 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_key_invert: Option<bool>,
+    /// The key of the qualifier adds to the key of the windows. Off, it is
+    /// Matte: the key is where both keys are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_mask: Option<bool>,
     /// The input of a key mixer, from 0, that the `mix_` values change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<u32>,
@@ -5149,8 +5215,11 @@ pub enum GradePalette {
     Primaries,
     /// The windows of the corrector.
     Window,
-    /// The Key Input and the Key Output, or the values of a key mixer.
+    /// The Key Input, the Qualifier controls and the Key Output, or the
+    /// values of a key mixer.
     Key,
+    /// The HSL qualifier of the corrector.
+    Qualifier,
 }
 
 /// How the Primaries palette shows the values of a corrector.
@@ -5901,6 +5970,9 @@ pub struct CopiedNode {
     /// As `key_input` of a grade node. Left out at its usual value.
     #[serde(default, skip_serializing_if = "crate::model::KeyInput::is_usual")]
     pub key_input: crate::model::KeyInput,
+    /// As `qualifier` of a grade node. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "crate::model::Qualifier::is_usual")]
+    pub qualifier: crate::model::Qualifier,
     /// As `windows` of a grade node. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::model::GradeWindow>,

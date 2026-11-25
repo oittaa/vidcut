@@ -1,5 +1,5 @@
 use vidcut_core::grade::{
-    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass,
+    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass, Qualifying,
     THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::{ByBytes, Lru};
@@ -7,7 +7,10 @@ use vidcut_core::model::{
     ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MaskChannel, MergeEdges,
     MergeOperator, NoiseColoring, PaintMode,
 };
-use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
+use vidcut_core::model::{
+    BlendMode, GlowOutput, KeyOutput, QUALIFIER_CHROMA, QUALIFIER_LUM_MIDDLE, QUALIFIER_LUM_SCALE,
+    QUALIFIER_LUMA, QUALIFIER_SAT_SCALE,
+};
 use vidcut_core::place::{
     Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Inking, Level, Making,
     Masks, Merging, Noising, Op, Outline, Painting, Picturing, Placing, Program, Shading, Shaping,
@@ -126,6 +129,7 @@ pub(super) struct Pipes {
     key_fold: wgpu::RenderPipeline,
     key_luma: wgpu::RenderPipeline,
     key_gray: wgpu::RenderPipeline,
+    key_qualify: wgpu::RenderPipeline,
     shot: wgpu::RenderPipeline,
 }
 
@@ -232,6 +236,7 @@ impl Pipes {
             key_fold: pipeline(&plain, "fs_key_fold"),
             key_luma: pipeline(&plain, "fs_key_luma"),
             key_gray: pipeline(&plain, "fs_key_gray"),
+            key_qualify: pipeline(&plain, "fs_key_qualify"),
             shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
@@ -2100,6 +2105,38 @@ fn key_fold_into(
     );
 }
 
+fn key_qualify_into(
+    gpu: &Gpu,
+    (from, to): (&Texture, &Texture),
+    how: &Qualifying,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let q = &how.qualifier;
+    let (direct, out) = match how.output {
+        Some(out) => (true, out),
+        None => (false, KeyOutput::default()),
+    };
+    let [hue, sat, lum] = [q.hue_edges(), q.sat_edges(), q.lum_edges()];
+    let [r, g, b] = QUALIFIER_LUMA;
+    let [cr, cb] = QUALIFIER_CHROMA;
+    let mut values = Vec::with_capacity(28);
+    values.extend_from_slice(&hue);
+    values.extend_from_slice(&sat);
+    values.extend_from_slice(&lum);
+    values.extend_from_slice(&[flag(q.hue), flag(q.sat), flag(q.lum), flag(q.invert)]);
+    values.extend_from_slice(&[r, g, b, QUALIFIER_LUM_SCALE]);
+    values.extend_from_slice(&[cr, cb, QUALIFIER_SAT_SCALE, QUALIFIER_LUM_MIDDLE]);
+    values.extend_from_slice(&[flag(direct), out.gain, out.offset, flag(out.invert)]);
+    let bytes = float_bytes(&values);
+    draw_step(
+        gpu,
+        (&gpu.blur().key_qualify, &bytes[..]),
+        Views::same(&from.view),
+        &to.view,
+        encoder,
+    );
+}
+
 fn key_blur_into(
     gpu: &Gpu,
     on: &Texture,
@@ -2144,6 +2181,11 @@ fn pass_into(
             input,
             fold,
         } => key_fold_into(gpu, at[*to], (acc, input, fold), (at, &scratch[0]), encoder),
+        GradePass::Qualify {
+            from,
+            to,
+            qualifying,
+        } => key_qualify_into(gpu, (at[*from], at[*to]), qualifying, encoder),
         GradePass::KeyBlur { on, blur } => {
             key_blur_into(gpu, at[*on], (*blur, spot), &scratch[0], encoder);
         }
