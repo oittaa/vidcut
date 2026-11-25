@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use super::effects::{group, handle_point, handle_value, keyed, plain, ranged, rounded};
-use super::picture::{file_curve, merge, read_keys, zoom_linked};
+use super::picture::{file_curve, merge, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
@@ -378,7 +378,7 @@ fn rich_text(
             4.0,
         )
     };
-    let linked = zoom_linked(&t.as_picture());
+    let linked = t.zoom_link != Some(false);
     group(
         "Rich Text",
         24,
@@ -1085,6 +1085,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         zoom: None,
         zoom_keys: Vec::new(),
         zoom_y: Vec::new(),
+        zoom_link: None,
         rotation: None,
         rotation_keys: Vec::new(),
         upper: None,
@@ -1185,6 +1186,12 @@ fn read_zoom(g: &Value) -> Option<[f64; 2]> {
         (None, None) => None,
         (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
     }
+}
+
+fn read_link(g: &Value) -> Option<bool> {
+    value(g, "transformationZoomLink")
+        .as_bool()
+        .filter(|on| !on)
 }
 
 fn read_rotation(g: &Value) -> Option<f64> {
@@ -1315,6 +1322,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         }
     };
     let zoom = read_zoom(turned_by);
+    let zoom_link = read_link(turned_by);
     let rotation = read_rotation(turned_by);
     let (align, anchor) = if kind == TitleKind::Text {
         (
@@ -1378,6 +1386,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         zoom,
         zoom_keys: Vec::new(),
         zoom_y: Vec::new(),
+        zoom_link,
         rotation,
         rotation_keys: Vec::new(),
         upper: None,
@@ -1394,6 +1403,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             anchor: anchor_read(high, usual),
             position: Some([across(x), down(1.0 - from_bottom)]),
             zoom: read_zoom(high),
+            zoom_link: read_link(high),
             rotation: read_rotation(high),
             ..TitleLine::default()
         };

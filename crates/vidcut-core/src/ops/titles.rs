@@ -105,7 +105,9 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid("a lower third has two lines at the most"));
     }
     if t.kind == TitleKind::Scroll
-        && (t.zoom.is_some_and(|z| !flat(z)) || t.rotation.is_some_and(|r| r != 0.0))
+        && (t.zoom.is_some_and(|z| !flat(z))
+            || t.zoom_link == Some(false)
+            || t.rotation.is_some_and(|r| r != 0.0))
     {
         return Err(Error::invalid("a scroll has no zoom or rotation"));
     }
@@ -183,6 +185,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         zoom,
         zoom_keys: t.zoom_keys.clone(),
         zoom_y: t.zoom_y.clone(),
+        zoom_link: t.zoom_link.filter(|on| !on),
         rotation,
         rotation_keys: t.rotation_keys.clone(),
         upper,
@@ -377,6 +380,7 @@ pub struct TitleChange {
     pub style: Option<TitleStyle>,
     pub position: Option<Option<[f64; 2]>>,
     pub zoom: Option<[f64; 2]>,
+    pub zoom_link: Option<bool>,
     pub rotation: Option<f64>,
     pub look: Option<TitleLook>,
     pub line: Option<LowerThirdLine>,
@@ -390,6 +394,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             position_handles: old.position_handles.clone(),
             zoom_keys: old.zoom_keys.clone(),
             zoom_y: old.zoom_y.clone(),
+            zoom_link: old.zoom_link,
             rotation_keys: old.rotation_keys.clone(),
             upper: old.upper.clone(),
             ..l.on(&old.text)
@@ -415,6 +420,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         t.position_handles.clear();
         t.zoom_keys.clear();
         t.zoom_y.clear();
+        t.zoom_link = None;
         t.rotation_keys.clear();
     }
     if let Some(a) = change.align {
@@ -434,6 +440,9 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
     }
     if let Some(z) = change.zoom {
         t.zoom = Some(z);
+    }
+    if let Some(on) = change.zoom_link {
+        t.zoom_link = (!on).then_some(false);
     }
     if let Some(r) = change.rotation {
         t.rotation = Some(r);

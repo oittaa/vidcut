@@ -590,6 +590,7 @@ Writing:
   - A lower third is a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background. Each line has its own point, as in the file.
   - `Title::block_text` gives the text of a block.
 - A title's zoom has an X and a Y, as the zoom of a `Picture`: `zoom`, `zoom_keys` and `zoom_y`. `Title::scale` gives both.
+- `zoom_link` is the Zoom link of the title, and of each `TitleLine`. It is a stored switch, because the link stays on when Zoom X and Zoom Y are different.
 - A handle of a title's position key is a point in the picture, not frames and a value. Thus it is not a `Handle` of the `Keyframe`:
   - `Title::place_at` gives the point on the path. It uses the same `cubic` as the other curves, at one speed along the length.
   - `Title::as_picture` leaves the handles out. `Title::take_picture` keeps the handles of the keys that stay.

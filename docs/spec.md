@@ -1941,7 +1941,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With the link on, Zoom X typed as 1.2 sets Zoom Y to 1.2 too.
   - vidcut: a title has a Zoom X and a Zoom Y. `titles.set` takes one number for both, or `[x, y]`.
     - The Zoom row of the Title section has Zoom X, a link button and Zoom Y, in percent.
-    - With the link on, a number in one box goes into the other box too. A click that turns the link on sets Zoom Y to Zoom X.
+    - The link is a switch of the title, and of each line of a lower third. `titles.set` sets it as `zoom_link`.
+    - A click on the link button changes only the switch. The zoom values stay as they are.
+    - What Resolve does to the zoom values when the link turns on is not measured.
+    - With the link on, a number in one box goes into the other box too.
+    - OTIO keeps the switch as `transformationZoomLink`.
     - A drag of a corner in the viewer keeps the ratio of Zoom X to Zoom Y.
     - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title.
     - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md#zoom-x-and-zoom-y)).

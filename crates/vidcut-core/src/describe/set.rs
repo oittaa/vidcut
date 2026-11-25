@@ -559,6 +559,9 @@ impl Words<'_> {
             json!(t.position)
         });
         s.zooms(|t| t.zoom);
+        s.usual("zoom_link", "Zoom Link", &on_off, json!(true), |t| {
+            json!(t.zoom_link)
+        });
         s.usual("rotation", "Rotation", &degrees, json!(0.0), |t| {
             json!(t.rotation)
         });

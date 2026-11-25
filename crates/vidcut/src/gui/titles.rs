@@ -22,7 +22,7 @@ struct LineFields {
     across: String,
     down: String,
     zoom: [String; 2],
-    unlinked: bool,
+    link: bool,
     rotation: String,
 }
 
@@ -77,26 +77,14 @@ impl LineFields {
             across: x.shown(t.position.map(|p| p[0])),
             down: y.shown(t.position.map(|p| p[1])),
             zoom: [0, 1].map(|i| percent(t.zoom.map(|z| z[i]))),
-            unlinked: false,
+            link: t.zoom_link != Some(false),
             rotation: plain(t.rotation),
         }
     }
 
-    fn kept_link(self, was: &Self) -> Self {
-        Self {
-            unlinked: was.unlinked,
-            ..self
-        }
-    }
-
-    fn linked(&self) -> bool {
-        let read = |s: &String| kept_number(s, None, "zoom").ok();
-        !self.unlinked && read(&self.zoom[0]) == read(&self.zoom[1])
-    }
-
     fn zoom_row(&mut self, ui: &mut egui::Ui) -> bool {
         ui.label("Zoom");
-        let linked = self.linked();
+        let linked = self.link;
         let mut changed = false;
         ui.horizontal(|ui| {
             let axis = |ui: &mut egui::Ui, f: &mut Self, i: usize| {
@@ -111,11 +99,8 @@ impl LineFields {
             };
             changed |= axis(ui, self, 0);
             if link_toggle(ui, linked) {
-                self.unlinked = linked;
-                if !linked {
-                    self.zoom[1] = self.zoom[0].clone();
-                    changed = true;
-                }
+                self.link = !linked;
+                changed = true;
             }
             changed |= axis(ui, self, 1);
         });
@@ -229,8 +214,8 @@ impl TitleDialog {
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
         self.base = Some(t.clone());
-        self.line = LineFields::of(t, self.size).kept_link(&self.line);
-        self.upper = LineFields::of_upper(t, self.size).kept_link(&self.upper);
+        self.line = LineFields::of(t, self.size);
+        self.upper = LineFields::of_upper(t, self.size);
         self.loaded = true;
     }
 }
@@ -249,8 +234,8 @@ impl TitleDialog {
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
-        self.line = LineFields::of(t, self.size).kept_link(&self.line);
-        self.upper = LineFields::of_upper(t, self.size).kept_link(&self.upper);
+        self.line = LineFields::of(t, self.size);
+        self.upper = LineFields::of_upper(t, self.size);
         self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
@@ -327,6 +312,7 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
                 (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
             }
         },
+        zoom_link: (!scroll && !f.link).then_some(false),
         rotation: if scroll {
             None
         } else if f.rotation.trim().is_empty() {
@@ -372,6 +358,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         zoom: lower.zoom,
         zoom_keys: stored.zoom_keys.clone(),
         zoom_y: stored.zoom_y.clone(),
+        zoom_link: lower.zoom_link,
         rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
         upper: (lines && apart).then_some(upper),
@@ -423,12 +410,16 @@ fn line_changes(params: &mut Value, t: &Title, stored: &Title, part: TitlePart) 
     if t.zoom != stored.zoom {
         params["zoom"] = json!(t.scale());
     }
+    if t.zoom_link != stored.zoom_link {
+        params["zoom_link"] = json!(t.zoom_link != Some(false));
+    }
     if t.rotation != stored.rotation {
         params["rotation"] = json!(t.turn());
     }
     t.anchor != stored.anchor
         || t.position != stored.position
         || t.zoom != stored.zoom
+        || t.zoom_link != stored.zoom_link
         || t.rotation != stored.rotation
 }
 

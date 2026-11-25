@@ -4935,6 +4935,7 @@ fn mutate(
                         .as_ref()
                         .map(|z| ops::picture::zoom(&z.to_vec(), "title"))
                         .transpose()?,
+                    zoom_link: None,
                     rotation: *rotation,
                     look: None,
                     line: None,
@@ -4952,6 +4953,7 @@ fn mutate(
             style,
             position,
             zoom,
+            zoom_link,
             rotation,
             look,
             line,
@@ -4973,6 +4975,7 @@ fn mutate(
                     .as_ref()
                     .map(|z| ops::picture::zoom(&z.to_vec(), "title"))
                     .transpose()?,
+                zoom_link: *zoom_link,
                 rotation: *rotation,
                 look: look
                     .as_deref()

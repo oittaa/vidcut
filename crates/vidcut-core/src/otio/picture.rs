@@ -775,20 +775,6 @@ fn placed_pair(
     (keys, ys)
 }
 
-pub(super) fn zoom_linked(p: &Picture) -> bool {
-    match p.zoom_keys.is_empty() {
-        true => {
-            let [x, y] = p.scale();
-            x == y
-        }
-        false => p
-            .zoom_keys
-            .iter()
-            .zip(&p.zoom_y)
-            .all(|(k, y)| k.value == *y),
-    }
-}
-
 pub(super) fn file_curve(
     keys: &[Keyframe],
     y: Option<&[f64]>,
@@ -956,7 +942,14 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
     let pitch = p.pitch_keys.first().map_or(p.pitch(), |k| k.value);
     let yaw_keys = file_curve(&p.yaw_keys, None, source, |v| v, 1.0);
     let yaw = p.yaw_keys.first().map_or(p.yaw(), |k| k.value);
-    let linked = zoom_linked(p);
+    let linked = match p.zoom_keys.is_empty() {
+        true => zx == zy,
+        false => p
+            .zoom_keys
+            .iter()
+            .zip(&p.zoom_y)
+            .all(|(k, y)| k.value == *y),
+    };
     let transform: Vec<Value> = [
         double_frames(ZOOM_X, zx, 1.0, zoom, zoom_x),
         double_frames(ZOOM_Y, zy, 1.0, zoom, zoom_y),

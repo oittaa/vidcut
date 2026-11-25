@@ -2738,6 +2738,10 @@ pub enum Request {
         /// both ways, or `[x, y]` across and down. 1 for the usual size.
         #[serde(default)]
         zoom: Option<OneOrMany<f64>>,
+        /// The Zoom link: on or off. Off, Zoom X and Zoom Y change apart in
+        /// the Title section. It changes no zoom.
+        #[serde(default)]
+        zoom_link: Option<bool>,
         /// Degrees turned counterclockwise; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2745,8 +2749,8 @@ pub enum Request {
         /// opacity goes to the clip's Composite.
         #[serde(default)]
         look: Option<String>,
-        /// The line of a lower third that takes `anchor`, `position`, `zoom`
-        /// and `rotation`. The two lines then go apart. Without it, the two
+        /// The line of a lower third that takes `anchor`, `position`, `zoom`,
+        /// `zoom_link` and `rotation`. The two lines then go apart. Without it, the two
         /// lines take `position`, `zoom` and `rotation` together until they
         /// go apart, then the lower line alone. Not with `kind` or `look`.
         #[serde(default)]
