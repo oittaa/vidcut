@@ -1117,7 +1117,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Clips,
         Action::Delete,
-        &["Delete", "Backspace"],
+        &["Delete", "Backspace", "Shift+Backspace"],
         "Delete",
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
@@ -1477,7 +1477,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         App,
         Action::Undo,
-        &["Ctrl+Z"],
+        &["Ctrl+Z", "`"],
         "Undo",
         Some("While Ripple Delete Silence is open, it undoes a change to its stripes or settings."),
     ),
@@ -1636,7 +1636,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Color,
         Action::AddOutsideNode,
-        &["Alt+O"],
+        &[],
         "Add an outside node",
         Some("A corrector after the current node, on the inverse of its key."),
     ),

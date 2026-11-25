@@ -3893,7 +3893,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K, Alt+O and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -4120,7 +4120,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
-  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside.
+  - Add Outside has no key, as measured. The key list of the built-in set of Resolve Studio 21.2 also gives it no key. The manual gives Alt+O (p. 3417).
   - vidcut: the menu of a Key Mixer and its Add Node submenu are as measured.
   - vidcut: Alt+S and Shift+S do nothing on a Key Mixer. Thus its Add Node submenu shows no shortcuts.
   - Not measured: the shortcuts in the Add Node submenu of a Key Mixer.
@@ -5477,7 +5478,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Shift+F12† | Append |
 | Ctrl+\ or Ctrl+B | Split at playhead: the selected clips and subtitles there, or with nothing selected, every clip there |
 | Ctrl+T | Dissolve (§8.11) |
-| Delete / Backspace | Delete (ripples on Track 1); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
+| Delete / Backspace / Shift+Backspace | Delete (ripples on Track 1, p. 725); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
 | [ / ] | Previous / next volume keyframe of the selected clips (D85) |
 | Alt+click on the volume line | Add a volume keyframe (X73) |
 
@@ -5509,7 +5510,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Alt+wheel | Zoom the lower timeline |
 | Ctrl+wheel | Move along the timeline |
 | Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| Ctrl+Z or ` / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
 | Shift+Ctrl+N | New bin |
 | Alt+F / Shift+F / Esc† | Enhanced viewer / full screen / exit |
