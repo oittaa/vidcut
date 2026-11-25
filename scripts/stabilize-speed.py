@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""How fast Stabilize analyzes clips on this computer, and how steady the
-result is. For each clip and each mode it runs `picture stabilize` on the
-whole clip and prints the frames a second of the analysis, the zoom, and the
-motion and the shake of the picture before and after. Each timed run starts
+"""How fast Stabilize analyzes clips on this computer, what it costs, and how
+steady the result is. For each clip and each mode it runs `picture stabilize`
+on the whole clip and prints the frames a second of the analysis, its cost
+(wall time, CPU time, CPU use, peak memory and GPU use, from usage.py), the
+zoom, and the motion and the shake of the picture before and after. Each timed run starts
 with no analysis in the cache, so it reads and measures every frame again.
 
     python3 scripts/stabilize-speed.py [--modes M,M] [--runs N] [--seconds S] [--json FILE] CLIP...
@@ -21,12 +22,13 @@ import json
 import os
 import platform
 import shutil
-import statistics
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import usage
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "release"
@@ -68,9 +70,12 @@ def project(work, n, clip, env, seconds):
 
 def stabilize(path, mode, env, cache):
     shutil.rmtree(cache / "vidcut" / "analysis", ignore_errors=True)
-    start = time.perf_counter()
-    r = result(["--headless", "-p", path, "picture", "stabilize", "c1", "--mode", mode], env)
-    return time.perf_counter() - start, r
+    args = ["--headless", "-p", path, "picture", "stabilize", "c1", "--mode", mode, "--json"]
+    r, cost = usage.measured([str(VIDCUT), *args], env)
+    if r.returncode:
+        sys.exit(f"vidcut {' '.join(args)} failed:\n{r.stderr or r.stdout}")
+    out = json.loads(r.stdout)
+    return cost, out.get("result", out)
 
 
 def number(r, *keys):
@@ -105,11 +110,12 @@ def main():
             frames = stabilize(path, modes[0], env, cache)[1]["frames"]
             print(f"{clip.name}: {v['width']}x{v['height']}, {v['fps']} fps, {frames} frames")
             for mode in modes:
-                times, last = [], {}
+                costs, last = [], {}
                 for _ in range(a.runs):
-                    seconds, last = stabilize(path, mode, env, cache)
-                    times.append(seconds)
-                seconds = statistics.median(times)
+                    cost, last = stabilize(path, mode, env, cache)
+                    costs.append(cost)
+                cost = sorted(costs, key=lambda c: c["wall_s"])[len(costs) // 2]
+                seconds = cost["wall_s"]
                 row = {
                     "clip": clip.name,
                     "width": v["width"],
@@ -118,6 +124,7 @@ def main():
                     "mode": mode,
                     "seconds": round(seconds, 3),
                     "fps": round(frames / seconds, 2),
+                    "cost": cost,
                     "result": last,
                 }
                 rows.append(row)
@@ -127,6 +134,7 @@ def main():
                     f"  shake {number(last, 'before', 'shake'):.2f} -> {number(last, 'after', 'shake'):.2f}",
                     flush=True,
                 )
+                print(f"  {'':12} {usage.text(cost)}", flush=True)
     if a.json:
         a.json.write_text(json.dumps(rows, indent=1))
 
