@@ -1804,7 +1804,7 @@ fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let op = i32(merging.how.y);
     let fa = fore.a;
     let ba = back.a;
-    let keep = 1.0 - merging.slide.z;
+    let keep = select(1.0, 1.0 - merging.slide.z, mode == 0);
     switch mode {
         case 0: {
             return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, op);
@@ -1916,9 +1916,11 @@ fn fs_merge(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let back = textureLoad(blur_source, px, 0);
     let taken = merge_fore(in.position.xy);
-    let fa = taken.a * merging.slide.y;
+    let gain = merging.slide.y;
+    let fa = taken.a * gain;
     let additive = merging.slide.x;
-    let fore = vec4<f32>(taken.rgb * (additive + (1.0 - additive) * fa), fa);
+    let normal = vec4<f32>(taken.rgb * (additive + (1.0 - additive) * fa), fa);
+    let fore = select(taken * gain, normal, i32(merging.how.x) == 0);
     let merged = select(merge_mode(fore, back), taken, merging.how.w > 0.5);
     var amount = merging.slide.w;
     if merging.how.z > 0.5 {
