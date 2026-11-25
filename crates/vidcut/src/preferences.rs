@@ -421,6 +421,7 @@ pub fn keys_delete(name: &str, dry_run: bool) -> Result<Value> {
         .is_some_and(|s| key_sets::same(s, name));
     if was_in_force {
         p.key_set = None;
+        p.keys = Custom::new();
         if !dry_run {
             write(&p)?;
         }
@@ -439,8 +440,16 @@ pub fn keys_import(
     overwrite: bool,
     dry_run: bool,
 ) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let before = bindings_of(&p)?;
     let (set, path) = key_sets::import(&key_sets::dir(), from, name, overwrite, dry_run)?;
-    Ok(json!({ "imported": set.name, "path": path }))
+    p.keys = set.keys;
+    p.key_set = named_set(&set.name);
+    let mut out = keys_changed(&p, &before, dry_run)?;
+    out["imported"] = json!(set.name);
+    out["path"] = json!(path);
+    Ok(out)
 }
 
 fn write(p: &Preferences) -> Result<()> {

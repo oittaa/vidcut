@@ -180,6 +180,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("export.start", &["output"]),
     ("export.plan", &["output"]),
     ("render.add", &["output"]),
+    ("render.update", &["job", "output"]),
     ("render.start", &["jobs"]),
     ("render.remove", &["jobs"]),
     ("render.move", &["job", "to"]),
@@ -404,6 +405,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut viewer scopes --waveform true --vectorscope true\n  \
          vidcut viewer scopes --scale percent --video-levels true\n  \
          vidcut viewer scopes --waveform-mode rgb --waveform-blue false --parade-mode yrgb\n  \
+         vidcut viewer scopes --skin-tone true\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),

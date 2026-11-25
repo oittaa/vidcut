@@ -56,6 +56,7 @@ mod subtitles;
 mod sync_bin;
 mod sync_clips;
 mod theme;
+mod thumbnail_timeline;
 mod tiles;
 mod timeline;
 mod timelines;

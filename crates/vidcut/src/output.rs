@@ -281,7 +281,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 r.rev
             );
         }
-        "render.add" if r.dry_run => {
+        "render.add" | "render.update" if r.dry_run => {
             let files: Vec<&str> = (r.result["existing"].as_array().into_iter().flatten())
                 .filter_map(Value::as_str)
                 .collect();
@@ -305,7 +305,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
             };
             println!("ok {method}: removed {removed} (rev {})", r.rev);
         }
-        "render.move" | "render.rename" | "render.clear_status" | "render.ended" => {
+        "render.update"
+        | "render.move"
+        | "render.rename"
+        | "render.clear_status"
+        | "render.ended" => {
             println!("ok {method} (rev {})", r.rev);
         }
         "timeline.list" => {
@@ -674,7 +678,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             r.result["path"].as_str().unwrap_or_default()
         ),
         "keys.import" => println!(
-            "added key set {} ({})",
+            "added key set {} and put it in force ({})",
             r.result["imported"].as_str().unwrap_or_default(),
             r.result["path"].as_str().unwrap_or_default()
         ),
