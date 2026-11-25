@@ -3092,6 +3092,15 @@ The sums use these names:
 The controls of the sums (pp. 2213–2217):
 
 - Apply Mode: Normal. It is one of 27 modes. The manual lists 26 of them. It does not list Hard Mix, which is in the menu (pp. 2213–2215).
+  - The menu has 7 groups, with a line between two groups:
+    - Normal, Screen and Dissolve.
+    - Darken, Multiply, Color Burn, Linear Burn and Darker Color.
+    - Lighten, Color Dodge, Linear Dodge and Lighter Color.
+    - Overlay, Soft Light, Hard Light, Vivid Light, Linear Light, Pin Light and Hard Mix.
+    - Difference and Exclusion.
+    - Hue, Saturation, Color and Luminosity.
+    - Hypotenuse and Geometric.
+  - vidcut: the Apply Mode of a tracker's Merge shows the same groups.
 - Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
 - Blend mixes the background with the result (p. 2217).
@@ -5371,7 +5380,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With a custom size, the picture fits into the rounded size with one draw.
     - Measured in Resolve Studio 21.2 with H.264 and H.265 on the CPU: each odd side goes up by one. This is so on a timeline and as a custom size.
     - 1279 x 719 gives 1280 x 720, and 853 x 481 gives 854 x 482. 1001 x 1001 gives 1002 x 1002, and 257 x 257 gives 258 x 258.
-    - Measured: a timeline of 1279 x 719 leaves the bottom row and the left and right columns part dark. As a custom size, the edges are full.
+    - Measured with 7 sizes in H.264 and H.265: the frame of an odd timeline fits into the even size with one factor. The frame stays centered.
+    - Measured: the factor is the smaller of the two ratios of the sides, even size to timeline size. This is so at Fill and at Fit.
+    - Measured: with an odd width only, or an odd height only, the factor is 1. A bar of half a pixel shows on each odd side.
+    - Measured: with both sides odd, the width fills. Bars show at the top and the bottom: 0.22 of a pixel at 1279 x 719, and 0.1 at 2001 x 1601.
+    - Measured: on a 1280 x 720 timeline, a custom size of 1279 x 720, 1280 x 719 or 1279 x 719 gives a full picture. No bar shows.
+    - Measured: an EXR keeps the odd size. The picture fits into that size, centered.
+    - One earlier run, with the barcode clip at 1279 x 719, showed a part-dark bottom row and no top bar. Its cause is not known.
     - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
@@ -8216,8 +8231,8 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - A Zoom that leaves bars of 0.18 and 0.10125: the distance is 0.2065, and the bars show.
   - Rotation 0.016: no bar. Rotation 0.02: the bars show. The rule gives the change at 0.0179. That value was not measured.
   - A part of the picture past the frame does not count. A left bar of 0.15 on an enlarged picture shows no bar.
+  - The rounding of an odd frame size for an encoder does not use the limit. At 2001 x 1601 in H.264 and H.265, bars of 0.1 show.
 - These cases were not measured:
   - Softness: vidcut does not use the limit on a picture with Softness.
   - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
   - A compound clip: vidcut uses the rule on each level by itself.
-  - The rounding of an odd frame size for an encoder: vidcut does not use the limit there.
