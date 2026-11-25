@@ -216,6 +216,8 @@ flowchart TD
   - `corners` takes the best corner of each cell of a `GRID`. `follow` follows each corner to the next frame with the Lucas–Kanade method, on the pyramid.
     - On the CPU, each cell (`best`) and each corner (`followed`) is one slice of the pool (`pool::run`).
     - The results keep the order of the cells. Thus the number of threads does not change the result.
+    - On the CPU, a `vidcut-pyramid` thread makes the gray picture and the pyramid of each new frame. Meanwhile, the measure thread measures and fits the pair before it.
+    - Thus the step of a pair comes one frame later. After the last frame, the last pair is measured (`Measuring::last`).
   - Each corner is also followed back. A corner that does not come back within `RETURN` is dropped.
   - `fitted` fits the motion of the mode to the corners with RANSAC (`TRIES`, `INLIER`). Then it fits that motion again to the corners that agree with it, by least squares.
     - Translation fits a move. Similarity fits a move, a turn and a zoom. Perspective fits a homography.
