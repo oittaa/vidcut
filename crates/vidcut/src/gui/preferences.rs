@@ -55,6 +55,7 @@ pub(super) struct PreferencesUi {
     pub(super) keys_open: bool,
     keys_window: super::window::Tool,
     pub(super) key_sets: super::key_sets::KeySetsUi,
+    keyboard: super::keyboard::KeyboardUi,
 }
 
 impl PreferencesUi {
@@ -266,6 +267,8 @@ fn without_key(bindings: &Bindings, action: Action, slot: usize) -> Option<(&'st
 fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) {
     ui.spacing_mut().item_spacing.y = 8.0;
     super::key_sets::bar(ui, &mut state.key_sets, bindings);
+    state.keyboard.show(ui, bindings);
+    let picked = state.keyboard.combo();
     ui.add(
         egui::TextEdit::singleline(&mut state.key_search)
             .hint_text("Find an Action or a Key")
@@ -278,6 +281,7 @@ fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) 
                 .iter()
                 .filter(|s| s.group == group && matches!(s.keys, Keys::Own(..)))
                 .filter(|s| super::help::matches(s, &query, bindings))
+                .filter(|s| picked.is_none_or(|c| bindings.combos(s).contains(&c)))
                 .collect();
             if rows.is_empty() {
                 continue;

@@ -18,7 +18,6 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **Key sets and panels:**
 
-- The on-screen keyboard. A click on a key and its modifiers shows the commands of that key (p. 122).
 - Keys per panel. One key does different things in different panels (pp. 123–124).
   - Only the Transcription window has its own level.
 

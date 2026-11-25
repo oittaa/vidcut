@@ -44,6 +44,14 @@ impl Group {
             Group::App => "Project and app",
         }
     }
+
+    pub fn level(self) -> Option<Panel> {
+        match self {
+            Group::Nodes => Some(Panel::Effects),
+            Group::Color => Some(Panel::Color),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,6 +60,33 @@ pub enum Panel {
     Transcription,
     Effects,
     Color,
+}
+
+impl Panel {
+    pub const ALL: [Panel; 4] = [
+        Panel::App,
+        Panel::Transcription,
+        Panel::Effects,
+        Panel::Color,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Panel::App => "app",
+            Panel::Transcription => "transcription",
+            Panel::Effects => "effects",
+            Panel::Color => "color",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Panel::App => "Application",
+            Panel::Transcription => "Transcription",
+            Panel::Effects => "Effects Page",
+            Panel::Color => "Color Page",
+        }
+    }
 }
 
 macro_rules! actions {
@@ -663,6 +698,13 @@ impl Bindings {
         match self.first(action) {
             Some(key) => format!("{label}  ({key})"),
             None => label.to_string(),
+        }
+    }
+
+    pub fn combos(&self, s: &Shortcut) -> Vec<Combo> {
+        match s.keys {
+            Keys::Own(action, _) | Keys::Same(action) => self.keys(action).to_vec(),
+            Keys::Hold(..) | Keys::Pointer(_) => Vec::new(),
         }
     }
 

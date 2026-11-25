@@ -4136,9 +4136,16 @@ pub enum Request {
     PreferencesReset {},
     /// The keyboard shortcuts in force, one action each, with a few plain
     /// words where the action's name doesn't say what it does (spec §11).
-    /// Ctrl and Alt are Cmd and Option on macOS.
+    /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
+    /// key of an action works: `app`, `transcription`, `effects` or
+    /// `color`.
     #[serde(rename = "keys.list")]
-    KeysList {},
+    KeysList {
+        /// Only the actions of this key, like `Ctrl+B`, at each level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<String>")]
+        key: Option<crate::shortcuts::Combo>,
+    },
     /// Give an action other keys in place of the ones it has (spec §11). A
     /// key belongs to one action: a key that another action has is refused,
     /// and the refusal names that action. A running GUI follows at once.
@@ -7993,7 +8000,7 @@ impl Request {
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
-                | Self::KeysList {}
+                | Self::KeysList { .. }
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
                 | Self::KeysSets {}
@@ -8094,7 +8101,7 @@ impl Request {
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
-                    | Self::KeysList {}
+                    | Self::KeysList { .. }
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
                     | Self::KeysSets {}

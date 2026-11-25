@@ -5143,6 +5143,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
+- The on-screen keyboard is under the dropdown of the key sets (p. 122):
+  - A click on a modifier key turns it on or off. A click on another key selects it.
+  - The list below then shows only the actions of that key with these modifiers, at each level. `keys.list` with `key` does the same.
+  - A key that has an action with the modifiers that are on has a lighter color.
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
   - The keys in force come from one set. The dropdown at the top of the window selects the set, and `keys.use` does the same.

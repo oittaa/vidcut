@@ -279,6 +279,10 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
             .collect::<Vec<_>>()
             .join("+")
     };
+    let level = match s.keys {
+        Keys::Own(a, _) | Keys::Same(a) => Some(s.group.level().unwrap_or(a.panel()).name()),
+        Keys::Hold(..) | Keys::Pointer(_) => None,
+    };
     let (action, default_keys, custom, follows) = match s.keys {
         Keys::Own(a, _) => {
             let defaults: Vec<String> = b.set_keys(a).iter().map(Combo::shown).collect();
@@ -291,6 +295,7 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
     json!({
         "group": s.group,
         "group_title": s.group.title(),
+        "level": level,
         "title": s.title,
         "action": action,
         "keys": b.row(s).into_iter().map(shown).collect::<Vec<_>>(),
@@ -305,9 +310,13 @@ fn in_force(b: &Bindings) -> Value {
     json!({ "set": b.set_name().unwrap_or(OWN), "changed": b.any_custom() })
 }
 
-pub fn keys_list() -> Result<Value> {
+pub fn keys_list(key: Option<Combo>) -> Result<Value> {
     let b = bindings_of(&read()?)?;
-    let rows: Vec<Value> = SHORTCUTS.iter().map(|s| key_row(&b, s)).collect();
+    let rows: Vec<Value> = SHORTCUTS
+        .iter()
+        .filter(|s| key.is_none_or(|k| b.combos(s).contains(&k)))
+        .map(|s| key_row(&b, s))
+        .collect();
     let mut out = in_force(&b);
     out["shortcuts"] = json!(rows);
     Ok(out)

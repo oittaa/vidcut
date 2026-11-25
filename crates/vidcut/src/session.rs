@@ -262,7 +262,7 @@ pub fn run_with(
             envelope.dry_run,
             |_| None,
         )?),
-        Request::KeysList {} => answer(crate::preferences::keys_list()?),
+        Request::KeysList { key } => answer(crate::preferences::keys_list(*key)?),
         Request::KeysSet { action, keys } => answer(crate::preferences::keys_set(
             *action,
             keys,

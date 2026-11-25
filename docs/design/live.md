@@ -910,6 +910,7 @@ The Keyboard Customization window:
 - `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
 - `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
 - The window sends `keys.set` and `keys.reset`, as the CLI does.
+- `KeyboardUi` draws the on-screen keyboard under the set row. Its `Combo` filters the rows with `Bindings::combos`.
 - `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame
