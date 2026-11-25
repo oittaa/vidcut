@@ -509,7 +509,9 @@ Voice Isolation:
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
   - On the page, `Workspace::mark` and `Workspace::clear_marks` call `export_mark` and `export_clear_marks`. Thus the keys and the Mark In, Mark Out and Clear buttons of the viewer follow the rules of the page.
   - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
-  - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is a tile of the media pool (`pool_picture`). Why: the tiles already hold the source frames, and a grade of each clip needs a draw of its own.
+  - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is the clip alone with its grade (`render::graded_frame`).
+  - The tile workers make the pictures (`Tiles::clip_job`). The key of a picture holds a digest of the clip, its media and the project settings. Why: a change of the grade gives a new key, and the old picture leaves the tile memory as other tiles do.
+  - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
 
 The render queue:
 

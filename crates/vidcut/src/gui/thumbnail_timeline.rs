@@ -1,6 +1,10 @@
+use std::cell::OnceCell;
+use std::sync::Arc;
+
 use eframe::egui::{self, Rect, RichText, Sense, pos2, vec2};
 use serde_json::json;
-use vidcut_core::model::{Project, RenderRange, TrackKind};
+use vidcut_core::model::{Clip, Media, Project, RenderRange, TrackKind};
+use vidcut_core::render::VideoPiece;
 use vidcut_core::request::ClipLabel;
 use vidcut_core::time::format_timecode;
 
@@ -13,16 +17,33 @@ pub(super) const CLIPS_HEIGHT: f32 = 118.0;
 const PICTURE: egui::Vec2 = vec2(96.0, 54.0);
 const CELL_GAP: f32 = 8.0;
 
+pub(super) struct Strip {
+    project: Arc<Project>,
+    thumbs: Vec<Thumb>,
+}
+
 struct Thumb {
     number: usize,
     track: String,
+    clip: String,
     start: i64,
     end: i64,
     media: String,
-    frame: i64,
+    look: String,
+    piece: OnceCell<Option<VideoPiece>>,
     timecode: String,
     name: String,
     codec: Option<String>,
+}
+
+fn look(p: &Project, settings: &[u8], c: &Clip, m: Option<&Media>) -> String {
+    let mut bytes = settings.to_vec();
+    bytes.extend(serde_json::to_vec(&(c, m)).unwrap_or_default());
+    if let Some(m) = m {
+        let lut = m.input_lut_in(&p.settings);
+        bytes.extend(crate::thumbcache::look(m, lut).as_bytes());
+    }
+    vidcut_core::fingerprint::short_digest(&bytes)
 }
 
 fn thumbs(p: &Project) -> Vec<Thumb> {
@@ -32,6 +53,7 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
         .collect();
     clips.sort_by_key(|(t, c)| (c.start, t.number()));
     let source_rate = p.settings.fps;
+    let settings = serde_json::to_vec(&p.settings).unwrap_or_default();
     (clips.into_iter().enumerate())
         .map(|(i, (t, c))| {
             let media = p.media(&c.media);
@@ -46,10 +68,12 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
             Thumb {
                 number: i + 1,
                 track: t.id.clone(),
+                clip: c.id.clone(),
                 start: c.start,
                 end: c.end(),
                 media: c.media.clone(),
-                frame: tiles::tile_frame(c.source_in, &c.pace(), 0.0, c.duration),
+                look: look(p, &settings, c, media),
+                piece: OnceCell::new(),
                 timecode,
                 name: p.clip_name(c).unwrap_or_default(),
                 codec: media
@@ -62,10 +86,17 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
 
 impl Workspace {
     pub(super) fn thumbnail_timeline(&mut self, ui: &mut egui::Ui) {
-        let Some(p) = self.project() else {
+        let Some(project) = self.project_shared() else {
             return;
         };
-        let list = thumbs(p);
+        let strip = match self.export.strip.take() {
+            Some(s) if Arc::ptr_eq(&s.project, &project) => s,
+            _ => Strip {
+                thumbs: thumbs(&project),
+                project,
+            },
+        };
+        let (p, list) = (&*strip.project, &strip.thumbs);
         let at = self.snap.timeline.position;
         let current = (list.iter())
             .filter(|t| t.start <= at && at < t.end)
@@ -81,7 +112,7 @@ impl Workspace {
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = CELL_GAP;
-                    for t in &list {
+                    for t in list {
                         let cell = ui.vertical(|ui| {
                             ui.set_width(PICTURE.x);
                             ui.horizontal(|ui| {
@@ -95,9 +126,9 @@ impl Workspace {
                             let (rect, picture) = ui.allocate_exact_size(PICTURE, Sense::click());
                             let painter = ui.painter_at(rect);
                             painter.rect_filled(rect, 2.0, colors.panel_dark);
-                            if let Some(m) = p.media(&t.media)
-                                && let Some(texture) =
-                                    self.pool_picture(ui.ctx(), m, t.frame, PICTURE.y, 0)
+                            if ui.is_rect_visible(rect)
+                                && let Some(m) = p.media(&t.media)
+                                && let Some(texture) = self.clip_picture(ui.ctx(), p, m, t)
                             {
                                 let aspect =
                                     tiles::media_aspect(m).unwrap_or(PICTURE.x / PICTURE.y);
@@ -145,6 +176,7 @@ impl Workspace {
                     }
                 });
             });
+        self.export.strip = Some(strip);
         if cycle {
             self.export.clip_label = match label {
                 ClipLabel::Codec => ClipLabel::Name,
@@ -160,6 +192,30 @@ impl Workspace {
             Some((Mark::Clip, a, b)) => self.render_clip(a, b),
             None => {}
         }
+    }
+
+    fn clip_picture(
+        &self,
+        ctx: &egui::Context,
+        p: &Project,
+        m: &Media,
+        t: &Thumb,
+    ) -> Option<egui::TextureId> {
+        let kept = self.tiles.as_ref()?;
+        let aspect = tiles::media_aspect(m)?;
+        let height = tiles::tile_height(PICTURE.y * ctx.pixels_per_point());
+        let width = (height as f32 * aspect).round().max(1.0) as u32;
+        let key = tiles::TileKey {
+            media: format!("{}@{}", t.clip, t.look),
+            frame: t.start,
+            height,
+        };
+        kept.want(&key, || {
+            let piece = t
+                .piece
+                .get_or_init(|| vidcut_core::render::graded_frame(p, &t.clip, t.start).ok());
+            Some(kept.clip_job(p, m, piece.clone()?, &key, width))
+        })
     }
 
     fn render_clip(&self, a: i64, b: i64) {

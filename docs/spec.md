@@ -5154,7 +5154,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Thumbnail timeline is over the timeline of the page. Clips in the toolbar of the timeline hides or shows it. `gui.page` with `clips` does the same.
   - It has a picture of each clip of the video tracks that are on, in the order of their first frames. Of two clips that start together, the clip of the lower track goes first.
   - Above each picture are the number of the clip, the source timecode of its first frame and its track.
-  - The picture is the first frame of the source of the clip, with no grade. A clip with no media has no picture.
+  - The picture is the first frame of the clip, with the grade of the clip. The clip's transform and the timeline grade are not in it.
+  - A change of the grade makes the picture again. A clip with no media has no picture.
   - Under each picture is the codec of the clip, or its name. A double-click on that text changes it for all clips. `clip_label` of `gui.page` sets it.
   - A clip with no media shows its name in both cases.
   - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.

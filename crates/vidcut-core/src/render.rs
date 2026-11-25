@@ -4341,12 +4341,30 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
 }
 
 pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
+    frame_alone(p, clip, at, |_| None)
+}
+
+pub fn graded_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
+    frame_alone(p, clip, at, |picture| {
+        Some(Picture {
+            grade: Some(picture?.grade?),
+            ..Picture::default()
+        })
+    })
+}
+
+fn frame_alone(
+    p: &Project,
+    clip: &str,
+    at: i64,
+    kept: fn(Option<Picture>) -> Option<Picture>,
+) -> Result<VideoPiece> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
         t.clips.retain(|x| x.id == clip);
         t.transitions.clear();
         for x in &mut t.clips {
-            x.picture = None;
+            x.picture = kept(x.picture.take());
         }
     }
     flatten(&alone, at, at + 1)?
