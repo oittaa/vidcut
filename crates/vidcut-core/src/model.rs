@@ -3635,20 +3635,21 @@ impl Title {
         ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 
-    pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
-        match self.kind {
-            TitleKind::Scroll => {
-                (heights[0] + heights[1]) * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
-            }
-            TitleKind::Text | TitleKind::LowerThird => {
-                let size = (text / zoom / pixel).round();
-                let line: f64 = heights
-                    .iter()
-                    .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
-                    .sum();
-                line.ceil() * zoom * pixel
-            }
-        }
+    pub fn line_gap(heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
+        let size = (text / zoom / pixel).round();
+        let line: f64 = heights
+            .iter()
+            .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
+            .sum();
+        line.ceil() * zoom * pixel
+    }
+
+    pub fn scroll_em(text: f64, pixel: f64) -> u32 {
+        (text / pixel * Self::SCROLL_LINE).round().max(1.0) as u32
+    }
+
+    pub fn scroll_gap(screen: u32, pixel: f64) -> f64 {
+        (f64::from(screen) + Self::SCROLL_LEAD) * pixel
     }
 
     pub fn ink(&self) -> [u8; 3] {
