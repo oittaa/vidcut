@@ -33,5 +33,4 @@ The Text+ tool and the Merge tool of the compositions get the rest of their cont
 **To measure in Resolve:**
 
 - Dissolve at a Blend below 1.
-- Burn In set under Over, with another Operator of Normal. The row does not show then. vidcut keeps its effect.
 - Invert Transform, also with a flip.
