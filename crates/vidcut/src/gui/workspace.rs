@@ -1181,6 +1181,7 @@ impl Workspace {
                     ui.menu_button("History", |ui| self.history_menu(ui));
                 });
                 ui.separator();
+                let export = self.effects_page.page == Page::Export;
                 let clips = self.snap.selection.clips.clone();
                 let pasted = !clips.is_empty() && self.snap.copied_clip.is_some();
                 let paste = egui::Button::new("Paste Attributes…").shortcut_text(
