@@ -277,6 +277,18 @@ fn listed(keys: &str) -> impl Iterator<Item = &str> {
     keys.split('|').map(str::trim).filter(|k| !k.is_empty())
 }
 
+fn combos(id: &str, keys: &str, unusable: &mut Vec<String>) -> Vec<Combo> {
+    let mut combos = Vec::new();
+    for key in listed(keys) {
+        match combo(key) {
+            Some(c) if !combos.contains(&c) => combos.push(c),
+            Some(_) => {}
+            None => unusable.push(format!("{id} := {key}")),
+        }
+    }
+    combos
+}
+
 pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> {
     let mut set = None;
     let mut commands: Vec<(&str, Vec<Combo>)> = Vec::new();
@@ -298,14 +310,7 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
                     }
                     continue;
                 }
-                let mut combos = Vec::new();
-                for key in listed(keys) {
-                    match combo(key) {
-                        Some(c) if !combos.contains(&c) => combos.push(c),
-                        Some(_) => {}
-                        None => read.unusable.push(format!("{id} := {key}")),
-                    }
-                }
+                let combos = combos(id, keys, &mut read.unusable);
                 commands.retain(|(known, _)| *known != id);
                 commands.push((id, combos));
             }
@@ -313,10 +318,7 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
                 let action = Action::named(name)
                     .filter(|a| !mapped(*a))
                     .ok_or_else(|| at(format!("{name:?} is not an action without a command")))?;
-                let combos = listed(keys)
-                    .map(str::parse)
-                    .collect::<Result<Vec<Combo>>>()
-                    .map_err(|e| at(e.message))?;
+                let combos = combos(&format!("{OWN}{name}"), keys, &mut read.unusable);
                 own.insert(action, combos);
             }
         }
