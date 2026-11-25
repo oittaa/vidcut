@@ -658,8 +658,10 @@ Writing:
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
   - `position_keys` holds X, and `position_y` holds Y, one number for each keyframe. Zoom and the anchor point do the same.
   - A handle `value` moves X. Y keeps the handle `frames`, with a value offset of 0 (`value_paired`).
+  - The keyframes of a compound clip count the frames of the compound clip.
+  - An import at another rate moves the keyframes to the frames of the project (`at_project_rate`, `Picture::scale_times`), as it moves the volume keyframes.
 - `ops::picture` holds the edits:
-  - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
+  - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It checks each keyframe as it checks the plain value.
   - `ops::picture::has_picture` tells which clips take a picture: not sound or generators that do not draw.
   - `ops::picture::takes_effects` tells which of them take effects: not generators and not titles ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
@@ -870,6 +872,15 @@ The metadata:
 - Other editors read the `Resolve_OTIO` metadata.
 - An import extracts `ClipRetime` on non-block video clips (`picture::take_retime` into `ImportedClip`), and reads placed effects as `Picture` (`picture::take`) by the shape of the probed source.
   - This occurs when the clip has no `vidcut` picture, and the parameters and keys fit the model.
+  - A Resolve effect is an OTIO `Effect.1` with the `effect_name` `Resolve Effect`. Its `Resolve_OTIO` metadata holds `Effect Name`, `Name`, `Type`, `Enabled`, `Display Type` and `Parameters`.
+  - A parameter has `Parameter ID`, `Parameter Value`, `Default Parameter Value` and `Variant Type`. It can have `minValue`, `maxValue` and `Key Frames`.
+  - `Key Frames` maps each keyframe time, a frame count as a string, to its `Value` and `Variant Type`, and optional `InBez` and `OutBez`.
+  - `effects::read` keeps an effect that is on when a parameter or a keyframe is off its default (`in_use`). It keeps a Dynamic Zoom that is on.
+  - `picture::read_keys` reads the keys of one parameter. When the X and the Y of the zoom or of the position both have keys, the keys must be on the same frames (`merge`).
+  - `picture::read_point_keys` reads the anchor point, a `POINTF`. Keys with Bezier handles do not fit.
+  - The center and the scale of Dynamic Zoom need exactly two keys (`ends`). The earlier key is the start box.
+  - The export writes the keys of each keyed value in the `Key Frames` of its parameter, and the anchor point keys without handles.
+  - `Effects::written` moves the times of the kept effects by `Effects::from` less the first source frame of the written item.
 - The notes of an export name a clip that moved past the reach of these parameters (`otio::out_of_reach`).
 
 Import:
@@ -988,10 +999,11 @@ The file:
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services, viewer and keys ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
-- `Preferences.keys` holds the keys of each `Action` that the user changed.
-  - An action that is not in the section has its default keys.
+- `Preferences.keys` holds the keys in force of each `Action` whose keys are different from the table.
+  - An action that is not in the section has its default keys, less the keys that an action of the section has. Why: a new default key of a later version does not make the file fail (spec §11).
   - An action with an empty list has no key.
-  - A file that gives one key to two actions fails to load.
+  - A file that gives one key to two actions of the section fails to load.
+- `Preferences.key_set` names the key set that the keys in force come from. It is left out for vidcut's own set (`key_sets::OWN`).
 - No key of a service is ever in the file.
 
 Requests:
@@ -1002,6 +1014,14 @@ Requests:
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
+- The key set requests are projectless too:
+  - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
+  - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
+  - A set file holds one table, `keys`, in the form of `Preferences.keys`. `keys.export` writes this form, and `keys.import` reads it.
+  - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
+  - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
+  - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.
+  - Why a copy in the preferences: the keys in force do not depend on a file that the user can delete or edit.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).

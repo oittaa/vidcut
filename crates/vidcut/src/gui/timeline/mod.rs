@@ -420,6 +420,7 @@ pub struct SpeedDialog {
     pub freeze: bool,
     pub ripple: bool,
     pub retime: ClipRetime,
+    pub stretch: bool,
 }
 
 impl SpeedDialog {
@@ -437,6 +438,7 @@ impl SpeedDialog {
             freeze: speed == 0.0,
             ripple,
             retime: ClipRetime::Project,
+            stretch: false,
         }
     }
 
@@ -455,7 +457,10 @@ impl SpeedDialog {
     }
 
     pub fn params(&self, clips: &[String]) -> Value {
-        json!({ "clips": clips, "speed": self.speed(), "ripple": self.ripple })
+        let keyframes = if self.stretch { "stretch" } else { "maintain" };
+        json!({
+            "clips": clips, "speed": self.speed(), "ripple": self.ripple, "keyframes": keyframes,
+        })
     }
 }
 
@@ -2905,22 +2910,21 @@ impl Workspace {
             return;
         };
         let at = self.drawn_playhead();
-        let mut times: Vec<i64> = self
-            .snap
-            .selection
-            .clips
-            .iter()
-            .filter_map(|id| p.clip(id))
-            .flat_map(|c| {
-                let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
-                keys.iter()
-                    .map(|k| c.key_time(k.frame).round() as i64)
-                    .filter(|t| (c.start..c.end()).contains(t))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        times.sort_unstable();
-        times.dedup();
+        let times = self.grade_key_times().unwrap_or_else(|| {
+            let mut times: Vec<i64> = (self.snap.selection.clips.iter())
+                .filter_map(|id| p.clip(id))
+                .flat_map(|c| {
+                    let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+                    keys.iter()
+                        .map(|k| c.key_time(k.frame).round() as i64)
+                        .filter(|t| (c.start..c.end()).contains(t))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            times.sort_unstable();
+            times.dedup();
+            times
+        });
         let to = if dir < 0 {
             times.iter().rev().find(|&&t| t < at)
         } else {
@@ -3980,6 +3984,14 @@ impl Workspace {
                         });
                     });
                 }
+                super::dialog::row(ui, "Keyframes", |ui| {
+                    ui.add_enabled_ui(!d.freeze, |ui| {
+                        super::dialog::switch(ui, |ui| {
+                            ui.selectable_value(&mut d.stretch, false, "Maintain Timing");
+                            ui.selectable_value(&mut d.stretch, true, "Stretch to Fit");
+                        });
+                    });
+                });
                 super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
             super::dialog::footer(ui, |ui| {

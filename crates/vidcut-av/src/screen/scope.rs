@@ -29,7 +29,7 @@ const HISTOGRAM_SHARE: u64 = 64;
 
 const PARAMS: usize = 1600;
 
-const SKIN_DEGREES: f64 = 123.0;
+const SKIN_DEGREES: f64 = 123.14;
 
 const PLOT_TOP: f64 = 0.04;
 
