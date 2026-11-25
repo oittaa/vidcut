@@ -27,7 +27,8 @@
   - Measure the line distance at a size that is not a multiple of 3. vidcut rounds 4/3 of the size to the nearest whole pixel.
   - vidcut draws the exact size of a Scroll and writes the nearest whole number to OTIO. Measure how the Inspector rounds a typed fraction.
 - **Faces of a variable font:** vidcut does not find a face by its own family name, for example "Bahnschrift Light" or "Bahnschrift SemiCondensed".
-  - Windows lists these faces as families, and Resolve draws them.
+  - Windows lists these faces as families. Resolve lists 12 families of Bahnschrift, one for each named face, and draws them.
+  - Resolve's file writes the family of the face, with a `font-weight` of 200 for Light and 504 for SemiBold.
   - vidcut draws another font for each of these names. At size 96, the ink of "Bahnschrift HHH" is then 685 pixels wide in each face.
 - **Fallback font:** a letter that the font does not have comes from another font.
   - In Arial at size 192, `Ⅷ` moves the words down by 35 pixels in vidcut and 9 pixels in Resolve. `Ⓐ` moves them 33 pixels in vidcut and 0 in Resolve.

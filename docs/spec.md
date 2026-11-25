@@ -6462,6 +6462,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Resolve's OTIO export leaves that tracking out, and its reader then draws none. Thus a lower third from a file has only the tracking of the file.
     - A font gives three heights for a line: ascent, descent and gap (measured in Resolve Studio 21.1.2 on Windows with 14 fonts).
       - If the font sets `USE_TYPO_METRICS` in its `OS/2` table, these are the three typographic values of that table.
+        - Bahnschrift sets it. Two lines of a Text title at 96 are 116 pixels apart, as these values give (measured in Resolve Studio 21.2).
       - Otherwise, the ascent and the descent are `usWinAscent` and `usWinDescent`. The gap is what the `hhea` line height has more than these two, or 0.
     - The height of a line is the sum of the three. Each one goes down to a step of 1/64 of a pixel. The sum goes up to a whole pixel.
     - That step is measured with 8 fonts at 24 sizes where it gives a different height from the exact sum.
