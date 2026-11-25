@@ -3880,6 +3880,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Alt+S at node 1 then puts the new node on the older link, between node 1 and node 2. Node 1 still feeds the old node 4.
     - The old node 4 becomes 2, and the new node is 3. The old nodes 2 and 3 become 4 and 5.
     - In one case, a node with no link from the source came last.
+    - Nodes 1 to 4 are in series. Alt+P at node 2 gives the numbers of Alt+L, with a Parallel Mixer 4.
+    - Alt+K at node 6, the last node, then adds node 7 between node 6 and the Node Tree output.
+    - Alt+K with node 2 selected then adds node 8 between node 7 and the output. Thus Alt+K does not use the selected node.
+  - Measured: that node 8 was drawn in a free place under node 1. One case does not give the rule for the place.
+  - vidcut: Alt+P and Alt+K give the measured numbers and links.
+  - vidcut: Alt+K draws the new node to the right of the last node. Where Resolve draws it is open ([todo](todo/color-page.md)).
   - vidcut: the same rule. Each link holds the order in which it was made (`made`).
   - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
   - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
@@ -3902,6 +3908,14 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: this occurs with a Parallel Mixer and a Layer Mixer, with two inputs, and with three inputs of which one is empty.
   - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
   - Measured: after a delete, the last corrector is the current node.
+  - Measured: in nodes 1 to 4 in series, the delete of node 2 gives nodes 1, 2 (old 3) and 3 (old 4).
+    - Node 1 feeds the new node 2. Node 3 is then the current node.
+  - Measured: Alt+P at node 2, then the delete of the new node 3, removes the Parallel Mixer too.
+    - Nodes 1 to 4 are in series again. Node 4 is then the current node.
+  - Measured: Alt+P at node 2, then the delete of the Parallel Mixer, gives nodes 1, 2, 3, 4 (old 5) and 5 (old 6). Node 3 is the parallel node.
+    - Node 1 still feeds nodes 2 and 3. Nothing takes the pictures of nodes 2 and 3.
+    - Node 4 has no input link. It feeds node 5, and node 5 feeds the output.
+    - Node 3, which was the current node, stays the current node.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
@@ -3910,6 +3924,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
+  - vidcut: the three measured deletes give the same numbers, links and current node.
 - **The Nodes submenu** (pp. 3392, 3395):
   - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
   - Measured in Resolve Studio 21.2: the submenu has six groups of items:
