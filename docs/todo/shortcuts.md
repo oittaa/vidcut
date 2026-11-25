@@ -4,11 +4,13 @@
 
 The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
 
-**Key files to measure:**
+**A press of a key that two actions have:**
 
-- Case 27 of shortcuts-resolve-runs.md: how Resolve reads a key file that vidcut writes.
-- Does Resolve read Esc and Ins, the comment lines of vidcut, and a key that another command has?
-- Which import line does Resolve write for a preset that it saved from another built-in preset?
+- An imported key file can give one key to two actions of one level. Both keep it ([spec §11](../spec.md#11-keyboard-shortcuts)).
+- A press does the first of these actions in the table. The manual tells of a warning dialog instead (p. 126).
+- To do: the action of such a press, after case 28 of shortcuts-resolve-runs.md.
+- The file of the Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point. The built-in set gives V only to Smart Insert.
+- To do: make the built-in set follow case 28 g.
 
 **Meta in the sets of other editors:**
 

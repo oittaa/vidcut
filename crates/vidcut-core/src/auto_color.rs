@@ -14,6 +14,23 @@ pub struct Balance {
     pub gain: [f64; 4],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Neural {
+    pub exposure: [f64; 6],
+    pub white: [f64; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AutoResult {
+    Legacy(Balance),
+    Neural(Neural),
+}
+
+pub fn white_scale(w: [f64; 3]) -> [f64; 3] {
+    let mean = (w[0] + w[1] + w[2]) / 3.0;
+    w.map(|c| if c > 0.0 { mean / c } else { 1.0 })
+}
+
 pub fn balance(pixels: impl IntoIterator<Item = [f32; 3]>) -> Balance {
     legacy(&Levels::of(pixels))
 }

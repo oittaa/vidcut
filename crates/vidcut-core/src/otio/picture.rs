@@ -707,7 +707,7 @@ fn read_point_keys(p: &Value, origin: i64) -> Option<(Vec<Keyframe>, Vec<f64>)> 
     Some(out.into_iter().unzip())
 }
 
-fn merge(
+pub(super) fn merge(
     x: Vec<Keyframe>,
     y: Vec<Keyframe>,
     x_plain: f64,

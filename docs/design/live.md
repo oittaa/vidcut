@@ -410,12 +410,14 @@ The bar and the Jobs button:
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
 - A double-click on a title in the viewer starts a `Typing` (`Workspace::title_typing`). It edits the text of the Title section in place.
   - `burn::title_letters` gives the box of each letter from the layout of the title as it is drawn. `Laid` puts the boxes on the viewer. The caret, the selection and the clicks use them.
+  - `Letters` holds the stretch and the turn of each block. Thus the caret and the selection fit a title with Zoom X and Zoom Y apart.
   - `rich::edited` changes the markup for a change of the letters that show. A typed letter takes the style of the letter before it, or at the start of a line the style of the letter after it.
   - Why: the markup holds the styles, and the user edits the letters that show.
   - The `Typing` holds the keyboard focus. Thus the keys of the viewer and the timeline do not act while the user types.
   - When the edit ends, `Typing::passed` gives the text before each step. `commit_title_form` sends each as its own `titles.set`, then the last text.
   - Why: each step of the edit is then one undo step, as in Resolve.
 - `key_buttons` draws the Keyframe buttons of the Title section. Their ease menus offer `keyframes::eases` and send `keyframes.set`. The check mark comes from `Title::position_ease` on Position, else from `keyframes::ease_of`.
+  - `TextFields::rows` calls a `KeyRow` after each row of the shadow and the background. The Title section draws the buttons there, and the subtitle sections draw none.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.
 - The Titles tab (`title_browser::Browser`) draws its cards with `burn::title`. A dragged card (`Gesture::Title`) drops as `titles.add`.
@@ -919,6 +921,8 @@ Keys:
 
 - The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
 - `Bindings` joins the table, `Preferences.keys` and the key set in force. It gives the keys of an action and the owner of a key (`Combo`).
+  - A key file can give one key to two actions of one level. `Bindings::owner` then gives the first in the table, and `Bindings::owners` gives all.
+  - `Bindings::conflicts` lists these keys, and `Bindings::conflicting` gives the keys of one action that another action has.
 - `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
 - Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.
 
@@ -953,7 +957,8 @@ The Keyboard Customization window:
   - `KeySetsUi::save` sends `keys.save` with the keys of the draft. For a pick of a set alone, it sends `keys.use`.
   - The draft keeps a limited list of earlier drafts. `draft_keys` takes Undo and Redo from the events of the window before they go to the main window.
   - `dialog::held_window` keeps the window open on a close request while there is a draft. Then `key_sets::close_row` asks "Discard Changes?".
-- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. Both show the keys of `KeySetsUi::shown`. The list asks `Bindings::owner` at each `Panel`.
+- `KeyboardUi` draws the on-screen keyboard under the set row, and the Active Key list under it. Both show the keys of `KeySetsUi::shown`. The list asks `Bindings::owners` at each `Panel`.
+- A row whose action has a key of another action shows a warning button (`conflict_button`). A click selects that key with `KeyboardUi::select`.
 - `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame

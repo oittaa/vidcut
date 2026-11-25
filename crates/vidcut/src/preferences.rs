@@ -292,6 +292,9 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
         Keys::Hold(first, then) => (None, Vec::new(), false, vec![first, then]),
         Keys::Pointer(_) => (None, Vec::new(), false, Vec::new()),
     };
+    let conflicts: Vec<String> = action
+        .map(|a| b.conflicting(a).iter().map(Combo::shown).collect())
+        .unwrap_or_default();
     json!({
         "group": s.group,
         "group_title": s.group.title(),
@@ -301,6 +304,7 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
         "keys": b.row(s).into_iter().map(shown).collect::<Vec<_>>(),
         "default_keys": default_keys,
         "custom": custom,
+        "conflicts": conflicts,
         "follows": follows,
         "explanation": s.explanation.map(|e| b.explain(e)),
     })
@@ -368,6 +372,7 @@ pub fn keys_sets() -> Result<Value> {
             false => json!({
                 "name": s.name,
                 "built_in": false,
+                "base": s.base,
                 "path": dir.join(format!("{}.toml", s.name)),
             }),
         })
@@ -401,6 +406,7 @@ pub fn keys_save(
     name: &str,
     overwrite: bool,
     keys: Option<&Custom>,
+    from: Option<&str>,
     dry_run: bool,
 ) -> Result<Value> {
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
@@ -409,7 +415,16 @@ pub fn keys_save(
         Some(keys) => Bindings::of(keys)?.changes(),
         None => bindings_of(&p)?.changes(),
     };
-    let (set, path) = key_sets::save(&key_sets::dir(), name, &keys, overwrite, dry_run)?;
+    let dir = key_sets::dir();
+    let base = match from {
+        Some(from) => key_sets::find(&dir, from)?.base,
+        None => p
+            .key_set
+            .as_deref()
+            .and_then(|set| key_sets::find(&dir, set).ok())
+            .map_or_else(|| OWN.to_string(), |set| set.base),
+    };
+    let (set, path) = key_sets::save(&dir, name, &base, &keys, overwrite, dry_run)?;
     p.keys = keys;
     p.key_set = Some(set.name.clone());
     p.check()?;
@@ -459,6 +474,12 @@ pub fn keys_import(
     out["path"] = json!(path);
     out["unknown_commands"] = json!(read.unknown);
     out["unusable_keys"] = json!(read.unusable);
+    let conflicts: Vec<Value> = read
+        .conflicts
+        .iter()
+        .map(|c| json!({ "key": c.combo.shown(), "level": c.panel.name(), "actions": c.actions }))
+        .collect();
+    out["conflicts"] = json!(conflicts);
     Ok(out)
 }
 

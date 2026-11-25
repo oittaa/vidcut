@@ -2128,14 +2128,17 @@ impl Live {
             }));
         }
         if let Request::GradeAutoColor { .. } = &envelope.request {
-            let looks = vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead);
+            let use_legacy =
+                crate::preferences::load().is_ok_and(|p| p.color.use_legacy_auto_color);
+            let looks =
+                vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead, use_legacy);
             if looks.is_empty() {
                 return None;
             }
             return Some(plain(move || {
                 use vidcut_core::Env;
-                for plan in &looks {
-                    AvEnv::new().auto_balance(plan)?;
+                for (plan, legacy) in &looks {
+                    AvEnv::new().auto_balance(plan, *legacy)?;
                 }
                 Ok(())
             }));

@@ -622,6 +622,11 @@ Cancel:
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - `lay_out` takes a `Typeset`: the text, its layers and its `Rules`. `Rules::Title` gives the size, the line gap, the tracking and the seat of a title. `Rules::Plain` gives the line gap of a subtitle.
   - Why: each kind of text has its own measured rules, and one engine shapes and draws them all.
+  - A block lays out its text at its Zoom Y. A block with another Zoom X is then stretched across about its pivot, by `TitleBlock::stretch`.
+    - `turned` does the stretch and the turn in one step. It maps each pixel of the result back to the drawing.
+    - A stretch below 1 takes the mean of several samples across each pixel. Thus thin strokes do not drop out.
+    - A turned block is first cut to the part that the stretch puts in the frame (`inside`).
+    - Why: a title with equal axes draws as with one zoom.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Typeset`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
     - The `drop` field of `Typeset` brings the top of the box down to where the upper line starts.
@@ -930,15 +935,16 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
-  - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
+- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
+  - `editor::auto_color_looks` makes the `RenderPlan` of one frame and pairs it with the legacy flag (`false` with `tool`, else `ColorPrefs::use_legacy_auto_color`).
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
-  - With `tool`, the corrector is at its usual values in that frame. Thus the analysis reads the picture that comes into it.
-  - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
-  - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
-  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`. With `tool`, it writes the `AutoColor` of the corrector.
-- The Auto Color tool (`Corrector::auto_color`) has its own Lift and Gain.
-  - `ToolGrading` gives their numbers with `wheel`, at Gamma 0. The tool has no Offset and a Lum Mix of 100.
+  - In neural mode, the corrector is at its usual values in that frame. In legacy mode, only its Lift and Gain reset.
+  - `Env::auto_balance` renders that frame in float (`still::floats_sized`). `BALANCES` keeps recent results keyed by mode and plan.
+  - Neural mode runs `auto_color::balance` in `vidcut-av` to give six `exposure` and three `white` values (`AutoResult::Neural`). With `gpu.acceleration` on, it runs in `compute::ops` and a GPU failure returns an error that names `gpu.acceleration`. With it off, the CPU runs the model.
+  - Legacy mode runs `auto_color::balance` in `vidcut-core` to give Lift and Gain (`AutoResult::Legacy`).
+  - `ops::grade::auto_color` writes the `AutoColor` tool in neural mode, or Lift and Gain in legacy mode.
+- The Auto Color tool (`Corrector::auto_color`) holds `exposure` and `white` numbers (`grade_auto`).
+  - `ToolGrading` passes `exposure` and `white_scale` directly to `fs_grade` and `fs_grade_stats`.
   - `fs_grade` applies the tool first, before step 1. `fs_grade_stats` also applies it. Thus the tone stage filters the luma that it changes.
   - A tool that is off keeps its values and does nothing. `Corrector::changes_nothing` does not count it, and the render plan uses that test.
   - `Corrector::is_usual` counts a tool that is off. Thus a keyframe that holds only such a tool keeps it in the project file.

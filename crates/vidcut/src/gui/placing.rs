@@ -34,7 +34,7 @@ const TOOL_DOT: f32 = 3.0;
 const TOOL_DOT_ON: Color32 = Color32::from_rgb(230, 50, 50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Side {
+pub(super) enum Side {
     Left,
     Right,
     Top,
@@ -42,10 +42,29 @@ enum Side {
 }
 
 impl Side {
-    const ALL: [Side; 4] = [Side::Left, Side::Right, Side::Top, Side::Bottom];
+    pub(super) const ALL: [Side; 4] = [Side::Left, Side::Right, Side::Top, Side::Bottom];
 
-    fn across(self) -> bool {
+    pub(super) fn across(self) -> bool {
         matches!(self, Side::Left | Side::Right)
+    }
+
+    pub(super) fn stretched(
+        self,
+        axis: Vec2,
+        (from, to): (Vec2, Vec2),
+        [zx, zy]: [f64; 2],
+        at: impl Fn(f64, f64) -> f64,
+    ) -> Option<[f64; 2]> {
+        let (s0, s1) = (from.dot(axis), to.dot(axis));
+        if s0.abs() <= 1.0 {
+            return None;
+        }
+        let k = f64::from(s1 / s0);
+        Some(if self.across() {
+            [at(zx, k), zy]
+        } else {
+            [zx, at(zy, k)]
+        })
     }
 }
 
@@ -559,8 +578,7 @@ fn angle_of(v: Vec2) -> f32 {
     (-v.y).atan2(v.x)
 }
 
-fn zoom_text(p: &Picture) -> String {
-    let [zx, zy] = p.scale();
+pub(super) fn zoom_text([zx, zy]: [f64; 2]) -> String {
     if zx == zy {
         format!("{:.0}%", zx * 100.0)
     } else {
@@ -1199,16 +1217,10 @@ impl Workspace {
                 next.now.zoom = Some([rounded(rx * size, 4), rounded(ry * size, 4)]);
             }
             Hold::Stretch(side) => {
-                let axis = s.axis(side);
-                let (s0, s1) = ((held.from - pivot).dot(axis), (to - pivot).dot(axis));
-                if s0.abs() > 1.0 {
-                    let [zx, zy] = p0.scale();
-                    let k = f64::from(s1 / s0).max(ZOOM.0);
-                    next.now.zoom = Some(if side.across() {
-                        [rounded((zx * k).clamp(ZOOM.0, ZOOM.1), 4), zy]
-                    } else {
-                        [zx, rounded((zy * k).clamp(ZOOM.0, ZOOM.1), 4)]
-                    });
+                let held_at = (held.from - pivot, to - pivot);
+                let at = |z: f64, k: f64| rounded((z * k.max(ZOOM.0)).clamp(ZOOM.0, ZOOM.1), 4);
+                if let Some(z) = side.stretched(s.axis(side), held_at, p0.scale(), at) {
+                    next.now.zoom = Some(z);
                 }
             }
             Hold::Turn => {
@@ -1384,12 +1396,12 @@ impl Workspace {
         let g = &self.timeline.picture_grab;
         let readout = match (&g.held, &g.wheel) {
             (Some(h), _) => match h.hold {
-                Hold::Corner | Hold::Stretch(_) => Some(zoom_text(&h.now)),
+                Hold::Corner | Hold::Stretch(_) => Some(zoom_text(h.now.scale())),
                 Hold::Turn => Some(turn_text(&h.now)),
                 _ => None,
             },
             (None, Some(w)) if w.now.turn() != w.start.turn() => Some(turn_text(&w.now)),
-            (None, Some(w)) if w.now.scale() != w.start.scale() => Some(zoom_text(&w.now)),
+            (None, Some(w)) if w.now.scale() != w.start.scale() => Some(zoom_text(w.now.scale())),
             (None, _) => None,
         };
         if let Some(text) = readout {

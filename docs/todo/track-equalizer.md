@@ -10,7 +10,6 @@
 
 **To measure** on the Fairlight page:
 
-- The rule from a typed Q to its whole step. The typed values 0.5 and 1.1 lie halfway between two steps, and went to 18 and 26.
 - The range of the Gain fader.
 - A Low Pass of Fire at the slopes 6 and 18, in a render of white noise.
 - Whether the window shows the slope of a pass filter with Earth, Air and Ice. Their sound does not use it.

@@ -2010,7 +2010,7 @@ pub enum Request {
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. On a
     /// title, position, zoom and rotation are those of its text, and a
-    /// scroll's text takes only position. A title's zoom is one number. The
+    /// scroll's text takes only position. The
     /// handles of its position keys bend its path. The other values of a
     /// title are those of its clip's picture. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
@@ -2680,9 +2680,10 @@ pub enum Request {
         /// usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
-        /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
+        /// How much larger its text is drawn, from 1/4 to 4: one number for
+        /// both ways, or `[x, y]` across and down. Default: 1.
         #[serde(default)]
-        zoom: Option<f64>,
+        zoom: Option<OneOrMany<f64>>,
         /// Degrees turned counterclockwise. Default: 0.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2733,10 +2734,14 @@ pub enum Request {
         /// from -3 to 5 down, or `[]` for the kind's usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
-        /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
-        /// size.
+        /// How much larger its text is drawn, from 1/4 to 4: one number for
+        /// both ways, or `[x, y]` across and down. 1 for the usual size.
         #[serde(default)]
-        zoom: Option<f64>,
+        zoom: Option<OneOrMany<f64>>,
+        /// The Zoom link: on or off. Off, Zoom X and Zoom Y change apart in
+        /// the Title section. It changes no zoom.
+        #[serde(default)]
+        zoom_link: Option<bool>,
         /// Degrees turned counterclockwise; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2744,8 +2749,8 @@ pub enum Request {
         /// opacity goes to the clip's Composite.
         #[serde(default)]
         look: Option<String>,
-        /// The line of a lower third that takes `anchor`, `position`, `zoom`
-        /// and `rotation`. The two lines then go apart. Without it, the two
+        /// The line of a lower third that takes `anchor`, `position`, `zoom`,
+        /// `zoom_link` and `rotation`. The two lines then go apart. Without it, the two
         /// lines take `position`, `zoom` and `rotation` together until they
         /// go apart, then the lower line alone. Not with `kind` or `look`.
         #[serde(default)]
@@ -3107,18 +3112,14 @@ pub enum Request {
         /// for a quarter point.
         points: f64,
     },
-    /// Auto Color: balance the blacks and the whites of a clip from one
-    /// frame. The analysis reads that frame after the corrector, with its
-    /// Lift and Gain at their usual values. Each channel gets its black
-    /// point from the darkest pixels and its white point from the brightest.
-    /// The master gets the luma of these points. New Lift and Gain of red,
-    /// green, blue and the master map them to 0 and 1, in place of all
-    /// earlier Lift and Gain values. Undo takes them back.
-    ///
-    /// With `tool`, the result goes to the Auto Color tool of the corrector
-    /// in place of its Lift and Gain, and the tool turns on. `grade.set`
-    /// with `auto_color_on` turns the tool off and on. `grade.clear` with
-    /// `auto_color` removes it.
+    /// Auto Color: balance the color and exposure of a clip from one
+    /// frame. By default it uses the neural model on the frame entering the
+    /// corrector and writes its result to the Auto Color tool, leaving
+    /// Lift and Gain untouched. With `color.use_legacy_auto_color` on and
+    /// `tool` off, it uses the earlier Lift and Gain method on the frame
+    /// after the corrector with Lift and Gain reset. Undo takes the change
+    /// back. `grade.set` with `auto_color_on` turns the Auto Color tool off
+    /// and on, and `grade.clear` with `auto_color` removes it.
     #[serde(rename = "grade.auto_color")]
     GradeAutoColor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4302,7 +4303,8 @@ pub enum Request {
     /// words where the action's name doesn't say what it does (spec §11).
     /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
     /// key of an action works: `app`, `transcription`, `effects` or
-    /// `color`.
+    /// `color`. `conflicts` gives the keys of an action that another action
+    /// of its level also has, from an imported key file.
     #[serde(rename = "keys.list")]
     KeysList {
         /// Only the actions of this key, like `Ctrl+B`, at each level.
@@ -4336,7 +4338,8 @@ pub enum Request {
     /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
     /// `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`). `set` names the set that the keys in force come
-    /// from, and `changed` tells if they differ from it. A set file that
+    /// from, and `changed` tells if they differ from it. Each set of yours
+    /// has a `base`: the built-in set that it changes. A set file that
     /// can't be read is left out and listed in `refused` with why.
     #[serde(rename = "keys.sets")]
     KeysSets {},
@@ -4363,16 +4366,21 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(with = "Option<std::collections::BTreeMap<String, Vec<String>>>")]
         keys: Option<crate::shortcuts::Custom>,
+        /// The set that the keys come from, as `keys.sets` names it. Without
+        /// it, the set in force. The new set keeps that set's `base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
     },
     /// Delete one of your key sets. Built-in sets can't be deleted. When the
     /// set is in force, vidcut's own set is put in force.
     #[serde(rename = "keys.delete")]
     KeysDelete { name: String },
     /// Write a key set to a key file, for another computer or another
-    /// editor (`keys.import`). The first line names the set that the file
-    /// changes. Then each command whose keys differ has a line like
+    /// editor (`keys.import`). The first line names the set's `base`. Then
+    /// each command whose keys differ from the base has a line like
     /// `editUndo := Ctrl+Z`. An action without such a command has a line
-    /// like `#vidcut ducking := Alt+D`. A file at the path is replaced.
+    /// like `#vidcut ducking := Alt+D`. A built-in set gives only the first
+    /// line. A file at the path is replaced.
     #[serde(rename = "keys.export")]
     KeysExport {
         /// The set's name, as `keys.sets` gives it.
@@ -4382,7 +4390,8 @@ pub enum Request {
     /// Add a key set from a key file, as `keys.export` writes it, and put
     /// it in force. The commands that vidcut does not have are listed in
     /// `unknown_commands`. The keys that vidcut can't use, such as keypad
-    /// keys, are listed in `unusable_keys`.
+    /// keys, are listed in `unusable_keys`. A file can give one key to two
+    /// actions of one level: both keep it, and `conflicts` lists it.
     #[serde(rename = "keys.import")]
     KeysImport {
         path: PathBuf,
@@ -6020,8 +6029,8 @@ pub enum KeyParam {
     /// lower third: both lines together, or the lower line when the lines
     /// are apart.
     TextPosition,
-    /// The zoom of a title's text, one number. On a lower third: as
-    /// `text_position`.
+    /// The zoom of a title's text, x and y, one keyframe for both. On a
+    /// lower third: as `text_position`.
     TextZoom,
     /// The rotation of a title's text in degrees. On a lower third: as
     /// `text_position`.
@@ -6044,6 +6053,35 @@ pub enum KeyParam {
     /// The Center Y of a Four Color Gradient, from -1 to 1. A number past an
     /// end takes that end.
     CenterY,
+    /// The offset of a title's shadow, x and y, one keyframe for both, as
+    /// fractions of the picture, right and down, from -4 to 4. The title needs
+    /// a `shadow`.
+    ShadowOffset,
+    /// The blur of a title's shadow, a whole number from 1 to 100. The title
+    /// needs a `shadow`.
+    ShadowBlur,
+    /// The opacity of a title's shadow, from 0 to 1 in steps of 0.01. The
+    /// title needs a `shadow`.
+    ShadowOpacity,
+    /// The outline width of a title's background, whole pixels of the
+    /// timeline from 0 to 30. The title needs a `shape`.
+    BackgroundOutlineWidth,
+    /// The width of a title's background, as a fraction of the picture width,
+    /// from 0 to 2. The title needs a `shape`.
+    BackgroundWidth,
+    /// The height of a title's background, as a fraction of the picture
+    /// height, from 0 to 2. The title needs a `shape`.
+    BackgroundHeight,
+    /// The corner radius of a title's background, as a fraction of the
+    /// picture height, from 0 to 1. The title needs a `shape`.
+    BackgroundCornerRadius,
+    /// The center of a title's background, x and y, one keyframe for both, as
+    /// fractions of the picture from the title's position, right and down,
+    /// from -4 to 4. The title needs a `shape`.
+    BackgroundCenter,
+    /// The opacity of a title's background, from 0 to 1 in steps of 0.01. The
+    /// title needs a `background`.
+    BackgroundOpacity,
     /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
     /// numbers are those of `effects.set`. One number of a color has a value
     /// of its own, for example `color_red`. A `position` or a `center` is one
@@ -6054,7 +6092,7 @@ pub enum KeyParam {
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 26] = [
+    pub const ALL: [KeyParam; 35] = [
         KeyParam::Volume,
         KeyParam::Pan,
         KeyParam::Position,
@@ -6081,7 +6119,46 @@ impl KeyParam {
         KeyParam::LowerRotation,
         KeyParam::CenterX,
         KeyParam::CenterY,
+        KeyParam::ShadowOffset,
+        KeyParam::ShadowBlur,
+        KeyParam::ShadowOpacity,
+        KeyParam::BackgroundOutlineWidth,
+        KeyParam::BackgroundWidth,
+        KeyParam::BackgroundHeight,
+        KeyParam::BackgroundCornerRadius,
+        KeyParam::BackgroundCenter,
+        KeyParam::BackgroundOpacity,
     ];
+
+    pub const STYLED: [(KeyParam, EffectValue); 9] = [
+        (KeyParam::ShadowOffset, EffectValue::ShadowOffset),
+        (KeyParam::ShadowBlur, EffectValue::ShadowBlur),
+        (KeyParam::ShadowOpacity, EffectValue::ShadowOpacity),
+        (
+            KeyParam::BackgroundOutlineWidth,
+            EffectValue::BackgroundOutlineWidth,
+        ),
+        (KeyParam::BackgroundWidth, EffectValue::BackgroundWidth),
+        (KeyParam::BackgroundHeight, EffectValue::BackgroundHeight),
+        (
+            KeyParam::BackgroundCornerRadius,
+            EffectValue::BackgroundCornerRadius,
+        ),
+        (KeyParam::BackgroundCenter, EffectValue::BackgroundCenter),
+        (KeyParam::BackgroundOpacity, EffectValue::BackgroundOpacity),
+    ];
+
+    pub fn style_value(self) -> Option<EffectValue> {
+        Self::STYLED
+            .into_iter()
+            .find_map(|(param, v)| (param == self).then_some(v))
+    }
+
+    pub fn of_style(v: EffectValue) -> Option<KeyParam> {
+        Self::STYLED
+            .into_iter()
+            .find_map(|(param, value)| (value == v).then_some(param))
+    }
 
     pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
         match self {
@@ -8161,6 +8238,7 @@ pub struct EqBandSet {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain: Option<f64>,
     /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// A track keeps the Q of its step of 1/15: 0.55 becomes 8/15.
     /// `bell` uses it, and on a track of the `fire` type the shelves too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub q: Option<f64>,

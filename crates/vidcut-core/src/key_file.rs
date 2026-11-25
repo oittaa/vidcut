@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use crate::key_sets::same;
-use crate::shortcuts::{Action, Bindings, Combo, Custom, Held, key_named};
+use crate::key_sets::{self, KeySet, same};
+use crate::shortcuts::{Action, Bindings, Combo, Conflict, Custom, Held, key_named};
 
 const BASE: &str = "DaVinci Resolve";
 
@@ -128,7 +128,9 @@ const STANDARD: &[(&str, &str)] = &[("Copy", "Ctrl+C"), ("Cut", "Ctrl+X"), ("Pas
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Read {
+    pub base: Option<String>,
     pub keys: Custom,
+    pub conflicts: Vec<Conflict>,
     pub unknown: Vec<String>,
     pub unusable: Vec<String>,
 }
@@ -187,20 +189,35 @@ fn line(id: &str, keys: &[Combo]) -> String {
     }
 }
 
-pub fn text(custom: &Custom) -> Result<String> {
-    let changes = Bindings::of(custom)?.changes();
-    let theirs: Vec<String> = changes
-        .iter()
-        .filter(|(a, _)| mapped(**a))
-        .flat_map(|(a, keys)| spread(*a, keys))
-        .map(|(id, keys)| line(id, &keys))
-        .collect();
-    let ours: Vec<String> = changes
-        .iter()
-        .filter(|(a, _)| !mapped(**a))
-        .map(|(a, keys)| format!("{OWN}{}", line(a.name(), keys)))
-        .collect();
-    let mut out = format!("import \"{BASE}\"\n");
+fn alike(a: &[Combo], b: &[Combo]) -> bool {
+    a.len() == b.len() && a.iter().all(|k| b.contains(k))
+}
+
+pub fn text(custom: &Custom, base: &KeySet) -> Result<String> {
+    let now = Bindings::of(custom)?;
+    let was = Bindings::of(&base.keys)?;
+    let mut theirs = Vec::new();
+    let mut ours = Vec::new();
+    for &action in Action::ALL {
+        let (keys, before) = (now.keys(action), was.keys(action));
+        if !mapped(action) {
+            if !alike(keys, before) {
+                ours.push(format!("{OWN}{}", line(action.name(), keys)));
+            }
+            continue;
+        }
+        let commands = spread(action, keys).into_iter();
+        for ((id, keys), (_, before)) in commands.zip(spread(action, before)) {
+            if !alike(&keys, &before) {
+                theirs.push(line(id, &keys));
+            }
+        }
+    }
+    let set = match same(&base.name, key_sets::OWN) {
+        true => BASE,
+        false => &base.name,
+    };
+    let mut out = format!("import \"{set}\"\n");
     for lines in [theirs, ours] {
         if !lines.is_empty() {
             out.push('\n');
@@ -324,7 +341,10 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
         }
     }
     let mut custom = match set {
-        Some(name) if !same(name, BASE) => base(name)?,
+        Some(name) if !same(name, BASE) => {
+            read.base = Some(name.to_string());
+            base(name)?
+        }
         Some(_) => Custom::new(),
         None => COMMANDS.iter().map(|&(_, a)| (a, Vec::new())).collect(),
     };
@@ -348,11 +368,18 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
         custom.insert(action, keys);
     }
     custom.extend(own);
-    custom.retain(|action, keys| {
-        let table = action.default_keys();
-        keys.len() != table.len() || keys.iter().any(|k| !table.contains(k))
+    let now = Bindings::of(&custom)?;
+    for &action in Action::ALL {
+        let left_out = mapped(action) && !custom.contains_key(&action);
+        if left_out && !alike(now.keys(action), start.keys(action)) {
+            custom.insert(action, start.keys(action).to_vec());
+        }
+    }
+    let now = Bindings::of(&custom)?;
+    custom.retain(|&action, keys| {
+        !alike(keys, &action.default_keys()) || !now.conflicting(action).is_empty()
     });
-    Bindings::of(&custom)?;
+    read.conflicts = Bindings::of(&custom)?.conflicts();
     read.keys = custom;
     Ok(read)
 }

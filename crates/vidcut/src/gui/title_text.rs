@@ -36,6 +36,7 @@ impl Spot {
 #[derive(Debug, Clone, Copy)]
 struct Turn {
     pivot: Pos2,
+    stretch: f32,
     sin: f32,
     cos: f32,
 }
@@ -43,10 +44,11 @@ struct Turn {
 impl Turn {
     fn on(self, x: f32, y: f32) -> Pos2 {
         let d = pos2(x, y) - self.pivot;
+        let across = d.x * self.stretch;
         self.pivot
             + vec2(
-                d.x * self.cos + d.y * self.sin,
-                -d.x * self.sin + d.y * self.cos,
+                across * self.cos + d.y * self.sin,
+                -across * self.sin + d.y * self.cos,
             )
     }
 
@@ -54,7 +56,7 @@ impl Turn {
         let d = p - self.pivot;
         self.pivot
             + vec2(
-                d.x * self.cos - d.y * self.sin,
+                (d.x * self.cos - d.y * self.sin) / self.stretch,
                 d.x * self.sin + d.y * self.cos,
             )
     }
@@ -127,6 +129,7 @@ impl Laid {
             let (sin, cos) = (b.turn.to_radians() as f32).sin_cos();
             let turn = Turn {
                 pivot: picture.min + vec2(b.pivot[0] * scale.x, b.pivot[1] * scale.y),
+                stretch: b.stretch,
                 sin,
                 cos,
             };

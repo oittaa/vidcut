@@ -3158,15 +3158,25 @@ pub struct Title {
     /// none. Left out when no keyframe has a handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
-    /// How much larger its text is drawn, from 1/4 to 4, about the `position`
-    /// of a `text` title or a lower third's line; a scroll has none. Usual: 1.
-    /// With `zoom_keys`, the zoom at a frame is that curve.
+    /// How much larger its text is drawn across and down, `[x, y]`, each
+    /// from 1/4 to 4, about the `position` of a `text` title or a lower
+    /// third's line; a scroll has none. Usual: `[1, 1]`. With `zoom_keys`,
+    /// the zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
-    /// Zoom keyframes, on the clip's source frames. Left out when the zoom
-    /// has no keyframes.
+    pub zoom: Option<[f64; 2]>,
+    /// Zoom keyframes, one for X and Y, on the clip's source frames. `value`
+    /// is X. `zoom_y` is Y, one number for each keyframe, in the same order.
+    /// A handle value moves X. Y keeps the handle frames and a value offset
+    /// of 0. Left out when the zoom has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
+    /// Y of each `zoom_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
+    /// The Zoom link: `false` when it is off. Off, Zoom X and Zoom Y change
+    /// apart in the Title section. Left out when on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_link: Option<bool>,
     /// Degrees it is turned counterclockwise, with its background and
     /// shadow, about the same point as `zoom`. Usual: 0. With
     /// `rotation_keys`, the angle at a frame is that curve.
@@ -3177,11 +3187,23 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rotation_keys: Vec<Keyframe>,
     /// A lower third's upper line, when it goes apart from the lower line.
-    /// `position`, `zoom` and `rotation` and their keyframes above are then
-    /// the lower line's alone. `anchor` above is always the lower line's. Left
+    /// `position`, `zoom`, `zoom_link` and `rotation` and their keyframes
+    /// above are then the lower line's alone. `anchor` above is always the lower line's. Left
     /// out when the two lines go together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper: Option<TitleLine>,
+    /// Keyframes of the shadow and the background, on the clip's source
+    /// frames, one entry for each value with keyframes, sorted by value:
+    /// `shadow_offset`, `shadow_blur`, `shadow_opacity`,
+    /// `background_outline_width`, `background_width`, `background_height`,
+    /// `background_corner_radius`, `background_center` and
+    /// `background_opacity`. Their numbers are those of `style`. A value takes
+    /// keyframes only while `style` has its part: `shadow`, `background` or
+    /// `shape`. With keyframes, the value at a frame is that curve. A lower
+    /// third keeps them for its whole title. Left out when no value has
+    /// keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<EffectKeys>,
 }
 
 /// One line of a lower third: `upper` or `lower`.
@@ -3211,9 +3233,13 @@ pub struct TitleLine {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_link: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3235,8 +3261,14 @@ pub struct TitleBlock {
     pub anchor: [f64; 2],
     pub pivot: [f64; 2],
     pub edge: f64,
-    pub zoom: f64,
+    pub zoom: [f64; 2],
     pub turn: f64,
+}
+
+impl TitleBlock {
+    pub fn stretch(&self) -> f64 {
+        self.zoom[0] / self.zoom[1]
+    }
 }
 
 /// The handles of one position keyframe of a title, as fractions of the
@@ -3422,7 +3454,7 @@ pub struct TitleShadow {
     /// `#rrggbb`, `#rgb` or a name such as `navy`. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// From 0 to 1. Usual: 0.75.
+    /// From 0 to 1. On a title, it is in steps of 1/100. Usual: 0.75.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `[x, y]`: how far it falls right and down, as fractions of the
@@ -3431,7 +3463,8 @@ pub struct TitleShadow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
     /// How soft its edge is, from 1 to 100, where the blur's radius is
-    /// about 3% of the picture height. Usual: 20.
+    /// about 3% of the picture height. On a title, it is a whole number.
+    /// Usual: 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur: Option<f64>,
     /// `true` draws no shadow and keeps these values.
@@ -3443,6 +3476,7 @@ impl TitleShadow {
     pub const OPACITY: f64 = 0.75;
     pub const OFFSET: [f64; 2] = [0.0, 0.0];
     pub const BLUR: f64 = 20.0;
+    pub const BLURS: (f64, f64) = (1.0, 100.0);
     pub const BLUR_PER_PICTURE: f64 = 3370.0;
 
     pub fn is_off(&self) -> bool {
@@ -3479,6 +3513,7 @@ pub fn size_fits(v: f64, most: u32) -> bool {
 impl Title {
     pub const MOST_SIZE: u32 = 4096;
     pub const MOST_SPACING: f64 = 4096.0;
+    pub const ZOOM: (f64, f64) = (0.25, 4.0);
     pub const TRACKING_SHARE: f64 = 100.0;
     pub const TRACKING_SHARE_LESS: f64 = 200.0;
     pub const TRACKING_FILE: f64 = 0.85;
@@ -3527,9 +3562,12 @@ impl Title {
             position_handles: Vec::new(),
             zoom: None,
             zoom_keys: Vec::new(),
+            zoom_y: Vec::new(),
+            zoom_link: None,
             rotation: None,
             rotation_keys: Vec::new(),
             upper: None,
+            keys: Vec::new(),
         }
     }
 
@@ -3746,8 +3784,8 @@ impl Title {
         )
     }
 
-    pub fn scale(&self) -> f64 {
-        self.zoom.unwrap_or(1.0)
+    pub fn scale(&self) -> [f64; 2] {
+        self.zoom.unwrap_or([1.0, 1.0])
     }
 
     pub fn turn(&self) -> f64 {
@@ -3772,6 +3810,8 @@ impl Title {
             position_handles: self.position_handles.clone(),
             zoom: self.zoom,
             zoom_keys: self.zoom_keys.clone(),
+            zoom_y: self.zoom_y.clone(),
+            zoom_link: self.zoom_link,
             rotation: self.rotation,
             rotation_keys: self.rotation_keys.clone(),
         }
@@ -3805,6 +3845,8 @@ impl Title {
         std::mem::swap(&mut self.position_handles, &mut u.position_handles);
         std::mem::swap(&mut self.zoom, &mut u.zoom);
         std::mem::swap(&mut self.zoom_keys, &mut u.zoom_keys);
+        std::mem::swap(&mut self.zoom_y, &mut u.zoom_y);
+        std::mem::swap(&mut self.zoom_link, &mut u.zoom_link);
         std::mem::swap(&mut self.rotation, &mut u.rotation);
         std::mem::swap(&mut self.rotation_keys, &mut u.rotation_keys);
         self.upper = Some(u);
@@ -3844,7 +3886,7 @@ impl Title {
                 place[1]
             },
             zoom: if part == TitlePart::Shape {
-                1.0
+                [1.0, 1.0]
             } else {
                 self.scale()
             },
@@ -5337,22 +5379,22 @@ pub struct Corrector {
     /// Where the Highlight range of the Log mode starts, below 1. Usual:
     /// 0.55.
     pub high_range: f64,
-    /// The Auto Color tool of the viewer Tools. Left out until that tool
-    /// runs on this corrector, and after its reset.
+    /// The Auto Color tool of the node or viewer Tools. Left out until
+    /// Auto Color runs on this corrector, and after its reset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_color: Option<AutoColor>,
 }
 
-/// The Auto Color tool of a corrector: a Lift and a Gain of its own, apart
-/// from the Lift and the Gain of the Primaries palette.
+/// The Auto Color tool of a corrector, with its own exposure, tone and
+/// white balance numbers, apart from the Primaries palette.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AutoColor {
     /// The tool changes the picture. Off, it keeps its values.
     pub on: bool,
-    /// Lift of red, green, blue and the master.
-    pub lift: [f64; 4],
-    /// Gain of red, green, blue and the master.
-    pub gain: [f64; 4],
+    /// Six exposure and tone numbers of the Auto Color tool.
+    pub exposure: [f64; 6],
+    /// Three white balance numbers of the Auto Color tool.
+    pub white: [f64; 3],
 }
 
 impl Default for Corrector {
@@ -6715,7 +6757,9 @@ pub struct EffectKeys {
 /// colors, from `top_left_red` to `bottom_right_alpha`, and `start`, `end`
 /// and `offset` of its gradient. A `fast_noise` has `center`, `detail`,
 /// `brightness`, `contrast`, `scale`, `y_scale`, `angle`, `seethe`,
-/// `seethe_rate` and the four channels of `color1` and `color2`.
+/// `seethe_rate` and the four channels of `color1` and `color2`. A title has
+/// the values of its shadow and its background, from `shadow_offset` to
+/// `background_opacity`. `shadow_offset` and `background_center` are points.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -6857,6 +6901,15 @@ pub enum EffectValue {
     Color2Green,
     Color2Blue,
     Color2Alpha,
+    ShadowOffset,
+    ShadowBlur,
+    ShadowOpacity,
+    BackgroundOutlineWidth,
+    BackgroundWidth,
+    BackgroundHeight,
+    BackgroundCornerRadius,
+    BackgroundCenter,
+    BackgroundOpacity,
 }
 
 /// What an effect does, with its own values.
@@ -10970,20 +11023,22 @@ impl Hash for Title {
             style,
             position,
             zoom,
+            zoom_link,
             rotation,
             upper,
             ..
         } = self;
         (kind, align, anchor, text, style).hash(h);
         pair_bits(*position).hash(h);
-        (floats_bits(*zoom), floats_bits(*rotation)).hash(h);
+        (pair_bits(*zoom), zoom_link, floats_bits(*rotation)).hash(h);
         upper
             .as_ref()
             .map(|u| {
                 (
                     u.anchor,
                     pair_bits(u.position),
-                    floats_bits(u.zoom),
+                    pair_bits(u.zoom),
+                    u.zoom_link,
                     floats_bits(u.rotation),
                 )
             })

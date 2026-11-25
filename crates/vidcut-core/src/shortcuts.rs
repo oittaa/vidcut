@@ -575,6 +575,13 @@ impl<'de> Deserialize<'de> for Combo {
 
 pub type Custom = BTreeMap<Action, Vec<Combo>>;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Conflict {
+    pub panel: Panel,
+    pub combo: Combo,
+    pub actions: Vec<Action>,
+}
+
 type Resolved = (
     BTreeMap<Action, Vec<Combo>>,
     BTreeMap<(Panel, Combo), Action>,
@@ -585,16 +592,7 @@ fn resolve(custom: &Custom) -> Result<Resolved> {
     let mut owners = BTreeMap::new();
     for (&action, combos) in custom {
         for &combo in combos {
-            match owners.insert((action.panel(), combo), action) {
-                Some(other) if other != action => {
-                    return Err(Error::usage(format!(
-                        "{combo} belongs to both {} and {}: one key has one action",
-                        other.title(),
-                        action.title(),
-                    )));
-                }
-                _ => {}
-            }
+            owners.entry((action.panel(), combo)).or_insert(action);
         }
         keys.insert(action, combos.clone());
     }
@@ -677,6 +675,43 @@ impl Bindings {
         self.owners.get(&(panel, combo)).copied()
     }
 
+    pub fn owners(&self, panel: Panel, combo: Combo) -> Vec<Action> {
+        Action::ALL
+            .iter()
+            .copied()
+            .filter(|&a| a.panel() == panel && self.keys(a).contains(&combo))
+            .collect()
+    }
+
+    pub fn conflicting(&self, action: Action) -> Vec<Combo> {
+        self.keys(action)
+            .iter()
+            .copied()
+            .filter(|&c| self.owners(action.panel(), c).len() > 1)
+            .collect()
+    }
+
+    pub fn conflicts(&self) -> Vec<Conflict> {
+        let mut found: BTreeMap<(Panel, Combo), Vec<Action>> = BTreeMap::new();
+        for (&action, combos) in &self.keys {
+            for &combo in combos {
+                found
+                    .entry((action.panel(), combo))
+                    .or_default()
+                    .push(action);
+            }
+        }
+        found
+            .into_iter()
+            .filter(|(_, actions)| actions.len() > 1)
+            .map(|((panel, combo), actions)| Conflict {
+                panel,
+                combo,
+                actions,
+            })
+            .collect()
+    }
+
     pub fn is_custom(&self, action: Action) -> bool {
         self.keys(action) != self.set_keys(action)
     }
@@ -688,7 +723,7 @@ impl Bindings {
     pub fn changes(&self) -> Custom {
         Action::ALL
             .iter()
-            .filter(|&&a| self.keys(a) != a.default_keys())
+            .filter(|&&a| self.keys(a) != a.default_keys() || !self.conflicting(a).is_empty())
             .map(|&a| (a, self.keys(a).to_vec()))
             .collect()
     }
@@ -749,6 +784,9 @@ impl Bindings {
 
     fn refuse_taken(&self, action: Action, combos: &[Combo]) -> Result<()> {
         for &combo in combos {
+            if self.keys(action).contains(&combo) {
+                continue;
+            }
             if let Some(other) = self.owner(action.panel(), combo)
                 && other != action
             {
@@ -772,7 +810,10 @@ impl Bindings {
             }
         }
         let mut custom = self.custom.clone();
-        if unique == action.default_keys() {
+        let shared = unique
+            .iter()
+            .any(|&c| self.owners(action.panel(), c).iter().any(|&o| o != action));
+        if unique == action.default_keys() && !shared {
             custom.remove(&action);
         } else {
             custom.insert(action, unique);

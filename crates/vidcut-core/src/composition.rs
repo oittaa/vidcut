@@ -1147,6 +1147,18 @@ impl ApplyMode {
     pub fn has_operator(self) -> bool {
         matches!(self, ApplyMode::Normal | ApplyMode::Screen)
     }
+
+    pub fn opens_group(self) -> bool {
+        matches!(
+            self,
+            ApplyMode::Darken
+                | ApplyMode::Lighten
+                | ApplyMode::Overlay
+                | ApplyMode::Difference
+                | ApplyMode::Hue
+                | ApplyMode::Hypotenuse
+        )
+    }
 }
 
 impl MergeOperator {
