@@ -1142,7 +1142,7 @@ The masks:
   - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
   - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
   - `joined_distance` gives the outer edge of a rectangle by its Border Style. Miter takes the larger distance across and down, thus the corners stay square.
-  - Bevel also cuts each corner of the outer edge at 45 degrees. Round, and each Corner Radius above 0, take `box_distance`.
+  - Bevel also cuts each corner of the outer edge at 45 degrees. Round, each Corner Radius above 0 and an edge that does not move out take `box_distance`.
   - The inner edge of the band always takes `box_distance`. Why: a join changes only the corners that the edge moves out from.
 - The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
   - Clipping Mode None also makes the mask beyond the picture. `blur::mask_pads` adds pixels at each side that the soft edge reaches from the shape.

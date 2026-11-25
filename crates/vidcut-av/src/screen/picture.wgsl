@@ -1450,7 +1450,7 @@ fn box_distance(q: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
 
 fn joined_distance(q: vec2<f32>, half: vec2<f32>, r: f32, out: f32) -> f32 {
     let join = i32(shaping.style.x + 0.5);
-    if r > 0.0 || join == 1 {
+    if r > 0.0 || out <= 0.0 || join == 1 {
         return box_distance(q, half, r) - out;
     }
     let e = abs(q) - half;

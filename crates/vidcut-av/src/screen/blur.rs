@@ -617,7 +617,11 @@ fn mask_pads(shape: &Shaping, (w, h): (u32, u32), most: u32) -> [u32; 4] {
     if !shape.beyond || reach == [0, 0] || points.is_empty() {
         return [0; 4];
     }
-    let near = shape.border.abs() + MASK_NEAR;
+    let corner = match shape.join {
+        JoinStyle::Sharp => std::f64::consts::SQRT_2,
+        _ => 1.0,
+    };
+    let near = shape.border.abs() * corner + MASK_NEAR;
     let low = |k: usize| points.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min) - near;
     let high = |k: usize| {
         points
