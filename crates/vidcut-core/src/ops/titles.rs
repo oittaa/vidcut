@@ -24,6 +24,8 @@ const SHAPE_CENTER: &str = "a background's center is from -4 to 4";
 const SHAPE_CORNER: &str = "a background's corner is from 0 to 1";
 const SHAPE_OUTLINE: &str = "a background's outline width is whole pixels, from 0 to 30";
 const BOX_OPACITY: &str = "a title's background opacity is in steps of 0.01, from 0 to 1";
+const SHADOW_OPACITY: &str = "a title's shadow opacity is in steps of 0.01, from 0 to 1";
+const SHADOW_BLUR: &str = "a title's shadow blur is a whole number, from 1 to 100";
 const SCROLL_SPACED: &str = "a scroll has no line spacing, tracking or case";
 const POSITION_HANDLED: &str =
     "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
@@ -170,7 +172,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         outline: checked_outline(s.outline.as_ref())?,
         background: checked_box(s.background.as_ref())?,
         shape: checked_shape(s)?,
-        shadow: s.shadow.as_ref().map(checked_shadow).transpose()?,
+        shadow: s.shadow.as_ref().map(checked_title_shadow).transpose()?,
     };
     Ok(Title {
         kind: t.kind,
@@ -192,9 +194,12 @@ pub fn checked(t: &Title) -> Result<Title> {
     })
 }
 
+fn hundredths(o: f64) -> bool {
+    (o * 100.0 - (o * 100.0).round()).abs() < 1e-9
+}
+
 fn checked_box(b: Option<&SubtitleBackground>) -> Result<Option<SubtitleBackground>> {
     let b = checked_background(b)?;
-    let hundredths = |o: f64| (o * 100.0 - (o * 100.0).round()).abs() < 1e-9;
     if b.as_ref()
         .and_then(|b| b.opacity)
         .is_some_and(|o| !hundredths(o))
@@ -202,6 +207,17 @@ fn checked_box(b: Option<&SubtitleBackground>) -> Result<Option<SubtitleBackgrou
         return Err(Error::invalid(BOX_OPACITY));
     }
     Ok(b)
+}
+
+fn checked_title_shadow(s: &TitleShadow) -> Result<TitleShadow> {
+    let s = checked_shadow(s)?;
+    if s.opacity.is_some_and(|o| !hundredths(o)) {
+        return Err(Error::invalid(SHADOW_OPACITY));
+    }
+    if s.blur.is_some_and(|b| b.fract() != 0.0) {
+        return Err(Error::invalid(SHADOW_BLUR));
+    }
+    Ok(s)
 }
 
 fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {

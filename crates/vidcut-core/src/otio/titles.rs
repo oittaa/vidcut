@@ -1017,12 +1017,14 @@ fn shadow_of(all: &[&Value]) -> Option<TitleShadow> {
                 .map(str::to_string),
             opacity: value(g, "shadow opacity")
                 .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+                .map(|o| (o.trunc() / 100.0).clamp(0.0, 1.0)),
             offset: Some([
                 rounded(dx.clamp(-Picture::REACH, Picture::REACH)),
                 rounded((-dy).clamp(-Picture::REACH, Picture::REACH)),
             ]),
-            blur: value(g, "shadow").as_f64().map(|b| b.clamp(1.0, 100.0)),
+            blur: value(g, "shadow")
+                .as_f64()
+                .map(|b| b.trunc().clamp(1.0, 100.0)),
             off: None,
         })
     })

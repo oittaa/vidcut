@@ -478,7 +478,7 @@ impl ShapeFields {
             outline_width: kept_whole(
                 &self.outline_width,
                 stored.and_then(|s| s.outline_width),
-                Title::BOX_MOST_OUTLINE,
+                (0, Title::BOX_MOST_OUTLINE),
                 "box outline width",
             )?,
         }))
@@ -501,7 +501,7 @@ fn kept_within(
 fn kept_whole(
     shown: &str,
     stored: Option<u32>,
-    most: u32,
+    (least, most): (u32, u32),
     what: &str,
 ) -> Result<Option<u32>, String> {
     let t = shown.trim().trim_end_matches('%').trim();
@@ -516,7 +516,9 @@ fn kept_whole(
         .ok()
         .filter(|n| n.is_finite())
         .ok_or_else(|| format!("{what} is a whole number, such as 5"))?;
-    Ok(Some(n.trunc().clamp(0.0, f64::from(most)) as u32))
+    Ok(Some(
+        n.trunc().clamp(f64::from(least), f64::from(most)) as u32
+    ))
 }
 
 fn usual_font() -> &'static str {
@@ -634,7 +636,20 @@ impl TextFields {
 
     pub(super) fn whole_opacity(&self, stored: Option<f64>) -> Result<Option<f64>, String> {
         let shown = stored.map(|o| (o * 100.0).round() as u32);
-        Ok(kept_whole(&self.opacity, shown, 100, "opacity")?.map(|p| f64::from(p) / 100.0))
+        Ok(kept_whole(&self.opacity, shown, (0, 100), "opacity")?.map(|p| f64::from(p) / 100.0))
+    }
+
+    pub(super) fn whole_shadow(
+        &self,
+        stored: Option<&TitleShadow>,
+    ) -> Result<[Option<f64>; 2], String> {
+        let opacity = stored
+            .and_then(|h| h.opacity)
+            .map(|o| (o * 100.0).round() as u32);
+        let blur = stored.and_then(|h| h.blur).map(|b| b.round() as u32);
+        let opacity = kept_whole(&self.shadow_opacity, opacity, (0, 100), "shadow opacity")?;
+        let blur = kept_whole(&self.shadow_blur, blur, (1, 100), "shadow blur")?;
+        Ok([opacity.map(|p| f64::from(p) / 100.0), blur.map(f64::from)])
     }
 
     pub(super) fn refilled(&self, stored: &Parts) -> Self {
