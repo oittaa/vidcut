@@ -391,11 +391,12 @@ pub fn run_with(
                 envelope.dry_run,
             )?)
         }
-        Request::RenderAdd(params) => {
+        Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } => {
             let store = open(project)?;
             let env = AvEnv::for_project(store.path());
             let editor = store.load_project()?;
-            let files = crate::queue::existing(editor.project(), params, &env.proxy_dir())?;
+            let job = crate::queue::updated(&envelope.request);
+            let files = crate::queue::existing(editor.project(), job, params, &env.proxy_dir())?;
             if envelope.dry_run {
                 answer(json!({ "existing": files }))
             } else {
