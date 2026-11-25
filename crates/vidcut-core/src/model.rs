@@ -3654,9 +3654,19 @@ impl Title {
         (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
-    pub fn seated_left(&self, across: f64, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
+    pub fn block_width(line: f64, freed: f64, pixel: f64) -> f64 {
+        ((line - freed.min(pixel)) / pixel + Self::WIDTH_SLACK).floor() + 1.0
+    }
+
+    pub fn seated_left(
+        &self,
+        across: f64,
+        middle: f64,
+        width: f64,
+        (widest, wrap): (f64, f64),
+        pixel: f64,
+    ) -> f64 {
         let lined = self.align().fraction();
-        let width = (widest / pixel + Self::WIDTH_SLACK).floor();
         ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 

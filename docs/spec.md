@@ -6468,8 +6468,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - That step is measured with 8 fonts at 24 sizes where it gives a different height from the exact sum.
     - A line's baseline in a Text title or a lower third is the ascent below the line's top. The gap goes below the text.
     - The middle of a block rounds to a whole pixel. The top of the block goes up by the anchor's part of the height. Then it goes down to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts at four sizes).
-    - The left of a block starts at its middle, rounded to a whole pixel. It goes left by the anchor's part of the width. That width is the whole pixels of the widest line (same renders).
-    - In Resolve Studio 21.1.2, some blocks are half a pixel from this rule, as "HHH" at anchor middle in Arial 96. The reason is not known.
+    - The left of a block starts at its middle, rounded to a whole pixel. It goes left by the anchor's part of the width.
+    - That width is the width of the widest line, rounded down to a whole pixel, plus 1 pixel.
+      - Measured in Resolve Studio 21.2 in Arial 96: "HH", "To" and "fH" at the left and right anchors, and "HHH" also at the middle.
+      - "fH" is 96 pixels wide at zoom 1, and its block is 97 pixels.
     - Each line sits in the block by the exact difference from the widest line, with no rounding (same renders).
     - The letters of a Text title or a lower third have no hinting. Their advances are the font's own (same renders).
     - The font's kerning also goes across a space, a hyphen and a slash, inside one style. A change of style stops it, and tracking keeps it (measured in Resolve Studio 21.1.2).
@@ -6501,9 +6503,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Below the size in the font's `LTSH` table for X, it is the width from the font's hinting for one-bit drawing.
       - Otherwise, it is the font's own width of X, rounded.
     - The space on a letter goes toward 0, to a step of 1/64 of a pixel.
-    - A negative value does not go after the last letter of a line. Thus it does not make the block narrower there.
+    - After the last letter of a line, a negative value takes 1 pixel at most off the block (measured in Resolve Studio 21.2).
     - These rules are measurements in Resolve Studio 21.1.2 on Windows, with 12 fonts at sizes 24 to 384.
-    - In these renders, some blocks with a negative value are up to 1 pixel from this rule, as "Ab" in Arial 96. The reason is not known.
+    - A block is wider than these rules when a letter at an end has ink outside its advance. The size of this pad is not known.
     - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
     - `small` draws small letters as capitals at 0.7 of the size in whole pixels at zoom 1, rounded to a whole pixel. The zoom scales it (measured in Resolve Studio 21.1.2).
@@ -6523,7 +6525,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The right end starts as that distance plus the width of the words. It then follows the same steps as the left end.
     - The edge of the block cuts the line. Thus a line at the start of the block starts at the first whole pixel.
     - At other places, each end can cover part of a pixel.
-    - The width of the words has a negative tracking after the last letter of a line. The width of the block does not.
+    - The width of the words has a negative tracking after the last letter of a line. The width of the block has 1 pixel of it at most.
     - The middle of `<u>` is under the baseline by a third of the thickness plus 1/2, rounded up, plus 1/2 pixel.
     - That distance comes from the thickness at zoom 1, and the zoom scales it.
     - The middle of `<s>` is a third of the ascent over the baseline. The middle of `<o>` is the ascent over the baseline.
