@@ -912,7 +912,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The same frame gives a different zoom in different timelines. One face gave 1.23, 1.305, 1.305, 1.29 and 1.275. The size of the timeline does not explain it.
     - An undo and a second Close Up give the same values again.
     - Pan is −Zoom × the place of the faces across the frame, measured from its middle. Tilt does the same up and down. That place is the same in each timeline.
-    - Pan and Tilt stop at (Zoom − 1) / 2 of the frame each way, so the picture fills the frame. Most copies stop at the top.
+    - Pan and Tilt stop at (Zoom − 1) / 2 of the timeline width and height each way. Most copies stop at the top.
+    - A picture smaller than the frame moves less than its Pan and Tilt ([§8.15](#815-transform-and-crop-pp-766768)). Thus the zoomed picture always covers the area of the picture at Zoom 1.
+    - One letterboxed shot stopped with the top of the zoomed picture at the top of the picture at Zoom 1.
     - A close up of a copy with Zoom 1.305 gave 1.4, at the same place of the faces.
   - **Track:** the first video track above the highest track with a clip in the range, as for Place On Top (D24). It never fills a free lower track.
     - Each new video track also makes one empty audio track.
@@ -923,9 +925,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the Out frame is in the copy, as in the other edits (D16). Resolve leaves it out ([gotchas](gotchas.md#resolves-edits)).
   - vidcut: the face model of `motion.find` looks at the first frame of the copy ([deviations X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
     - With no face, the copy has Zoom 2.0 at the middle.
-    - With faces, it has the `zoom` of the request, usual 1.3. Why: 1.3 is the middle of the measured values.
-    - The middle of the box around the faces goes to the middle of the frame, up to the limits of Pan and Tilt.
-    - When that box, 1.1 times as large, does not fit at that zoom, the copy has Zoom 1.0 at the middle. Why: three faces across the frame gave 1.0.
+    - With faces, the zoom is at most the `zoom` of the request, usual 1.5. Why: the manual says about 150%.
+    - The zoom is the largest up to that value at which the box around the faces, 1.1 times as large, fits in the frame. It is never under 1.0. Why: three faces across the frame gave 1.0.
+    - The middle of the box around the faces goes to the middle of the frame, up to the limits of Pan and Tilt. The limits are in the size of the picture, as measured. Thus a letterboxed picture never shows the track below.
     - A face with a score under 0.7 does not count. A face that the edge of the picture cuts does not count. Why: a face cut by the edge did not move the measured framing.
   - vidcut: these cases are not measured:
     - **A range past the end of the clip:** it stops at the end of the clip.

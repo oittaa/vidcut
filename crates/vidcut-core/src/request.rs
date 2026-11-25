@@ -1090,10 +1090,11 @@ pub enum Request {
     /// In, else the clip's start, to the Out, else the clip's end. With no
     /// marks it runs 5 seconds from `at`. It stays in the clip. The face
     /// model looks at the first frame of the copy. With no face, the copy
-    /// has zoom 2 at the middle. With faces, it has `zoom`, and the middle
-    /// of the box around the faces goes as near to the middle of the frame
-    /// as the picture lets while it fills the frame. When that box, a
-    /// tenth larger, does not fit at `zoom`, the copy has zoom 1. Clears
+    /// has zoom 2 at the middle. With faces, it has the largest zoom up to
+    /// `zoom`, and at least 1, at which the box around the faces, a tenth
+    /// larger, fits in the frame. The middle of that box goes as near to
+    /// the middle of the frame as the picture lets while it covers what it
+    /// covers at zoom 1. Clears
     /// the timeline marks. Returns the clip, its track, the `reference`
     /// clip and the `playhead` after the edit, at its end. With no clip at
     /// the frame, nothing changes and it returns no clip.
@@ -1102,7 +1103,8 @@ pub enum Request {
         /// The playhead.
         #[serde(default)]
         at: Option<TimeSpec>,
-        /// The zoom of a copy that shows faces, from 1 to 100. Usual: 1.3.
+        /// The largest zoom of a copy that shows faces, from 1 to 100.
+        /// Usual: 1.5.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         zoom: Option<f64>,
         /// Download the face model when it is not on this computer, checked

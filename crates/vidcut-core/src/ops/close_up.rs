@@ -7,7 +7,7 @@ use super::{Placed, place, track_above, tracks, unlocked};
 const SECONDS: f64 = 5.0;
 const NO_FACE_ZOOM: f64 = 2.0;
 const ROOM: f64 = 1.1;
-pub const FACE_ZOOM: f64 = 1.3;
+pub const FACE_ZOOM: f64 = 1.5;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Framing {
@@ -73,17 +73,14 @@ pub fn framing(faces: &[Found], fit: [f64; 4], [w, h]: [f64; 2], zoom: f64) -> F
     let low = |i: usize| boxes.iter().map(|b| b[i]).fold(f64::INFINITY, f64::min);
     let high = |i: usize| boxes.iter().map(|b| b[i]).fold(f64::NEG_INFINITY, f64::max);
     let ([x0, y0], [x1, y1]) = ([low(0), low(1)], [high(2), high(3)]);
-    if (x1 - x0).max(y1 - y0) * ROOM * zoom > 1.0 {
-        return Framing {
-            zoom: 1.0,
-            position: [0.5; 2],
-        };
-    }
-    let limit = (zoom - 1.0) / 2.0;
-    let place = |lo: f64, hi: f64| 0.5 + (zoom * (0.5 - (lo + hi) / 2.0)).clamp(-limit, limit);
+    let zoom = zoom.min(1.0 / ((x1 - x0).max(y1 - y0) * ROOM)).max(1.0);
+    let place = |lo: f64, hi: f64, size: f64| {
+        let limit = (zoom - 1.0) / 2.0 * size;
+        0.5 + (zoom * (0.5 - (lo + hi) / 2.0)).clamp(-limit, limit)
+    };
     Framing {
         zoom,
-        position: [place(x0, x1), place(y0, y1)],
+        position: [place(x0, x1, fw / w), place(y0, y1, fh / h)],
     }
 }
 

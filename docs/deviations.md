@@ -1516,10 +1516,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
   - A face has two models. `fast` is a small network on the CPU. `slow` is a larger network on the GPU.
   - After a Find, the status line tells how many things it found.
-  - Close Up uses the `fast` face model on the first frame of the copy. Its zoom with faces is the `zoom` of the request, usual 1.3.
+  - Close Up uses the `fast` face model on the first frame of the copy. Its zoom with faces is at most the `zoom` of the request, usual 1.5.
+    - The zoom is less when the faces do not fit at that zoom ([spec §7.2](spec.md#72-edit-functions)).
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.
-  - A zoom that changes for the same frame cannot be repeated. Each model also finds other faces: in one wide shot, vidcut found seven small faces where Resolve framed only the left ones.
+  - The manual says about 150%. A zoom that changes for the same frame cannot be repeated.
+  - Each model also finds other faces: in one wide shot, vidcut found seven small faces where Resolve framed only the left ones.
   - Text is the next thing that people hide: names, addresses, documents and screens.
   - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 
