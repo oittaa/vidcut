@@ -1265,7 +1265,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Select all",
         Some(
             "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
-             shows.",
+             shows. After a click in the Keyframes tab or the keyframe tray, all its \
+             keyframes.",
         ),
     ),
     own(

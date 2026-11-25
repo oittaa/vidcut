@@ -657,7 +657,9 @@ The bar and the Jobs button:
   - A dragged number keeps its value in `Drag` until the release. Thus one drag is one undo step.
   - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
   - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
-- With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
+- `section` draws the Keyframe buttons of the Transform, Crop and Composite headers. `group_values` names the values of each section, and `group_mark` lights the buttons.
+  - The button and its ease menu send a request for each value (`Workspace::key_group`). Previous and Next seek (`Workspace::step_group`).
+- With several clips, `number`, `section`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
 - `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.
 
 **The Keyframes tab** (`keyframe_editor::Editor`, `Workspace::keyframe_panel`).
@@ -701,6 +703,7 @@ The bar and the Jobs button:
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
 - Without the keys, Ctrl+V pastes no keyframes.
+- With the keys, Select All and Select Nothing change the selected marks, not the clips (`Workspace::select_editor_keys`).
 - `clip.paste_attributes` without `from` and `copied` takes the first clip of the clipboard. The live core fills it in (`edit_at`).
   - Each copy of clips gives `Snapshot::copied_clip`: its name, the boxes to check and a count of the copies.
   - `Workspace::attributes_window` keeps the last choices for the same copy (`PasteChoice`).

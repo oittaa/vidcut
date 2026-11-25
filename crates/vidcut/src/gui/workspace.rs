@@ -1894,6 +1894,10 @@ impl Workspace {
         }
         let all = fired.pressed(Action::SelectAll);
         let nothing = fired.pressed(Action::SelectNothing);
+        let (all, nothing) = match (all || nothing) && self.select_editor_keys(all) {
+            true => (false, false),
+            false => (all, nothing),
+        };
         if (all || nothing) && self.pool_focus {
             let media: Vec<String> = match self.project() {
                 Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)
