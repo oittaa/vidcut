@@ -1,10 +1,9 @@
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Grade, GradeKey, GradeKeyKind, Project};
+use crate::model::{Clip, Grade, GradeKey, GradeKeyKind, Project, Track, TrackKind};
 
 use super::grade::{GradeOf, edited, locked, no_node, node};
 use super::keyframes::Pick;
@@ -134,19 +133,8 @@ pub fn add(
             match d.keys.iter_mut().find(|key| key.frame == frame) {
                 Some(key) => key.kind = kind,
                 None => {
-                    let at = frame as f64;
-                    let values = d.corrector_at(at).map(Cow::into_owned);
-                    d.put_key(GradeKey {
-                        frame,
-                        kind,
-                        start: profile.start,
-                        end: profile.end,
-                        values: values.unwrap_or_default(),
-                        key: d.key_output_at(at),
-                        key_input: d.key_input_at(at),
-                        mix: d.mix_at(at).map_or_else(Vec::new, Cow::into_owned),
-                        windows: d.windows_at(at).into_owned(),
-                    });
+                    let key = d.key_here(frame, kind, profile);
+                    d.put_key(key);
                 }
             }
             made.push(k);
@@ -154,6 +142,58 @@ pub fn add(
         Ok(())
     })?;
     Ok(json!({ "frame": frame, "nodes": made }))
+}
+
+pub fn edl_frames(p: &Project) -> Vec<i64> {
+    let end = p.end();
+    let frames: BTreeSet<i64> = (p.tracks.iter())
+        .filter(|t| t.kind == TrackKind::Video)
+        .flat_map(Track::edit_points)
+        .filter(|f| *f > 0 && *f < end)
+        .collect();
+    frames.into_iter().collect()
+}
+
+pub fn add_marks(p: &mut Project, n: Option<u32>) -> Result<Value> {
+    let frames = edl_frames(p);
+    if frames.is_empty() {
+        return Err(Error::invalid("the timeline has no edits"));
+    }
+    let profile = p.settings.dynamics_profile;
+    let mut made = Vec::new();
+    edited(p, &GradeOf::Timeline, |g| {
+        for k in targets(g, n)? {
+            let d = node(g, k)?;
+            let marks: Vec<GradeKey> = (frames.iter())
+                .filter(|f| d.key_on(**f).is_none())
+                .map(|f| GradeKey {
+                    edl: true,
+                    ..d.key_here(*f, GradeKeyKind::Static, profile)
+                })
+                .collect();
+            for mark in marks {
+                d.put_key(mark);
+            }
+            made.push(k);
+        }
+        Ok(())
+    })?;
+    Ok(json!({ "frames": frames, "nodes": made }))
+}
+
+pub fn remove_marks(p: &mut Project, of: &GradeOf, n: Option<u32>) -> Result<()> {
+    edited(p, of, |g| {
+        let mut gone = false;
+        for k in targets(g, n)? {
+            let d = node(g, k)?;
+            gone |= d.keys.iter().any(|key| key.edl);
+            d.keys.retain(|key| !key.edl);
+        }
+        match gone {
+            true => Ok(()),
+            false => Err(Error::not_found("the grade has no EDL marks")),
+        }
+    })
 }
 
 pub fn set(

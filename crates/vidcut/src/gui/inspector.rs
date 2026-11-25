@@ -20,8 +20,8 @@ use vidcut_core::model::{
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
     JoinStyle, Keyframe, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime,
-    ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
+    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
+    Retime, ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
     Tracker, TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape,
     ZoomBox,
 };
@@ -2335,6 +2335,14 @@ fn node_rows(
             }
             value(ui, acts, V::SoftEdge, "Soft Edge");
             value(ui, acts, V::BorderWidth, "Border Width");
+            if n.effect_mask.is_some() {
+                let paints = (
+                    &PaintMode::ALL[..],
+                    PaintMode::name as fn(PaintMode) -> &'static str,
+                );
+                let paint = (m.paint(), PaintMode::default());
+                choice_row(ui, (slot, "Paint Mode", "paint_mode"), paint, paints, acts);
+            }
             check(ui, (slot, "Invert", m.invert, false), "invert", acts);
             check(ui, (slot, "Solid", m.solid, true), "solid", acts);
             center_row(ui, i, (slot, n), sight, acts);

@@ -546,15 +546,20 @@ The bar and the Jobs button:
   - `Workspace::color_tool_button` paints the dot of the tool: red while it is on and white while it is off.
   - `Live::measuring` renders the frame on a worker thread first. The edit then reads the result from `BALANCES`.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
-- The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.
+- The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframes, a drag and a box.
   - It has a ruler, a Master track and a track for each corrector and each Key Mixer. A click or a drag in the ruler moves the playhead.
   - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
   - The All and Color switch (`KeyMode`) sets the nodes that get a new keyframe: each one with a track, or the current node. A bar at the left marks that track.
-  - A drag of a keyframe sends `grade.keys.move` with `by`. The drag picks the keyframe at the press, and `by` is the move of the pointer from the press. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
+  - Each node track has three buttons at the right of its name: Enable/Disable, Lock and Auto-Keyframe (`Flag`). A click sends `grade.set` with `on`, `locked` or `auto_key`.
+  - A drag of a keyframe sends `grade.keys.move` with `by`. The drag picks the keyframe at the press, and `by` is the move of the pointer from the press.
+  - A drag from an empty place draws a box in that track. The keyframes in the box become the selection, in red. A drag of a selected keyframe moves the selection of its track.
+  - The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`. The menu of a keyframe acts on the selection of its track.
+  - On the timeline grade, the menu of a track also has Add EDL Marks on Tracks and Delete EDL Marks on Tracks. They send `edl` with `grade.keys.add` and `grade.keys.remove`.
   - Change Dynamic Attributes opens a window with the Start and End sliders and the curve of `Dissolve`.
   - Another clip or another grade mode clears the selection (`GradeKeys::forget`).
 - On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.
   - Mark > Make Static Keyframe is on the Color page only (`Workspace::static_key_item`). Its key is `Action::AddStaticKeyframe`.
+  - On the Color page, `Action::PreviousKeyframe` and `Action::NextKeyframe` move the playhead among the keyframes of the grade (`Workspace::grade_key_times`).
 - The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
 - The Input LUT, Output LUT and Video Monitor LUT rows of the Project Settings window (`LutRow`) set `input_lut`, `output_lut` and `video_monitor_lut` of `project.set`.
   - Each row is one dropdown of the LUT list (`luts::combo`). No LUT selected sends an empty path.

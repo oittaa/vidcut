@@ -12,7 +12,7 @@ use vidcut_core::model::{AlphaMode, CompositeMode, Grade, Hdr};
 use vidcut_core::place::{
     Extent, Level, Mix, MixPart, Mixes, Placing, Program, Working, chain, frame_back, lettered,
 };
-use vidcut_core::preferences::{Scope, ScopeScale};
+use vidcut_core::preferences::{Scope, Scopes};
 use vidcut_core::render::{Moving, Placed, Shift};
 
 #[cfg(any(target_os = "linux", windows))]
@@ -3695,7 +3695,7 @@ impl Screen {
         self.scoping = on;
     }
 
-    pub fn scopes(&mut self, gpu: &Gpu, wanted: &[(Scope, (u32, u32))], scale: ScopeScale) -> bool {
+    pub fn scopes(&mut self, gpu: &Gpu, wanted: &[(Scope, (u32, u32))], prefs: Scopes) -> bool {
         if wanted.is_empty() {
             self.plots.drop_all();
             return false;
@@ -3713,7 +3713,7 @@ impl Screen {
             (canvas, target.size),
             (self.drawn_colors, self.draws),
             wanted,
-            scale,
+            prefs,
         )
     }
 
