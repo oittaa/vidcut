@@ -199,6 +199,9 @@ pub struct ExportUi {
     pub(super) duplicate_paths: bool,
     pub(super) focus_name: bool,
     pub(super) job_details: bool,
+    pub(super) hide_clips: bool,
+    pub(super) clip_label: vidcut_core::request::ClipLabel,
+    pub(super) strip: Option<super::thumbnail_timeline::Strip>,
     pub(super) queue: Option<super::export_page::QueueStep>,
     pub(super) renaming: Option<super::export_page::Renaming>,
     starting: Option<Starting>,
@@ -622,14 +625,30 @@ impl Render {
     }
 
     pub(super) fn use_preset(&mut self, preset: &PresetInfo) {
+        let rate = (self.settings.audio.as_ref())
+            .filter(|a| a.codec == AudioCodec::Aac)
+            .and_then(|a| a.bitrate);
         self.preset = preset.name.clone();
         self.base = preset.settings.clone();
         self.settings = preset.settings.clone();
+        if let Some(a) = self.settings.audio.as_mut()
+            && a.codec == AudioCodec::Aac
+            && a.bitrate.is_none()
+        {
+            a.bitrate = rate;
+        }
         self.stashed_video = None;
     }
 
     pub(super) fn changed(&self) -> bool {
-        self.settings != self.base
+        let mut base = self.base.clone();
+        if let (Some(b), Some(s)) = (base.audio.as_mut(), self.settings.audio.as_ref())
+            && b.codec == AudioCodec::Aac
+            && b.bitrate.is_none()
+        {
+            b.bitrate = s.bitrate;
+        }
+        self.settings != base
     }
 
     pub(super) fn load_job(

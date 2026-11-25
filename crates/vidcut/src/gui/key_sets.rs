@@ -26,6 +26,7 @@ pub(super) struct KeySetsUi {
     importing: Option<Picked>,
     naming: Option<String>,
     focus_name: bool,
+    focus_cancel: bool,
     confirm_use: Option<String>,
     confirm_delete: Option<String>,
     want: Option<Want>,
@@ -52,11 +53,12 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
     let in_force = b.set_name().unwrap_or(OWN).to_string();
     let changed = b.any_custom();
     let mine = s.mine(&in_force);
+    let any_mine = s.sets.iter().any(|(_, built_in)| !built_in);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button(icon::DOTS_THREE, |ui| {
                 if ui.button("Save As New Set…").clicked() {
-                    s.naming = Some(String::new());
+                    s.naming = Some(in_force.clone());
                     s.focus_name = true;
                     ui.close();
                 }
@@ -72,25 +74,31 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                         }
                     }
                 });
-                ui.menu_button("Delete Set", |ui| {
-                    for (name, built_in) in &s.sets {
-                        if !built_in && ui.button(name).clicked() {
-                            s.confirm_delete = Some(name.clone());
-                            ui.close();
+                ui.add_enabled_ui(any_mine, |ui| {
+                    ui.menu_button("Delete Set", |ui| {
+                        for (name, built_in) in &s.sets {
+                            if !built_in && ui.button(name).clicked() {
+                                s.confirm_delete = Some(name.clone());
+                                s.focus_cancel = true;
+                                ui.close();
+                            }
                         }
-                    }
+                    });
                 });
                 ui.separator();
-                if ui
-                    .add_enabled(mine && changed, egui::Button::new("Save"))
-                    .clicked()
-                {
-                    s.want = Some(Want::Save(in_force.clone(), true));
+                if ui.add_enabled(changed, egui::Button::new("Save")).clicked() {
+                    match mine {
+                        true => s.want = Some(Want::Save(in_force.clone(), true)),
+                        false => {
+                            s.naming = Some(in_force.clone());
+                            s.focus_name = true;
+                        }
+                    }
                     ui.close();
                 }
             });
             let shown = match changed {
-                true => format!("{in_force} (Changed)"),
+                true => format!("{in_force}*"),
                 false => in_force.clone(),
             };
             egui::ComboBox::from_id_salt("key-set")
@@ -102,7 +110,10 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                             continue;
                         }
                         match changed {
-                            true => s.confirm_use = Some(name.clone()),
+                            true => {
+                                s.confirm_use = Some(name.clone());
+                                s.focus_cancel = true;
+                            }
                             false => s.want = Some(Want::Use(name.clone())),
                         }
                     }
@@ -113,36 +124,53 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                 .clicked()
             {
                 s.confirm_delete = Some(in_force.clone());
+                s.focus_cancel = true;
             }
         })
     });
     naming_row(ui, s);
-    if let Some(name) = s.confirm_use.clone() {
-        dialog::warn(ui, format!("The changes to {in_force} are lost"));
-        ui.horizontal(|ui| {
-            if dialog::main_button(ui, "Discard Changes", true) {
-                s.want = Some(Want::Use(name));
-                s.confirm_use = None;
-            }
-            if ui.button("Cancel").clicked() {
-                s.confirm_use = None;
-            }
-        });
+    if let Some(name) = s.confirm_use.clone()
+        && let Some(discard) = ask(ui, &mut s.focus_cancel, "Discard Changes?", "Discard")
+    {
+        if discard {
+            s.want = Some(Want::Use(name));
+        }
+        s.confirm_use = None;
     }
-    if let Some(name) = s.confirm_delete.clone() {
-        ui.horizontal(|ui| {
-            if dialog::main_button(ui, &format!("Delete {name}"), true) {
-                s.want = Some(Want::Delete(name));
-                s.confirm_delete = None;
-            }
-            if ui.button("Cancel").clicked() {
-                s.confirm_delete = None;
-            }
-        });
+    if let Some(name) = s.confirm_delete.clone()
+        && let Some(delete) = ask(
+            ui,
+            &mut s.focus_cancel,
+            &format!("Delete \"{name}\"?"),
+            "Delete",
+        )
+    {
+        if delete {
+            s.want = Some(Want::Delete(name));
+        }
+        s.confirm_delete = None;
     }
     if let Some(e) = &s.error {
         dialog::warn(ui, e.clone());
     }
+}
+
+fn ask(ui: &mut egui::Ui, focus: &mut bool, question: &str, main: &str) -> Option<bool> {
+    let mut answer = None;
+    ui.horizontal(|ui| {
+        ui.label(question);
+        if dialog::main_button(ui, main, true) {
+            answer = Some(true);
+        }
+        let cancel = ui.button("Cancel");
+        if std::mem::take(focus) {
+            cancel.request_focus();
+        }
+        if cancel.clicked() {
+            answer = Some(false);
+        }
+    });
+    answer
 }
 
 fn naming_row(ui: &mut egui::Ui, s: &mut KeySetsUi) {
@@ -253,7 +281,7 @@ impl Workspace {
             }
             Want::Delete(name) => ("keys.delete", json!({ "name": name })),
             Want::Export(name) => {
-                let file = format!("{}.toml", name.replace(['/', '\\'], "-"));
+                let file = format!("{} Keys.toml", name.replace(['/', '\\'], "-"));
                 let picked = Picked::ask(ctx, move || {
                     dialogs.save_file("Export Key Set", &folder, &file, &["toml"])
                 });

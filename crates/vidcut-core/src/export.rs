@@ -990,14 +990,14 @@ pub fn builtin_presets() -> Vec<Preset> {
         height: Some(h),
         ..video(V::H264, Some(q))
     };
-    let site = |family: &str, w: u32, h: u32, quick: bool| Preset {
+    let site = |family: &str, w: u32, h: u32, quick: bool, kbps: Option<u64>| Preset {
         family: Some(family.into()),
         ..preset(
             &format!("{}-{h}p", family.to_lowercase()),
             &format!("{family} {h}p"),
             &format!("MP4, H.264 {w}×{h}, AAC"),
             quick,
-            av(C::Mp4, sized(w, h, 18), audio(A::Aac, Some(320))),
+            av(C::Mp4, sized(w, h, 18), audio(A::Aac, kbps)),
         )
     };
     vec![
@@ -1018,14 +1018,14 @@ pub fn builtin_presets() -> Vec<Preset> {
         preset(
             "h264-master",
             "H.264 Master",
-            "QuickTime, high-quality H.264, AAC 320 kb/s",
+            "QuickTime, high-quality H.264, AAC",
             true,
-            av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, Some(320))),
+            av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, None)),
         ),
         preset(
             "h265-master",
             "H.265 Master",
-            "QuickTime, 10-bit HEVC (Main10), AAC 320 kb/s",
+            "QuickTime, 10-bit HEVC (Main10), AAC",
             true,
             av(
                 C::Mov,
@@ -1033,7 +1033,7 @@ pub fn builtin_presets() -> Vec<Preset> {
                     bit_depth: Some(10),
                     ..video(V::Hevc, Some(18))
                 },
-                audio(A::Aac, Some(320)),
+                audio(A::Aac, None),
             ),
         ),
         preset(
@@ -1050,13 +1050,13 @@ pub fn builtin_presets() -> Vec<Preset> {
                 audio(A::PcmS24, None),
             ),
         ),
-        site("YouTube", 1280, 720, false),
-        site("YouTube", 1920, 1080, true),
-        site("YouTube", 2560, 1440, false),
-        site("YouTube", 3840, 2160, false),
-        site("Vimeo", 1280, 720, false),
-        site("Vimeo", 1920, 1080, true),
-        site("Vimeo", 3840, 2160, false),
+        site("YouTube", 1280, 720, false, Some(320)),
+        site("YouTube", 1920, 1080, true, Some(320)),
+        site("YouTube", 2560, 1440, false, Some(320)),
+        site("YouTube", 3840, 2160, false, Some(320)),
+        site("Vimeo", 1280, 720, false, None),
+        site("Vimeo", 1920, 1080, true, None),
+        site("Vimeo", 3840, 2160, false, None),
         preset(
             "tiktok",
             "TikTok",
@@ -1068,7 +1068,7 @@ pub fn builtin_presets() -> Vec<Preset> {
                     hdr: HdrMode::Sdr,
                     ..sized(1080, 1920, 20)
                 },
-                audio(A::Aac, Some(256)),
+                audio(A::Aac, None),
             ),
         ),
         preset(
