@@ -397,10 +397,18 @@ pub fn keys_use(set: &str, dry_run: bool) -> Result<Value> {
     keys_changed(&p, &before, dry_run)
 }
 
-pub fn keys_save(name: &str, overwrite: bool, dry_run: bool) -> Result<Value> {
+pub fn keys_save(
+    name: &str,
+    overwrite: bool,
+    keys: Option<&Custom>,
+    dry_run: bool,
+) -> Result<Value> {
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = load()?;
-    let keys = bindings_of(&p)?.changes();
+    let keys = match keys {
+        Some(keys) => Bindings::of(keys)?.changes(),
+        None => bindings_of(&p)?.changes(),
+    };
     let (set, path) = key_sets::save(&key_sets::dir(), name, &keys, overwrite, dry_run)?;
     p.keys = keys;
     p.key_set = Some(set.name.clone());
