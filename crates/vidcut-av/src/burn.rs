@@ -41,6 +41,24 @@ pub struct Sprite {
     pub rgba: Vec<[f32; 4]>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Letter {
+    pub at: usize,
+    pub x: [f32; 2],
+    pub y: [f32; 2],
+    pub rtl: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Letters {
+    pub letters: Vec<Letter>,
+    pub pivot: [f32; 2],
+    pub turn: f64,
+    pub top: i32,
+    pub height: u32,
+    pub lift: f32,
+}
+
 impl Sprite {
     fn at(&self, x: i32, y: i32) -> [f32; 4] {
         let (sx, sy) = (x - self.x, y - self.y);
@@ -498,6 +516,7 @@ struct Laid {
     above: f32,
     popped: Option<(f32, f32)>,
     seated: Option<[f32; 2]>,
+    letters: Vec<Letter>,
 }
 
 struct Canvas {
@@ -1322,6 +1341,55 @@ fn kern_words(system: &mut FontSystem, buffer: &mut Buffer) -> bool {
     changed
 }
 
+fn letters_of(buffer: &Buffer, runs: &[LayoutRun<'_>], empty: f32) -> Vec<Letter> {
+    let mut starts = Vec::with_capacity(buffer.lines.len());
+    let mut n = 0;
+    for line in &buffer.lines {
+        starts.push(n);
+        n += line.text().chars().count() + line.ending().as_str().chars().count();
+    }
+    let mut out: Vec<Letter> = Vec::new();
+    for run in runs {
+        let first = starts.get(run.line_i).copied().unwrap_or(n);
+        let y = [run.line_top, run.line_top + run.line_height];
+        if run.glyphs.is_empty() {
+            out.push(Letter {
+                at: first,
+                x: [empty; 2],
+                y,
+                rtl: run.rtl,
+            });
+            continue;
+        }
+        for g in run.glyphs {
+            let c0 = first + run.text[..g.start].chars().count();
+            let c1 = first + run.text[..g.end].chars().count();
+            let count = (c1 - c0).max(1);
+            let rtl = g.level.is_rtl();
+            for k in 0..count {
+                let part = |i: usize| g.x + g.w * i as f32 / count as f32;
+                let x = if rtl {
+                    [part(count - k - 1), part(count - k)]
+                } else {
+                    [part(k), part(k + 1)]
+                };
+                match out.last_mut() {
+                    Some(l) if l.at == c0 + k && l.y == y => {
+                        l.x = [l.x[0].min(x[0]), l.x[1].max(x[1])];
+                    }
+                    _ => out.push(Letter {
+                        at: c0 + k,
+                        x,
+                        y,
+                        rtl,
+                    }),
+                }
+            }
+        }
+    }
+    out
+}
+
 fn lay_out(look: &Typeset) -> Option<Laid> {
     let size = look.size;
     let line = look.rules.line();
@@ -1460,6 +1528,17 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
         Markup::Pieces(..) => Vec::new(),
     };
     let runs = spaced(&mut f.system, &buffer, &below, seat);
+    let spots = match look.markup {
+        Markup::Rich(..) => {
+            let lined = match look.align {
+                Align::Center => 0.5,
+                Align::Right | Align::End => 1.0,
+                Align::Left | Align::Justified => 0.0,
+            };
+            letters_of(&buffer, &runs, lined * look.wrap)
+        }
+        Markup::Pieces(..) => Vec::new(),
+    };
     let lifts: Vec<Vec<f32>> = runs
         .iter()
         .map(|r| shifts(&mut f.system, r, seat))
@@ -1679,6 +1758,7 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
         tall,
         popped,
         seated,
+        letters: spots,
     })
 }
 
@@ -2013,6 +2093,59 @@ fn title_block(
     if block.part == TitlePart::Shape {
         return shaped_box(t, block, (w, h), h / f64::from(timeline.max(1)));
     }
+    let (sprite, _) = upright_block(t, block, (width, height), timeline)?;
+    if block.turn == 0.0 {
+        return Some(sprite);
+    }
+    let [px, py] = block.pivot;
+    Some(turned(
+        inside(sprite, (w, h))?,
+        ((px * w) as f32, (py * h) as f32),
+        block.turn,
+    ))
+}
+
+pub fn title_letters(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Letters> {
+    if t.text.trim().is_empty() {
+        return Vec::new();
+    }
+    let plain = vidcut_core::rich::plain(&t.text);
+    let last = plain.rfind('\n').map_or(0, |i| plain[..=i].chars().count());
+    let (w, h) = (f64::from(width), f64::from(height));
+    t.blocks()
+        .iter()
+        .filter_map(|b| {
+            let first = match b.part {
+                TitlePart::Whole | TitlePart::Upper => 0,
+                TitlePart::Lower => last,
+                TitlePart::Shape | TitlePart::Backing => return None,
+            };
+            let (s, letters) = upright_block(t, b, (width, height), timeline)?;
+            Some(Letters {
+                letters: letters
+                    .into_iter()
+                    .map(|l| Letter {
+                        at: l.at + first,
+                        ..l
+                    })
+                    .collect(),
+                pivot: [(b.pivot[0] * w) as f32, (b.pivot[1] * h) as f32],
+                turn: b.turn,
+                top: s.y,
+                height: s.height,
+                lift: s.lift,
+            })
+        })
+        .collect()
+}
+
+fn upright_block(
+    t: &Title,
+    block: &TitleBlock,
+    (width, height): (u32, u32),
+    timeline: u32,
+) -> Option<(Sprite, Vec<Letter>)> {
+    let (w, h) = (f64::from(width), f64::from(height));
     let zoom = block.zoom;
     let pixel = h / f64::from(timeline.max(1));
     let exact = h * t.text_fraction() * zoom;
@@ -2076,12 +2209,13 @@ fn title_block(
         above,
         seated,
         tall,
+        letters,
         ..
     } = lay_out(&look)?
     else {
         return None;
     };
-    let [px, py] = block.pivot;
+    let [px, _] = block.pivot;
     let [across, down] = block.anchor;
     let lined = t.align().fraction() as f32;
     let exact = block_top(
@@ -2101,14 +2235,16 @@ fn title_block(
         },
         ..placed(sprite, left, top)
     };
-    if block.turn == 0.0 {
-        return Some(sprite);
-    }
-    Some(turned(
-        inside(sprite, (w, h))?,
-        ((px * w) as f32, (py * h) as f32),
-        block.turn,
-    ))
+    let (dx, dy) = (left.round(), top.round());
+    let letters = letters
+        .into_iter()
+        .map(|l| Letter {
+            x: l.x.map(|v| v + dx),
+            y: l.y.map(|v| v + dy),
+            ..l
+        })
+        .collect();
+    Some((sprite, letters))
 }
 
 fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {

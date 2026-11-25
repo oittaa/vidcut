@@ -319,6 +319,11 @@ impl Workspace {
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::ColorTool => self.show_color_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
+            GuiPanel::TitleText => {
+                if let Err(e) = self.type_title_text() {
+                    self.say(format!("Title Text: {e}"));
+                }
+            }
             GuiPanel::SelectTool => self.open_select_tool(),
         }
     }
@@ -348,6 +353,7 @@ impl Workspace {
                 {
                     return Err("Open a project first".into());
                 }
+                live::GuiChange::Show(GuiPanel::TitleText) => self.type_title_text()?,
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Close(panel) => self.close_panel(panel),
                 live::GuiChange::Page(Page::Effects | Page::Color | Page::Export)
@@ -439,6 +445,7 @@ impl Workspace {
             }
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
+            GuiPanel::TitleText => self.stop_title_text(),
             GuiPanel::SelectTool => self.close_select_tool(),
         }
     }
@@ -486,6 +493,7 @@ impl Workspace {
                 tool.is_none() && self.timeline.picture_grab.color,
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
+            (GuiPanel::TitleText, self.typing_title_text()),
             (GuiPanel::SelectTool, self.select_tool_open()),
         ];
         let (edit, edits) = self.selected_edit_points();

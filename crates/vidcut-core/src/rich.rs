@@ -250,6 +250,69 @@ pub fn escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
+pub fn letter_bytes(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(c) = text[at..].chars().next() {
+        let rest = &text[at..];
+        if c == '<'
+            && let Some((_, Some(_), len)) = tag(rest)
+        {
+            at += len;
+            continue;
+        }
+        let len = entity(rest).map_or(c.len_utf8(), |(_, len)| len);
+        out.push(at..at + len);
+        at += len;
+    }
+    out
+}
+
+fn tidy(mut text: String) -> String {
+    let mut from = 0;
+    while let Some(i) = text[from..].find('<').map(|i| from + i) {
+        let empty = match tag(&text[i..]) {
+            Some((false, Some(open), len)) => match tag(&text[i + len..]) {
+                Some((true, Some(close), end)) if close.name() == open.name() => Some(len + end),
+                _ => None,
+            },
+            _ => None,
+        };
+        match empty {
+            Some(len) => {
+                text.replace_range(i..i + len, "");
+                from = 0;
+            }
+            None => from = i + 1,
+        }
+    }
+    text
+}
+
+pub fn edited(text: &str, (a, b): (usize, usize), with: &str) -> String {
+    let letters = letter_bytes(text);
+    let n = letters.len();
+    let (a, b) = (a.min(n), b.min(n).max(a.min(n)));
+    let newline = |i: usize| text[letters[i].clone()].starts_with('\n');
+    let at = if a < b || (a < n && (a == 0 || newline(a - 1))) {
+        letters[a].start
+    } else if a > 0 {
+        letters[a - 1].end
+    } else {
+        text.len()
+    };
+    let mut out = String::with_capacity(text.len() + with.len());
+    out.push_str(&text[..at]);
+    out.push_str(&escape(with));
+    let mut kept = at;
+    for r in &letters[a..b] {
+        out.push_str(&text[kept..r.start]);
+        kept = r.end;
+    }
+    out.push_str(&text[kept..]);
+    tidy(out)
+}
+
 pub fn lines(text: &str) -> Vec<Vec<Span>> {
     let mut out: Vec<Vec<Span>> = vec![Vec::new()];
     for span in spans(text) {

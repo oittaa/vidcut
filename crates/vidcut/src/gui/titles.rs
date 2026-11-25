@@ -202,13 +202,8 @@ impl TitleDialog {
         self.shown.clone().map(|t| (self.clip.clone(), t))
     }
 
-    pub(super) fn text_mut(&mut self) -> &mut String {
-        &mut self.text
-    }
-
-    pub(super) fn typed(&mut self) {
-        self.dirty = true;
-        self.typed = true;
+    pub(super) fn text(&self) -> &str {
+        &self.text
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
@@ -495,8 +490,29 @@ impl Workspace {
     }
 
     pub(crate) fn open_title(&mut self, id: &str) {
+        self.show_title(id, true);
+    }
+
+    pub(super) fn show_title(&mut self, id: &str, focus: bool) {
         self.left = LeftTab::Inspector;
-        self.inspect_title(id, true);
+        self.inspect_title(id, focus);
+    }
+
+    pub(super) fn retype_title(&mut self, text: String) {
+        let Some(mut d) = self.timeline.title_dialog.take() else {
+            return;
+        };
+        d.text = text;
+        d.dirty = true;
+        d.typed = true;
+        let stored = self
+            .project()
+            .and_then(|p| p.clip(&d.clip))
+            .and_then(|c| Some(sampled_at(c, c.title.as_ref()?, d.at)));
+        if let Some(s) = stored {
+            d.shown = title_of(&d, &s).ok().filter(|t| *t != s);
+        }
+        self.timeline.title_dialog = Some(d);
     }
 
     pub(super) fn inspect_title(&mut self, id: &str, focus: bool) {

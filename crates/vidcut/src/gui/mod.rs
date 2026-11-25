@@ -58,6 +58,7 @@ mod tiles;
 mod timeline;
 mod timelines;
 mod title_browser;
+mod title_text;
 mod titles;
 mod transcription;
 mod transition_browser;

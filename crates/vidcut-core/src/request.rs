@@ -4632,8 +4632,10 @@ pub enum Request {
     /// clip (the topmost clip at the playhead when none is selected), the
     /// viewer's `color_tool` (the switch, Auto Color and Reset of the Auto
     /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
-    /// Dynamic Zoom, Color and their buttons, or `select_tool` (a tool to
-    /// add on the effects page). Answers what `gui.state` does.
+    /// Dynamic Zoom, Color and their buttons, `title_text` (the text of the
+    /// selected title, or of the topmost title at the playhead, to edit in
+    /// place in the viewer), or `select_tool` (a tool to add on the effects
+    /// page). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -6159,6 +6161,12 @@ pub enum GuiPanel {
     /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Color, the
     /// flips, Swap, the ease, Auto Color and Reset.
     Tools,
+    /// The text of a title, to edit in place in the viewer, with a caret at
+    /// its end: the first selected title at the playhead, else the topmost
+    /// title there. The Title section of the Inspector opens with it.
+    /// Typing changes the title as `titles.set` with `text` does, and
+    /// `gui.close` puts the change in.
+    TitleText,
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.
     SelectTool,

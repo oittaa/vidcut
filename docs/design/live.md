@@ -404,10 +404,15 @@ The bar and the Jobs button:
   - `Selection::keep_order` removes each item that left the selection and adds each new item at the end. Items that come in one request count clips first.
   - Its `first` is the first item of `order`.
 
-**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-and-are-edited-in-the-inspector)).
+**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-and-their-handles-show-near-the-pointer)).
 
 - The Title section (`TitleDialog`) works out the title of its fields (`title_of`). When the user leaves a field, the changes go as one `titles.set`. A change on each line of a lower third goes as one `titles.set` for each line.
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
+- A double-click on a title in the viewer starts a `Typing` (`Workspace::title_typing`). It edits the text of the Title section in place.
+  - `burn::title_letters` gives the box of each letter from the layout of the title as it is drawn. `Laid` puts the boxes on the viewer. The caret, the selection and the clicks use them.
+  - `rich::edited` changes the markup for a change of the letters that show. A typed letter takes the style of the letter before it, or at the start of a line the style of the letter after it.
+  - Why: the markup holds the styles, and the user edits the letters that show.
+  - The `Typing` holds the keyboard focus. Thus the keys of the viewer and the timeline do not act while the user types.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.
 - The Titles tab (`title_browser::Browser`) draws its cards with `burn::title`. A dragged card (`Gesture::Title`) drops as `titles.add`.

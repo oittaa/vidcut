@@ -5,6 +5,7 @@ use vidcut_core::model::{Clip, Project, Title, TitleKind, TrackKind};
 use vidcut_core::render::Run;
 
 use super::timeline::tools::landing;
+use super::title_text::{Laid, Typing};
 use super::workspace::Workspace;
 
 const GRAB: f32 = 6.0;
@@ -12,7 +13,6 @@ const SNAP: f32 = 8.0;
 const LIFT: f32 = 26.0;
 const LINES: [f64; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 const KEPT: usize = 8;
-const TEXT_W: f32 = 120.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hold {
@@ -35,10 +35,11 @@ struct Held {
 pub struct Grab {
     selected: Option<String>,
     held: Option<Held>,
-    editing: Option<(String, bool)>,
+    typing: Option<Typing>,
     landing: Option<(String, Title, std::time::Instant, Title)>,
     sent: Option<(String, Title)>,
     boxes: Lru<(Title, (u32, u32)), [f32; 5], KEPT>,
+    letters: Lru<(Title, (u32, u32)), Vec<vidcut_av::burn::Letters>, KEPT>,
 }
 
 struct Shown {
@@ -48,6 +49,7 @@ struct Shown {
     pivot: Pos2,
     angle: f32,
     turn_at: Pos2,
+    run: Option<Run>,
 }
 
 impl Shown {
@@ -237,15 +239,14 @@ impl Workspace {
                 ry * fh + (by - qy * fh) * z
             };
             let (bw, bh) = (bw * z, bh * z);
-            let dy = if title.moves() {
-                let run = Run {
-                    at: at - c.start,
-                    of: c.duration,
-                    held: false,
-                };
-                run.top(0, h, f64::from(bh)) as f32 + lift - y
-            } else {
-                0.0
+            let run = title.moves().then_some(Run {
+                at: at - c.start,
+                of: c.duration,
+                held: false,
+            });
+            let dy = match run {
+                Some(run) => run.top(0, h, f64::from(bh)) as f32 + lift - y,
+                None => 0.0,
             };
             let frame = |fx: f32, fy: f32| picture.min + vec2(fx * scale.x, fy * scale.y);
             let pivot = frame((px * w) as f32, (py * h) as f32);
@@ -274,6 +275,7 @@ impl Workspace {
                 pivot,
                 angle,
                 turn_at: top_middle + up,
+                run,
             });
         }
         out
@@ -355,11 +357,13 @@ impl Workspace {
         let pointer = ui.input(|i| i.pointer.hover_pos());
         let (shift, free) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
         let selected = self.timeline.title_grab.selected.clone();
+        let typed = self.typed_title();
         let grip = |p: Pos2| {
             shapes
                 .iter()
                 .filter(|s| Some(&s.clip) == selected.as_ref())
                 .chain(&shapes)
+                .filter(|s| Some(&s.clip) != typed.as_ref())
                 .find_map(|s| Some((s, s.grip(p)?)))
         };
         let cursor = match &self.timeline.title_grab.held {
@@ -417,14 +421,13 @@ impl Workspace {
             self.timeline.title_grab.selected = hit.map(|s| s.clip.clone());
         }
         if resp.double_clicked()
-            && let Some(id) = pointer
-                .and_then(|p| shapes.iter().find(|s| s.inside(p)))
-                .map(|s| s.clip.clone())
+            && let Some(p) = pointer
+            && let Some(id) = shapes.iter().find(|s| s.inside(p)).map(|s| s.clip.clone())
         {
-            self.open_title(&id);
-            self.timeline.title_grab.editing = Some((id, true));
+            self.show_title(&id, false);
+            self.timeline.title_grab.typing = Some(Typing::new(&id, Some(p)));
         }
-        self.title_text_box(ui.ctx(), &shapes);
+        let typing = self.title_typing(ui, &shapes, picture);
         if let Some(h) = &self.timeline.title_grab.held
             && h.hold == Hold::Zoom
         {
@@ -439,44 +442,124 @@ impl Workspace {
             .show(|ui| ui.add(egui::Label::new(zoom).extend()));
         }
         self.sync_title_preview();
-        self.paint_title_controls(ui, picture, &shapes, pointer);
+        match typing {
+            Some((laid, outline, fresh)) => {
+                let shapes = fresh.unwrap_or(shapes);
+                self.paint_title_controls(ui, picture, &shapes, pointer);
+                if let Some(t) = &self.timeline.title_grab.typing {
+                    t.paint(ui, &laid, outline, picture);
+                }
+            }
+            None => self.paint_title_controls(ui, picture, &shapes, pointer),
+        }
     }
 
-    fn title_text_box(&mut self, ctx: &egui::Context, shapes: &[Shown]) {
-        let Some((clip, fresh)) = self.timeline.title_grab.editing.clone() else {
-            return;
-        };
-        let shown = shapes.iter().find(|s| s.clip == clip);
-        let dialog = self
+    fn typed_title(&self) -> Option<String> {
+        self.timeline
+            .title_grab
+            .typing
+            .as_ref()
+            .map(|t| t.clip.clone())
+    }
+
+    fn title_typing(
+        &mut self,
+        ui: &egui::Ui,
+        shapes: &[Shown],
+        picture: Rect,
+    ) -> Option<(Laid, [Pos2; 4], Option<Vec<Shown>>)> {
+        let clip = self.typed_title()?;
+        let text = self
             .timeline
             .title_dialog
-            .as_mut()
-            .filter(|d| d.clip() == clip);
-        let (Some(s), Some(d)) = (shown, dialog) else {
-            self.timeline.title_grab.editing = None;
-            return;
+            .as_ref()
+            .filter(|d| d.clip() == clip)
+            .map(|d| d.text().to_string());
+        let shown = shapes.iter().find(|s| s.clip == clip);
+        let (Some(s), Some(text)) = (shown, text) else {
+            self.timeline.title_grab.typing = None;
+            return None;
         };
-        let rect = Rect::from_points(&s.corners);
-        let r = egui::Area::new(egui::Id::unique("title-text-box"))
-            .fixed_pos(rect.min)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(d.text_mut())
-                        .desired_width(rect.width().max(TEXT_W))
-                        .desired_rows(1),
-                )
-            })
-            .inner;
-        if r.changed() {
-            d.typed();
+        let laid = self.typed_laid(s, picture);
+        let mut typing = self.timeline.title_grab.typing.take()?;
+        let (changed, done) = typing.frame(ui, &text, &laid, s.corners);
+        let fresh = changed.is_some();
+        if let Some(t) = changed {
+            self.retype_title(t);
         }
-        if fresh {
-            r.request_focus();
-            self.timeline.title_grab.editing = Some((clip, false));
-        } else if !r.has_focus() {
-            self.timeline.title_grab.editing = None;
+        if done {
+            return None;
         }
+        self.timeline.title_grab.typing = Some(typing);
+        if !fresh {
+            return Some((laid, s.corners, None));
+        }
+        let shapes = self.title_shapes(picture);
+        let s = shapes.iter().find(|s| s.clip == clip)?;
+        let laid = self.typed_laid(s, picture);
+        let outline = s.corners;
+        Some((laid, outline, Some(shapes)))
+    }
+
+    fn typed_laid(&mut self, s: &Shown, picture: Rect) -> Laid {
+        let size = self
+            .project_shared()
+            .map_or((1, 1), |p| (p.width(), p.height()));
+        let key = (s.title.clone(), size);
+        let letters = match self.timeline.title_grab.letters.get(&key) {
+            Some(l) => l.clone(),
+            None => {
+                let l = vidcut_av::burn::title_letters(&s.title, size.0, size.1, size.1);
+                self.timeline.title_grab.letters.insert(key, l.clone());
+                l
+            }
+        };
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        let tall = (s.title.text_fraction() * s.title.scale()) as f32 * picture.height();
+        let home = [
+            s.pivot - vec2(0.0, tall / 2.0),
+            s.pivot + vec2(0.0, tall / 2.0),
+        ];
+        let run = s.run;
+        let drop = |b: &vidcut_av::burn::Letters| match run {
+            Some(r) => r.top(0, f64::from(h), f64::from(b.height)) as f32 + b.lift - b.top as f32,
+            None => 0.0,
+        };
+        Laid::new(&letters, picture, (w, h), drop, home)
+    }
+
+    pub(super) fn type_title_text(&mut self) -> Result<(), String> {
+        let p = self.project_shared().ok_or("Open a project first")?;
+        if self.snap.viewer != vidcut_core::request::ViewerMode::Timeline {
+            return Err("The viewer does not show the timeline".into());
+        }
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let shown: Vec<String> = showing(&p, at)
+            .into_iter()
+            .map(|(c, _)| c.id.clone())
+            .collect();
+        let id = self
+            .snap
+            .selection
+            .clips
+            .iter()
+            .find(|id| shown.contains(id))
+            .or(shown.first())
+            .cloned()
+            .ok_or("No title at the playhead")?;
+        self.timeline.picture_grab.tool = None;
+        self.timeline.title_grab.selected = Some(id.clone());
+        self.show_title(&id, false);
+        self.timeline.title_grab.typing = Some(Typing::new(&id, None));
+        Ok(())
+    }
+
+    pub(super) fn stop_title_text(&mut self) {
+        self.timeline.title_grab.typing = None;
+    }
+
+    pub(super) fn typing_title_text(&self) -> bool {
+        self.timeline.title_grab.typing.is_some()
     }
 
     fn paint_title_controls(
@@ -490,17 +573,19 @@ impl Workspace {
         let accent = super::theme::colors().accent;
         let selected = self.timeline.title_grab.selected.as_deref();
         let held = self.timeline.title_grab.held.as_ref();
+        let typed = self.typed_title();
         for s in shapes {
             let chosen = Some(s.clip.as_str()) == selected;
             let hovered = pointer.is_some_and(|p| s.near(p));
-            if !chosen && !hovered {
+            let typing = Some(&s.clip) == typed.as_ref();
+            if !chosen && !hovered && !typing {
                 continue;
             }
-            let stroke = Stroke::new(if chosen { 1.5 } else { 1.0 }, accent);
+            let stroke = Stroke::new(if chosen && !typing { 1.5 } else { 1.0 }, accent);
             for i in 0..4 {
                 painter.line_segment([s.corners[i], s.corners[(i + 1) % 4]], stroke);
             }
-            if s.title.kind != TitleKind::Scroll {
+            if s.title.kind != TitleKind::Scroll && !typing {
                 for c in s.corners {
                     painter.rect_filled(
                         Rect::from_center_size(c, Vec2::splat(GRAB * 1.4)),
