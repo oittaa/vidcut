@@ -6596,7 +6596,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `corner` is its radius, as a fraction of the picture height. No radius passes half of a side, on each axis apart.
     - `outline_width` is in pixels of the timeline, and half of it is outside the box.
     - The outline is not changed by the background's opacity.
-  - The Title section shows `shape` as Box Width, Box Height, Box Across, Box Down, Box Corner, Box Outline and Box Outline Width. Empty Width and Height fit the box to the text. Empty Width alone takes 90%, the usual width in a file.
+  - These are measurements of the Background controls of the Inspector, in Resolve Studio 21.2 at 1920×1080 and 3840×2160:
+    - The Background of a new Text title is on, with Height 0. Thus it draws nothing.
+    - Width, Height and Corner Radius show 3 decimals. The file holds the same numbers at each picture size. Their usual values are 0.9, 0 and 1/27.
+    - Center X and Center Y are pixels of the timeline, with Y up. The file holds them as fractions of the picture width and height.
+    - Outline Width and Opacity are whole numbers. A typed fraction loses its decimals: 7.6 gives 7. Their usual values are 0 and 50.
+    - A typed value past a limit gives the limit. The limits are 0 to 2 for Width and Height, 0 to 1 for Corner Radius, and 0 to 30 for Outline Width.
+    - Opacity is from 0 to 100. Center goes 4 picture widths and 4 picture heights from the middle.
+  - The Title section shows `shape` as Box Width, Box Height, Box Center X, Box Center Y, Box Corner Radius, Box Outline and Box Outline Width. They have the units and the limits of the Inspector.
+    - A title's Opacity is a whole percent. Its usual value is 50%.
+    - Empty Width and Height fit the box to the text. Empty Width alone takes 0.9, the usual width in a file.
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
