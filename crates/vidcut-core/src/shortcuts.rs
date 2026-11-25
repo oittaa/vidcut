@@ -165,6 +165,7 @@ actions! {
     AddLayerNode "add_layer_node",
     AppendNode "append_node",
     AddOutsideNode "add_outside_node",
+    AddSplitterCombiner "add_splitter_combiner",
     AddCircleNode "add_circle_node",
     AddLinearNode "add_linear_node",
     AddPolygonNode "add_polygon_node",
@@ -217,6 +218,7 @@ impl Action {
             | Action::AddLayerNode
             | Action::AppendNode
             | Action::AddOutsideNode
+            | Action::AddSplitterCombiner
             | Action::AddCircleNode
             | Action::AddLinearNode
             | Action::AddPolygonNode
@@ -1265,7 +1267,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Select all",
         Some(
             "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
-             shows.",
+             shows. After a click in the Keyframes tab or the keyframe tray, all its \
+             keyframes.",
         ),
     ),
     own(
@@ -1584,6 +1587,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+O"],
         "Add an outside node",
         Some("A corrector after the current node, on the inverse of its key."),
+    ),
+    own(
+        Color,
+        Action::AddSplitterCombiner,
+        &["Alt+Y"],
+        "Add a splitter and a combiner",
+        Some("After the current node: a corrector for each channel, joined again."),
     ),
     own(
         Color,
