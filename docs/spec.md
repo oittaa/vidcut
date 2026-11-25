@@ -3110,6 +3110,15 @@ The sums use these names:
 The controls of the sums (pp. 2213–2217):
 
 - Apply Mode: Normal. It is one of 27 modes. The manual lists 26 of them. It does not list Hard Mix, which is in the menu (pp. 2213–2215).
+  - The menu has 7 groups, with a line between two groups:
+    - Normal, Screen and Dissolve.
+    - Darken, Multiply, Color Burn, Linear Burn and Darker Color.
+    - Lighten, Color Dodge, Linear Dodge and Lighter Color.
+    - Overlay, Soft Light, Hard Light, Vivid Light, Linear Light, Pin Light and Hard Mix.
+    - Difference and Exclusion.
+    - Hue, Saturation, Color and Luminosity.
+    - Hypotenuse and Geometric.
+  - vidcut: the Apply Mode of a tracker's Merge shows the same groups.
 - Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
 - Blend mixes the background with the result (p. 2217).
@@ -5389,7 +5398,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With a custom size, the picture fits into the rounded size with one draw.
     - Measured in Resolve Studio 21.2 with H.264 and H.265 on the CPU: each odd side goes up by one. This is so on a timeline and as a custom size.
     - 1279 x 719 gives 1280 x 720, and 853 x 481 gives 854 x 482. 1001 x 1001 gives 1002 x 1002, and 257 x 257 gives 258 x 258.
-    - Measured: a timeline of 1279 x 719 leaves the bottom row and the left and right columns part dark. As a custom size, the edges are full.
+    - Measured with 7 sizes in H.264 and H.265: the frame of an odd timeline fits into the even size with one factor. The frame stays centered.
+    - Measured: the factor is the smaller of the two ratios of the sides, even size to timeline size. This is so at Fill and at Fit.
+    - Measured: with an odd width only, or an odd height only, the factor is 1. A bar of half a pixel shows on each odd side.
+    - Measured: with both sides odd, the width fills. Bars show at the top and the bottom: 0.22 of a pixel at 1279 x 719, and 0.1 at 2001 x 1601.
+    - Measured: on a 1280 x 720 timeline, a custom size of 1279 x 720, 1280 x 719 or 1279 x 719 gives a full picture. No bar shows.
+    - Measured: an EXR keeps the odd size. The picture fits into that size, centered.
+    - One earlier run, with the barcode clip at 1279 x 719, showed a part-dark bottom row and no top bar. Its cause is not known.
     - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
@@ -5779,26 +5794,35 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Each delete asks first, for example 'Delete "Run A"?', with Cancel and Delete. Cancel has the focus (measured).
   - Save As New Set… (`keys.save`) asks for a name. The field holds the name of the set in force (measured).
   - It saves the keys of the window under that name. That set is then in force.
+  - A user's set keeps the built-in set that it changes, its base. A new set gets the base of the set in the window (measured, case 27).
   - Save puts the keys of the window in force. With changed keys of a user's set, it writes them into that set first (measured).
   - Save without changed keys puts the picked set in force (measured). After Save, the window stays open. Not measured (case 26 of shortcuts-resolve-runs.md).
   - On a changed built-in set, Save asks for a name, as Save As New Set… does. A built-in set does not change (measured).
   - Export Set (`keys.export`) writes a set to a key file. The file name that it offers is the name of the set and " Keys.txt" (measured).
   - Import Set… (`keys.import`) adds the set of a key file, with the name of the file. The imported set is then in force (measured).
+    - The import asks no question (measured, case 27).
   - A key file is a text file (measured):
-    - The first line is `import "DaVinci Resolve"`. It names the built-in set that the file changes.
-    - Then each command whose keys differ from that set has a line like `editUndo := Ctrl+Z`. The names are the command names of Resolve.
+    - The first line names the base of the set, for example `import "Adobe Premiere Pro"` (measured, case 27). An empty line follows.
+    - In this line, vidcut's own set is "DaVinci Resolve".
+    - Then each command whose keys differ from the base has a line like `editUndo := Ctrl+Z`. The names are the command names of Resolve.
+    - A line gives all the keys of its command, with " | " between them. It replaces all the keys of that command (measured, case 27).
     - `editUndo :=` gives the command no key.
     - A line that starts with `#` is a comment.
     - Del, PgUp, PgDown and Return are Delete, Page Up, Page Down and Enter. "Copy", "Cut" and "Paste" are Ctrl+C, Ctrl+X and Ctrl+V.
     - On macOS, Ctrl is Command and Meta is Control.
-  - vidcut writes a line for each changed action that has a command of Resolve.
+    - Resolve writes CR CR LF line ends ([gotchas](gotchas.md#resolves-key-files)). vidcut writes LF line ends. It reads LF, CR LF and CR CR LF.
+  - vidcut writes a line for each command whose keys differ from the base. Keys in another order are not a difference.
+    - A built-in set gives only the import line. In Resolve, that file gives the keys of that preset.
     - Split has two commands: Ctrl+B is `editBladeRazor` and Ctrl+\ is `editM2SplitClip`. Delete has `editDelete` (Shift+Backspace and Delete) and `editBackspace` (Backspace). Another key goes to the first command.
-    - vidcut writes Esc for Escape and Ins for Insert. Whether Resolve reads these names is not measured (case 27 of shortcuts-resolve-runs.md).
+    - vidcut writes Esc for Escape and Ins for Insert. Resolve reads these names (measured, case 27 of shortcuts-resolve-runs.md).
   - vidcut: an action that has no command of Resolve gets a comment line, like `#vidcut ducking := Alt+D`. Thus vidcut reads its own files back with all their keys.
+    - Resolve reads this line as a comment, with no error (measured, case 27).
     - Its keys have the same names as in the command lines, for example `#vidcut lift := Alt+Del`.
-  - An import starts from the set that the import line names.
+  - An import starts from the set that the import line names. The new set gets the base of that set.
     - An action that gets the keys of the table, in any order, keeps the table.
-  - A file without an import line lists all commands. A command that it leaves out has no key, as in a built-in preset (measured, case 25 of shortcuts-resolve-runs.md). Whether an import does the same is not measured (case 27).
+  - A file without an import line lists all commands. A command that it leaves out has no key, as in a built-in preset (measured, case 25 of shortcuts-resolve-runs.md).
+    - An import of such a file does the same. The keys of the Fusion page stay (measured, case 27).
+    - Thus the actions that have no command of Resolve keep their keys. The base of the new set is vidcut's own set.
   - An import leaves out these lines and keys. `keys.import` names them in its answer.
     - The commands that vidcut does not have.
     - The keypad keys, which vidcut can't tell apart ([todo](todo/egui-keypad-keys.md)).
@@ -8213,8 +8237,8 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - A Zoom that leaves bars of 0.18 and 0.10125: the distance is 0.2065, and the bars show.
   - Rotation 0.016: no bar. Rotation 0.02: the bars show. The rule gives the change at 0.0179. That value was not measured.
   - A part of the picture past the frame does not count. A left bar of 0.15 on an enlarged picture shows no bar.
+  - The rounding of an odd frame size for an encoder does not use the limit. At 2001 x 1601 in H.264 and H.265, bars of 0.1 show.
 - These cases were not measured:
   - Softness: vidcut does not use the limit on a picture with Softness.
   - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
   - A compound clip: vidcut uses the rule on each level by itself.
-  - The rounding of an odd frame size for an encoder: vidcut does not use the limit there.

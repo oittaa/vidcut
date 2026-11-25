@@ -278,10 +278,12 @@ pub fn run_with(
             name,
             overwrite,
             keys,
+            from,
         } => answer(crate::preferences::keys_save(
             name,
             *overwrite,
             keys.as_ref(),
+            from.as_deref(),
             envelope.dry_run,
         )?),
         Request::KeysDelete { name } => {

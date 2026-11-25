@@ -2295,9 +2295,10 @@ fn node_rows(
             let modes = (
                 &ApplyMode::ALL[..],
                 ApplyMode::label as fn(ApplyMode) -> &'static str,
+                ApplyMode::opens_group as fn(ApplyMode) -> bool,
             );
             let mode = (m.mode(), ApplyMode::default());
-            choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
+            grouped_choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
             if m.mode().has_operator() {
                 let ops = (
                     &MergeOperator::ALL[..],
@@ -2486,9 +2487,10 @@ fn operation_rows(
         let modes = (
             &ApplyMode::ALL[..],
             ApplyMode::label as fn(ApplyMode) -> &'static str,
+            ApplyMode::opens_group as fn(ApplyMode) -> bool,
         );
         let mode = (m.mode(), ApplyMode::default());
-        choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
+        grouped_choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
         if m.mode().has_operator() {
             let ops = (
                 &MergeOperator::ALL[..],
@@ -4635,9 +4637,21 @@ fn mosaic_folds(
 
 fn choice_row<T: Copy + PartialEq + serde::Serialize>(
     ui: &mut egui::Ui,
+    row: (usize, &str, &str),
+    values: (T, T),
+    (all, text): (&[T], fn(T) -> &'static str),
+    acts: &mut Vec<Act>,
+) {
+    grouped_choice_row(ui, row, values, (all, text, |_| false), acts);
+}
+
+type Grouped<'a, T> = (&'a [T], fn(T) -> &'static str, fn(T) -> bool);
+
+fn grouped_choice_row<T: Copy + PartialEq + serde::Serialize>(
+    ui: &mut egui::Ui,
     (n, name, put): (usize, &str, &str),
     (now, usual): (T, T),
-    (all, text): (&[T], fn(T) -> &'static str),
+    (all, text, opens): Grouped<T>,
     acts: &mut Vec<Act>,
 ) {
     let set = |v: T| {
@@ -4650,6 +4664,9 @@ fn choice_row<T: Copy + PartialEq + serde::Serialize>(
         .selected_text(text(now))
         .show_ui(ui, |ui| {
             for v in all {
+                if opens(*v) {
+                    ui.separator();
+                }
                 if ui.selectable_label(*v == now, text(*v)).clicked() && *v != now {
                     acts.push(set(*v));
                 }
