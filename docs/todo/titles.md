@@ -35,3 +35,11 @@
 
 - The measurements of `shape` read files. Measure the range and the units of these controls in Resolve's Inspector.
 - vidcut uses the numbers of the file until then.
+
+## Edit in place
+
+- **Lower third:** Resolve edits only the line under the pointer, inside an outline of that line.
+  - Each line of Resolve's lower third has its own Rich Text. vidcut keeps the two lines in one text.
+- **Tab:** in Resolve, Tab types a tab character. Measure the width of a tab in a title, then let Tab type it.
+- **Spell check:** Resolve draws a red wavy line under the words that its spell check does not know. vidcut has no spell check.
+- **Bursts:** measure what ends one burst of typing in Resolve: a pause, a space or another key.

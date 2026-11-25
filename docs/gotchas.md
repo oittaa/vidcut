@@ -714,6 +714,14 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.
   - Two runs gave the same result.
   - vidcut does not copy this fault. Delete removes each selected point ([spec §8.23](spec.md#823-windows-pp-32653279)).
+- **The outline of a title edit stays after the title leaves the viewer.**
+  - A Text title was in the edit state. The playhead then moved to another clip, and the outline stayed in the viewer.
+  - A click in the viewer removed it.
+  - vidcut ends the edit when the title leaves the viewer, and puts the change in ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **The first edit of a title can put the caret at the start of the line.**
+  - In 3 of 12 double-clicks, the caret went to the start of the line, not to the pointer.
+  - These were the first edit of the first Text title and the first edit of each line of a Left Lower Third. The cause was not found.
+  - vidcut always puts the caret at the letter boundary nearest to the pointer.
 
 ## Resolve's renders
 

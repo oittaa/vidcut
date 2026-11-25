@@ -549,7 +549,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn commit_title_form(&mut self) {
+    pub(super) fn commit_title_form(&mut self, passed: Vec<String>) {
         let Some(mut d) = self.timeline.title_dialog.take() else {
             return;
         };
@@ -558,16 +558,28 @@ impl Workspace {
             .and_then(|p| p.clip(&d.clip))
             .and_then(|c| Some(sampled_at(c, c.title.as_ref()?, d.at)));
         if d.dirty
-            && let Some(s) = stored
+            && let Some(mut s) = stored
             && let Ok(t) = title_of(&d, &s)
         {
+            let mut sent = false;
+            for text in passed {
+                if text != s.text {
+                    let params = json!({ "clip": d.clip, "text": text, "at": d.at });
+                    self.send("titles.set", params);
+                    s.text = text;
+                    sent = true;
+                }
+            }
             let sends = commands(&d, changes(&d.clip, &t, &s, d.at));
             d.fade = None;
-            if sends.is_empty() {
-                d.loaded = false;
-            } else {
+            if !sends.is_empty() {
                 self.send_title(sends);
+                sent = true;
+            }
+            if sent {
                 self.title_landing(&d.clip, &t);
+            } else {
+                d.loaded = false;
             }
             d.dirty = false;
             d.error.clear();
