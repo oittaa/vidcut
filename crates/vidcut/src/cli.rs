@@ -99,6 +99,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
     ("picture.stabilize", &["clip"]),
+    ("picture.reframe", &["clips"]),
     ("grade.get", &["clip"]),
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
@@ -509,6 +510,13 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut picture stabilize c3 --mode translation\n  \
          vidcut picture stabilize V1@10s --camera-lock true\n  \
          vidcut picture stabilize c3 --smooth 1 --strength 0.5 --zoom false",
+    ),
+    (
+        "picture.reframe",
+        "vidcut picture reframe c3 --download\n  \
+         vidcut picture reframe c3,c4 --mode pan\n  \
+         vidcut picture reframe c3 --subject face --smooth 1\n  \
+         vidcut picture reframe c3 --at 2s --reference '{\"center\":[0.6,0.4],\"size\":[0.2,0.5]}'",
     ),
     (
         "effects.add",

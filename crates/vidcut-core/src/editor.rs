@@ -5069,6 +5069,14 @@ fn mutate(
             let made = crate::stabilize::steadied(&shake, &s.stabilization.values, s.shot);
             ops::picture::stabilized(p, &s.id, s.stabilization, made)?
         }
+        Request::PictureReframe { .. } => {
+            let mut done = Vec::new();
+            for r in reframe_plans(p, request, playhead)? {
+                let moved = reframe_move(env, &r)?;
+                done.push(ops::picture::reframed(p, &r.id, moved)?);
+            }
+            json!({ "clips": done })
+        }
         Request::GradeSet {
             clips,
             timeline,
@@ -8549,19 +8557,7 @@ fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Fi
     if let Some(why) = rules.problem() {
         return Err(Error::usage(why));
     }
-    if !model.finds(*subject) {
-        return Err(Error::usage(format!(
-            "the {} model (--model) finds only faces",
-            model.name()
-        )));
-    }
-    let sides = crate::analysis::SIDES;
-    if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
-        return Err(Error::usage(format!(
-            "size (--size) is from {} to {} pixels",
-            sides.0, sides.1
-        )));
-    }
+    finder_checked(*model, *subject, *size)?;
     let id = resolve_clip(p, clip, playhead)?;
     ops::motion::findable(p, &id, node, *subject, *replace)?;
     let c = p.clip(&id);
@@ -8666,6 +8662,292 @@ pub fn stabilize_looks(
     let plan = stabilize_plan(p, request, playhead).ok();
     plan.map(|s| (s.media, s.plan, s.look))
         .into_iter()
+        .collect()
+}
+
+enum Follows {
+    Subject {
+        subject: Subject,
+        look: Look,
+        span: (i64, i64),
+        rate: f64,
+    },
+    Reference {
+        plan: Box<RenderPlan>,
+        follow: crate::analysis::Follow,
+        base: i64,
+    },
+}
+
+struct ReframePlan {
+    id: String,
+    media: Media,
+    follows: Follows,
+    files: Vec<i64>,
+    frames: Vec<crate::reframe::Frame>,
+    shape: crate::reframe::Shape,
+    rules: crate::reframe::Rules,
+    download: bool,
+}
+
+fn finder_checked(
+    model: crate::model::FindModel,
+    subject: Subject,
+    size: Option<u32>,
+) -> Result<()> {
+    if !model.finds(subject) {
+        return Err(Error::usage(format!(
+            "the {} model (--model) finds only faces",
+            model.name()
+        )));
+    }
+    let sides = crate::analysis::SIDES;
+    if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
+        return Err(Error::usage(format!(
+            "size (--size) is from {} to {} pixels",
+            sides.0, sides.1
+        )));
+    }
+    Ok(())
+}
+
+fn reframe_rules(request: &Request) -> Result<crate::reframe::Rules> {
+    let Request::PictureReframe {
+        mode,
+        smooth,
+        tolerance,
+        ..
+    } = request
+    else {
+        return Err(Error::invalid("not a picture.reframe request"));
+    };
+    let (sl, sh) = crate::reframe::SMOOTH;
+    let smooth = smooth.unwrap_or(crate::reframe::USUAL_SMOOTH);
+    if !(sl..=sh).contains(&smooth) {
+        return Err(Error::usage(format!(
+            "smooth (--smooth) is from {sl} to {sh} seconds"
+        )));
+    }
+    let (tl, th) = crate::reframe::TOLERANCE;
+    let tolerance = tolerance.unwrap_or(crate::reframe::USUAL_TOLERANCE);
+    if !(tl..=th).contains(&tolerance) {
+        return Err(Error::usage(format!(
+            "tolerance (--tolerance) is from {tl} to {th} pixels"
+        )));
+    }
+    Ok(crate::reframe::Rules {
+        mode: *mode,
+        smooth,
+        tolerance,
+    })
+}
+
+fn reframe_frames(p: &Project, c: &Clip) -> (Vec<i64>, Vec<crate::reframe::Frame>) {
+    let f = crate::composition::Frames::of(p, c);
+    let picture = c.picture.clone().unwrap_or_default();
+    let mut files = Vec::new();
+    let mut frames = Vec::new();
+    for t in c.start..c.end() {
+        let key = c.key_at(t as f64).round() as i64;
+        let at = key as f64;
+        files.push(f.file(f.at(t)));
+        frames.push(crate::reframe::Frame {
+            key,
+            seen: None,
+            cut: false,
+            zoom: picture.channel_at(crate::keyframes::PictureValue::Zoom, at),
+            anchor: picture.channel_at(crate::keyframes::PictureValue::Anchor, at),
+            now: picture.place_at(at),
+        });
+    }
+    (files, frames)
+}
+
+fn reframe_shape(p: &Project, c: &Clip, media: &Media) -> crate::reframe::Shape {
+    let (w, h) = (p.width(), p.height());
+    let picture = c.picture.clone().unwrap_or_default();
+    let size = media.info.video.as_ref().map_or([1.0; 2], |v| {
+        let scaling = picture.scaling.or(p.scaling());
+        let sar = (v.sar[0], v.sar[1]);
+        let [_, _, mw, mh] =
+            crate::place::mapped(scaling, (v.width, v.height), sar, v.rotation, (w, h));
+        [mw / f64::from(w), mh / f64::from(h)]
+    });
+    crate::reframe::Shape {
+        size,
+        flip: [picture.flip_horizontal, picture.flip_vertical],
+        pixels: [f64::from(w), f64::from(h)],
+        fps: p.fps().as_f64(),
+    }
+}
+
+fn reframe_reference(
+    p: &Project,
+    c: &Clip,
+    (shape, frames): (&crate::reframe::Shape, &[crate::reframe::Frame]),
+    area: &crate::request::ReframeBox,
+    at: i64,
+) -> Result<Follows> {
+    let inside = |v: f64| v.is_finite() && v > 0.0 && v <= 1.0;
+    if !area.center.iter().all(|v| v.is_finite()) || !area.size.iter().all(|&v| inside(v)) {
+        return Err(Error::usage(
+            "the reference box (--reference) has a center and a size above 0 and at most 1",
+        ));
+    }
+    if at < c.start || at >= c.end() {
+        return Err(Error::invalid(format!(
+            "{} is not at frame {at}: the reference box is on a frame of the clip",
+            c.id
+        )));
+    }
+    let frame = frames[(at - c.start) as usize];
+    let seen = crate::reframe::Seen {
+        center: area.center,
+        size: area.size,
+    };
+    let picked = shape.picked(&frame, seen);
+    let f = crate::composition::Frames::of(p, c);
+    let base = f.file(f.first);
+    let follow = crate::analysis::Follow {
+        at: f.file(f.at(at)) - base,
+        frames: (f.file(f.mark_in) - base, f.file(f.mark_out) + 1 - base),
+        area: [
+            picked.center[0],
+            picked.center[1],
+            picked.size[0],
+            picked.size[1],
+        ]
+        .map(|v| v as f32),
+        backward: true,
+        forward: true,
+    };
+    let plan = Box::new(crate::render::own_picture(p, &c.id)?);
+    Ok(Follows::Reference { plan, follow, base })
+}
+
+fn reframe_plans(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+) -> Result<Vec<ReframePlan>> {
+    let Request::PictureReframe {
+        clips,
+        reference,
+        at,
+        subject,
+        model,
+        size,
+        download,
+        ..
+    } = request
+    else {
+        return Err(Error::invalid("not a picture.reframe request"));
+    };
+    let rules = reframe_rules(request)?;
+    let subject = subject.unwrap_or(Subject::Person);
+    finder_checked(*model, subject, *size)?;
+    let mut ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+    ids.dedup();
+    if reference.is_some() && ids.len() != 1 {
+        return Err(Error::usage(
+            "a reference box (--reference) frames one clip",
+        ));
+    }
+    let mut out = Vec::new();
+    for id in ids {
+        let media = ops::picture::reframable(p, &id)?;
+        let c = p
+            .clip(&id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        let (files, frames) = reframe_frames(p, c);
+        let shape = reframe_shape(p, c, &media);
+        let follows = match reference {
+            Some(area) => {
+                let at = match at {
+                    Some(t) => resolve(p, t, playhead)?,
+                    None => need(playhead, "at")?,
+                };
+                reframe_reference(p, c, (&shape, &frames), area, at)?
+            }
+            None => {
+                let (span, rate) = ops::motion::file_frames(p, c);
+                let look = Look {
+                    side: *size,
+                    model: *model,
+                    ..subject_look(&media, rate, span)
+                };
+                Follows::Subject {
+                    subject,
+                    look,
+                    span,
+                    rate,
+                }
+            }
+        };
+        out.push(ReframePlan {
+            id,
+            media,
+            follows,
+            files,
+            frames,
+            shape,
+            rules,
+            download: *download,
+        });
+    }
+    Ok(out)
+}
+
+fn reframe_move(env: &dyn Env, r: &ReframePlan) -> Result<crate::reframe::Moved> {
+    let mut frames = r.frames.clone();
+    let seen = match &r.follows {
+        Follows::Subject {
+            subject,
+            look,
+            span,
+            rate,
+        } => {
+            let found = env.subjects(&r.media, *subject, *look, r.download)?;
+            let origin = r.media.origin();
+            let rules = crate::motion::Join::of(*subject);
+            let paths = crate::motion::joined(&found, origin, *rate, *span, &rules);
+            let shown = |f: i64| crate::motion::shown_time(origin, *rate, f);
+            let cuts: Vec<bool> = (0..r.files.len())
+                .map(|t| t > 0 && found.cut(shown(r.files[t - 1]), shown(r.files[t])))
+                .collect();
+            for (f, cut) in frames.iter_mut().zip(&cuts) {
+                f.cut = *cut;
+            }
+            crate::reframe::found(&paths, &r.files, &cuts)
+        }
+        Follows::Reference { plan, follow, base } => {
+            let found = env.tracked(&r.media, plan, *follow, r.download)?;
+            crate::reframe::tracked(&found, *base, &r.files)
+        }
+    };
+    for (f, s) in frames.iter_mut().zip(seen) {
+        f.seen = s;
+    }
+    Ok(crate::reframe::moved(&frames, &r.shape, &r.rules))
+}
+
+pub enum ReframeLook {
+    Subject(SubjectLook),
+    Track(Box<TrackLook>),
+}
+
+pub fn reframe_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<ReframeLook> {
+    let plans = reframe_plans(p, request, playhead).unwrap_or_default();
+    plans
+        .into_iter()
+        .map(|r| match r.follows {
+            Follows::Subject { subject, look, .. } => {
+                ReframeLook::Subject((r.media, subject, look, r.download))
+            }
+            Follows::Reference { plan, follow, .. } => {
+                ReframeLook::Track(Box::new((r.media, *plan, follow, r.download)))
+            }
+        })
         .collect()
 }
 

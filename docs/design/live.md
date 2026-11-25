@@ -647,6 +647,10 @@ The bar and the Jobs button:
   - A dragged number keeps its value in `Drag` until the release. Thus one drag is one undo step.
   - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
   - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
+- `Workspace::reframe_section` shows the Smart Reframe section for the selected clips of video files (`ops::picture::reframable`).
+  - `Reframing` keeps the Mode, the Subject and Smooth in the `Inspector`. They are not in the project.
+  - Reframe sends one `picture.reframe` for all the clips, through `Workspace::ask`. Thus a missing model is asked for first.
+  - `picture.reframe` runs as a job of kind `reframe`. Reframe is grey while such a job runs.
 - With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
 - `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.
 

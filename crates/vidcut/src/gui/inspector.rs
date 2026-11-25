@@ -3465,6 +3465,7 @@ pub struct Inspector {
     find_model: FindModel,
     find_error: bool,
     finding: Option<Finding>,
+    pub(super) reframing: super::reframe::Reframing,
     pub(super) stopping: Option<bool>,
     pub(super) pattern_picked: Option<(String, String, usize)>,
     tab: Tab,
@@ -5022,7 +5023,10 @@ fn boxed(subject: Subject) -> bool {
 }
 
 fn with_model(method: &str, params: &mut Value) {
-    if matches!(method, "motion.find" | "motion.track" | "edit.close_up") {
+    if matches!(
+        method,
+        "motion.find" | "motion.track" | "edit.close_up" | "picture.reframe"
+    ) {
         params["download"] = json!(true);
     }
 }
@@ -6893,9 +6897,11 @@ impl Workspace {
                 }
                 if tab == Tab::Video && !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
-                    let i = &self.inspector;
                     let at = self.snap.timeline.position;
-                    transform(ui, i, p, at, &chosen, &mut acts);
+                    transform(ui, &self.inspector, p, at, &chosen, &mut acts);
+                    let ids: Vec<String> = chosen.iter().map(|c| c.id.clone()).collect();
+                    self.reframe_section(ui, p, &ids);
+                    let i = &self.inspector;
                     crop(ui, i, p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, p, at, &chosen, &mut acts);

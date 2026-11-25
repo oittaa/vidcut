@@ -30,6 +30,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - Auto Color, with the legacy method (§8.25, X174)
 - stabilization of a clip of a video file (§8.27)
+- Smart Reframe of a clip of a video file (§8.28)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
@@ -45,7 +46,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - the Fusion tools that §8.19 does not have
 - LUT files other than `.cube` ([todo](todo/luts.md))
 - Lens Correction ([todo](todo/lens-correction.md))
-- Smart Reframe ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -4542,6 +4542,66 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An OpenTimelineIO file of vidcut keeps the stabilization in the vidcut metadata of the picture. Other editors read nothing of it.
   - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
   - [design](design/analysis.md#stabilization) gives the method.
+
+### 8.28 Smart Reframe (pp. 735, 771–772, 815, 920, 956–957, 1208; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Video Inspector of the Cut page and of the Edit page has a Smart Reframe section (pp. 735, 920, 1208). Only Resolve Studio has it.
+  - Smart Reframe reframes clips across a large change of the aspect ratio. Examples are a 16:9 shot in a 9:16 timeline, and a 4:3 shot in a 2.39:1 timeline (p. 735).
+  - First, the user makes a timeline of the new size. Its Mismatched Resolution is Scale full frame with crop (pp. 772, 956).
+  - Object of Interest has Auto and Reference Point (pp. 735, 920).
+    - With Auto, the Neural Engine analyzes the clip and chooses its most representative object.
+    - With more than one clip selected, Auto is the only item.
+    - With Reference Point, the user drags a box around the subject. The Target icon sets the viewer mode to Smart Reframe, which shows the box (pp. 772, 815).
+    - The Transform controls can move the picture first, when the subject is outside the frame (p. 772).
+  - Mode has Auto, Pan Only and Tilt Only (p. 735).
+    - Auto moves the picture across and up and down, as necessary.
+    - Pan Only moves it across only. Tilt Only moves it up and down only.
+  - Reframe starts the analysis. It can take some time (p. 735).
+  - The analysis locks onto the reference and tracks it where necessary. The picture pans to keep the reference in the new aspect ratio (pp. 772, 957).
+- Measured:
+  - The Edit page Inspector shows the section as "AI Smart Reframe", in the Video tab. Both menus are at Auto first.
+  - The Target icon is grey with Auto. With Reference Point and the viewer control on, the viewer shows a box with four corner handles and a center dot.
+  - With two clips selected, Object of Interest is grey at Auto. Reframe reframes each clip.
+  - Reframe of a 5 s clip takes less than 1 s. No progress window shows.
+  - Reframe sets Position keyframes. The zoom stays, with no keyframes.
+  - The picture moves only on an axis where it is larger than the frame. It always covers the frame on that axis.
+    - A 16:9 clip in a 9:16 timeline moves across only. Tilt Only then gives keyframes at 0.
+    - A 9:16 clip in a 16:9 timeline moves up and down only.
+    - A 3840×2160 clip at Crop in a 1080×1920 timeline moves across, and down by 120 pixels.
+    - A clip at Fit in a 1080×1920 timeline is not larger than the frame. Its keyframes are all 0.
+  - The keyframes are at the frames where the move bends, not on a fixed grid. A 119-frame clip gets 5 to 23 keyframes.
+  - The same shot gives nearly the same move in 1080×1920 and in 2160×3840, as fractions of the picture.
+  - Shots with no face move too. On a shot of a logo, the picture moves by up to 0.06 of its width.
+  - With Reference Point and the box moved to the right, the move follows the box.
+  - One clip has a shot change at frame 32. Its keyframes move the picture from frame 21 to frame 44.
+  - One undo removes all the keyframes of a Reframe. The name of the undo step is "Smart Reframe".
+  - The record is sections R2, R8, R10 and R12 of `fixtures/program/NOTES.md` in the test data.
+- vidcut:
+  - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
+    - Without `reference`, it follows the main thing of the `subject` in each shot. That is the thing that shows largest for the longest time. The usual subject is `person`.
+    - The finders of `motion.find` find the things, with the same rules for their paths.
+    - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
+  - `mode` selects the axes:
+    - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip.
+    - `pan` and `tilt` move only their own axis. On an axis with no room, the picture goes to the middle.
+    - The axis that does not move keeps its value at each frame.
+  - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
+    - Why: the head of a person is at the top of the box.
+  - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
+  - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds. The usual value is 0.5 s.
+  - Then the picture covers the frame on each axis where it is larger than the frame.
+  - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
+  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes, in pixels of the frame. The usual value is 1 pixel.
+  - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point and the flips of each frame, and they stay.
+  - Each `picture.reframe` is one undo step, "Smart Reframe".
+  - The Video tab of the Inspector has the Smart Reframe section, below Transform: Mode, Subject, Smooth and Reframe.
+    - Reframe asks to download the model of the subject when it is not on this computer.
+    - Reframe is grey while a Smart Reframe runs.
+    - The section has no Object of Interest and the viewer has no box yet. `reference` does the same in a request.
+  - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
+  - Not measured: a clip with Position keyframes, a zoom, a rotation or a Dynamic Zoom before Reframe; a clip with a speed change; more clips with a shot change.
+  - [design](design/analysis.md#smart-reframe) gives the method.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

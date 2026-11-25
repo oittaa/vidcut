@@ -33,6 +33,7 @@ flowchart TD
 | `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
 | `motion.track` | `Env::tracked`: the box of one thing on each picture of the track, with a score | `motion::followed`; the edit then calls `ops::motion::tracked` |
 | `picture.stabilize` | `Env::shake`: the motion of the camera from each frame of the clip to the next | `stabilize::steadied`; the edit then calls `ops::picture::stabilized` |
+| `picture.reframe` | `Env::subjects` of the subject, or `Env::tracked` of the box | `reframe::moved`; the edit then calls `ops::picture::reframed` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing. It checks that each part is inside its clip and apart from the other parts, and cuts them.
 
@@ -273,6 +274,31 @@ flowchart TD
   - `Placed::hold` keeps only the map of the held frame. Thus the key of one frame of the render cache stays small.
   - A made frame of a Retime Process keeps its placement. Thus its `Id` holds the keyframe position when the clip is stabilized (`placed_now`, [playback](playback.md)).
 - In a GUI, `Live::measuring` measures first (`editor::stabilize_looks`), as a job of kind `stabilize`. Headless, `work_first` measures on `vidcut-stabilize`.
+
+## Smart Reframe
+
+- `picture.reframe` finds the thing to follow on each frame, and the core decides the move ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
+  - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
+    - It also gives the zoom, the anchor point and the position of each frame.
+  - `reframe_shape` gives the size of the picture in the frame, by the scaling of the clip (`place::mapped`), and the flips.
+- Without `reference`, `Env::subjects` finds the things on each frame of the file, as for `motion.find`. `motion::joined` makes their paths, by the `Join` of the subject.
+  - `reframe::found` takes the main path of each shot: the largest sum of the box areas over the frames of the shot. A frame where that path has no box takes the next path in that order.
+  - The shot changes come from the scene scores of the `Detections` (`Detections::cut`).
+  - Why the sum of the areas: the main thing shows large and long. A person far behind it shows small.
+- With `reference`, `reframe_reference` turns the box on the frame into a box on the picture (`Shape::picked`). `Env::tracked` follows it, forward and backward, on the own picture of the clip (`render::own_picture`), as for `motion.track`.
+  - `reframe::tracked` takes the box of each frame.
+- `reframe::moved` decides:
+  - On each axis, the goal is the point of the picture to show at the middle of the frame (`Shape::goal`).
+  - A frame with no box takes the goal of the nearest frame with one in the shot. A shot with no box takes the point that the frame shows now (`Shape::view`).
+  - `stabilize::fitted` smooths the goals of each shot: a straight line through the near frames, with Gaussian weights. Its sigma is `smooth` seconds.
+    - Why a line: at the ends of a shot, the near frames are on one side only. Their mean lags behind a move.
+  - `Shape::held` then keeps the picture over the frame on each axis.
+  - `Shape::place` turns the point into the position of the picture, with the zoom and the anchor point of the frame.
+  - `reframe::axes` gives the axes that move, by the `ReframeMode`.
+  - `kept` keeps the first and the last frame of each shot. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
+- `ops::picture::reframed` puts the keyframes in `Picture.position_keys` and `Picture.position_y`.
+- In a GUI, `Live::measuring` measures first, as a job of kind `reframe`. Headless, `work_first` measures on `vidcut-subjects`.
 
 ## In a GUI
 

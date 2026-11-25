@@ -1327,6 +1327,39 @@ pub fn stabilized(
     }))
 }
 
+pub fn reframable(p: &Project, id: &str) -> Result<crate::model::Media> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    takes(p, ti, c)?;
+    let media = p
+        .media(&c.media)
+        .filter(|m| !c.is_block() && m.info.video.is_some() && !m.is_still());
+    media.cloned().ok_or_else(|| {
+        Error::invalid(format!(
+            "{} is not footage: only a clip from a video file is reframed",
+            c.id
+        ))
+    })
+}
+
+pub fn reframed(p: &mut Project, id: &str, moved: crate::reframe::Moved) -> Result<Value> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &mut p.tracks[ti].clips[ci];
+    let frames = c.duration.max(1) as f64;
+    let mut picture = c.picture.clone().unwrap_or_default();
+    picture.position_keys = moved.keys;
+    picture.position_y = moved.y;
+    c.picture = checked(&picture)?;
+    let axes = [("pan", moved.axes[0]), ("tilt", moved.axes[1])];
+    let axes: Vec<&str> = axes.iter().filter(|(_, on)| *on).map(|(a, _)| *a).collect();
+    Ok(json!({
+        "clip": id,
+        "keys": picture.position_keys.len(),
+        "axes": axes,
+        "seen": rounded(moved.seen as f64 / frames),
+    }))
+}
+
 fn rounded(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
 }

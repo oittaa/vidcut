@@ -40,6 +40,7 @@ mod placing;
 mod pool;
 mod preferences;
 mod project;
+mod reframe;
 mod relink;
 mod retime;
 mod retime_process;

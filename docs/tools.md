@@ -58,6 +58,16 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `--runs N` prints the median of N runs. `--seconds S` uses only the first S seconds of each clip. `--json FILE` writes each result.
 - The projects and their cache go to a temporary folder.
 
+**Smart Reframe fit:** `python3 scripts/reframe-fit.py [--size WxH] [--fps F] [--scaling S] [--smooth S,S] [--tolerance T,T] [--json FILE] TIMELINE.otio` (release build).
+
+- TIMELINE.otio holds clips with Position keyframes. They are the reference move of each clip.
+- The script makes a project from the file, with the frame size, the frame rate and the scaling given. The defaults are 1080x1920, 24 fps and `fill`.
+- For each smooth value and each tolerance, it runs `picture.reframe` on all the clips.
+- At each frame from the first to the last reference keyframe, it measures the distance between the two positions, in pixels of the frame.
+- Between two keyframes, each position is a straight line. The handles of the keyframes are not used.
+- It prints the median, the mean and the largest distance, and the keyframe counts of the two moves. `--json FILE` also writes the result of each clip.
+- The project goes to a temporary folder. The analysis stays in the cache of vidcut. Thus a second run measures no frame again.
+
 **Cost of a program:** `python3 scripts/usage.py -- COMMAND…`
 
 - It runs the command and prints the wall time, the CPU time, the CPU use, the peak memory and the use of each GPU engine.

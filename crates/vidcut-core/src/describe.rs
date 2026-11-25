@@ -447,6 +447,7 @@ pub fn describe_at(
             d.clips("clip")
         ),
         "picture.stabilize" => format!("Stabilize {}", d.clips("clip")),
+        "picture.reframe" => format!("Smart Reframe {}", d.clips("clips")),
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),

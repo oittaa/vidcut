@@ -236,17 +236,17 @@ fn spread(m: &Matrix, corners: &[[f64; 2]; 4]) -> f64 {
     moves.sum::<f64>() / corners.len() as f64
 }
 
-fn fitted(
-    path: &[Parts],
+pub fn fitted<const N: usize>(
+    path: &[[f64; N]],
     sigma: f64,
     weight: impl Fn(usize, usize, f64) -> f64,
-) -> Vec<(Parts, Parts)> {
+) -> Vec<([f64; N], [f64; N])> {
     let w = weights(sigma);
     let reach = (w.len() / 2) as i64;
     let n = path.len() as i64;
     (0..n)
         .map(|t| {
-            let (mut level, mut slope) = ([0.0; 8], [0.0; 8]);
+            let (mut level, mut slope) = ([0.0; N], [0.0; N]);
             let (mut s0, mut s1, mut s2) = (0.0, 0.0, 0.0);
             for (k, wk) in w.iter().enumerate() {
                 let d = k as i64 - reach;
@@ -262,11 +262,11 @@ fn fitted(
                 }
             }
             let det = s0 * s2 - s1 * s1;
-            let goal: Parts = std::array::from_fn(|i| match det > REACH {
+            let goal: [f64; N] = std::array::from_fn(|i| match det > REACH {
                 true => (s2 * level[i] - s1 * slope[i]) / det,
                 false => level[i] / s0,
             });
-            let speed: Parts = std::array::from_fn(|i| match det > REACH {
+            let speed: [f64; N] = std::array::from_fn(|i| match det > REACH {
                 true => (s0 * slope[i] - s1 * level[i]) / det,
                 false => 0.0,
             });

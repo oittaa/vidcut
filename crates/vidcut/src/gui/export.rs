@@ -2038,6 +2038,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "find" => Some("motion.find"),
         "track" => Some("motion.track"),
         "stabilize" => Some("picture.stabilize"),
+        "reframe" => Some("picture.reframe"),
         _ => None,
     }
 }

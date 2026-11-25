@@ -400,6 +400,9 @@ pub fn run_with(
                 Request::PictureStabilize { .. } if !envelope.dry_run => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-stabilize")?;
                 }
+                Request::PictureReframe { .. } if !envelope.dry_run => {
+                    work_first(&store, &envelope, &env, hooks, "vidcut-subjects")?;
+                }
                 Request::SubtitlesTimeWords { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-transcribe")?;
                 }
