@@ -45,6 +45,7 @@ use crate::model::{
     Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
+use crate::request::KeyTiming;
 use follow::{Before, Edit};
 
 pub const MAIN: &str = "V1";
@@ -2017,8 +2018,8 @@ pub fn change_speed(
     p: &mut Project,
     ids: &[String],
     speed: f64,
-    ripple: Option<bool>,
-    at: Option<i64>,
+    (ripple, at): (Option<bool>, Option<i64>),
+    timing: KeyTiming,
 ) -> Result<()> {
     if !speed.is_finite() || (speed != 0.0 && !Speed::RANGE.contains(&speed.abs())) {
         return Err(Error::invalid(format!(
@@ -2079,7 +2080,36 @@ pub fn change_speed(
         } else {
             repaced(p, &c, n, want, &at_speed)?;
         }
+        let steady = c.constant_speed();
+        if timing == KeyTiming::Stretch && speed != 0.0 && steady != Some(0.0) {
+            stretched(p, &c, speed, steady)?;
+        }
     }
+    Ok(())
+}
+
+fn stretched(p: &mut Project, old: &Clip, speed: f64, steady: Option<f64>) -> Result<()> {
+    let (ti, ci) = locate(p, &old.id)?;
+    let new = p.tracks[ti].clips[ci].clone();
+    let Some(mut pic) = new.picture.clone().filter(|pic| pic.is_keyed()) else {
+        return Ok(());
+    };
+    let (from, to) = (
+        old.source_at(old.start) as f64,
+        new.source_at(new.start) as f64,
+    );
+    let source = |t: f64| match steady {
+        Some(v) => from + (t - old.start as f64) * v,
+        None => old.source_at(t.round() as i64) as f64,
+    };
+    let conv = |k: i64| {
+        let t = new.key_time(k);
+        new.key_at(new.start as f64 + (source(t) - to) / speed)
+            .round() as i64
+    };
+    let ratio = |k: i64| old.speed_at(new.key_time(k).round() as i64) / speed;
+    pic.scale_value_times(&conv, &ratio);
+    p.tracks[ti].clips[ci].picture = Some(pic);
     Ok(())
 }
 

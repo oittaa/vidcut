@@ -96,6 +96,7 @@ pub enum GuiChange {
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
+    Layer(usize),
     Palette(GradePalette),
     Primaries(PrimariesView),
     Window(usize),
@@ -177,6 +178,7 @@ pub struct TimelineState {
 pub struct GuiState {
     pub page: Page,
     pub grade: GradeLevel,
+    pub layer: usize,
     pub palette: GradePalette,
     pub primaries: PrimariesView,
     pub window: usize,
@@ -1914,7 +1916,8 @@ impl Live {
             && let Some(open) = &self.project
         {
             let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
-            let files = match crate::queue::existing(open.project(), params, &proxies) {
+            let updated = crate::queue::updated(&envelope.request);
+            let files = match crate::queue::existing(open.project(), updated, params, &proxies) {
                 Ok(f) => f,
                 Err(e) => return self.finish(job, Err(e)),
             };
@@ -3086,12 +3089,24 @@ impl Live {
                 parade,
                 vectorscope,
                 scale,
+                video_levels,
+                waveform_mode,
+                waveform_red,
+                waveform_green,
+                waveform_blue,
+                parade_mode,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
                     parade,
                     vectorscope,
                     scale,
+                    video_levels,
+                    waveform_mode,
+                    waveform_red,
+                    waveform_green,
+                    waveform_blue,
+                    parade_mode,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {
@@ -3568,6 +3583,7 @@ impl Live {
             Request::GuiPage {
                 page,
                 grade,
+                layer,
                 palette,
                 primaries,
                 window,
@@ -3578,6 +3594,7 @@ impl Live {
                 edit_job,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
+                    .chain(layer.map(GuiChange::Layer))
                     .chain(palette.map(GuiChange::Palette))
                     .chain(primaries.map(GuiChange::Primaries))
                     .chain(window.map(GuiChange::Window))
