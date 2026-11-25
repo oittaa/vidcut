@@ -214,7 +214,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - The answer names the renderer. It gives the layout and the place of each layer of the picture, from the bottom up.
 - If the player cannot make the frame, the error is the error of the player.
 
-**The scopes:** `vidcut frame scope waveform --at TIME --out F.png` renders one scope of that same picture, with no window. The others are `parade` and `vectorscope`.
+**The scopes:** `vidcut frame scope waveform --at TIME --out F.png` renders one scope of that same picture, with no window. The others are `parade`, `vectorscope` and `histogram`.
 
 - It draws the frame at the size of the timeline.
 - It reads the picture through the Scopes LUT of the project, as the scopes of the GUI do. A file that cannot be read is an error.

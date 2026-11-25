@@ -398,6 +398,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut viewer scopes --scale percent --video-levels true\n  \
          vidcut viewer scopes --waveform-mode rgb --waveform-blue false --parade-mode yrgb\n  \
          vidcut viewer scopes --skin-tone true\n  \
+         vidcut viewer scopes --histogram true --histogram-mode yrgb\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),
@@ -678,7 +679,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "frame.scope",
         "vidcut frame scope waveform --at 1m --out w.png\n  \
-         vidcut frame scope vectorscope --at 1m --out v.png --width 400",
+         vidcut frame scope vectorscope --at 1m --out v.png --width 400\n  \
+         vidcut frame scope histogram --at 1m --out h.png",
     ),
     (
         "presets.save",

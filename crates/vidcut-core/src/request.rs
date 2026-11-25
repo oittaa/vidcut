@@ -4366,9 +4366,9 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
     },
-    /// The scopes of the viewer: a waveform, a parade and a vectorscope of
-    /// its picture, in the timeline color space, and the scale of the
-    /// waveform and the parade. Stored in preferences, not the project. A
+    /// The scopes of the viewer: a waveform, a parade, a vectorscope and a
+    /// histogram of its picture, in the timeline color space, and the
+    /// scale of the waveform, the parade and the histogram. Stored in preferences, not the project. A
     /// field that is left out stays as it is. With no fields, tells which
     /// scopes are on.
     #[serde(rename = "viewer.scopes")]
@@ -4403,6 +4403,11 @@ pub enum Request {
         /// The Vectorscope shows a line at the skin tone angle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         skin_tone: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        histogram: Option<bool>,
+        /// The bands of the Histogram: `rgb` or `yrgb`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        histogram_mode: Option<crate::preferences::HistogramMode>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).

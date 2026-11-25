@@ -1,6 +1,8 @@
 use vidcut_core::generators::{hlg_code, pq_code};
 use vidcut_core::model::Hdr;
-use vidcut_core::preferences::{ParadeMode, Scope, ScopeScale, Scopes, WaveformMode};
+use vidcut_core::preferences::{
+    HistogramMode, ParadeMode, Scope, ScopeScale, Scopes, WaveformMode,
+};
 
 use super::{Gpu, TARGET, Target, begin, make_target};
 use crate::color::{Colors, Matrix, shader_colors};
@@ -20,6 +22,8 @@ const CIRCLE: f64 = 0.5;
 const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
+
+const HISTOGRAM_PEAK: u64 = 4;
 
 const PARAMS: usize = 224;
 
@@ -41,6 +45,7 @@ pub(super) struct Pipes {
     waveform: wgpu::ComputePipeline,
     parade: wgpu::ComputePipeline,
     vectorscope: wgpu::ComputePipeline,
+    histogram: wgpu::ComputePipeline,
     painting: wgpu::RenderPipeline,
 }
 
@@ -89,6 +94,7 @@ impl Pipes {
             waveform: gather("waveform"),
             parade: gather("parade"),
             vectorscope: gather("vectorscope"),
+            histogram: gather("histogram"),
             painting,
         }
     }
@@ -98,6 +104,7 @@ impl Pipes {
             Scope::Waveform => &self.waveform,
             Scope::Parade => &self.parade,
             Scope::Vectorscope => &self.vectorscope,
+            Scope::Histogram => &self.histogram,
         }
     }
 }
@@ -139,10 +146,11 @@ fn dashed(scale: ScopeScale, colors: Option<Hdr>) -> Vec<f64> {
 }
 
 fn sections(scope: Scope, prefs: Scopes) -> u32 {
-    match (scope, prefs.parade_mode) {
-        (Scope::Parade, ParadeMode::Yrgb) => 4,
-        (Scope::Parade, _) => 3,
-        _ => 1,
+    match scope {
+        Scope::Parade if prefs.parade_mode == ParadeMode::Yrgb => 4,
+        Scope::Histogram if prefs.histogram_mode == HistogramMode::Yrgb => 4,
+        Scope::Parade | Scope::Histogram => 3,
+        Scope::Waveform | Scope::Vectorscope => 1,
     }
 }
 
@@ -205,6 +213,13 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 at: [0.0, from_top(v) as f32],
             })
             .collect(),
+        Scope::Histogram => levels(prefs.scale, colors)
+            .into_iter()
+            .map(|(label, v)| Mark {
+                label,
+                at: [v as f32, 0.0],
+            })
+            .collect(),
         Scope::Vectorscope => {
             let unit = per_unit(size);
             hue_points(colors)
@@ -232,11 +247,15 @@ fn params(
     let unit = per_unit(size);
     let pixels = u64::from(canvas.0) * u64::from(canvas.1);
     let columns = match scope {
-        Scope::Waveform => size.0,
+        Scope::Waveform | Scope::Histogram => size.0,
         Scope::Parade => size.0 / sections(scope, prefs),
         Scope::Vectorscope => size.0.min(size.1),
     };
-    let full = (pixels / u64::from(columns.max(1)) / FULL_AT).max(1);
+    let full = match scope {
+        Scope::Histogram => pixels * HISTOGRAM_PEAK / u64::from(columns.max(1)),
+        _ => pixels / u64::from(columns.max(1)) / FULL_AT,
+    }
+    .max(1);
     let f = |v: f64| (v as f32).to_le_bytes();
     let n = |v: u32| v.to_le_bytes();
     let mut rows = [f(-1.0); MOST_ROWS];
@@ -252,8 +271,13 @@ fn params(
         }
     };
     for (row, v) in rows.iter_mut().zip(&lines) {
-        let at = (from_top(*v) * f64::from(size.1)).floor();
-        *row = f(at.min(f64::from(size.1 - 1)));
+        let at = match scope {
+            Scope::Histogram => (v * f64::from(size.0)).floor().min(f64::from(size.0 - 1)),
+            _ => (from_top(*v) * f64::from(size.1))
+                .floor()
+                .min(f64::from(size.1 - 1)),
+        };
+        *row = f(at);
     }
     let middle = [f64::from(size.0) / 2.0, f64::from(size.1) / 2.0];
     let hues = hue_points(colors).map(|(_, [x, y])| {
@@ -269,6 +293,7 @@ fn params(
     let mode = match scope {
         Scope::Waveform => prefs.waveform_mode as u32,
         Scope::Parade => prefs.parade_mode as u32,
+        Scope::Histogram => prefs.histogram_mode as u32,
         Scope::Vectorscope => 0,
     };
     let channels = [
@@ -284,6 +309,7 @@ fn params(
         Scope::Waveform => 0,
         Scope::Parade => 1,
         Scope::Vectorscope => 2,
+        Scope::Histogram => 3,
     };
     let mut bytes = vec![
         n(canvas.0),

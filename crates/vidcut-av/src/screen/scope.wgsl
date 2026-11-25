@@ -126,6 +126,31 @@ fn vectorscope(@builtin(global_invocation_id) id: vec3<u32>) {
     add(p.x, p.y);
 }
 
+fn bin(v: f32) -> u32 {
+    return min(u32(clamp(v, 0.0, 1.0) * f32(params.size.x)), params.size.x - 1u);
+}
+
+fn band_value(c: vec3<f32>, band: u32) -> f32 {
+    if params.how.w == 0u {
+        return shown(c[band]);
+    }
+    if band == 0u {
+        return shown(dot(c, params.luma.xyz));
+    }
+    return shown(c[band - 1u]);
+}
+
+@compute @workgroup_size(16, 16)
+fn histogram(@builtin(global_invocation_id) id: vec3<u32>) {
+    if outside(id) {
+        return;
+    }
+    let c = color_at(id);
+    for (var b = 0u; b < params.parts.x; b++) {
+        add(bin(band_value(c, b)), b);
+    }
+}
+
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     let x = f32((i << 1u) & 2u) * 2.0 - 1.0;
@@ -175,12 +200,56 @@ fn evened(x: u32, across: u32) -> f32 {
 }
 
 fn ruled(p: vec2<f32>) -> bool {
+    let across = params.how.x == 3u;
+    let at = select(p.y, p.x, across);
+    let along = select(p.x, p.y, across);
     for (var i = 0u; i < params.how.y; i++) {
-        if p.y == params.rows[i / 4u][i % 4u] {
-            return i < params.how.z || (u32(p.x) / DASH) % 2u == 0u;
+        if at == params.rows[i / 4u][i % 4u] {
+            return i < params.how.z || (u32(along) / DASH) % 2u == 0u;
         }
     }
     return false;
+}
+
+fn band_tint(band: u32) -> vec3<f32> {
+    if params.how.w == 0u {
+        return channel_tint(band);
+    }
+    if band == 0u {
+        return WHITE;
+    }
+    return channel_tint(band - 1u);
+}
+
+fn bar(band: u32, x: i32, room: f32) -> f32 {
+    if x < 0 || x >= i32(params.size.x) {
+        return 0.0;
+    }
+    let count = f32(counted[band * params.size.x + u32(x)]);
+    return min(count * params.range.z, 1.0) * room;
+}
+
+fn histogram_color(x: i32, y: i32) -> vec3<f32> {
+    let bands = params.parts.x;
+    let tall = params.size.y / bands;
+    let band = u32(y) / tall;
+    if band >= bands {
+        return vec3<f32>(0.0);
+    }
+    let up = f32(tall - 1u - u32(y) % tall);
+    let room = f32(tall) - 2.0;
+    let here = bar(band, x, room);
+    let left = bar(band, x - 1, room);
+    let top = up >= max(here - 1.0, 0.0) && up < max(here, 1.0);
+    let side = up >= min(here, left) && up < max(here, left);
+    let tint = band_tint(band);
+    if top || side {
+        return tint;
+    }
+    if up < here {
+        return tint * 0.35;
+    }
+    return vec3<f32>(0.0);
 }
 
 fn on_graticule(p: vec2<f32>) -> bool {
@@ -228,6 +297,10 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
         }
         let grid = select(vec3<f32>(0.0), GRID, on_graticule(p));
         return vec4<f32>(max(grid, vec3<f32>(level(most))), 1.0);
+    }
+    if params.how.x == 3u {
+        let grid = select(vec3<f32>(0.0), GRID, ruled(p));
+        return vec4<f32>(max(grid, histogram_color(x, y)), 1.0);
     }
     var color = vec3<f32>(0.0);
     var edge = false;
