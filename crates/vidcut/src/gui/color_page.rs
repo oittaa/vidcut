@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{
     BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
-    KeyOutput, Picture, Project, Settings, WindowKind,
+    KeyOutput, Picture, Project, Qualifier, Settings, WindowKind,
 };
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
@@ -280,6 +280,10 @@ fn key_input_held(g: &Grade, n: u32, frame: i64) -> Option<KeyInput> {
     g.node(n)?.key_input_changed_at(frame)
 }
 
+fn qualifier_held(g: &Grade, n: u32, frame: i64) -> Option<Qualifier> {
+    g.node(n)?.qualifier_changed_at(frame)
+}
+
 fn correctors(g: &Grade) -> impl DoubleEndedIterator<Item = u32> + '_ {
     (g.nodes.iter().enumerate())
         .filter(|(_, d)| !d.tool.is_mixer())
@@ -328,11 +332,18 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         ),
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
         (changed.iter().any(auto), icon::MAGIC_WAND, "Auto Color"),
+        (
+            std::iter::once(&d.qualifier)
+                .chain(d.keys.iter().map(|k| &k.qualifier))
+                .any(|q| !q.hsl_usual()),
+            icon::EYEDROPPER,
+            "Qualifier",
+        ),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
         (
-            std::iter::once((&d.key, &d.key_input))
-                .chain(d.keys.iter().map(|k| (&k.key, &k.key_input)))
-                .any(|(k, i)| !k.is_usual() || !i.is_usual()),
+            std::iter::once((&d.key, &d.key_input, &d.qualifier))
+                .chain(d.keys.iter().map(|k| (&k.key, &k.key_input, &k.qualifier)))
+                .any(|(k, i, q)| !k.is_usual() || !i.is_usual() || !q.row_usual()),
             icon::SQUARE_HALF,
             "Key",
         ),
@@ -444,6 +455,96 @@ fn key_input(ui: &mut Ui, changes: &mut Vec<Change>, input: KeyInput) {
         );
         let ratio = ("Blur H/V", "key_input_blur_ratio");
         slider(ui, changes, ratio, input.blur_ratio, 0.005, range);
+    });
+}
+
+fn qualifier_key(ui: &mut Ui, changes: &mut Vec<Change>, q: Qualifier) {
+    ui.horizontal(|ui| {
+        ui.strong("Qualifier");
+        let mut invert = q.key_invert;
+        if ui.toggle_value(&mut invert, "Invert").changed() {
+            changes.push(Change {
+                field: "qualifier_key_invert",
+                value: json!(invert),
+            });
+        }
+        let mut matte = !q.mask;
+        if ui.toggle_value(&mut matte, "Matte").changed() {
+            changes.push(Change {
+                field: "qualifier_mask",
+                value: json!(!matte),
+            });
+        }
+        let gain = ("Gain", "qualifier_gain");
+        slider(ui, changes, gain, q.gain, 0.005, (0.0, 2.0));
+        let offset = ("Offset", "qualifier_offset");
+        slider(ui, changes, offset, q.offset, 0.005, (-1.0, 1.0));
+    });
+}
+
+fn qualifier_part(
+    ui: &mut Ui,
+    changes: &mut Vec<Change>,
+    (text, field): (&str, &'static str),
+    on: bool,
+) {
+    let mut on = on;
+    if ui.checkbox(&mut on, text).changed() {
+        changes.push(Change {
+            field,
+            value: json!(on),
+        });
+    }
+}
+
+fn qualifier_body(ui: &mut Ui, changes: &mut Vec<Change>, q: Qualifier) {
+    let percent = (0.0, 100.0);
+    let step = 0.25;
+    ui.horizontal(|ui| {
+        ui.strong("HSL");
+        let mut invert = q.invert;
+        if ui.toggle_value(&mut invert, "Invert").changed() {
+            changes.push(Change {
+                field: "qualifier_invert",
+                value: json!(invert),
+            });
+        }
+    });
+    ui.horizontal(|ui| {
+        qualifier_part(ui, changes, ("Hue", "qualifier_hue"), q.hue);
+        let rows = [
+            ("Center", "qualifier_hue_center", q.hue_center),
+            ("Width", "qualifier_hue_width", q.hue_width),
+            ("Soft", "qualifier_hue_soft", q.hue_soft),
+            ("Sym", "qualifier_hue_sym", q.hue_sym),
+        ];
+        for (text, field, v) in rows {
+            slider(ui, changes, (text, field), v, step, percent);
+        }
+    });
+    ui.horizontal(|ui| {
+        qualifier_part(ui, changes, ("Sat", "qualifier_sat"), q.sat);
+        let rows = [
+            ("Low", "qualifier_sat_low", q.sat_low),
+            ("High", "qualifier_sat_high", q.sat_high),
+            ("L.Soft", "qualifier_sat_low_soft", q.sat_low_soft),
+            ("H.Soft", "qualifier_sat_high_soft", q.sat_high_soft),
+        ];
+        for (text, field, v) in rows {
+            slider(ui, changes, (text, field), v, step, percent);
+        }
+    });
+    ui.horizontal(|ui| {
+        qualifier_part(ui, changes, ("Lum", "qualifier_lum"), q.lum);
+        let rows = [
+            ("Low", "qualifier_lum_low", q.lum_low),
+            ("High", "qualifier_lum_high", q.lum_high),
+            ("L.Soft", "qualifier_lum_low_soft", q.lum_low_soft),
+            ("H.Soft", "qualifier_lum_high_soft", q.lum_high_soft),
+        ];
+        for (text, field, v) in rows {
+            slider(ui, changes, (text, field), v, step, percent);
+        }
     });
 }
 
@@ -564,6 +665,34 @@ fn key_inputted(input: KeyInput, c: &Change) -> KeyInput {
         _ => {}
     }
     input
+}
+
+fn qualified(q: Qualifier, c: &Change) -> Qualifier {
+    let Some(field) = c.field.strip_prefix("qualifier_") else {
+        return q;
+    };
+    match (field, c.value.as_f64()) {
+        ("hue_width", Some(v)) => return q.with_hue_width(v),
+        ("hue_soft", Some(v)) => return q.with_hue_soft(v),
+        _ => {}
+    }
+    let Ok(Value::Object(mut values)) = serde_json::to_value(q) else {
+        return q;
+    };
+    values.insert(field.to_string(), c.value.clone());
+    serde_json::from_value(Value::Object(values)).unwrap_or(q)
+}
+
+fn qualifier_changes(from: Qualifier, to: Qualifier) -> Map<String, Value> {
+    let (Ok(Value::Object(a)), Ok(Value::Object(b))) =
+        (serde_json::to_value(from), serde_json::to_value(to))
+    else {
+        return Map::new();
+    };
+    b.into_iter()
+        .filter(|(k, v)| a.get(k) != Some(v))
+        .map(|(k, v)| (format!("qualifier_{k}"), v))
+        .collect()
 }
 
 fn mixed(m: KeyMix, c: &Change) -> KeyMix {
@@ -1297,6 +1426,7 @@ fn grade_switch(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)
 fn usual(field: &str) -> f64 {
     let parts = [
         ("key_input_", serde_json::to_value(KeyInput::default())),
+        ("qualifier_", serde_json::to_value(Qualifier::default())),
         ("mix_", serde_json::to_value(KeyMix::default())),
         ("key_", serde_json::to_value(KeyOutput::default())),
     ];
@@ -1944,6 +2074,7 @@ impl Workspace {
             ui.separator();
             for (p, text) in [
                 (GradePalette::Primaries, "Primaries"),
+                (GradePalette::Qualifier, "Qualifier"),
                 (GradePalette::Window, "Window"),
                 (GradePalette::Key, "Key"),
             ] {
@@ -2030,6 +2161,7 @@ impl Workspace {
             self.send("gui.page", Value::Object(view));
         }
         let key_now = key_output_held(&grade, n, frame).unwrap_or_default();
+        let qualifier_now = qualifier_held(&grade, n, frame).unwrap_or_default();
         let mut window_acts = Vec::new();
         let point = match palette {
             GradePalette::Key => {
@@ -2037,6 +2169,12 @@ impl Workspace {
                 key_input(ui, &mut changes, input);
                 ui.separator();
                 key_output(ui, &mut changes, ("Key Output", key_now));
+                ui.separator();
+                qualifier_key(ui, &mut changes, qualifier_now);
+                None
+            }
+            GradePalette::Qualifier => {
+                qualifier_body(ui, &mut changes, qualifier_now);
                 None
             }
             GradePalette::Window => {
@@ -2071,6 +2209,9 @@ impl Workspace {
             return true;
         }
         if !changes.is_empty() {
+            let (quals, changes): (Vec<Change>, Vec<Change>) = changes
+                .into_iter()
+                .partition(|c| c.field.starts_with("qualifier_"));
             let (inputs, changes): (Vec<Change>, Vec<Change>) = changes
                 .into_iter()
                 .partition(|c| c.field.starts_with("key_input_"));
@@ -2084,6 +2225,7 @@ impl Workspace {
             if let Some(d) = next.node_mut(n) {
                 d.change_key_output_at(frame, |k| keys.iter().fold(k, keyed));
                 d.change_key_input_at(frame, |i| inputs.iter().fold(i, key_inputted));
+                d.change_qualifier_at(frame, |q| quals.iter().fold(q, qualified));
             }
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
@@ -2115,6 +2257,13 @@ impl Workspace {
                 );
                 if let (Some(a), Some(b)) = inputs {
                     params.extend(key_input_changes(a, b));
+                }
+                let quals = (
+                    qualifier_held(&stored, n, frame),
+                    qualifier_held(&h.grade, n, frame),
+                );
+                if let (Some(a), Some(b)) = quals {
+                    params.extend(qualifier_changes(a, b));
                 }
                 Some((params, window_sets((&stored, &h.grade), n, frame)))
             }

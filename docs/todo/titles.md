@@ -23,10 +23,18 @@
 
 ## Font heights
 
-- **Scroll:**
-  - Measure the line distance at a size that is not a multiple of 3. vidcut rounds 4/3 of the size to the nearest whole pixel.
-  - vidcut draws the exact size of a Scroll and writes the nearest whole number to OTIO. Measure how the Inspector rounds a typed fraction.
+- **Scroll letters:** in run T5, the letters of a Scroll have an em of 4/3 of its size. vidcut draws an em of the size.
+  - The font of that Scroll was picked in the Inspector. Its file gives the font in points: `Arial,8.25,-1,…`.
+  - vidcut writes the font in pixels: `Arial,-1,58,…`. Measure the letters of a Scroll from each kind of file.
 - **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
 - **Fallback font:** a letter that the font does not have comes from another font.
   - In Arial at size 192, `Ⅷ` moves the words down by 35 pixels in vidcut and 9 pixels in Resolve. `Ⓐ` moves them 33 pixels in vidcut and 0 in Resolve.
   - The two programs draw these letters in different fonts. Find which font Resolve takes.
+
+## Edit in place
+
+- **Lower third:** Resolve edits only the line under the pointer, inside an outline of that line.
+  - Each line of Resolve's lower third has its own Rich Text. vidcut keeps the two lines in one text.
+- **Tab:** in Resolve, Tab types a tab character. Measure the width of a tab in a title, then let Tab type it.
+- **Spell check:** Resolve draws a red wavy line under the words that its spell check does not know. vidcut has no spell check.
+- **Bursts:** measure what ends one burst of typing in Resolve: a pause, a space or another key.

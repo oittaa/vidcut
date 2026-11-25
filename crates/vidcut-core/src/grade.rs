@@ -1,5 +1,6 @@
 use crate::model::{
-    BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, KeyOutput, SPLIT_OUTPUTS,
+    BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, KeyOutput, Qualifier,
+    SPLIT_OUTPUTS,
 };
 use crate::tone_tables::{HIGHLIGHTS, SHADOWS, TONE_AMOUNTS};
 use crate::window_key::Keying;
@@ -546,6 +547,7 @@ impl KeyFold {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum KeySource {
     Windows,
+    Qualifier,
     Link(GradeLink),
 }
 
@@ -582,6 +584,11 @@ fn key_steps(node: &GradeNode, off: &[bool]) -> Vec<(KeySource, KeyFold)> {
             let mut steps = Vec::new();
             if windows {
                 steps.push((KeySource::Windows, fold((1.0, 0.0, false), false)));
+            }
+            let q = node.qualifier;
+            if !q.is_usual() {
+                let how = fold((q.gain, q.offset, q.key_invert), windows && !q.mask);
+                steps.push((KeySource::Qualifier, how));
             }
             if let Some(from) = node.key_from {
                 let i = node.key_input;
@@ -652,7 +659,7 @@ fn shape_of(node: &GradeNode, shapes: &[Shape], off: &[bool], count: usize) -> S
                 Shape::Flat(x) => acc = fold.of(acc, x),
                 Shape::Map => return Shape::Map,
             },
-            KeySource::Windows => return Shape::Map,
+            KeySource::Windows | KeySource::Qualifier => return Shape::Map,
         }
     }
     Shape::Flat(acc)
@@ -720,6 +727,17 @@ pub enum Pass {
         on: usize,
         channel: u8,
     },
+    Qualify {
+        from: usize,
+        to: usize,
+        qualifying: Box<Qualifying>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Qualifying {
+    pub qualifier: Qualifier,
+    pub output: Option<KeyOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -951,7 +969,7 @@ impl Uses {
 
     fn folded(
         &self,
-        (node, count): (&GradeNode, usize),
+        (node, count, from): (&GradeNode, usize, Option<usize>),
         r: &mut Registers,
         passes: &mut Vec<Pass>,
     ) -> Option<Key> {
@@ -960,6 +978,23 @@ impl Uses {
             let to = r.kept(count);
             let keying = Box::new(Keying::of(node)?);
             passes.push(Pass::Key { to, keying });
+            return Some(Key::Map(to));
+        }
+        let q = node.qualifier;
+        let plain = q.all_on() && q.gain == 1.0 && q.offset == 0.0 && !q.key_invert;
+        if let [(KeySource::Qualifier, _)] = steps[..]
+            && plain
+        {
+            let to = r.kept(count);
+            let qualifying = Box::new(Qualifying {
+                qualifier: q,
+                output: Some(node.key),
+            });
+            passes.push(Pass::Qualify {
+                from: from?,
+                to,
+                qualifying,
+            });
             return Some(Key::Map(to));
         }
         let mut acc = Key::Flat(0.0);
@@ -973,6 +1008,19 @@ impl Uses {
                     };
                     let keying = Box::new(keying);
                     passes.push(Pass::Key { to, keying });
+                    Key::Map(to)
+                }
+                KeySource::Qualifier => {
+                    let to = r.kept(1);
+                    let qualifying = Box::new(Qualifying {
+                        qualifier: q,
+                        output: None,
+                    });
+                    passes.push(Pass::Qualify {
+                        from: from?,
+                        to,
+                        qualifying,
+                    });
                     Key::Map(to)
                 }
                 KeySource::Link(l) => self.source((node, l), r, passes),
@@ -999,7 +1047,7 @@ impl Uses {
 
     fn keyed(
         &self,
-        (node, k): (&GradeNode, usize),
+        (node, k, from): (&GradeNode, usize, Option<usize>),
         r: &mut Registers,
         passes: &mut Vec<Pass>,
     ) -> Option<Key> {
@@ -1007,7 +1055,7 @@ impl Uses {
         match self.shapes[k] {
             Shape::Flat(v) => Some(Key::Flat(v)),
             Shape::Map if count == 0 => Some(Key::Flat(1.0)),
-            Shape::Map => self.folded((node, count), r, passes),
+            Shape::Map => self.folded((node, count, from), r, passes),
         }
     }
 }
@@ -1135,6 +1183,7 @@ fn keys_only(p: &Pass) -> bool {
             | Pass::KeyBlur { .. }
             | Pass::KeySharpen { .. }
             | Pass::Luma { .. }
+            | Pass::Qualify { .. }
     )
 }
 
@@ -1256,7 +1305,8 @@ impl Graded {
                 .collect();
             let number = k;
             let k = k as usize;
-            uses.keys[k] = uses.keyed((node, k), &mut r, &mut passes)?;
+            let from = ins.first().map(|&x| r.holder[x]);
+            uses.keys[k] = uses.keyed((node, k, from), &mut r, &mut passes)?;
             match &node.tool {
                 GradeTool::Corrector(c) => {
                     let from = corrected((node, c, k, ins[0]), &mut uses, &mut r, &mut passes);

@@ -749,6 +749,8 @@ impl Words<'_> {
                     "video_enabled": t.video_enabled,
                     "name": t.name,
                     "duck": t.duck,
+                    "dynamics": t.dynamics,
+                    "equalizer": t.equalizer,
                 })),
                 (None, Some(t)) => Some(json!({
                     "locked": t.locked,
@@ -774,6 +776,8 @@ impl Words<'_> {
         s.put("video_enabled", "Video", &raw, |t| {
             t["video_enabled"].clone()
         });
+        s.put("dynamics", "Dynamics", &raw, |t| t["dynamics"].clone());
+        s.put("equalizer", "Equalizer", &raw, |t| t["equalizer"].clone());
         s.put("shown", "Show", &raw, |t| t["shown"].clone());
         s.put("destination", "Destination", &raw, |t| {
             t["destination"].clone()

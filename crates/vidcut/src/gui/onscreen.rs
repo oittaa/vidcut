@@ -494,7 +494,7 @@ impl Workspace {
         }
         if done {
             self.timeline.title_grab.typed_shown = None;
-            self.commit_title_form();
+            self.commit_title_form(typing.passed());
             return None;
         }
         self.timeline.title_grab.typing = Some(typing);
@@ -579,8 +579,8 @@ impl Workspace {
     pub(super) fn stop_title_text(&mut self) {
         let g = &mut self.timeline.title_grab;
         g.typed_shown = None;
-        if g.typing.take().is_some() {
-            self.commit_title_form();
+        if let Some(t) = g.typing.take() {
+            self.commit_title_form(t.passed());
         }
     }
 
@@ -607,7 +607,11 @@ impl Workspace {
             if !chosen && !hovered && !typing {
                 continue;
             }
-            let stroke = Stroke::new(if chosen && !typing { 1.5 } else { 1.0 }, accent);
+            let stroke = if typing {
+                Stroke::new(1.0, Color32::WHITE)
+            } else {
+                Stroke::new(if chosen { 1.5 } else { 1.0 }, accent)
+            };
             for i in 0..4 {
                 painter.line_segment([s.corners[i], s.corners[(i + 1) % 4]], stroke);
             }

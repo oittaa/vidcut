@@ -5,6 +5,8 @@ use crate::error::{Error, Result};
 use crate::model::{EqBand, EqKind, Equalizer};
 use crate::request::{EqBandSet, EqualizerSet};
 
+pub mod track;
+
 pub const FREQUENCY: RangeInclusive<f64> = 20.0..=22000.0;
 pub const GAIN: RangeInclusive<f64> = -70.0..=24.0;
 pub const Q: RangeInclusive<f64> = 0.3..=100.0;
@@ -170,13 +172,38 @@ impl Equalizer {
     }
 }
 
+pub trait Curve: Clone {
+    fn stages(&self, rate: f64) -> Vec<Biquad>;
+}
+
+fn warped(freq: f64, rate: f64) -> f64 {
+    (PI * freq.min(rate * 0.49) / rate).tan()
+}
+
 #[derive(Debug, Clone, Copy)]
-struct Biquad {
+pub struct Biquad {
     b: [f64; 3],
     a: [f64; 2],
 }
 
 impl Biquad {
+    fn normalized(b: [f64; 3], a: [f64; 3]) -> Self {
+        Self {
+            b: [b[0] / a[0], b[1] / a[0], b[2] / a[0]],
+            a: [a[1] / a[0], a[2] / a[0]],
+        }
+    }
+
+    fn analog(top: [f64; 3], bottom: [f64; 3]) -> Self {
+        let z = |[s2, s1, s0]: [f64; 3]| [s2 + s1 + s0, 2.0 * (s0 - s2), s2 - s1 + s0];
+        Self::normalized(z(top), z(bottom))
+    }
+
+    fn analog_first(top: [f64; 2], bottom: [f64; 2]) -> Self {
+        let z = |[s1, s0]: [f64; 2]| [s1 + s0, s0 - s1, 0.0];
+        Self::normalized(z(top), z(bottom))
+    }
+
     fn of(band: &EqBand, rate: f64) -> Self {
         let boost = 10f64.powf(band.gain / 40.0);
         let corner = 10f64.powf(band.gain.abs() / 80.0);
@@ -252,10 +279,7 @@ impl Biquad {
                 )
             }
         };
-        Self {
-            b: [b[0] / a[0], b[1] / a[0], b[2] / a[0]],
-            a: [a[1] / a[0], a[2] / a[0]],
-        }
+        Self::normalized(b, a)
     }
 
     fn magnitude(&self, w: f64) -> f64 {
@@ -274,35 +298,37 @@ impl Biquad {
     }
 }
 
-fn stages(eq: &Equalizer, rate: f64) -> Vec<Biquad> {
-    if !eq.on {
-        return Vec::new();
+impl Curve for Equalizer {
+    fn stages(&self, rate: f64) -> Vec<Biquad> {
+        if !self.on {
+            return Vec::new();
+        }
+        self.bands
+            .iter()
+            .filter(|b| b.changes_sound())
+            .map(|b| Biquad::of(b, rate))
+            .collect()
     }
-    eq.bands
-        .iter()
-        .filter(|b| b.changes_sound())
-        .map(|b| Biquad::of(b, rate))
-        .collect()
 }
 
-pub fn response_db(eq: &Equalizer, freq: f64, rate: u32) -> f64 {
+pub fn response_db(eq: &impl Curve, freq: f64, rate: u32) -> f64 {
     let rate = f64::from(rate);
     let w = 2.0 * PI * freq / rate;
-    let gain: f64 = stages(eq, rate).iter().map(|s| s.magnitude(w)).product();
+    let gain: f64 = eq.stages(rate).iter().map(|s| s.magnitude(w)).product();
     20.0 * gain.max(1e-6).log10()
 }
 
 #[derive(Debug, Clone)]
-pub struct Filter {
-    settings: Equalizer,
+pub struct Filter<S> {
+    settings: S,
     stages: Vec<Biquad>,
     memory: Vec<[f64; 2]>,
     channels: usize,
 }
 
-impl Filter {
-    pub fn new(eq: &Equalizer, rate: u32, channels: u16) -> Self {
-        let stages = stages(eq, f64::from(rate));
+impl<S: Curve> Filter<S> {
+    pub fn new(eq: &S, rate: u32, channels: u16) -> Self {
+        let stages = eq.stages(f64::from(rate));
         let channels = usize::from(channels).max(1);
         Self {
             settings: eq.clone(),
@@ -312,8 +338,12 @@ impl Filter {
         }
     }
 
-    pub fn settings(&self) -> &Equalizer {
+    pub fn settings(&self) -> &S {
         &self.settings
+    }
+
+    pub fn clear(&mut self) {
+        self.memory.fill([0.0; 2]);
     }
 
     pub fn run(&mut self, samples: &mut [f32]) {

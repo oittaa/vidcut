@@ -4,8 +4,8 @@ use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
     AutoColor, COMBINER_INPUTS, Clip, Corrector, DynamicsProfile, Grade, GradeKey, GradeLink,
-    GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput, Project, SPLIT_OUTPUTS, Track,
-    WindowKind,
+    GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput, Project, Qualifier,
+    SPLIT_OUTPUTS, Track, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -107,6 +107,81 @@ impl GradeNodeChange {
         }
     }
 
+    fn changes_qualifier(&self) -> bool {
+        let values = [
+            self.qualifier_hue_center,
+            self.qualifier_hue_sym,
+            self.qualifier_sat_low,
+            self.qualifier_sat_high,
+            self.qualifier_sat_low_soft,
+            self.qualifier_sat_high_soft,
+            self.qualifier_lum_low,
+            self.qualifier_lum_high,
+            self.qualifier_lum_low_soft,
+            self.qualifier_lum_high_soft,
+            self.qualifier_gain,
+            self.qualifier_offset,
+            self.qualifier_hue_width,
+            self.qualifier_hue_soft,
+        ];
+        let flags = [
+            self.qualifier_hue,
+            self.qualifier_sat,
+            self.qualifier_lum,
+            self.qualifier_invert,
+            self.qualifier_key_invert,
+            self.qualifier_mask,
+        ];
+        values.iter().any(Option::is_some) || flags.iter().any(Option::is_some)
+    }
+
+    fn qualifier_changed(&self, q: Qualifier) -> Qualifier {
+        let mut q = Qualifier {
+            hue_center: self.qualifier_hue_center.unwrap_or(q.hue_center),
+            hue_sym: self.qualifier_hue_sym.unwrap_or(q.hue_sym),
+            sat_low: self.qualifier_sat_low.unwrap_or(q.sat_low),
+            sat_high: self.qualifier_sat_high.unwrap_or(q.sat_high),
+            sat_low_soft: self.qualifier_sat_low_soft.unwrap_or(q.sat_low_soft),
+            sat_high_soft: self.qualifier_sat_high_soft.unwrap_or(q.sat_high_soft),
+            lum_low: self.qualifier_lum_low.unwrap_or(q.lum_low),
+            lum_high: self.qualifier_lum_high.unwrap_or(q.lum_high),
+            lum_low_soft: self.qualifier_lum_low_soft.unwrap_or(q.lum_low_soft),
+            lum_high_soft: self.qualifier_lum_high_soft.unwrap_or(q.lum_high_soft),
+            gain: self.qualifier_gain.unwrap_or(q.gain),
+            offset: self.qualifier_offset.unwrap_or(q.offset),
+            hue: self.qualifier_hue.unwrap_or(q.hue),
+            sat: self.qualifier_sat.unwrap_or(q.sat),
+            lum: self.qualifier_lum.unwrap_or(q.lum),
+            invert: self.qualifier_invert.unwrap_or(q.invert),
+            key_invert: self.qualifier_key_invert.unwrap_or(q.key_invert),
+            mask: self.qualifier_mask.unwrap_or(q.mask),
+            ..q
+        };
+        match (self.qualifier_hue_width, self.qualifier_hue_soft) {
+            (Some(width), Some(soft)) => {
+                q.hue_width = width;
+                q.hue_soft = soft;
+            }
+            (Some(width), None) => q = q.with_hue_width(width),
+            (None, Some(soft)) => q = q.with_hue_soft(soft),
+            (None, None) => {}
+        }
+        q
+    }
+
+    fn qualifier_sent(&self) -> Result<()> {
+        let sent = [
+            (self.qualifier_hue_width, "qualifier_hue_width"),
+            (self.qualifier_hue_soft, "qualifier_hue_soft"),
+        ];
+        for (v, name) in sent {
+            if let Some(v) = v {
+                within(v, (0.0, 100.0), name)?;
+            }
+        }
+        Ok(())
+    }
+
     fn changes_mix(&self) -> bool {
         let flags = [self.mix_invert, self.mix_matte];
         let values = [self.mix_gain, self.mix_offset];
@@ -194,9 +269,11 @@ fn keys_checked(d: &GradeNode, k: u32) -> Result<()> {
         corrector_checked(&key.values)?;
         key_checked(&key.key)?;
         key_input_checked(&key.key_input)?;
-        if d.tool.is_mixer() && (!key.values.is_usual() || !key.key_input.is_usual()) {
+        qualifier_checked(&key.qualifier)?;
+        let own = !key.values.is_usual() || !key.key_input.is_usual() || !key.qualifier.is_usual();
+        if d.tool.is_mixer() && own {
             return Err(Error::invalid(format!(
-                "a keyframe of key mixer {k} has no values and no key input"
+                "a keyframe of key mixer {k} has no values, no key input and no qualifier"
             )));
         }
         if key.mix.len() != mixes {
@@ -235,6 +312,29 @@ fn key_input_checked(i: &KeyInput) -> Result<()> {
     within(i.offset, (-1.0, 1.0), "key_input_offset")?;
     within(i.blur, (-1.0, 1.0), "key_input_blur")?;
     within(i.blur_ratio, (-1.0, 1.0), "key_input_blur_ratio")
+}
+
+fn qualifier_checked(q: &Qualifier) -> Result<()> {
+    within(q.hue_center, (0.0, 100.0), "qualifier_hue_center")?;
+    within(q.hue_width, (0.0, 100.0), "qualifier_hue_width")?;
+    within(q.hue_soft, (0.0, 100.0), "qualifier_hue_soft")?;
+    within(q.hue_sym, (0.0, 100.0), "qualifier_hue_sym")?;
+    within(q.sat_low, (0.0, 100.0), "qualifier_sat_low")?;
+    within(q.sat_high, (0.0, 100.0), "qualifier_sat_high")?;
+    within(q.sat_low_soft, (0.0, 100.0), "qualifier_sat_low_soft")?;
+    within(q.sat_high_soft, (0.0, 100.0), "qualifier_sat_high_soft")?;
+    within(q.lum_low, (0.0, 100.0), "qualifier_lum_low")?;
+    within(q.lum_high, (0.0, 100.0), "qualifier_lum_high")?;
+    within(q.lum_low_soft, (0.0, 100.0), "qualifier_lum_low_soft")?;
+    within(q.lum_high_soft, (0.0, 100.0), "qualifier_lum_high_soft")?;
+    within(q.gain, (0.0, 2.0), "qualifier_gain")?;
+    within(q.offset, (-1.0, 1.0), "qualifier_offset")?;
+    if q.hue_soft > 2.0 * q.hue_width {
+        return Err(Error::invalid(
+            "qualifier_hue_soft is at most 2 times qualifier_hue_width",
+        ));
+    }
+    Ok(())
 }
 
 fn gives(g: &Grade, l: GradeLink) -> Result<()> {
@@ -281,6 +381,10 @@ fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
     if n.tool.is_mixer() && (n.key_from.is_some() || !n.key_input.is_usual()) {
         return Err(Error::invalid(format!("mixer {k} has no key input")));
     }
+    if n.tool.is_mixer() && !n.qualifier.is_usual() {
+        return Err(Error::invalid(format!("mixer {k} has no qualifier")));
+    }
+    qualifier_checked(&n.qualifier)?;
     if let GradeTool::KeyMixer { mix } = &n.tool {
         if mix.len() != n.inputs.len() {
             return Err(Error::invalid(format!(
@@ -649,6 +753,17 @@ fn key_input_changed(
         .ok_or_else(|| no_node(n))
 }
 
+fn qualifier_changed(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+    change: impl FnOnce(Qualifier) -> Qualifier,
+) -> Result<()> {
+    let (d, frame) = changed_node(g, n, frame)?;
+    d.change_qualifier_at(frame, change)
+        .ok_or_else(|| no_node(n))
+}
+
 fn mix_changed(g: &mut Grade, n: u32, frame: Option<i64>, change: &GradeNodeChange) -> Result<()> {
     if !node(g, n)?.takes_keys() {
         return Err(Error::invalid(format!("node {n} is not a key mixer")));
@@ -676,6 +791,7 @@ pub fn set(
     let keyed = !change.is_empty()
         || node_change.changes_key()
         || node_change.changes_key_input()
+        || node_change.changes_qualifier()
         || node_change.changes_mix();
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
@@ -698,6 +814,10 @@ pub fn set(
             }
             if node_change.changes_key_input() {
                 key_input_changed(g, n, frame, |i| node_change.key_input_changed(i))?;
+            }
+            if node_change.changes_qualifier() {
+                node_change.qualifier_sent()?;
+                qualifier_changed(g, n, frame, |q| node_change.qualifier_changed(q))?;
             }
             match (node_change.changes_mix(), node_change.input) {
                 (true, _) => mix_changed(g, n, frame, node_change)?,
@@ -835,6 +955,28 @@ fn cleared(
         key_input_changed(g, n, frame, |i| KeyInput {
             invert: kept && i.invert,
             ..KeyInput::default()
+        })?;
+        if palette.is_some() {
+            let usual = Qualifier::default();
+            qualifier_changed(g, n, frame, |q| Qualifier {
+                gain: usual.gain,
+                offset: usual.offset,
+                key_invert: usual.key_invert,
+                mask: usual.mask,
+                ..q
+            })?;
+        }
+    }
+    if resets(GradePalette::Qualifier) {
+        qualifier_changed(g, n, frame, |q| match palette {
+            Some(_) => Qualifier {
+                gain: q.gain,
+                offset: q.offset,
+                key_invert: q.key_invert,
+                mask: q.mask,
+                ..Qualifier::default()
+            },
+            None => Qualifier::default(),
         })?;
     }
     if resets(GradePalette::Window) {
@@ -1441,6 +1583,7 @@ pub fn copy(p: &Project, of: &GradeOf, n: u32) -> Result<CopiedNode> {
         animated: d.is_animated(),
         key: d.key,
         key_input: d.key_input,
+        qualifier: d.qualifier,
         windows: d.windows.clone(),
     })
 }
@@ -1458,6 +1601,7 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
             d.animated = copied.animated;
             d.key = copied.key;
             d.key_input = copied.key_input;
+            d.qualifier = copied.qualifier;
             d.windows.clone_from(&copied.windows);
             Ok(())
         })?;
@@ -1591,6 +1735,7 @@ pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
             d.animated = from.animated;
             d.key = from.key;
             d.key_input = from.key_input;
+            d.qualifier = from.qualifier;
             d.windows = from.windows;
         }
         Ok(())
