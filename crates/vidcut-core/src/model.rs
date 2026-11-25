@@ -6178,6 +6178,11 @@ pub struct Mask {
     /// Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
+    /// How the sharp corners of a `rectangle` are drawn where its edge moves
+    /// out: `sharp` keeps a square corner, `rounded` gives an arc and
+    /// `beveled` cuts the corner straight. Usual: `sharp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,

@@ -495,6 +495,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             }
             if rectangle {
                 given(&mut left.corner_radius, &mut m.corner_radius);
+                given(&mut left.join_style, &mut m.join_style);
             }
         }
         Tool::Tracker(t) => {

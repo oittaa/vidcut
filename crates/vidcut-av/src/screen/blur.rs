@@ -4,8 +4,8 @@ use vidcut_core::grade::{
 };
 use vidcut_core::lru::{ByBytes, Lru};
 use vidcut_core::model::{
-    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MaskChannel, MergeEdges,
-    MergeOperator, NoiseColoring, PaintMode,
+    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, JoinStyle, MaskChannel,
+    MergeEdges, MergeOperator, NoiseColoring, PaintMode,
 };
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
@@ -422,6 +422,13 @@ fn shape_bytes(shape: &Shaping, figure: &Figure, joined: bool) -> Vec<u8> {
         flag(shape.solid),
         flag(winding),
         flag(joined),
+        JoinStyle::ALL
+            .iter()
+            .position(|j| *j == shape.join)
+            .unwrap_or_default() as f64,
+        0.0,
+        0.0,
+        0.0,
     ])
 }
 

@@ -6791,7 +6791,8 @@ pub struct NodeChange {
     /// the edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside_only: Option<bool>,
-    /// How the corners of the outline of the shading element are drawn.
+    /// How the corners of the outline of the shading element, or the sharp
+    /// corners of a rectangle mask whose edge moves out, are drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join_style: Option<JoinStyle>,
     /// What one border of the shading element goes around.

@@ -2810,6 +2810,8 @@ The shapes:
   - The ends: Flat, Rounded or Square. Usual: Rounded. Flat stops at the end point. Square goes on past it with a square end. Rounded ends in a half circle.
   - With Solid off, Position and Length show under Border Style. Usual: 0 and 1.
   - Length 0.5 with Position 0 draws the band from the middle of the left side, over the top, to the middle of the right side.
+  - vidcut: Border Style has the joins, as one switch of Bevel, Round and Miter. The joins act on the sharp corners. With Corner Radius above 0, the corners stay round.
+  - vidcut has no ends, Position and Length yet ([todo](todo/effects-page.md)).
 - Polygon (p. 2483): its points, from its center. X is a fraction of W. Y is a fraction of H, up.
   - Size: 1, from 0 to 1000000. The slider goes to 5. The points move out from the center by this.
   - Z Rotation, X Rotation and Y Rotation: 0. Measured: Z turns the shape counterclockwise in square pixels. Then X tilts it, and then Y.

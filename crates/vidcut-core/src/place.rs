@@ -4,10 +4,10 @@ use crate::model::{
     ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
     FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
-    GradientType, Mask, MaskChannel, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, PaintMode, Pattern, Picture, PivotType, ReferenceTime, Scaling, ShadingElement,
-    Sharpen, TextPlus, Tool, Tracker, TrackerMerge, TrackerOperation, VideoInfo, Vignette,
-    VignetteMode, VignetteShape,
+    GradientType, JoinStyle, Mask, MaskChannel, Media, Merge, MergeEdges, MergeOperator,
+    MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, Picture, PivotType, ReferenceTime,
+    Scaling, ShadingElement, Sharpen, TextPlus, Tool, Tracker, TrackerMerge, TrackerOperation,
+    VideoInfo, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -258,6 +258,7 @@ pub struct Shaping {
     pub soft: Option<Softening>,
     pub beyond: bool,
     pub paint: PaintMode,
+    pub join: JoinStyle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -371,6 +372,10 @@ impl Shaping {
             soft,
             beyond: m.clipping() == BlurClipping::None,
             paint: m.paint(),
+            join: match tool {
+                Tool::Rectangle(_) => m.join(),
+                _ => JoinStyle::Rounded,
+            },
         }
     }
 

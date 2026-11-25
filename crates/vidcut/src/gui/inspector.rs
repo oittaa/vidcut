@@ -19,7 +19,7 @@ use vidcut_core::model::{
     Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
-    JoinStyle, Keyframe, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
+    JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
     NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
     Retime, ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
     Tracker, TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape,
@@ -2345,6 +2345,9 @@ fn node_rows(
             }
             check(ui, (slot, "Invert", m.invert, false), "invert", acts);
             check(ui, (slot, "Solid", m.solid, true), "solid", acts);
+            if matches!(t, Tool::Rectangle(_)) {
+                join_row(ui, slot, m.join(), acts);
+            }
             center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::Width, "Width");
             value(ui, acts, V::Height, "Height");
@@ -2374,6 +2377,30 @@ fn node_rows(
     if pictured {
         picture_mask_rows(ui, slot, n, acts);
     }
+}
+
+fn mask_join_label(j: JoinStyle) -> &'static str {
+    match j {
+        JoinStyle::Beveled => "Bevel",
+        JoinStyle::Rounded => "Round",
+        JoinStyle::Sharp => "Miter",
+    }
+}
+
+fn join_row(ui: &mut egui::Ui, slot: usize, now: JoinStyle, acts: &mut Vec<Act>) {
+    let joins = [JoinStyle::Beveled, JoinStyle::Rounded, JoinStyle::Sharp];
+    label(ui, "Border Style", now != Mask::JOIN);
+    dialog::switch(ui, |ui| {
+        for j in joins {
+            if ui.selectable_label(j == now, mask_join_label(j)).clicked() && j != now {
+                acts.push(node_set(slot, "join_style", json!(j)));
+            }
+        }
+    });
+    if reset(ui, now != Mask::JOIN) {
+        acts.push(node_set(slot, "join_style", json!(Mask::JOIN)));
+    }
+    ui.end_row();
 }
 
 fn picture_mask_rows(ui: &mut egui::Ui, slot: usize, n: &Node, acts: &mut Vec<Act>) {

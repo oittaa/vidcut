@@ -1419,6 +1419,7 @@ struct Shape {
     middle: vec4<f32>,
     half: vec4<f32>,
     edge: vec4<f32>,
+    style: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> shaping: Shape;
@@ -1445,6 +1446,19 @@ fn ellipse_distance(q: vec2<f32>, axes: vec2<f32>) -> f32 {
 fn box_distance(q: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
     let e = abs(q) - half + r;
     return length(max(e, vec2<f32>(0.0))) + min(max(e.x, e.y), 0.0) - r;
+}
+
+fn joined_distance(q: vec2<f32>, half: vec2<f32>, r: f32, out: f32) -> f32 {
+    let join = i32(shaping.style.x + 0.5);
+    if r > 0.0 || join == 1 {
+        return box_distance(q, half, r) - out;
+    }
+    let e = abs(q) - half;
+    let square = max(e.x, e.y) - out;
+    if join == 2 {
+        return max(square, (e.x + e.y - out) * 0.70710678);
+    }
+    return square;
 }
 
 fn polygon_distance(q: vec2<f32>) -> f32 {
@@ -1480,9 +1494,15 @@ fn polygon_distance(q: vec2<f32>) -> f32 {
 fn fs_shape(in: Out) -> @location(0) vec4<f32> {
     let at = in.position.xy;
     let kind = shaping.middle.w;
+    let border = shaping.edge.x;
+    let band = abs(border);
     var d = 0.0;
+    var solid_out = 0.0;
+    var band_out = 0.0;
     if kind > 1.5 {
         d = polygon_distance(at);
+        solid_out = d - border;
+        band_out = d - band;
     } else {
         let l = vec2<f32>(at.x - shaping.middle.x, shaping.middle.y - at.y);
         let c = cos(shaping.middle.z);
@@ -1490,15 +1510,17 @@ fn fs_shape(in: Out) -> @location(0) vec4<f32> {
         let q = vec2<f32>(c * l.x + s * l.y, c * l.y - s * l.x);
         if kind > 0.5 {
             d = box_distance(q, shaping.half.xy, shaping.half.z);
+            solid_out = joined_distance(q, shaping.half.xy, shaping.half.z, border);
+            band_out = joined_distance(q, shaping.half.xy, shaping.half.z, band);
         } else {
             d = ellipse_distance(q, shaping.half.xy);
+            solid_out = d - border;
+            band_out = d - band;
         }
     }
-    let border = shaping.edge.x;
-    let band = abs(border);
-    var cover = clamp(min(d + 0.5, band) - max(d - 0.5, -band), 0.0, 1.0);
+    var cover = clamp(min(0.5 - band_out, 1.0) + min(d + band + 0.5, 1.0) - 1.0, 0.0, 1.0);
     if shaping.edge.y > 0.5 {
-        cover = clamp(0.5 - (d - border), 0.0, 1.0);
+        cover = clamp(0.5 - solid_out, 0.0, 1.0);
     }
     if shaping.edge.w > 0.5 {
         cover = max(cover, textureLoad(blur_source, vec2<i32>(at), 0).r);
