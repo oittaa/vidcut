@@ -658,8 +658,10 @@ Writing:
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
   - `position_keys` holds X, and `position_y` holds Y, one number for each keyframe. Zoom and the anchor point do the same.
   - A handle `value` moves X. Y keeps the handle `frames`, with a value offset of 0 (`value_paired`).
+  - The keyframes of a compound clip count the frames of the compound clip.
+  - An import at another rate moves the keyframes to the frames of the project (`at_project_rate`, `Picture::scale_times`), as it moves the volume keyframes.
 - `ops::picture` holds the edits:
-  - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
+  - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It checks each keyframe as it checks the plain value.
   - `ops::picture::has_picture` tells which clips take a picture: not sound or generators that do not draw.
   - `ops::picture::takes_effects` tells which of them take effects: not generators and not titles ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
@@ -870,6 +872,15 @@ The metadata:
 - Other editors read the `Resolve_OTIO` metadata.
 - An import extracts `ClipRetime` on non-block video clips (`picture::take_retime` into `ImportedClip`), and reads placed effects as `Picture` (`picture::take`) by the shape of the probed source.
   - This occurs when the clip has no `vidcut` picture, and the parameters and keys fit the model.
+  - A Resolve effect is an OTIO `Effect.1` with the `effect_name` `Resolve Effect`. Its `Resolve_OTIO` metadata holds `Effect Name`, `Name`, `Type`, `Enabled`, `Display Type` and `Parameters`.
+  - A parameter has `Parameter ID`, `Parameter Value`, `Default Parameter Value` and `Variant Type`. It can have `minValue`, `maxValue` and `Key Frames`.
+  - `Key Frames` maps each keyframe time, a frame count as a string, to its `Value` and `Variant Type`, and optional `InBez` and `OutBez`.
+  - `effects::read` keeps an effect that is on when a parameter or a keyframe is off its default (`in_use`). It keeps a Dynamic Zoom that is on.
+  - `picture::read_keys` reads the keys of one parameter. When the X and the Y of the zoom or of the position both have keys, the keys must be on the same frames (`merge`).
+  - `picture::read_point_keys` reads the anchor point, a `POINTF`. Keys with Bezier handles do not fit.
+  - The center and the scale of Dynamic Zoom need exactly two keys (`ends`). The earlier key is the start box.
+  - The export writes the keys of each keyed value in the `Key Frames` of its parameter, and the anchor point keys without handles.
+  - `Effects::written` moves the times of the kept effects by `Effects::from` less the first source frame of the written item.
 - The notes of an export name a clip that moved past the reach of these parameters (`otio::out_of_reach`).
 
 Import:

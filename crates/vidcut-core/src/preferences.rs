@@ -285,6 +285,10 @@ pub struct Scopes {
     pub vectorscope: bool,
     /// The scale at the left of the Waveform and the Parade.
     pub scale: ScopeScale,
+    /// Video Level Scopes: the Waveform and the Parade show black at code
+    /// 64 and white at code 940 of the 10-bit scale. Off: Data Level
+    /// Scopes, black at 0 and white at 1023. The picture does not change.
+    pub video_levels: bool,
 }
 
 /// The scale of the Waveform and the Parade. Each one spans the full range
@@ -365,6 +369,7 @@ impl Scopes {
             parade: patch.parade.unwrap_or(self.parade),
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
             scale: patch.scale.unwrap_or(self.scale),
+            video_levels: patch.video_levels.unwrap_or(self.video_levels),
         }
     }
 }
@@ -381,6 +386,8 @@ pub struct ScopesPatch {
     pub vectorscope: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<ScopeScale>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_levels: Option<bool>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
@@ -704,8 +711,9 @@ pub struct Player {
 #[serde(default, deny_unknown_fields)]
 pub struct Gpu {
     /// Use the GPU to decode, scale and encode: in the preview, exports and
-    /// proxies. Off, all of it runs on the CPU, even when an export names a
-    /// GPU encoder.
+    /// proxies. It also finds people and vehicles, measures the shake and
+    /// transcribes. Off, all of it runs on the CPU, even when an export
+    /// names a GPU encoder.
     pub acceleration: bool,
     /// While `acceleration` is on, decode H.264, HEVC, AV1 and VP9 on the
     /// GPU in the viewer, exports and proxies, and all but H.264 in the
