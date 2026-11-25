@@ -459,10 +459,12 @@ The bar and the Jobs button:
 **The Color page** (`Workspace::primaries_panel`).
 
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
-  - Primaries and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Input (`key_input`) and the Key Output (`key_output`) of the node.
+  - Primaries, Qualifier, Window and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Input (`key_input`), the Key Output (`key_output`) and the Qualifier row (`qualifier_key`) of the node.
+  - The Qualifier palette draws the HSL values of the node (`qualifier_body`).
   - The palette and the mode of the Primaries palette (`PrimariesView`) are in `EffectsPage`. A click sends `gui.page` with `palette` or `primaries`.
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
   - A Key Input change changes the `key_input` of the node in the same way. The sent `grade.set` has the `key_input_` fields.
+  - A qualifier change changes the `qualifier` of the node in the same way (`qualified`). The sent `grade.set` has the `qualifier_` fields.
   - A key mixer has its own palette (`Workspace::key_mixer_palette`). It shows each linked input (`key_mix_row`), then the output.
   - It sends one `grade.set` with `input` for each changed input, and one for the output, in one `apply` (`mixer_sets`).
   - Reset in a palette sends `grade.clear` with the `palette` of that palette.
@@ -501,7 +503,8 @@ The bar and the Jobs button:
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
   - In List View, the label is in the row, and Node Label edits it there. The graph and the list use one edit field (`label_field`).
   - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`). The Keyframes badge comes from `GradeNode::is_animated`. Each grade edit keeps that state in `animated` (`edited`).
-  - The Key badge comes from the Key Input and the Key Output of the node (`KeyInput::is_usual`, `KeyOutput::is_usual`).
+  - The Key badge comes from the Key Input, the Key Output and the Qualifier row of the node (`KeyInput::is_usual`, `KeyOutput::is_usual`, `Qualifier::row_usual`).
+  - The Qualifier badge comes from the HSL values of the node and of each keyframe (`Qualifier::hsl_usual`).
   - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
   - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
@@ -550,6 +553,7 @@ The bar and the Jobs button:
   - The dragged grade changes that keyframe and the other keyframe of its pair, as `grade.set` does (`GradeNode::change_at`).
   - The Key palette does the same with the Key Output (`GradeNode::key_output_changed_at`, `GradeNode::change_key_output_at`).
   - The Key palette does the same with the Key Input (`GradeNode::key_input_changed_at`, `GradeNode::change_key_input_at`).
+  - The Qualifier palette and the Qualifier row do the same with the qualifier (`GradeNode::qualifier_changed_at`, `GradeNode::change_qualifier_at`).
   - The Key Mixer palette does the same with the mix and the Key Output (`GradeNode::mix_changed_at`, `GradeNode::change_mix_at`).
   - The Window palette and the window overlay do the same with the windows (`GradeNode::windows_changed_at`, `GradeNode::change_window_at`).
   - The dragged grade (`Graded`) stays until the playhead comes to a frame that picks a different keyframe (`GradeNode::changed_key`).

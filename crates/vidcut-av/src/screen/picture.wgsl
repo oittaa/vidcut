@@ -2751,6 +2751,82 @@ fn fs_key_fold(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(v);
 }
 
+struct KeyQualifying {
+    hue: vec4<f32>,
+    sat: vec4<f32>,
+    lum: vec4<f32>,
+    parts: vec4<f32>,
+    luma: vec4<f32>,
+    chroma: vec4<f32>,
+    out: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> key_qualifying: KeyQualifying;
+
+fn qualify_fall(t: f32) -> f32 {
+    let s = clamp(t, 0.0, 1.0);
+    return 1.0 - s * s * (3.0 - 2.0 * s);
+}
+
+fn qualify_low(v: f32, a: f32, b: f32) -> f32 {
+    if v >= b {
+        return 1.0;
+    }
+    if v <= a {
+        return 0.0;
+    }
+    return qualify_fall((b - v) / (b - a));
+}
+
+fn qualify_high(v: f32, a: f32, b: f32) -> f32 {
+    if v <= a {
+        return 1.0;
+    }
+    if v >= b {
+        return 0.0;
+    }
+    return qualify_fall((v - a) / (b - a));
+}
+
+@fragment
+fn fs_key_qualify(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let c = effect_taken(textureLoad(blur_source, px, 0), 0.0).rgb;
+    let q = key_qualifying;
+    let w = q.luma.xyz;
+    let y = dot(c, w);
+    let cr = (w.y * (c.r - c.g) + w.z * (c.r - c.b)) / q.chroma.x;
+    let cb = (w.x * (c.b - c.r) + w.y * (c.b - c.g)) / q.chroma.y;
+    var key = 1.0;
+    if q.parts.x > 0.5 {
+        var angle = 0.0;
+        if cr != 0.0 || cb != 0.0 {
+            angle = degrees(atan2(cr, cb));
+        }
+        var d = angle - q.hue.x;
+        d = d - 360.0 * floor((d + 180.0) / 360.0);
+        let outer = select(q.hue.w, q.hue.z, d >= 0.0);
+        key *= qualify_high(abs(d), q.hue.y, outer);
+    }
+    if q.parts.y > 0.5 {
+        let s = q.chroma.z * length(vec2<f32>(cb, cr));
+        key *= qualify_low(s, q.sat.x, q.sat.y) * qualify_high(s, q.sat.z, q.sat.w);
+    }
+    if q.parts.z > 0.5 {
+        let l = q.chroma.w + y * q.luma.w;
+        key *= qualify_low(l, q.lum.x, q.lum.y) * qualify_high(l, q.lum.z, q.lum.w);
+    }
+    if q.parts.w > 0.5 {
+        key = 1.0 - key;
+    }
+    let o = q.out;
+    if o.x > 0.5 {
+        let v = o.y * clamp(key, 0.0, 1.0) + o.z;
+        key = clamp(select(v, 1.0 - v, o.w > 0.5), 0.0, 1.0);
+    }
+    return vec4<f32>(key);
+}
+
 @fragment
 fn fs_key_luma(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(grade_luma(vec2<i32>(in.position.xy)));
