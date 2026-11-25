@@ -964,6 +964,52 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
         .collect())
 }
 
+pub fn reverse(p: &mut Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<Value>> {
+    let whole = holder(p, id)?;
+    let times: Vec<i64> = picks
+        .iter()
+        .flat_map(|(param, frames)| {
+            let c = of_line(&whole, param.on_line().1);
+            frames
+                .iter()
+                .map(|f| c.key_time(*f).round() as i64)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let Some(at) = times.iter().copied().min() else {
+        return Err(Error::invalid(format!("{id} has no keyframes")));
+    };
+    let copied = copy(p, id, picks)?;
+    let ids = [id.to_string()];
+    for (param, frames) in picks {
+        let pick = Pick {
+            frames: Some(frames.clone()),
+            at: None,
+        };
+        on_line(p, &ids, *param, |p, param| remove(p, &ids, param, &pick))?;
+    }
+    let span = copied.iter().map(|k| k.offset).max().unwrap_or(0);
+    let flip = |h: Option<Handle>| {
+        h.map(|h| Handle {
+            frames: -h.frames,
+            ..h
+        })
+    };
+    let reversed: Vec<CopiedKey> = copied
+        .iter()
+        .map(|k| CopiedKey {
+            offset: span - k.offset,
+            ease: k.ease.map(Ease::backward),
+            in_handle: flip(k.out_handle),
+            out_handle: flip(k.in_handle),
+            in_point: k.out_point,
+            out_point: k.in_point,
+            ..*k
+        })
+        .collect();
+    paste(p, &ids, at, &reversed)
+}
+
 fn pastes_on_its_kind(c: &Clip, id: &str, k: &CopiedKey) -> Result<()> {
     let (KeyParam::Effect(q), Some(kind)) = (k.param.on_line().0, k.kind) else {
         return Ok(());

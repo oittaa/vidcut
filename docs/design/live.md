@@ -690,6 +690,8 @@ The bar and the Jobs button:
   - Why: a speed keyframe is a cut between two sections. Its frame and its value come from the sections.
 - A press in the tab or the tray gives them the keys. A press in another place takes the keys away (`Workspace::key_focus`, `Editor::focused`).
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
+- Reverse Keyframes sends `keyframes.reverse` with the selected keyframes. The selection moves to their new frames at once (`reverse_editor_keys`).
+  - `ops::keyframes::reverse` copies the keyframes, removes them and pastes them back in the opposite order, with each handle on the other side.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
 - Without the keys, Ctrl+V pastes no keyframes.
 - `clip.paste_attributes` without `from` and `copied` takes the first clip of the clipboard. The live core fills it in (`edit_at`).

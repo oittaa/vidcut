@@ -7709,6 +7709,14 @@ impl Ease {
         *self == Self::Linear
     }
 
+    pub fn backward(self) -> Self {
+        match self {
+            Self::EaseIn => Self::EaseOut,
+            Self::EaseOut => Self::EaseIn,
+            other => other,
+        }
+    }
+
     pub fn of(self, t: f64) -> f64 {
         let t = t.clamp(0.0, 1.0);
         match self {

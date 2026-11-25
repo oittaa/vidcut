@@ -2110,6 +2110,18 @@ pub enum Request {
         #[serde(default)]
         keys: Option<Vec<KeyPicks>>,
     },
+    /// Reverse Keyframes: run keyframes of `clip` backward over their span.
+    /// Each one goes as far from the last as it was from the first, with
+    /// its value. Its In and Out handles change places, and Ease In and
+    /// Ease Out too. It takes the place of a keyframe there. `keys` picks
+    /// as in `keyframes.copy`. Without `keys`, every keyframe of the clip.
+    /// Returns the `keyframes` with their clip, value and source frame.
+    #[serde(rename = "keyframes.reverse")]
+    KeyframesReverse {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
     /// Paste keyframes (Ctrl+V in the Keyframes tab or the keyframe tray)
     /// on each of `clips`: the first at `at` in the earliest of `clips`,
     /// each other one at its offset from it. Each clip takes the keyframes

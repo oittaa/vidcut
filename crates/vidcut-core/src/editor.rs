@@ -4498,6 +4498,11 @@ fn mutate(
             }
             json!({ "clip": id, "keyframes": copied })
         }
+        Request::KeyframesReverse { clip, keys } => {
+            let id = resolve_holder(p, clip, playhead)?;
+            let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
+            json!({ "clip": id, "keyframes": ops::keyframes::reverse(p, &id, &picks)? })
+        }
         Request::KeyframesPaste {
             clips,
             at,

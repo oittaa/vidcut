@@ -178,6 +178,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A pasted keyframe can be past the clip's ends (p. 1258).
       - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
+    - The ⋯ menu has Reverse Keyframes (pp. 1264, 1267). It runs the selected keyframes backward over their span.
+      - Each keyframe goes as far from the last as it was from the first. It keeps its value, and it stays selected.
+      - Its In and Out handles change places. Thus Ease In becomes Ease Out.
+      - The span is that of all the selected keyframes. Thus the timing between the values stays.
+      - A reversed keyframe takes the place of a keyframe on its new frame.
+      - Speed keyframes do not reverse. `keyframes.reverse` does this.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
       - A button is off when no selected keyframe takes its ease.

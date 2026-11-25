@@ -319,6 +319,7 @@ pub fn describe_at(
         "keyframes.move" => format!("Move {} of {} {}", d.keyframes(), d.clips("clips"), d.by()),
         "keyframes.remove" => format!("Remove {} of {}", d.keyframes(), d.clips("clips")),
         "keyframes.cut" => format!("Cut keyframes of {}", d.clips("clip")),
+        "keyframes.reverse" => format!("Reverse keyframes of {}", d.clips("clip")),
         "keyframes.paste" => format!(
             "Paste keyframes on {} at {}",
             d.clips("clips"),
