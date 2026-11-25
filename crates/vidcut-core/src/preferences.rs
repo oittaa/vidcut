@@ -332,12 +332,12 @@ impl Default for Scopes {
 #[serde(rename_all = "snake_case")]
 pub enum WaveformMode {
     /// Luma.
-    #[default]
     Y,
     /// The two color differences over one another. No color difference is
     /// at the middle of the scale.
     Cbcr,
     /// Red, green and blue over one another, each in its color.
+    #[default]
     Rgb,
 }
 
