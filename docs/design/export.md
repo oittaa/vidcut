@@ -1032,7 +1032,8 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
 - The `key_input_` fields of `grade.set` change the Key Input in the same way (`GradeNode::change_key_input_at`, `KeyInput::carried`).
 - The `qualifier_` fields change the qualifier in the same way (`GradeNode::change_qualifier_at`, `Qualifier::carried`).
-  - A Width or a Soft moves the other value by the measured rule (`Qualifier::with_hue_width`, `Qualifier::with_hue_soft`).
+  - A Width or a Soft alone moves the other value by the measured rule (`Qualifier::with_hue_width`, `Qualifier::with_hue_soft`).
+  - A request with both takes them as they are. Thus `ops::grade::checked` refuses a Soft above 2 times the Width.
 - The `mix_` fields change an input of a Key Mixer in the same way (`GradeNode::change_mix_at`, `KeyMix::carried`).
   - `grade.connect` and `grade.input.remove` change each mix list (`GradeNode::mix_lists_mut`).
 - All of these changes use one rule (`GradeNode::keyed_change`).

@@ -157,13 +157,29 @@ impl GradeNodeChange {
             mask: self.qualifier_mask.unwrap_or(q.mask),
             ..q
         };
-        if let Some(width) = self.qualifier_hue_width {
-            q = q.with_hue_width(width);
-        }
-        if let Some(soft) = self.qualifier_hue_soft {
-            q = q.with_hue_soft(soft);
+        match (self.qualifier_hue_width, self.qualifier_hue_soft) {
+            (Some(width), Some(soft)) => {
+                q.hue_width = width;
+                q.hue_soft = soft;
+            }
+            (Some(width), None) => q = q.with_hue_width(width),
+            (None, Some(soft)) => q = q.with_hue_soft(soft),
+            (None, None) => {}
         }
         q
+    }
+
+    fn qualifier_sent(&self) -> Result<()> {
+        let sent = [
+            (self.qualifier_hue_width, "qualifier_hue_width"),
+            (self.qualifier_hue_soft, "qualifier_hue_soft"),
+        ];
+        for (v, name) in sent {
+            if let Some(v) = v {
+                within(v, (0.0, 100.0), name)?;
+            }
+        }
+        Ok(())
     }
 
     fn changes_mix(&self) -> bool {
@@ -800,6 +816,7 @@ pub fn set(
                 key_input_changed(g, n, frame, |i| node_change.key_input_changed(i))?;
             }
             if node_change.changes_qualifier() {
+                node_change.qualifier_sent()?;
                 qualifier_changed(g, n, frame, |q| node_change.qualifier_changed(q))?;
             }
             match (node_change.changes_mix(), node_change.input) {
