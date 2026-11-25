@@ -16,6 +16,7 @@ use crate::live::PlayerId;
 pub(super) const CLIPS_HEIGHT: f32 = 118.0;
 const PICTURE: egui::Vec2 = vec2(96.0, 54.0);
 const CELL_GAP: f32 = 8.0;
+const COMPOUND: &str = "Compound Clip";
 
 pub(super) struct Strip {
     project: Arc<Project>,
@@ -50,21 +51,29 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
     let mut clips: Vec<_> = (p.tracks.iter())
         .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
         .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
+        .filter(|(_, c)| !c.is_generator())
         .collect();
-    clips.sort_by_key(|(t, c)| (c.start, t.number()));
+    clips.sort_by_key(|(t, c)| (c.start, c.end(), t.number()));
     let source_rate = p.settings.fps;
     let settings = serde_json::to_vec(&p.settings).unwrap_or_default();
     (clips.into_iter().enumerate())
         .map(|(i, (t, c))| {
             let media = p.media(&c.media);
-            let timecode = media.map_or_else(String::new, |m| {
-                let rate = m.rate(source_rate);
-                let per = vidcut_core::render::per_frame(m, source_rate, p.fps());
-                let start = m.timecode_at(rate).round() as i64;
-                let first = vidcut_core::render::shown_frame(per, c.source_in as f64 + c.phase);
-                let drop = m.info.timecode.as_ref().is_some_and(|tc| tc.drop_frame);
-                format_timecode(first, rate, start, drop)
-            });
+            let timecode = media.map_or_else(
+                || format_timecode(c.source_in, p.fps(), 0, false),
+                |m| {
+                    let rate = m.rate(source_rate);
+                    let per = vidcut_core::render::per_frame(m, source_rate, p.fps());
+                    let start = m.timecode_at(rate).round() as i64;
+                    let first = vidcut_core::render::shown_frame(per, c.source_in as f64 + c.phase);
+                    let drop = m.info.timecode.as_ref().is_some_and(|tc| tc.drop_frame);
+                    format_timecode(first, rate, start, drop)
+                },
+            );
+            let codec = match &c.compound {
+                Some(_) => Some(COMPOUND.to_string()),
+                None => (media.and_then(|m| m.info.video.as_ref())).map(|v| v.codec.clone()),
+            };
             Thumb {
                 number: i + 1,
                 track: t.id.clone(),
@@ -76,9 +85,7 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
                 piece: OnceCell::new(),
                 timecode,
                 name: p.clip_name(c).unwrap_or_default(),
-                codec: media
-                    .and_then(|m| m.info.video.as_ref())
-                    .map(|v| v.codec.clone()),
+                codec,
             }
         })
         .collect()
@@ -144,8 +151,12 @@ impl Workspace {
                                 (ClipLabel::Codec, Some(codec)) => codec.as_str(),
                                 _ => t.name.as_str(),
                             };
+                            let shade = match current == Some(t.number) {
+                                true => colors.text,
+                                false => colors.text_dim,
+                            };
                             let under = ui.add(
-                                egui::Label::new(RichText::new(text).small())
+                                egui::Label::new(RichText::new(text).small().color(shade))
                                     .truncate()
                                     .sense(Sense::click()),
                             );
