@@ -4060,7 +4060,7 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
             {
                 audio.push(lane);
                 lanes.push(LaneTrack {
-                    track: track.id.clone(),
+                    track: root.id.clone(),
                     volume_db: root.volume_db,
                 });
             }

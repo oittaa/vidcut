@@ -156,6 +156,8 @@ pub fn over_db(above: f64, knee: f64) -> f64 {
     let top = KNEE_TOP * knee;
     if above >= top {
         above
+    } else if above <= -KNEE_REACH * knee {
+        0.0
     } else {
         (above + KNEE_BEND * (top - above).powf(KNEE_POWER)).max(0.0)
     }

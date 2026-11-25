@@ -437,7 +437,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 ## Sound
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
-- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
+- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` is 0.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
@@ -473,7 +473,8 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - A seek clears the Dynamics and the filters. A new plan at the same sample keeps the state of a bus that did not change.
 - `Curve` gives the biquad stages of a clip equalizer and of a track equalizer (`equalizer::track`). `Filter` and `response_db` take either.
 - A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
-  - A lane of a bus gets the fader preview of its track after the Dynamics and the equalizer of the bus (`Mixed::process`).
+  - Each lane names the timeline track at the top of its chain of hosts (`LaneTrack`). A fader preview of that track goes to all its lanes.
+  - `AudioMix` applies the preview one time, at the top bus, after the Dynamics and the equalizer of that bus (`Mixed::process`).
   - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).

@@ -1277,16 +1277,17 @@ impl AudioMix {
                 }
             }
         }
+        let mut trims = vec![1.0f32; self.buses.len()];
+        for (lane, bus) in self.lanes.iter().zip(&self.bus_of) {
+            if let Some(b) = *bus {
+                trims[self.buses[b].top] = lane.trim;
+            }
+        }
         let mut tops = vec![0.0f32; self.buses.len() * ch];
         for b in (0..self.buses.len()).rev() {
             let (before, rest) = self.buses.split_at_mut(b);
             let bus = &mut rest[0];
-            let trim = bus
-                .lanes
-                .first()
-                .and_then(|&l| self.lanes.get(l))
-                .map_or(1.0, |l| l.trim);
-            bus.process(trim);
+            bus.process(if bus.top == b { trims[b] } else { 1.0 });
             match bus.into.and_then(|up| before.get_mut(up)) {
                 Some(up) => {
                     for (o, s) in up.sum.iter_mut().zip(&bus.sum) {
