@@ -39,7 +39,8 @@ fn models_check(id: &str, download: bool) -> Result<Value> {
         )));
     }
     let dir = crate::paths::models_dir();
-    let inspected = vidcut_av::models::inspect(model, &dir, download)
+    let gpu = crate::preferences::gpu_acceleration();
+    let inspected = vidcut_av::models::inspect(model, &dir, download, gpu)
         .map_err(|e| export::av_error(&e, ErrorCode::Media, String::new()))?;
     let found = &inspected.found;
     let differences = catalog::differences(model, found);
@@ -329,12 +330,14 @@ pub fn run_with(
             parade,
             vectorscope,
             scale,
+            video_levels,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
                 parade: *parade,
                 vectorscope: *vectorscope,
                 scale: *scale,
+                video_levels: *video_levels,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }

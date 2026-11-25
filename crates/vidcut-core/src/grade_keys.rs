@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::model::{
-    Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
-    KeyOutput, WindowShape,
+    Corrector, DynamicsProfile, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow,
+    KeyInput, KeyMix, KeyOutput, WindowShape,
 };
 use crate::window_key::{circle_scale, circle_size, linear_scale, linear_size};
 
@@ -791,6 +791,32 @@ impl GradeNode {
         }
     }
 
+    pub fn key_here(&self, frame: i64, kind: GradeKeyKind, profile: DynamicsProfile) -> GradeKey {
+        let at = frame as f64;
+        GradeKey {
+            frame,
+            kind,
+            start: profile.start,
+            end: profile.end,
+            values: self
+                .corrector_at(at)
+                .map(Cow::into_owned)
+                .unwrap_or_default(),
+            key: self.key_output_at(at),
+            key_input: self.key_input_at(at),
+            mix: self.mix_at(at).map_or_else(Vec::new, Cow::into_owned),
+            windows: self.windows_at(at).into_owned(),
+            edl: false,
+        }
+    }
+
+    pub fn auto_keyed(&mut self, frame: i64, profile: DynamicsProfile) {
+        if self.auto_key && self.takes_keyframes() && self.key_on(frame).is_none() {
+            let key = self.key_here(frame, GradeKeyKind::Dynamic, profile);
+            self.put_key(key);
+        }
+    }
+
     pub fn key_on(&self, frame: i64) -> Option<&GradeKey> {
         self.keys.iter().find(|k| k.frame == frame)
     }
@@ -805,7 +831,7 @@ impl GradeNode {
 
 impl Grade {
     pub fn is_keyed(&self) -> bool {
-        self.nodes.iter().any(|d| !d.keys.is_empty())
+        self.nodes.iter().any(|d| !d.keys.is_empty()) || self.layers.iter().any(Grade::is_keyed)
     }
 
     pub fn at(&self, frame: f64) -> Cow<'_, Grade> {
@@ -826,6 +852,9 @@ impl Grade {
             d.keys.clear();
             d.animated = false;
         }
+        for (layer, from) in g.layers.iter_mut().zip(&self.layers) {
+            *layer = from.at(frame).into_owned();
+        }
         Cow::Owned(g)
     }
 
@@ -833,6 +862,9 @@ impl Grade {
         for d in &mut self.nodes {
             d.keys.clear();
             d.animated = false;
+        }
+        for layer in self.layers.iter_mut().chain(&mut self.kept_layers) {
+            layer.clear_keys();
         }
     }
 
@@ -848,12 +880,19 @@ impl Grade {
     }
 
     pub fn map_key_frames(&mut self, map: impl Fn(i64) -> i64) {
+        self.map_frames(&map);
+    }
+
+    fn map_frames(&mut self, map: &dyn Fn(i64) -> i64) {
         for d in &mut self.nodes {
             for k in &mut d.keys {
                 k.frame = map(k.frame);
             }
             d.keys.sort_by_key(|k| k.frame);
             d.keys.dedup_by_key(|k| k.frame);
+        }
+        for layer in self.layers.iter_mut().chain(&mut self.kept_layers) {
+            layer.map_frames(map);
         }
     }
 }

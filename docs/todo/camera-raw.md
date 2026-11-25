@@ -27,7 +27,10 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 
 - vidcut decodes with the FFmpeg libraries, and OpenEXR with the `exr` crate ([gpu](../design/gpu.md#the-gpu-and-the-decoder)).
 - The design lists Camera Raw among the stages vidcut does not have ([picture order](../design/README.md#picture-order)).
-- No code of vidcut names a RAW format. `tests/media-manifest.toml` has no RAW clip.
+- No code of vidcut names a RAW format.
+- `tests/media-manifest.toml` has one RAW clip of each of these formats:
+  - Blackmagic RAW, ARRIRAW, Apple ProRes RAW and CinemaDNG;
+  - Canon Cinema RAW Light, Phantom Cine and Magic Lantern Video.
 - FFmpeg 9.0.2 has decoders for Apple ProRes RAW and Cintel RAW.
 - FFmpeg 9.0.2 has demuxers for REDCODE R3D, Magic Lantern Video and Phantom Cine.
 - FFmpeg 9.0.2 has no decoder for Blackmagic RAW or ARRIRAW.
@@ -36,7 +39,9 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 **To do:**
 
 - Measure the lines of the manual above in Resolve. The manual and the application can differ.
-- Add a RAW clip of each format that FFmpeg reads to `tests/media-manifest.toml`.
+- Add a REDCODE R3D, a Sony X-OCN and a Nikon N-RAW clip to `tests/media-manifest.toml`.
+  - RED gives its samples only after a sign-in.
+  - Sony and Nikon give their samples only after a form with an email address.
 - Check CinemaDNG. FFmpeg has a TIFF decoder. Whether it reads the pictures of a CinemaDNG folder is not checked.
 - Check what vidcut does with each clip now: the probe, the picture, its colors and its proxy.
 - Measure what an OpenTimelineIO file keeps of the Camera Raw settings.

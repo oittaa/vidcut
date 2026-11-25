@@ -463,6 +463,9 @@ pub fn describe_at(
         "grade.clear" if d.flag("auto_color") => {
             format!("Reset the Auto Color of {}", d.clips("clips"))
         }
+        "grade.clear" if d.flag("all_layers") => {
+            format!("Reset all node stack layers of {}", d.clips("clips"))
+        }
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
@@ -485,6 +488,8 @@ pub fn describe_at(
         | "grade.window.paste" => format!(
             "{} {}",
             match method {
+                "grade.keys.add" if d.flag("edl") => "Add EDL marks to",
+                "grade.keys.remove" if d.flag("edl") => "Remove the EDL marks of",
                 "grade.add" => "Add a node to",
                 "grade.remove" => "Remove a node from",
                 "grade.input.remove" => "Remove a mixer input from",
@@ -682,7 +687,10 @@ pub fn describe_at(
         "gui.show" => format!("Show {}", d.text("panel")),
         "gui.close" => format!("Close {}", d.text("panel")),
         "gui.page" => format!("Show the {} page", d.text("page")),
-        "gui.nodes" => format!("Select nodes {}", d.list("nodes").join(", ")),
+        "gui.nodes" => match d.list("nodes") {
+            n if n.is_empty() => "Select no nodes".into(),
+            n => format!("Select nodes {}", n.join(", ")),
+        },
         "gui.viewers" => format!("Viewers: {}", compact(params)),
         "gui.page_time" => format!("Effects page playhead: {}", compact(params)),
         "gui.target" => format!("Target track {}", d.text("track")),

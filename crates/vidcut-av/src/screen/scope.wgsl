@@ -4,6 +4,7 @@ struct Params {
     luma: vec4<f32>,
     chroma: vec4<f32>,
     range: vec4<f32>,
+    levels: vec4<f32>,
     rows: array<vec4<f32>, 3>,
     hues: array<vec4<f32>, 3>,
     how: vec4<u32>,
@@ -15,6 +16,12 @@ struct Params {
 @group(0) @binding(3) var<storage, read> counted: array<u32>;
 
 const GRID: vec3<f32> = vec3<f32>(0.3, 0.3, 0.3);
+
+const DASH: u32 = 4u;
+
+fn shown(v: f32) -> f32 {
+    return params.levels.x + params.levels.y * v;
+}
 
 fn row(v: f32) -> u32 {
     let up = (v - params.range.x) / params.range.y;
@@ -40,7 +47,7 @@ fn waveform(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let x = id.x * params.size.x / params.canvas.x;
-    add(x, row(dot(color_at(id), params.luma.xyz)));
+    add(x, row(shown(dot(color_at(id), params.luma.xyz))));
 }
 
 @compute @workgroup_size(16, 16)
@@ -51,9 +58,9 @@ fn parade(@builtin(global_invocation_id) id: vec3<u32>) {
     let part = params.size.x / 3u;
     let x = id.x * part / params.canvas.x;
     let c = color_at(id);
-    add(x, row(c.r));
-    add(x + part, row(c.g));
-    add(x + 2u * part, row(c.b));
+    add(x, row(shown(c.r)));
+    add(x + part, row(shown(c.g)));
+    add(x + 2u * part, row(shown(c.b)));
 }
 
 @compute @workgroup_size(16, 16)
@@ -94,10 +101,10 @@ fn evened(x: u32, across: u32) -> f32 {
     return f32(params.canvas.x) / f32(across) / max(f32(after - first), 1.0);
 }
 
-fn ruled(y: f32) -> bool {
+fn ruled(p: vec2<f32>) -> bool {
     for (var i = 0u; i < params.how.y; i++) {
-        if y == params.rows[i / 4u][i % 4u] {
-            return true;
+        if p.y == params.rows[i / 4u][i % 4u] {
+            return i < params.how.z || (u32(p.x) / DASH) % 2u == 0u;
         }
     }
     return false;
@@ -160,6 +167,6 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
             tint = vec3<f32>(0.0);
         }
     }
-    let grid = select(vec3<f32>(0.0), GRID, edge || ruled(p.y));
+    let grid = select(vec3<f32>(0.0), GRID, edge || ruled(p));
     return vec4<f32>(max(grid, tint * level(hit(x, y) * even)), 1.0);
 }

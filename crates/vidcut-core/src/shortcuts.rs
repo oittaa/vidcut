@@ -200,6 +200,7 @@ actions! {
     AddLayerNode "add_layer_node",
     AppendNode "append_node",
     AddOutsideNode "add_outside_node",
+    AddSplitterCombiner "add_splitter_combiner",
     AddCircleNode "add_circle_node",
     AddLinearNode "add_linear_node",
     AddPolygonNode "add_polygon_node",
@@ -252,6 +253,7 @@ impl Action {
             | Action::AddLayerNode
             | Action::AppendNode
             | Action::AddOutsideNode
+            | Action::AddSplitterCombiner
             | Action::AddCircleNode
             | Action::AddLinearNode
             | Action::AddPolygonNode
@@ -1359,7 +1361,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Select all",
         Some(
             "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
-             shows.",
+             shows. After a click in the Keyframes tab or the keyframe tray, all its \
+             keyframes.",
         ),
     ),
     own(
@@ -1681,6 +1684,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     own(
         Color,
+        Action::AddSplitterCombiner,
+        &["Alt+Y"],
+        "Add a splitter and a combiner",
+        Some("After the current node: a corrector for each channel, joined again."),
+    ),
+    own(
+        Color,
         Action::AddCircleNode,
         &["Alt+C"],
         "Add a serial node with a circle window",
@@ -1719,7 +1729,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Action::DeleteNode,
         &["Shift+Backspace", "Delete"],
         "Delete the selected nodes",
-        Some("The nodes after them get lower numbers. The last corrector becomes current."),
+        Some(
+            "The nodes after them get lower numbers. The last corrector becomes current. With selected points of a curve window, it deletes those points.",
+        ),
     ),
     own(
         Color,
