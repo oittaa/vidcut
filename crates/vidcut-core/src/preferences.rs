@@ -283,6 +283,8 @@ pub struct Scopes {
     pub parade: bool,
     /// The hue and the saturation of the picture: Cb across, Cr up.
     pub vectorscope: bool,
+    /// How many pixels have each value, one band for each channel.
+    pub histogram: bool,
     /// The scale at the left of the Waveform and the Parade.
     pub scale: ScopeScale,
     /// Video Level Scopes: the Waveform and the Parade show black at code
@@ -301,6 +303,8 @@ pub struct Scopes {
     pub parade_mode: ParadeMode,
     /// The Vectorscope shows a line at the skin tone angle.
     pub skin_tone: bool,
+    /// The bands of the Histogram.
+    pub histogram_mode: HistogramMode,
 }
 
 impl Default for Scopes {
@@ -309,6 +313,7 @@ impl Default for Scopes {
             waveform: false,
             parade: false,
             vectorscope: false,
+            histogram: false,
             scale: ScopeScale::default(),
             video_levels: false,
             waveform_mode: WaveformMode::default(),
@@ -317,6 +322,7 @@ impl Default for Scopes {
             waveform_blue: true,
             parade_mode: ParadeMode::default(),
             skin_tone: false,
+            histogram_mode: HistogramMode::default(),
         }
     }
 }
@@ -343,6 +349,28 @@ impl WaveformMode {
             Self::Y => "Y",
             Self::Cbcr => "CbCr",
             Self::Rgb => "RGB",
+        }
+    }
+}
+
+/// The bands of the Histogram, from top to bottom.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistogramMode {
+    /// Red, green and blue.
+    #[default]
+    Rgb,
+    /// Luma, red, green and blue.
+    Yrgb,
+}
+
+impl HistogramMode {
+    pub const ALL: [Self; 2] = [Self::Rgb, Self::Yrgb];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rgb => "RGB",
+            Self::Yrgb => "YRGB",
         }
     }
 }
@@ -418,16 +446,23 @@ pub enum Scope {
     Waveform,
     Parade,
     Vectorscope,
+    Histogram,
 }
 
 impl Scope {
-    pub const ALL: [Self; 3] = [Self::Waveform, Self::Parade, Self::Vectorscope];
+    pub const ALL: [Self; 4] = [
+        Self::Waveform,
+        Self::Parade,
+        Self::Vectorscope,
+        Self::Histogram,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Waveform => "Waveform",
             Self::Parade => "Parade",
             Self::Vectorscope => "Vectorscope",
+            Self::Histogram => "Histogram",
         }
     }
 }
@@ -438,6 +473,7 @@ impl Scopes {
             Scope::Waveform => self.waveform,
             Scope::Parade => self.parade,
             Scope::Vectorscope => self.vectorscope,
+            Scope::Histogram => self.histogram,
         }
     }
 
@@ -450,6 +486,7 @@ impl Scopes {
             waveform: patch.waveform.unwrap_or(self.waveform),
             parade: patch.parade.unwrap_or(self.parade),
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
+            histogram: patch.histogram.unwrap_or(self.histogram),
             scale: patch.scale.unwrap_or(self.scale),
             video_levels: patch.video_levels.unwrap_or(self.video_levels),
             waveform_mode: patch.waveform_mode.unwrap_or(self.waveform_mode),
@@ -458,6 +495,7 @@ impl Scopes {
             waveform_blue: patch.waveform_blue.unwrap_or(self.waveform_blue),
             parade_mode: patch.parade_mode.unwrap_or(self.parade_mode),
             skin_tone: patch.skin_tone.unwrap_or(self.skin_tone),
+            histogram_mode: patch.histogram_mode.unwrap_or(self.histogram_mode),
         }
     }
 }
@@ -488,6 +526,10 @@ pub struct ScopesPatch {
     pub parade_mode: Option<ParadeMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skin_tone: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub histogram: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub histogram_mode: Option<HistogramMode>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
