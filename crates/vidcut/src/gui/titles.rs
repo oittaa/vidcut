@@ -549,6 +549,32 @@ impl Workspace {
         }
     }
 
+    pub(super) fn commit_title_form(&mut self) {
+        let Some(mut d) = self.timeline.title_dialog.take() else {
+            return;
+        };
+        let stored = self
+            .project()
+            .and_then(|p| p.clip(&d.clip))
+            .and_then(|c| Some(sampled_at(c, c.title.as_ref()?, d.at)));
+        if d.dirty
+            && let Some(s) = stored
+            && let Ok(t) = title_of(&d, &s)
+        {
+            let sends = commands(&d, changes(&d.clip, &t, &s, d.at));
+            d.fade = None;
+            if sends.is_empty() {
+                d.loaded = false;
+            } else {
+                self.send_title(sends);
+                self.title_landing(&d.clip, &t);
+            }
+            d.dirty = false;
+            d.error.clear();
+        }
+        self.timeline.title_dialog = Some(d);
+    }
+
     fn send_title(&mut self, mut commands: Vec<Value>) {
         if let [one] = &mut commands[..] {
             let method = one["method"].as_str().unwrap_or_default().to_string();
