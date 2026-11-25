@@ -1599,7 +1599,6 @@ impl Workspace {
         self.history_keys(ctx);
         self.sync_numbers(ctx);
         self.multi_numbers(ctx);
-        self.pool_keys(ctx);
         self.color_keys(ctx);
         let input = ctx.input(|i| i.clone());
         let fired = Fired::of(&bindings, &input);
@@ -1837,11 +1836,13 @@ impl Workspace {
             self.open_cue(&cue);
         }
         let lift = fired.pressed(Action::Lift);
-        if (fired.pressed(Action::Delete) || lift)
-            && !self.delete_editor_keys()
-            && !self.delete_keys()
-        {
-            self.delete_key(lift);
+        if fired.pressed(Action::Delete) || lift {
+            if self.pool_takes_keys() {
+                let selected = self.snap.selection.media.clone();
+                self.removing = (!selected.is_empty()).then_some(selected);
+            } else if !self.delete_editor_keys() && !self.delete_keys() {
+                self.delete_key(lift);
+            }
         }
         if self.effects_page.page != Page::Export {
             self.undo_keys(&fired);
@@ -1907,7 +1908,16 @@ impl Workspace {
             true => (false, false),
             false => (all, nothing),
         };
-        if all || nothing {
+        if (all || nothing) && self.pool_takes_keys() {
+            let media: Vec<String> = match self.project() {
+                Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)
+                    .iter()
+                    .map(|m| m.id.clone())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            self.send("selection.set", json!({ "media": media }));
+        } else if all || nothing {
             let (clips, cues): (Vec<String>, Vec<String>) = match self.project() {
                 Some(p) if all => (
                     p.tracks
