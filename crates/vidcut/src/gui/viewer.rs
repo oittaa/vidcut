@@ -479,6 +479,9 @@ impl Workspace {
         if mode == ViewerMode::Timeline {
             self.sync_subtitles();
         }
+        if area_resp.secondary_clicked() {
+            self.timeline.picture_grab.path_menu = None;
+        }
         if mode == ViewerMode::Timeline
             && offline.is_none()
             && played.is_some()
@@ -508,6 +511,9 @@ impl Workspace {
             );
         }
         area_resp.context_menu(|ui| {
+            if self.path_menu(ui) {
+                return;
+            }
             let mut shown = self.snap.stats;
             if ui.checkbox(&mut shown, "Stats for Nerds").clicked() {
                 self.send("player.stats", json!({ "show": shown }));

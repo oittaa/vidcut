@@ -63,7 +63,6 @@ pub fn update(p: &mut Project, job: &str, export: ExportParams) -> Result<()> {
     let j = &mut p.queue[i];
     j.timeline = timeline;
     j.export = export;
-    j.status = None;
     Ok(())
 }
 

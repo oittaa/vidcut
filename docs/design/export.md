@@ -809,14 +809,21 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
   - Each input holds a link (`GradeLink`): the number of a node and the output that the link leaves, RGB or key. The number 0 is the picture that comes in.
   - A link also holds the order in which it was made (`made`). Two links are the same when they leave the same output, whatever their order.
+  - A link from a splitter also holds which of its three RGB outputs it leaves (`GradeLink::output`).
   - `Grade::output` is the link that goes out.
   - Why: a key output can go to an RGB input, and an RGB output to a key input. The place of a link gives only the kind of its input.
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a key from a node with no key output, and a picture from a key mixer (`gives`).
   - It also refuses a corrector without one input and a mixer without an input.
+  - It also refuses a splitter without one input, a combiner without three inputs and a link from a splitter into a key input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
   - After `grade.add` and `grade.connect`, `stamped` gives each new link the next `made` number. After `grade.add`, `walked` numbers the nodes again, in the order of a walk from the source.
   - Why: the node numbers then follow the measured rule of the spec (§8.21).
+- A clip grade holds node stack layer 1 in its own nodes and the layers after it in `Grade::layers`. Each layer is a `Grade` of its own.
+  - `ops::grade::stored` gives one layer (`Grade::layer`), and `store` puts it back (`Grade::with_layer`). Thus each request changes one layer and numbers its nodes from 1.
+  - `with_layer` removes the usual layers at the end. Thus a clip with one changed layer stores no empty layers after it.
+  - A lower `node_stack_layers` count moves the layers above it to `Grade::kept_layers`, in each clip of the project (`ops::grade::count_layers`, `Grade::counted`). A higher count moves them back.
+  - `ops::grade::clear_layers` resets each layer for `grade.clear` with `all_layers` (`Grade::reset_layers`). It keeps `kept_layers`.
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
@@ -829,6 +836,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
+  - First `Grade::stacked` joins the node stack layers into one tree. Each layer gets the numbers after the layers under it.
+  - A link from the picture that comes into a layer becomes the `output` link of the layer under it. Thus a layer takes the result of the one before it.
+  - Why: the passes, the thumbnails and the render cache then need no case for layers.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
   - It works when something goes out, each input of a corrector has a link, and each node goes somewhere.
   - It also needs a link on each Parallel Mixer and Layer Mixer. A Key Mixer with no link gives a key of 1. A node that gives only its key goes somewhere.
@@ -862,6 +872,12 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - The same walk adds the reads of a picture that a luma key or a second texture (`Uses::twice`) needs. Each node then has all its readers before the walk comes to it.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
+  - A splitter has a picture slot for each output (`split_slots`). Output 0 has slot v. Output j has slot v plus j + 1 times the slot count.
+    - Thus the plan has `SLOTS` picture slots for each node: the picture, the key as a picture, green and blue.
+    - A `Spread` pass gives one channel of the input in R, G and B, for each output that a node reads. An output that no node reads costs no pass.
+    - `grade::passed` gives each output its own path. Thus the base of two outputs of one splitter is the input of the splitter.
+  - A combiner takes the texture of its first input that has a link. A `Take` pass then puts the channel of each other linked input into it.
+    - A `Clear` pass sets the channel of an input with no link to 0.
   - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
@@ -891,7 +907,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
   - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
 - `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `KEY_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
-- `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
+- `fs_grade_mix` makes a `Parallel`, a `Layer`, a `Spread`, a `Take` or a `Clear` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
@@ -1001,7 +1017,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
-  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile` (`GradeNode::key_here`).
+  - `ops::grade_keys::add_marks` puts a Static keyframe with `edl` on each edit of the video tracks (`edl_frames`). `ops::grade_keys::remove_marks` removes only those.
+  - With `GradeNode::auto_key` on, a change first adds a Dynamic keyframe on its frame (`GradeNode::auto_keyed`). `grade.set`, `grade.printer`, `grade.clear`, `grade.auto_color` and the window changes call it (`ops::grade::auto_keyed`).
 - `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
   - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
@@ -1146,14 +1164,18 @@ The masks:
   - `polygon_distance` takes the nearest side, and the winding number for the inside.
   - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
   - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
+  - `joined_distance` gives the outer edge of a rectangle by its Border Style. Miter takes the larger distance across and down, thus the corners stay square.
+  - Bevel also cuts each corner of the outer edge at 45 degrees. Round, each Corner Radius above 0 and an edge that does not move out take `box_distance`.
+  - The inner edge of the band always takes `box_distance`. Why: a join changes only the corners that the edge moves out from.
 - The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
   - Clipping Mode None also makes the mask beyond the picture. `blur::mask_pads` adds pixels at each side that the soft edge reaches from the shape.
   - The reach is the sum of the taps of the passes (`blur::soft_reach`). The added pixels are in two textures of `Worked`. `fs_mask_join` reads them at their offset.
   - Why: the replicate border then acts only beyond the reach, where no tap of a pixel of the picture goes.
   - The added pixels stop at the largest texture of the device. Beyond them, the replicate border acts.
   - A shape that is not in the reach of an edge adds no pixels. Clipping Mode Frame adds none.
-- `fs_mask_join` joins the mask to the masks before it by the Merge paint mode: n + i × (1 − c).
+- `fs_mask_join` joins the mask to the masks before it by its Paint Mode, with the forms of `PaintMode`. Merge is n + i × (1 − c).
   - c is the shape after Invert, and n is c × Level. i is the masks before it.
+  - The first mask has no masks before it. `blur::mask_made` gives it Copy, so it is its own shape n.
 - `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.
 
 The boxes:

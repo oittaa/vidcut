@@ -2,7 +2,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2
 use eframe::emath::GuiRounding;
 use serde_json::json;
 use vidcut_av::screen::scope::marks;
-use vidcut_core::preferences::{Scope, ScopeScale};
+use vidcut_core::preferences::{ParadeMode, Scope, ScopeScale, WaveformMode};
 
 use super::theme;
 use super::workspace::Workspace;
@@ -57,11 +57,49 @@ impl Workspace {
                 self.send("viewer.scopes", json!({ field(scope): on }));
             }
         }
+        ui.separator();
+        ui.menu_button("Waveform Options", |ui| {
+            let now = self.snap.scopes.waveform_mode;
+            for mode in WaveformMode::ALL {
+                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
+                    self.send("viewer.scopes", json!({ "waveform_mode": mode }));
+                }
+            }
+            ui.separator();
+            let s = self.snap.scopes;
+            ui.add_enabled_ui(now == WaveformMode::Rgb, |ui| {
+                for (name, key, on) in [
+                    ("R", "waveform_red", s.waveform_red),
+                    ("G", "waveform_green", s.waveform_green),
+                    ("B", "waveform_blue", s.waveform_blue),
+                ] {
+                    let mut on = on;
+                    if ui.checkbox(&mut on, name).clicked() {
+                        self.send("viewer.scopes", json!({ key: on }));
+                    }
+                }
+            });
+        });
+        ui.menu_button("Parade Options", |ui| {
+            let now = self.snap.scopes.parade_mode;
+            for mode in ParadeMode::ALL {
+                if ui.radio(now == mode, mode.name()).clicked() && now != mode {
+                    self.send("viewer.scopes", json!({ "parade_mode": mode }));
+                }
+            }
+        });
         ui.menu_button("Waveform Scale Style", |ui| {
             let now = self.snap.scopes.scale;
             for scale in ScopeScale::ALL {
                 if ui.radio(now == scale, scale.name()).clicked() && now != scale {
                     self.send("viewer.scopes", json!({ "scale": scale }));
+                }
+            }
+            ui.separator();
+            let video = self.snap.scopes.video_levels;
+            for (on, name) in [(true, "Video Level Scopes"), (false, "Data Level Scopes")] {
+                if ui.radio(video == on, name).clicked() && video != on {
+                    self.send("viewer.scopes", json!({ "video_levels": on }));
                 }
             }
         });
@@ -99,7 +137,7 @@ impl Workspace {
         let colors = self.scope_pictures.colors;
         let dim = theme::colors().text_dim;
         let font = FontId::proportional(MARK_FONT);
-        let scale = self.snap.scopes.scale;
+        let prefs = self.snap.scopes;
         for &(scope, rect) in plots {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
@@ -120,7 +158,7 @@ impl Workspace {
                 (rect.width() * ppp).round() as u32,
                 (rect.height() * ppp).round() as u32,
             );
-            for mark in marks(scope, (colors, scale), size.max((1, 1))) {
+            for mark in marks(scope, (colors, prefs), size.max((1, 1))) {
                 let at = rect.min + vec2(mark.at[0] * rect.width(), mark.at[1] * rect.height());
                 let (at, align) = match scope {
                     Scope::Vectorscope => {
