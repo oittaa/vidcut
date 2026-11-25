@@ -741,7 +741,7 @@ impl Workspace {
         let usual = Title::usual_position(d.kind, d.align);
         let size_hint = format!(
             "{}% of the picture",
-            percent(Some(Title::usual_size(d.kind)))
+            percent(Some(Title::usual_size(d.kind, p.height())))
         );
         let [x, y] = Axis::pair(d.size);
         let across_hint = x.shown(Some(usual[0]));

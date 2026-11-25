@@ -6220,7 +6220,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The font of the burn-in (D61).
     - White, with no outline and no background (measured in Resolve Studio 21.1.2).
     - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
-    - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
+    - Text 108 pixels of the timeline for Scroll, at any timeline height. Thus a Scroll on a 1280×720 timeline is 108/720 of the picture height.
+      - Measured in Resolve Studio 21.2 on 1920×1080, 1366×768, 1280×720, 1024×576 and 2560×1440. A Text title follows the height of the timeline there.
+      - The size of a Scroll is a whole number of timeline pixels, from 24 to 4096. An OTIO file with a fraction does not import.
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
     - A Text title and a lower third draw a whole number of timeline pixels for the size. The style keeps the exact number.
