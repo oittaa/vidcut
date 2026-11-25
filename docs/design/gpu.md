@@ -415,6 +415,7 @@ The scales (`marks`):
   - The marks of 10-bit and 12-bit stay. The marks of the other scales move the same way (`on_scale`).
 - A change of the scale or of `video_levels` draws each `Plot` again. `Plots::paint` takes the whole `Scopes`.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
+- With `skin_tone`, the Vectorscope also has a line from the center to the circle at `SKIN_DEGREES` (`on_skin`).
 
 A scope that is off:
 

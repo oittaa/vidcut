@@ -21,7 +21,9 @@ const BARS: f64 = 0.75;
 
 const FULL_AT: u64 = 16;
 
-const PARAMS: usize = 224;
+const PARAMS: usize = 240;
+
+const SKIN_DEGREES: f64 = 123.14;
 
 const HDR_NITS: [f64; 6] = [0.0, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 
@@ -335,8 +337,10 @@ fn params(
         n(sections(scope, prefs)),
         n(channels),
         n(planes(scope, prefs)),
-        n(0),
+        n(u32::from(prefs.skin_tone)),
     ]);
+    let skin = SKIN_DEGREES.to_radians();
+    bytes.extend([f(skin.cos()), f(-skin.sin()), f(0.0), f(0.0)]);
     bytes
         .try_into()
         .expect("the fields of the scope's parameters")

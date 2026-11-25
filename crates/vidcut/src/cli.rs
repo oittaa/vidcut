@@ -8,6 +8,7 @@ use vidcut_core::request::{Client, ClientKind, method_names, protocol_schema, re
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
+    ("keys.list", &["key"]),
     ("keys.set", &["action", "keys"]),
     ("keys.reset", &["action"]),
     ("keys.use", &["set"]),
@@ -404,6 +405,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut viewer scopes --waveform true --vectorscope true\n  \
          vidcut viewer scopes --scale percent --video-levels true\n  \
          vidcut viewer scopes --waveform-mode rgb --waveform-blue false --parade-mode yrgb\n  \
+         vidcut viewer scopes --skin-tone true\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),

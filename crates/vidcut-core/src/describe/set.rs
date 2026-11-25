@@ -513,7 +513,8 @@ impl Words<'_> {
         });
         s.usual("anchor", "Anchor", &word, anchor, |t| json!(t.anchor));
         if self.params["style"].is_object() {
-            let size = Title::usual_size(first.map_or(TitleKind::Text, |t| t.kind));
+            let kind = first.map_or(TitleKind::Text, |t| t.kind);
+            let size = Title::usual_size(kind, self.project.map_or(1080, |pr| pr.height()));
             let olds = s.olds(|t| json!(t.style));
             style(&mut s.f, &olds, &self.params["style"], size, None);
         }
