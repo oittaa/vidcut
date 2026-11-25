@@ -281,7 +281,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 r.rev
             );
         }
-        "render.add" if r.dry_run => {
+        "render.add" | "render.update" if r.dry_run => {
             let files: Vec<&str> = (r.result["existing"].as_array().into_iter().flatten())
                 .filter_map(Value::as_str)
                 .collect();
@@ -305,7 +305,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
             };
             println!("ok {method}: removed {removed} (rev {})", r.rev);
         }
-        "render.move" | "render.rename" | "render.clear_status" | "render.ended" => {
+        "render.update"
+        | "render.move"
+        | "render.rename"
+        | "render.clear_status"
+        | "render.ended" => {
             println!("ok {method} (rev {})", r.rev);
         }
         "timeline.list" => {
@@ -626,9 +630,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 }
                 println!("  {}", key_line(s));
             }
+            println!();
+            println!("{}", set_line(&r.result));
         }
-        "keys.set" | "keys.reset" => {
-            let changed = r.result["changed"]
+        "keys.set" | "keys.reset" | "keys.use" => {
+            let changed = r.result["changed_keys"]
                 .as_array()
                 .map_or(&[][..], Vec::as_slice);
             if changed.is_empty() {
@@ -637,7 +643,45 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for s in changed {
                 println!("{}", key_line(s));
             }
+            println!("{}", set_line(&r.result));
         }
+        "keys.sets" => {
+            for s in r.result["sets"].as_array().into_iter().flatten() {
+                let name = s["name"].as_str().unwrap_or_default();
+                match s["path"].as_str() {
+                    Some(path) => println!("{name}  ({path})"),
+                    None => println!("{name}  (built in)"),
+                }
+            }
+            for f in r.result["refused"].as_array().into_iter().flatten() {
+                println!(
+                    "{} is left out: {}",
+                    f["path"].as_str().unwrap_or_default(),
+                    f["why"].as_str().unwrap_or_default()
+                );
+            }
+            println!("{}", set_line(&r.result));
+        }
+        "keys.save" => println!(
+            "saved key set {} ({})",
+            r.result["saved"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "keys.delete" => println!(
+            "deleted key set {} ({})",
+            r.result["deleted"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "keys.export" => println!(
+            "wrote key set {} to {}",
+            r.result["exported"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "keys.import" => println!(
+            "added key set {} ({})",
+            r.result["imported"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
         "preferences.get" | "preferences.set" | "preferences.reset" => {
             let mut lines = Vec::new();
             flatten("", &r.result["preferences"], &mut lines);
@@ -1950,6 +1994,14 @@ fn summary(s: &Value) {
                 .join(" "))
             .unwrap_or_default()
     );
+}
+
+fn set_line(r: &Value) -> String {
+    let set = r["set"].as_str().unwrap_or_default();
+    match r["changed"].as_bool() {
+        Some(true) => format!("in force: {set}, with changes"),
+        _ => format!("in force: {set}"),
+    }
 }
 
 fn key_line(s: &Value) -> String {

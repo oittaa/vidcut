@@ -109,7 +109,7 @@ fn a_bad_look_file_is_refused_with_its_reason() {
 
 #[test]
 fn a_look_name_with_a_slash_is_refused() {
-    assert!(checked_name("a/b").is_err());
+    assert!(checked_name("look", "a/b").is_err());
 }
 
 #[test]

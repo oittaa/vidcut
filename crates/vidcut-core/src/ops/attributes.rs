@@ -212,7 +212,7 @@ fn speeds(p: &mut Project, ids: &[String], speed: f64, ripple: bool) -> Result<(
         .collect();
     match takers.is_empty() {
         true => Ok(()),
-        false => super::change_speed(p, &takers, speed, Some(ripple), None),
+        false => super::change_speed(p, &takers, speed, (Some(ripple), None), KeyTiming::Maintain),
     }
 }
 
