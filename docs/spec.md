@@ -4931,6 +4931,63 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The line is what the ducking takes from the track.
     - Both use one dB scale, from 0 dB at the top.
     - With Detect at Sound level, a second line shows the threshold.
+- **Track Dynamics** (pp. 3938, 3944–3948):
+  - Each channel strip of the Mixer has a Dynamics processor. A small graph on the strip shows its curve (p. 3944).
+  - A double click on the small graph opens the Dynamics window. A single click turns the Dynamics on or off (pp. 3944–3945).
+  - The Dynamics come after the FX and before the equalizer (p. 3938).
+  - The window has a switch, a reset button, a preset menu and a Make Up gain after the modules (p. 3945).
+  - The graph of the window shows the input level on the X axis and the output level on the Y axis (p. 3944).
+  - The modules are an Expander or Gate, a Compressor and a Limiter. Each module has its own switch (pp. 3945–3948).
+  - The Compressor has a Sidechain with On, Listen and Source. Source selects the track or bus that controls it (pp. 3947–3948).
+  - The Mix of the Compressor goes from all compressed sound at 0 to the input without compression at 100 (p. 3947).
+  - The manual gives a Compressor ratio of 1.0:1 to 10:1, and attacks from 0 ms (pp. 3946–3948). The window of Resolve Studio 21.2 gives other ranges.
+  - The Fairlight page of Resolve Studio 21.2 gives these values (measured):
+    - The Dynamics switch is on. Each module is off. Make Up is 0.0 dB, from 0 to 20 dB.
+    - Expander or Gate: Threshold −35.0 dB (−50 to 0), Range 18.0 dB (0 to 60), Ratio 1:1.1 (1:1.1 to 1:3.0).
+    - Expander or Gate: Attack 1.4 ms (0.50 to 100), Hold 0 ms (0 to 4000), Release 93 ms (50 to 4000). A new module is an Expander.
+    - Compressor: Threshold −15.0 dB (−50 to 0), Ratio 2.0:1 (1.2:1 to 20:1), Knee 0 (0 to 100), Mix 0 (0 to 100).
+    - Compressor: Attack 1.4 ms (0.70 to 100), Hold 0 ms (0 to 4000), Release 93 ms (50 to 4000).
+    - Limiter: Threshold −21.0 dB (−30 to 0), Attack 0.71 ms (0.70 to 30), Hold 0 ms (0 to 4000), Release 93 ms (50 to 4000).
+    - A click on Gate or Expander switches the module on. The values stay.
+    - A typed value outside its range is refused. The ends of a range are accepted.
+    - Source of the Sidechain lists no track in a project with one track.
+  - Renders of tones, bursts and noise at 48 kHz give this processor, to 0.01 dB (measured):
+    - Each module has a detector. The detector reads the output of the module before it.
+    - The detector runs once in each 3 samples. Its input is the peak of those samples over all channels, in dB, and not below −100 dB.
+    - All channels get the same gain. A new gain applies from the sample of its detector run.
+    - The level rises to a louder input with the Attack as the time constant. It falls to a softer input with the Release as the time constant.
+    - After a rise, Hold keeps the level for its time before the level falls.
+    - The level stays in the range where the module acts:
+      - Compressor: not below the threshold minus 0.13 times the Knee.
+      - Limiter: not below its threshold.
+      - Expander or Gate: not above the threshold, and not below the threshold minus the Range divided by the slope.
+    - A Compressor lowers the gain by (1 − 1/ratio) dB for each dB of the level above the threshold.
+    - Let b be the threshold plus Knee/10. Below b, the level above the threshold T is s − T + 0.153451 (b − s)^1.4, and not less than 0.
+    - Mix 50 and Mix 100 of one setting add the input to the compressed sound. The input has the gain (Mix/100)². Thus Mix 100 adds the full input.
+    - The Limiter is a Compressor with the ratio 20, no Knee, and its own threshold and times.
+    - An Expander lowers the gain by (ratio − 1) dB for each dB of the level below the threshold, down to the Range.
+    - A Gate lowers the gain by 4 dB for each dB of the level below the threshold, down to the Range. A Gate also lowers the gain by 0.1 dB.
+    - The order is the Expander or Gate, the Compressor, the Limiter and Make Up.
+    - The window shows rounded times and ratios. The processor uses values near them. For example, a shown Attack of 17 ms is 16.818 ms.
+  - An OTIO export of Resolve Studio 21.2 writes no Dynamics (measured).
+  - vidcut: `track.set` sets `dynamics`. A track starts with none. `{}` turns them on with each module off, and null takes them off.
+  - vidcut: the strip of a track in the Mixer has a small graph of the curve. A click on it switches the Dynamics on or off.
+  - vidcut: a double click on the small graph opens the Dynamics window. Its first click also switches the Dynamics.
+  - vidcut: `gui.show` with `dynamics` and a `track` opens the Dynamics window of that track.
+  - vidcut: the window has the switch, Make Up, the graph and a column for each module.
+    - The Expander/Gate column has a switch with Off, Expander and Gate.
+    - A change applies at once. A drag on a field makes one change when it stops.
+    - Reset and Close are at the bottom of the window.
+  - vidcut uses the measured processor with the typed values. The ranges are those of the window, and the defaults are the shown values.
+  - vidcut: Mix goes in a straight line from the compressed sound at 0 to the input at 100, as the manual says.
+    - Two renders of one setting do not override the manual. More cases are to measure ([todo](todo/track-dynamics.md)).
+  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-dynamics.md)):
+    - Other sample rates also run the detector once in each 3 samples.
+  - vidcut has no presets and no Sidechain ([todo](todo/track-dynamics.md)).
+  - vidcut: the Dynamics of a track work on the mix of its clips, after their ducking and with their fades.
+  - vidcut: the Dynamics of a track that holds a compound clip also work on the sound of the compound clip.
+  - vidcut: the fader of a track comes after its Dynamics and its equalizer. The meter of a track shows the sound after its fader.
+  - vidcut: an OTIO file keeps the Dynamics in the metadata of vidcut. Its export tells that other editors do not hear them.
 - **Track equalizer** (pp. 3938, 3949–3952):
   - Each channel strip of the Mixer has an equalizer of six bands. A small graph on the strip shows its curve (p. 3949).
   - The manual says that the small graph bypasses the equalizer, and opens its window with a double click (p. 3949).
@@ -5000,7 +5057,6 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Other sample rates use the same rules.
   - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
   - vidcut: the equalizer of a track that holds a compound clip also works on the sound of the compound clip.
-  - vidcut: the meter of a track with an equalizer shows the sound after the equalizer.
   - vidcut: an OTIO file keeps the track equalizer in the metadata of vidcut. Its export tells that other editors do not hear it.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
@@ -5169,8 +5225,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Attack goes from 0 to 100 ms. Its default is 1.4 ms.
     - Hold goes from 0 to 4000 ms. Its default is 0.
     - Release goes from 50 to 4000 ms. Its default is 93 ms.
-  - The scripting API of Resolve Studio 21.2 cannot read or set the Dynamics. Thus the curve and the times are not measured.
+  - The Track Dynamics item gives the ranges and the processor that Resolve Studio 21.2 has (measured).
   - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X156](deviations.md#x156-the-compressor-is-on-a-clip)).
+  - vidcut: the compressor of a clip has the processor, the ranges and the Mix of the Compressor of the Track Dynamics.
+  - vidcut: the Makeup Gain of a clip compressor goes from 0 to 24 dB. It raises the compressed sound before the Mix.
 - **Noise Reduction** (pp. 4041–4042):
   - Noise Reduction is a Fairlight FX. It reduces noise in all kinds of recordings (p. 4041).
   - It has a Bypass switch, Listen To Noise Only, Threshold, Attack, Sensitivity, Ratio, Frequency Smoothing, Time Smoothing, Dry/Wet and Level (pp. 4041–4042).

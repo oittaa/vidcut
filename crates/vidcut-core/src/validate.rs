@@ -130,6 +130,9 @@ pub fn violations(p: &Project) -> Vec<String> {
         {
             v.push(format!("track {}: {}", t.id, e.message));
         }
+        if let Some(why) = t.dynamics.as_ref().and_then(crate::dynamics::problem) {
+            v.push(format!("track {}: {why}", t.id));
+        }
         if let Some(why) = t
             .equalizer
             .as_ref()

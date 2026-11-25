@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use vidcut_core::compressor::Dynamics;
+use vidcut_core::dynamics::Dynamics;
 use vidcut_core::equalizer::Filter;
 use vidcut_core::leveler::Leveler;
-use vidcut_core::model::{Equalizer, TrackEqualizer};
+use vidcut_core::model::{ClipCompressor, Equalizer, TrackDynamics, TrackEqualizer};
 use vidcut_core::render::{AudioPiece, Bus, Dip, Ducking, Fade};
 
 use super::ahead::Ahead;
@@ -614,10 +614,11 @@ struct Lane {
     declick: i64,
     scratch: Vec<f32>,
     trim: f32,
+    bused: bool,
     isolator: Option<Isolator>,
     filter: Option<Filter<Equalizer>>,
     leveler: Option<Leveler>,
-    dynamics: Option<Dynamics>,
+    dynamics: Option<(ClipCompressor, Dynamics)>,
     denoiser: Option<Denoiser>,
     unheard: Option<String>,
     dip: Option<Arc<Dip>>,
@@ -637,6 +638,7 @@ impl Lane {
             declick,
             scratch: Vec::new(),
             trim: 1.0,
+            bused: false,
             isolator: None,
             filter: None,
             leveler: None,
@@ -758,9 +760,8 @@ impl Lane {
                     && before.is_some_and(|b| plays_on(b, &piece) || ramps_on(b, &piece));
                 let rings_on =
                     joined && self.filter.as_ref().map(Filter::settings) == equalizer.as_deref();
-                let keeps_level = joined
-                    && self.dynamics.as_ref().map(Dynamics::settings)
-                        == compressor.as_deref().copied();
+                let keeps_level =
+                    joined && self.dynamics.as_ref().map(|d| d.0) == compressor.as_deref().copied();
                 let ramps = self.started
                     && self.paced.is_some()
                     && before.is_some_and(|b| ramps_on(b, &piece));
@@ -848,7 +849,7 @@ impl Lane {
                 if opens && !keeps_level {
                     self.dynamics = compressor
                         .as_deref()
-                        .map(|c| Dynamics::new(*c, rate, channels));
+                        .map(|c| (*c, Dynamics::clip(c, rate, channels)));
                 }
                 if opens && !rings_on {
                     self.filter = equalizer.as_deref().map(|e| Filter::new(e, rate, channels));
@@ -880,13 +881,14 @@ impl Lane {
                 if let Some(filter) = self.filter.as_mut() {
                     filter.run(&mut self.scratch[..take * ch]);
                 }
-                if let Some(dynamics) = self.dynamics.as_mut() {
+                if let Some((_, dynamics)) = self.dynamics.as_mut() {
                     dynamics.run(&mut self.scratch[..take * ch]);
                 }
+                let trim = if self.bused { 1.0 } else { self.trim };
                 let gain = if *silent && self.trim == 1.0 {
                     0.0
                 } else {
-                    10f32.powf(*gain_db as f32 / 20.0) * self.trim
+                    10f32.powf(*gain_db as f32 / 20.0) * trim
                 };
                 const PAN_STEP: usize = 64;
                 let flat_sides =
@@ -1049,7 +1051,11 @@ fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
 
 struct Mixed {
     lanes: Vec<usize>,
-    filters: Vec<Filter<TrackEqualizer>>,
+    into: Option<usize>,
+    top: usize,
+    dynamics: Option<(TrackDynamics, Dynamics)>,
+    filter: Option<Filter<TrackEqualizer>>,
+    gain: f32,
     sum: Vec<f32>,
 }
 
@@ -1057,24 +1063,54 @@ impl Mixed {
     fn of(bus: &Bus, rate: u32, channels: u16) -> Self {
         Self {
             lanes: bus.lanes.clone(),
-            filters: bus
-                .equalizers
-                .iter()
-                .map(|e| Filter::new(e, rate, channels))
-                .collect(),
+            into: bus.into,
+            top: 0,
+            dynamics: bus
+                .dynamics
+                .map(|d| (d, Dynamics::track(&d, rate, channels))),
+            filter: bus
+                .equalizer
+                .as_ref()
+                .map(|e| Filter::new(e, rate, channels)),
+            gain: decibels(bus.gain_db),
             sum: Vec::new(),
         }
     }
 
     fn same(&self, bus: &Bus) -> bool {
         self.lanes == bus.lanes
-            && self.filters.len() == bus.equalizers.len()
-            && self
-                .filters
-                .iter()
-                .zip(&bus.equalizers)
-                .all(|(f, e)| f.settings() == e)
+            && self.into == bus.into
+            && self.dynamics.as_ref().map(|d| &d.0) == bus.dynamics.as_ref()
+            && self.filter.as_ref().map(Filter::settings) == bus.equalizer.as_ref()
     }
+
+    fn clear(&mut self, rate: u32, channels: u16) {
+        if let Some((settings, dynamics)) = self.dynamics.as_mut() {
+            *dynamics = Dynamics::track(settings, rate, channels);
+        }
+        if let Some(filter) = self.filter.as_mut() {
+            filter.clear();
+        }
+    }
+
+    fn process(&mut self, trim: f32) {
+        if let Some((_, dynamics)) = self.dynamics.as_mut() {
+            dynamics.run(&mut self.sum);
+        }
+        if let Some(filter) = self.filter.as_mut() {
+            filter.run(&mut self.sum);
+        }
+        let gain = self.gain * trim;
+        if gain != 1.0 {
+            for s in &mut self.sum {
+                *s *= gain;
+            }
+        }
+    }
+}
+
+fn decibels(db: f64) -> f32 {
+    10f64.powf(db / 20.0) as f32
 }
 
 pub struct AudioMix {
@@ -1114,10 +1150,20 @@ impl AudioMix {
         self.buses = buses
             .iter()
             .map(|b| match old.iter().position(|m| m.same(b)) {
-                Some(i) => old.swap_remove(i),
+                Some(i) => {
+                    let mut kept = old.swap_remove(i);
+                    kept.gain = decibels(b.gain_db);
+                    kept
+                }
                 None => Mixed::of(b, self.rate, self.channels),
             })
             .collect();
+        for i in 0..self.buses.len() {
+            self.buses[i].top = match self.buses[i].into {
+                Some(up) if up < i => self.buses[up].top,
+                _ => i,
+            };
+        }
         self.bus_of = vec![None; self.lanes.len()];
         for (i, bus) in self.buses.iter().enumerate() {
             for &lane in &bus.lanes {
@@ -1126,11 +1172,14 @@ impl AudioMix {
                 }
             }
         }
+        for (lane, bus) in self.lanes.iter_mut().zip(&self.bus_of) {
+            lane.bused = bus.is_some();
+        }
     }
 
     fn clear_buses(&mut self) {
-        for filter in self.buses.iter_mut().flat_map(|b| &mut b.filters) {
-            filter.clear();
+        for bus in &mut self.buses {
+            bus.clear(self.rate, self.channels);
         }
     }
 
@@ -1228,15 +1277,31 @@ impl AudioMix {
                 }
             }
         }
-        for bus in &mut self.buses {
-            for filter in &mut bus.filters {
-                filter.run(&mut bus.sum);
+        let mut trims = vec![1.0f32; self.buses.len()];
+        for (lane, bus) in self.lanes.iter().zip(&self.bus_of) {
+            if let Some(b) = *bus {
+                trims[self.buses[b].top] = lane.trim;
             }
-            let mut peak = vec![0.0f32; ch];
-            add_peaked(&bus.sum, &mut out, &mut peak);
-            if let Some(peaks) = peaks.as_deref_mut() {
+        }
+        let mut tops = vec![0.0f32; self.buses.len() * ch];
+        for b in (0..self.buses.len()).rev() {
+            let (before, rest) = self.buses.split_at_mut(b);
+            let bus = &mut rest[0];
+            bus.process(if bus.top == b { trims[b] } else { 1.0 });
+            match bus.into.and_then(|up| before.get_mut(up)) {
+                Some(up) => {
+                    for (o, s) in up.sum.iter_mut().zip(&bus.sum) {
+                        *o += *s;
+                    }
+                }
+                None => add_peaked(&bus.sum, &mut out, &mut tops[b * ch..(b + 1) * ch]),
+            }
+        }
+        if let Some(peaks) = peaks {
+            for bus in &self.buses {
+                let top = &tops[bus.top * ch..(bus.top + 1) * ch];
                 for &lane in &bus.lanes {
-                    peaks[lane * ch..(lane + 1) * ch].copy_from_slice(&peak);
+                    peaks[lane * ch..(lane + 1) * ch].copy_from_slice(top);
                 }
             }
         }

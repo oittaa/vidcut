@@ -1144,6 +1144,9 @@ fn export_with(
         if let Some(d) = &t.duck {
             meta["duck"] = json!(d);
         }
+        if let Some(d) = &t.dynamics {
+            meta["dynamics"] = json!(d);
+        }
         if let Some(e) = &t.equalizer {
             meta["equalizer"] = json!(e);
         }
@@ -1686,7 +1689,7 @@ pub struct ImportedClip {
     pub pan_keys: Vec<Keyframe>,
     pub equalizer: Option<crate::model::Equalizer>,
     pub dialogue_leveler: Option<crate::model::DialogueLeveler>,
-    pub compressor: Option<crate::model::Compressor>,
+    pub compressor: Option<crate::model::ClipCompressor>,
     pub noise_reduction: Option<crate::model::NoiseReduction>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
@@ -1826,6 +1829,7 @@ pub struct ImportedTrack {
     pub volume_db: f64,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub duck: Option<crate::model::Duck>,
+    pub dynamics: Option<crate::model::TrackDynamics>,
     pub equalizer: Option<crate::model::TrackEqualizer>,
     pub video_enabled: bool,
     pub render_cache: bool,
@@ -1851,6 +1855,9 @@ impl ImportedTrack {
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
             voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
             duck: serde_json::from_value(meta["duck"].clone()).ok(),
+            dynamics: serde_json::from_value(meta["dynamics"].clone())
+                .ok()
+                .filter(|d| crate::dynamics::problem(d).is_none()),
             equalizer: serde_json::from_value(meta["equalizer"].clone())
                 .ok()
                 .filter(|e| crate::equalizer::track::problem(e).is_none()),
@@ -3071,6 +3078,12 @@ fn track_kept(
 pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
     track_kept(p, span, "Ducking", |t| {
         t.duck.as_ref().is_some_and(|d| d.on)
+    })
+}
+
+pub fn unheard_track_dynamics(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "The track Dynamics", |t| {
+        t.dynamics.as_ref().is_some_and(|d| d.heard())
     })
 }
 

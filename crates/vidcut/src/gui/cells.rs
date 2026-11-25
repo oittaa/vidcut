@@ -193,6 +193,7 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
         ),
     };
     plan.audio.clear();
+    plan.buses.clear();
     Some((plan, frame))
 }
 

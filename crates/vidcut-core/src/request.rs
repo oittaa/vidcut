@@ -1707,7 +1707,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, equalizer). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1746,6 +1746,16 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         duck: Option<Option<DuckSet>>,
+        /// The track's Dynamics: each field given replaces its own. A track
+        /// starts with none, and its sound plays as with each module off.
+        /// `{}` puts on the usual ones, with each module off. null takes
+        /// them off with their settings.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        dynamics: Option<Option<Box<TrackDynamicsSet>>>,
         /// The track's equalizer: each field given replaces its own. A
         /// track starts with none, and its sound plays as with the
         /// equalizer off. `{}` turns it on, flat. null takes it off with
@@ -4875,12 +4885,12 @@ pub enum Request {
     /// Dynamic Zoom, Color and their buttons, `title_text` (the text of the
     /// selected title, or of the topmost title at the playhead, to edit in
     /// place in the viewer), `select_tool` (a tool to add on the effects
-    /// page), or `equalizer` (the Equalizer window of `track`). Answers what
-    /// `gui.state` does.
+    /// page), `equalizer` (the Equalizer window of `track`), or `dynamics`
+    /// (the Dynamics window of `track`). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
-        /// The track of the `equalizer` window.
+        /// The track of the `equalizer` or `dynamics` window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<String>,
     },
@@ -6542,6 +6552,9 @@ pub enum GuiPanel {
     /// The Equalizer window of a track with sound: the switch, the Type,
     /// the curve and the bands of its equalizer.
     Equalizer,
+    /// The Dynamics window of a track with sound: the switch, the Make Up
+    /// gain and the Expander or Gate, Compressor and Limiter modules.
+    Dynamics,
 }
 
 /// Media tab sort orders.
@@ -7924,9 +7937,10 @@ pub struct DialogueLevelerSet {
     pub output_gain_db: Option<f64>,
 }
 
-/// A change to a clip's compressor: each field given replaces its own, and
-/// the rest stay as they are. A new one is on: Threshold -15 dB, Ratio 2,
-/// Knee 0, Mix 0, Attack 1.4 ms, Hold 0, Release 93 ms and Makeup Gain 0.
+/// A change to a compressor: each field given replaces its own, and the
+/// rest stay as they are. A new one has Threshold -15 dB, Ratio 2, Knee 0,
+/// Mix 0, Attack 1.4 ms, Hold 0 and Release 93 ms. A clip's new one is on,
+/// with Makeup Gain 0. A track's new one is off.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CompressorSet {
@@ -7936,16 +7950,17 @@ pub struct CompressorSet {
     /// The level above which it compresses, in dB, from -50 to 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_db: Option<f64>,
-    /// The ratio of the input to the output, from 1 to 10.
+    /// The ratio of the input to the output, from 1.2 to 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
-    /// The width of the curve around the threshold, in dB, from 0 to 30.
+    /// How soft the curve is around the threshold, from 0 to 100.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub knee_db: Option<f64>,
-    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    pub knee: Option<f64>,
+    /// The share of the input in the result, from 0 to 100: 0 is all
+    /// compressed sound, and 100 is the input alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mix: Option<f64>,
-    /// How fast it starts to compress, in ms, from 0 to 100.
+    /// How fast it starts to compress, in ms, from 0.7 to 100.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attack_ms: Option<f64>,
     /// How long it keeps the reduction after the attack, in ms, from 0 to
@@ -7955,9 +7970,92 @@ pub struct CompressorSet {
     /// How fast it stops to compress, in ms, from 50 to 4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_ms: Option<f64>,
-    /// The gain after it, in dB, from 0 to 24.
+    /// A clip's gain of the compressed sound before the mix, in dB, from 0
+    /// to 24. A track's compressor
+    /// takes none: the Dynamics have `makeup_db`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub makeup_db: Option<f64>,
+}
+
+/// A change to a track's Dynamics: each field given replaces its own, and
+/// the rest stay as they are. New ones are on, with each module off and
+/// Make Up 0 dB.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackDynamicsSet {
+    /// The switch. Off keeps the settings, and the sound plays without
+    /// them. On brings them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The Expander or Gate, the first module.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expander: Option<ExpanderSet>,
+    /// The Compressor, after the Expander or Gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compressor: Option<CompressorSet>,
+    /// The Limiter, after the Compressor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limiter: Option<LimiterSet>,
+    /// The gain after the modules, in dB, from 0 to 20.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub makeup_db: Option<f64>,
+}
+
+/// A change to an Expander or Gate: each field given replaces its own. A
+/// new one is an expander, off, with Threshold -35 dB, Range 18 dB, Ratio
+/// 1.1, Attack 1.4 ms, Hold 0 and Release 93 ms.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExpanderSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// A gate: it lowers the level by 4 dB for each dB below the threshold,
+    /// and by 0.1 dB when it is open. False, an expander: by its ratio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<bool>,
+    /// The level below which it lowers the level, in dB, from -50 to 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
+    /// The most that it lowers the level, in dB, from 0 to 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_db: Option<f64>,
+    /// The expander's change of the output for each dB of the input below
+    /// the threshold, in dB, from 1.1 to 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f64>,
+    /// How fast it opens, in ms, from 0.5 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_ms: Option<f64>,
+    /// How long it stays open after the level falls, in ms, from 0 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// How fast it closes, in ms, from 50 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_ms: Option<f64>,
+}
+
+/// A change to a Limiter: each field given replaces its own. A new one is
+/// off, with Threshold -21 dB, Attack 0.71 ms, Hold 0 and Release 93 ms.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LimiterSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The level above which it limits, in dB, from -30 to 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
+    /// How fast it starts to limit, in ms, from 0.7 to 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_ms: Option<f64>,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// How fast it stops to limit, in ms, from 50 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_ms: Option<f64>,
 }
 
 /// A change to a clip's Noise Reduction: each field given replaces its own,

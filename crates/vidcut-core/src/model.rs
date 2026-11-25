@@ -1779,11 +1779,16 @@ pub struct Track {
     /// D76).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<Duck>,
-    /// The equalizer of the track, after its ducking and before its fader.
+    /// The equalizer of the track, after its Dynamics and before its fader.
     /// Left out when the track has none, as a new track: then it is off,
     /// with the usual bands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<TrackEqualizer>,
+    /// The Dynamics of the track, after its ducking and before its
+    /// equalizer. Left out when the track has none, as a new track: then
+    /// they are on, with each module off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<TrackDynamics>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -8867,7 +8872,7 @@ pub struct ClipAudio {
     pub dialogue_leveler: Option<DialogueLeveler>,
     /// The compressor. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compressor: Option<Compressor>,
+    pub compressor: Option<ClipCompressor>,
     /// Noise Reduction. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise_reduction: Option<NoiseReduction>,
@@ -8983,22 +8988,84 @@ pub struct Compressor {
     pub on: bool,
     /// The level above which it compresses, in dB, from -50 to 0.
     pub threshold_db: f64,
-    /// The ratio of the input to the output, from 1 to 10.
+    /// The ratio of the input to the output, from 1.2 to 20.
     pub ratio: f64,
-    /// The width of the curve around the threshold, in dB, from 0 to 30.
-    /// At 0, compression starts at the threshold.
-    pub knee_db: f64,
-    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    /// How soft the curve is around the threshold, from 0 to 100. At 0,
+    /// compression starts at the threshold. At 100, it starts about 10 dB
+    /// below it and is full 10 dB above it.
+    pub knee: f64,
+    /// The share of the input in the result, from 0 to 100: 0 is all
+    /// compressed sound, and 100 is the input alone.
     pub mix: f64,
-    /// How fast it starts to compress, in ms, from 0 to 100.
+    /// How fast it starts to compress, in ms, from 0.7 to 100.
     pub attack_ms: f64,
     /// How long it keeps the reduction after the attack, in ms, from 0 to
     /// 4000.
     pub hold_ms: f64,
     /// How fast it stops to compress, in ms, from 50 to 4000.
     pub release_ms: f64,
-    /// The gain after it, in dB, from 0 to 24.
+}
+
+/// The compressor of a clip, with its own gain on the compressed sound.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipCompressor {
+    #[serde(flatten)]
+    pub compressor: Compressor,
+    /// The gain of the compressed sound before the mix, in dB, from 0 to
+    /// 24.
     pub makeup_db: f64,
+}
+
+/// The Dynamics of a track: an expander or gate, a compressor and a
+/// limiter, one after the other, then the make up gain.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackDynamics {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    pub expander: Expander,
+    pub compressor: Compressor,
+    pub limiter: Limiter,
+    /// The gain after the modules, in dB, from 0 to 20.
+    pub makeup_db: f64,
+}
+
+/// An expander or a gate: it lowers the level below its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Expander {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// A gate: it lowers the level by 4 dB for each dB below the threshold,
+    /// and by 0.1 dB when it is open. Off, an expander: by its ratio.
+    pub gate: bool,
+    /// The level below which it lowers the level, in dB, from -50 to 0.
+    pub threshold_db: f64,
+    /// The most that it lowers the level, in dB, from 0 to 60.
+    pub range_db: f64,
+    /// The expander's change of the output for each dB of the input below
+    /// the threshold, in dB, from 1.1 to 3.
+    pub ratio: f64,
+    /// How fast it opens, in ms, from 0.5 to 100.
+    pub attack_ms: f64,
+    /// How long it stays open after the level falls, in ms, from 0 to 4000.
+    pub hold_ms: f64,
+    /// How fast it closes, in ms, from 50 to 4000.
+    pub release_ms: f64,
+}
+
+/// A limiter: a compressor of ratio 20 above its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Limiter {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// The level above which it limits, in dB, from -30 to 0.
+    pub threshold_db: f64,
+    /// How fast it starts to limit, in ms, from 0.7 to 30.
+    pub attack_ms: f64,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    pub hold_ms: f64,
+    /// How fast it stops to limit, in ms, from 50 to 4000.
+    pub release_ms: f64,
 }
 
 /// Noise Reduction: it lowers the steady noise of the room and the hiss.
@@ -10823,6 +10890,7 @@ impl Track {
             volume_db: 0.0,
             voice_isolation: None,
             duck: None,
+            dynamics: None,
             equalizer: None,
             video_enabled: true,
             name: None,
