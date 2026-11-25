@@ -39,7 +39,8 @@ fn models_check(id: &str, download: bool) -> Result<Value> {
         )));
     }
     let dir = crate::paths::models_dir();
-    let inspected = vidcut_av::models::inspect(model, &dir, download)
+    let gpu = crate::preferences::gpu_acceleration();
+    let inspected = vidcut_av::models::inspect(model, &dir, download, gpu)
         .map_err(|e| export::av_error(&e, ErrorCode::Media, String::new()))?;
     let found = &inspected.found;
     let differences = catalog::differences(model, found);
@@ -271,6 +272,31 @@ pub fn run_with(
         Request::KeysReset { action } => {
             answer(crate::preferences::keys_reset(*action, envelope.dry_run)?)
         }
+        Request::KeysSets {} => answer(crate::preferences::keys_sets()?),
+        Request::KeysUse { set } => answer(crate::preferences::keys_use(set, envelope.dry_run)?),
+        Request::KeysSave { name, overwrite } => answer(crate::preferences::keys_save(
+            name,
+            *overwrite,
+            envelope.dry_run,
+        )?),
+        Request::KeysDelete { name } => {
+            answer(crate::preferences::keys_delete(name, envelope.dry_run)?)
+        }
+        Request::KeysExport { set, path } => answer(crate::preferences::keys_export(
+            set,
+            path,
+            envelope.dry_run,
+        )?),
+        Request::KeysImport {
+            path,
+            name,
+            overwrite,
+        } => answer(crate::preferences::keys_import(
+            path,
+            name.as_deref(),
+            *overwrite,
+            envelope.dry_run,
+        )?),
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
             *service,
             key.as_deref(),
@@ -367,11 +393,12 @@ pub fn run_with(
                 envelope.dry_run,
             )?)
         }
-        Request::RenderAdd(params) => {
+        Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } => {
             let store = open(project)?;
             let env = AvEnv::for_project(store.path());
             let editor = store.load_project()?;
-            let files = crate::queue::existing(editor.project(), params, &env.proxy_dir())?;
+            let job = crate::queue::updated(&envelope.request);
+            let files = crate::queue::existing(editor.project(), job, params, &env.proxy_dir())?;
             if envelope.dry_run {
                 answer(json!({ "existing": files }))
             } else {
