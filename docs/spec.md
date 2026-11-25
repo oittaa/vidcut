@@ -5142,6 +5142,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Media Pool has its own level. A click in the Media tab gives it the focus, and a click in another place takes the focus away. While it has the focus, a line in the accent color is at the top of the tab.
   - The keys of the Media Pool work only while the Media tab is on the screen. The Effects page and the Export page do not show it.
   - In the Media Pool, Delete and Backspace remove the selected media, after a question. Ctrl+A and Ctrl+Shift+A select all or no media.
+  - These three commands and their keys are not measured. The manual does not list the commands of the Media Pool level (case 18 of shortcuts-resolve-runs.md).
+  - Thus Alt+Delete in the Media Pool lifts the timeline selection, as an application action. Not measured (case 19 of shortcuts-resolve-runs.md).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
   - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - On the other pages, these five keys keep the actions of the table.
