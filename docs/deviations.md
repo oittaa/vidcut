@@ -1498,7 +1498,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X167. vidcut finds the faces and the text of a clip
 
 - **Resolve:**
-  - The Close Up edit of the Cut page does a face detection, and puts a face that it finds in the frame (p. 699).
+  - The manual says that the Close Up edit of the Cut page does a face detection (p. 699). It puts a face that it finds in the frame.
+    - Measured: with faces, the zoom is 1.0 to 1.4. It changes from one timeline to the next for the same frame ([spec §7.2](spec.md#72-edit-functions)).
   - On the Media page, Analyze Clips for People finds faces to make People keywords (p. 418).
   - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
     - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).
@@ -1517,8 +1518,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
   - A face has two models. `fast` is a small network on the CPU. `slow` is a larger network on the GPU.
   - After a Find, the status line tells how many things it found.
+  - Close Up uses the `fast` face model on the first frame of the copy. Its zoom with faces is at most the `zoom` of the request, usual 1.5.
+    - The zoom is less when the faces do not fit at that zoom ([spec §7.2](spec.md#72-edit-functions)).
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.
+  - The manual says about 150%. A zoom that changes for the same frame cannot be repeated.
+  - Each model also finds other faces: in one wide shot, vidcut found seven small faces where Resolve framed only the left ones.
   - Text is the next thing that people hide: names, addresses, documents and screens.
   - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 

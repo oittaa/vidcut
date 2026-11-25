@@ -1,4 +1,5 @@
 pub mod attributes;
+pub mod close_up;
 pub mod comp;
 pub mod compound;
 pub mod conform;
@@ -26,6 +27,7 @@ mod transition;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
+pub use close_up::close_up;
 use serde_json::json;
 pub use source_overwrite::{
     Placed, SourceLining, Synced, file_start_at, source_overwrite, synced_at,

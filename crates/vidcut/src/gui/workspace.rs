@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
-use vidcut_core::model::{Marker, PictureTool, Project, RenderCache};
+use vidcut_core::model::{FindModel, Marker, PictureTool, Project, RenderCache, Subject};
 use vidcut_core::preferences::Scope;
-use vidcut_core::request::{GradeLevel, Page, ViewerMode};
+use vidcut_core::request::{GradeLevel, Page, Request, ViewerMode};
 use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -790,6 +790,23 @@ impl Workspace {
         self.multi_part()
             .is_none()
             .then_some("This Camera Has No Frames Between the Marks")
+    }
+
+    pub(super) fn close_up(&mut self) {
+        let at = self.snap.timeline.position;
+        let ask = ("edit.close_up", json!({ "at": at }));
+        let request = Request::EditCloseUp {
+            at: None,
+            zoom: None,
+            download: false,
+        };
+        let faces = self.project().is_some_and(|p| {
+            !vidcut_core::editor::close_up_looks(p, &request, Some(at)).is_empty()
+        });
+        match faces {
+            true => self.ask(vec![ask], Some((Subject::Face, FindModel::Fast))),
+            false => self.send(ask.0, ask.1),
+        }
     }
 
     pub(super) fn edit_function(&mut self, method: &str) {
@@ -1780,6 +1797,9 @@ impl Workspace {
             if fired.pressed(action) {
                 self.edit_function(method);
             }
+        }
+        if fired.pressed(Action::CloseUp) {
+            self.close_up();
         }
         if fired.pressed(Action::Dissolve) {
             self.send("edit.dissolve", self.dissolve_target());

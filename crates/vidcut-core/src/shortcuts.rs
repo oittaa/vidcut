@@ -111,6 +111,7 @@ actions! {
     SmartInsert "smart_insert",
     Overwrite "overwrite",
     RippleOverwrite "ripple_overwrite",
+    CloseUp "close_up",
     PlaceOnTop "place_on_top",
     Append "append",
     Split "split",
@@ -1008,6 +1009,16 @@ pub const SHORTCUTS: &[Shortcut] = &[
             "Swaps the clip under the playhead for the source, even when they're different \
              lengths. Everything after it moves, so nothing is cut short or left over. Use it \
              to try a better take.",
+        ),
+    ),
+    own(
+        Edit,
+        Action::CloseUp,
+        &[],
+        "Close Up",
+        Some(
+            "Puts a zoomed-in copy of the clip under the playhead on a track above, \
+             in sync. Use it to make a closer shot from a wide one.",
         ),
     ),
     own(

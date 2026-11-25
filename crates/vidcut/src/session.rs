@@ -392,7 +392,9 @@ pub fn run_with(
                 Request::SubtitlesRetime { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-retime")?;
                 }
-                Request::MotionFind { .. } | Request::MotionTrack { .. } => {
+                Request::MotionFind { .. }
+                | Request::MotionTrack { .. }
+                | Request::EditCloseUp { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-subjects")?;
                 }
                 Request::PictureStabilize { .. } if !envelope.dry_run => {
