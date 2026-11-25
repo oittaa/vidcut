@@ -778,6 +778,12 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
   - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
   - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+- **Arial picked in a Scroll draws Arial Black.**
+  - The Inspector shows the face Regular. Its other faces, such as Bold and Black, cannot be picked.
+  - The file writes the font `Arial,8.25,-1,5,127,0,0,0,0,0,Regular`.
+  - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
+  - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
+  - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 
 ## Resolve's Fusion page
 

@@ -3631,6 +3631,10 @@ impl Title {
         tracking * Self::TRACKING_SHARE * Self::TRACKING_FILE / Self::tracking_share(tracking)
     }
 
+    pub fn scroll_size(text: f64, scale: f64) -> f64 {
+        (text / scale + Self::WIDTH_SLACK).floor().max(1.0) * scale
+    }
+
     pub fn whole_size(text: f64, scale: f64) -> f64 {
         (text / scale + Self::WIDTH_SLACK).round().max(1.0) * scale
     }
