@@ -1947,6 +1947,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With the link on, a number in one box goes into the other box too.
     - OTIO keeps the switch as `transformationZoomLink`.
     - A drag of a corner in the viewer keeps the ratio of Zoom X to Zoom Y.
+    - The viewer shows a handle at the middle of each side of a Text title or a lower third.
+    - A drag of the left or right handle changes only Zoom X. A drag of the top or bottom handle changes only Zoom Y.
+    - The zoom changes about the position of the title. The dragged side follows the pointer, also with the link on.
+    - One `titles.set` follows on release. Thus each drag is one undo step.
     - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title.
     - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md#zoom-x-and-zoom-y)).
   - A drag snaps to the centre and the thirds of the frame.
