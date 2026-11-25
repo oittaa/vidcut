@@ -30,3 +30,4 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - In the render queue: Reveal in Media Storage in the right-click menu, and Refresh in the "..." menu (pp. 4131–4132)
 - Don't show until next copy in Paste Attributes ([§8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212))
 - Paste Attributes of a copied speed that has keyframes ([§8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212))
+- The Stabilization tool of the viewer Tools, and the Stabilizer mode and the graph of the Tracker palette (pp. 769, 3502; [§8.27](../spec.md#827-stabilization-pp-295-737738-769-923924-12091210-35023503-measured-in-resolve-studio-212))

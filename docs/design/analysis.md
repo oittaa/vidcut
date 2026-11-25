@@ -32,6 +32,7 @@ flowchart TD
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 | `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
 | `motion.track` | `Env::tracked`: the box of one thing on each picture of the track, with a score | `motion::followed`; the edit then calls `ops::motion::tracked` |
+| `picture.stabilize` | `Env::shake`: the motion of the camera from each frame of the clip to the next | `stabilize::steadied`; the edit then calls `ops::picture::stabilized` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing. It checks that each part is inside its clip and apart from the other parts, and cuts them.
 
@@ -200,6 +201,64 @@ flowchart TD
   - Thus the old path also gives two samples: on the frame before the track and on the frame after it. The frames between the track and the next old sample keep their boxes.
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
+
+## Stabilization
+
+- `picture.stabilize` measures the motion of the camera, and the core decides the correction ([spec](../spec.md#827-stabilization-pp-295-737738-769-923924-12091210-35023503-measured-in-resolve-studio-212)).
+- `editor::stabilize_looks` gives the plan to measure: the own picture of the clip (`render::own_picture`).
+  - That is the composition of the clip. It has one frame for each frame of the file from the In to the Out, at the rate of the file.
+  - Why: the correction refers back to the source (spec, p. 295). Thus the crop, the transform and the speed of the clip do not change the measurement.
+- `stabilize::measure` in vidcut-av measures, on the CPU:
+  - The `Reader` of the tracker reads the frames of the plan at a working size. It decodes on the GPU when GPU decoding is on.
+  - Each frame becomes gray, with a pyramid of `LEVELS` levels.
+  - A frame that differs from the frame before by less than `REPEAT` on average repeats that frame. A repeat has no step.
+    - Why: a repeat shows no new moment. A step of zero would show a stop of the camera, and the correction would move the repeat.
+  - `corners` takes the best corner of each cell of a `GRID`. `follow` follows each corner to the next frame with the Lucas–Kanade method, on the pyramid.
+  - Each corner is also followed back. A corner that does not come back within `RETURN` is dropped.
+  - `fitted` fits the motion of the mode to the corners with RANSAC (`TRIES`, `INLIER`). Then it fits that motion again to the corners that agree with it, by least squares.
+    - Translation fits a move. Similarity fits a move, a turn and a zoom. Perspective fits a homography.
+  - A pair of frames with fewer than `LEAST` corners that agree gets no motion.
+  - The result is a `Shake`: one step for each pair of frames, or none for a repeat. A step is in units of the picture height, from the center of the picture.
+  - Why a method of our own: the deshake filter of FFmpeg finds only moves and turns. vid.stab has no perspective, and many FFmpeg builds do not have it.
+- `stabilize::steadied` in the core decides:
+  - It uses the new pictures only. A repeat gets the correction of the frame that it repeats.
+  - Each step becomes parts (`parts`): a move, a turn, the log of the scale, a stretch, a shear and the two perspective terms. The path of the camera is the sum of these parts.
+    - Why: a sum keeps a steady change on a straight line. A product of the matrices compounds a change of the scale or of the perspective. Then a camera that moves forward gets a path that is not real.
+  - The goal is the path smoothed with Gaussian weights (`smoothed`). At each frame, a straight line goes through the near frames by weighted least squares (`fitted`). Its sigma is Smooth times `SMOOTH_SECS` seconds.
+    - Why a line: near an end of the clip, the near frames are on one side only. Their mean lags behind a pan, and the fix becomes large. In the middle of the clip, the line gives the same value as the mean.
+  - A second fit follows fast motion that the camera operator makes, for example a fast pan or the turn of a forward motion.
+    - The first fit gives the speed of the path at each frame.
+    - The second fit weighs each near frame again by its distance from the line through the frame at that speed.
+    - The distance is the mean squared move of the four corners of the picture (`spread`), in units of the picture height.
+    - The weight falls as a Gaussian. Its sigma is Smooth times `SHAKE_RANGE`.
+    - Why: a near frame far from the line is part of a different motion. The first fit takes a fast pan as shake, and its fix then needs a large zoom.
+    - Why the corners: they give one unit for all the parts. A change of the perspective moves the corners as a move does.
+    - `SMOOTH_SECS` and `SHAKE_RANGE` come from 12 measurements of Resolve on seven test clips, at three values of Smooth and two of Cropping Ratio.
+    - With them, the mean zoom of vidcut is within about 10% of the zoom of Resolve in each measurement.
+  - The fix of a frame takes the path to the goal (`from_parts`). With Camera Lock, the fix is the inverse of the product of the steps (`locked`). Thus the picture holds the view of the first frame.
+  - Strength multiplies each part of each fix (`blend`). Camera Lock uses the whole fix, with no limit.
+    - Why the parts: a product of the matrix values by Strength is not a motion. At Strength −1, a large zoom becomes a flip, and a turn gets a zoom.
+    - With the parts, Strength −1 gives the inverse motion: the opposite move, turn and zoom.
+  - Cropping Ratio then limits the fixes (`limited`). A fix shrinks until the picture keeps that share of its width and height in the frame.
+    - The limit is the smallest limit within `NEAR_SECS`, then smoothed. Thus the limit does not jump from frame to frame.
+    - Why after Strength: the limit applies to the fix that the picture gets, also at a negative Strength.
+  - With Zoom on, one zoom for the whole clip keeps the edges out of each frame (`zoom_for`). The zoom is at most one over Cropping Ratio. With Camera Lock, it is at most one over the smallest Cropping Ratio.
+  - The correction of each frame is the inverse of its fix, in the coordinates of the picture (`Stabilized`).
+  - `before` and `after` give the mean motion and the mean shake of five points of the picture, in pixels of the picture height.
+- Where the data is:
+  - `AvEnv` keeps the `Shake` in the disk cache (`analysis`). The key has `stabilize::name`, the digest of the plan, the mode and the frames.
+  - Why: the mode changes the measurement. The other values decide again from the same `Shake`, with no new measurement.
+  - The correction goes into the project, on the picture of the clip (`Stabilization`), with the values that made it. It holds one map for each frame of the file, from `first`.
+  - Why in the project: the render reads it on each frame, with no analysis and no cache. An undo brings it back with the values.
+  - Why frames of the file: a trim, a split, a slip or a speed change keeps the correction of each frame. A frame outside the analysis takes the correction of the nearest end.
+- The render:
+  - `Placed::steadied` gives the map of the frame that the clock shows (`FileClock`).
+  - `place::Placing` chains it after the map of the transform (`chain`). Thus the picture is sampled once.
+  - The edges of the picture and of its crop use the map before the correction (`Level::area`). Thus the correction moves the source inside the area of the picture, and the picture never shows past that area.
+    - Why: the correction refers back to the source (spec, p. 295). The transform then places the steadied picture as it places any other picture.
+  - `Placed::hold` keeps only the map of the held frame. Thus the key of one frame of the render cache stays small.
+  - A made frame of a Retime Process keeps its placement. Thus its `Id` holds the keyframe position when the clip is stabilized (`placed_now`, [playback](playback.md)).
+- In a GUI, `Live::measuring` measures first (`editor::stabilize_looks`), as a job of kind `stabilize`. Headless, `work_first` measures on `vidcut-stabilize`.
 
 ## In a GUI
 
@@ -468,6 +527,7 @@ flowchart TD
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | the boxes of the faces of a range | `analysis` (`AvEnv`) | origin, the model and its sizes, the `Look` |
+| the motion of the camera in a clip (`Shake`) | `analysis` (`AvEnv`) | origin, the digest of the plan, the mode, the frames |
 | sound matches of two files | `analysis` (`AvEnv`) | both origins |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
@@ -481,7 +541,7 @@ flowchart TD
 
 - `reset` with `keep_downloads` keeps `models` and `speech-replies`.
 - `Tiles::evict` drops kept pictures past the memory budget of the tile cache.
-- The disk cache holds the levels, voice activity, picture stats, sound matches and boxes of faces. The `cache` setting limits the disk cache.
+- The disk cache holds the levels, voice activity, picture stats, sound matches, boxes of faces and the motion of the camera. The `cache` setting limits the disk cache.
 - Each `AvEnv` keeps a few results and transcripts in memory (`Memos`). One request can ask for the same file many times.
   - An `AvEnv` lives for one request or one job. Its results leave the memory when it ends.
   - The disk cache can refuse a result. The next request then measures that file again.
@@ -558,6 +618,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 - `crates/vidcut-core/src/fingerprint.rs`, `crates/vidcut-core/src/dirs.rs`, `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`
+- `crates/vidcut-av/src/stabilize.rs`, `crates/vidcut-core/src/stabilize.rs`
 - `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-av/src/subjects/retinaface.rs`, `crates/vidcut-av/src/subjects/yolox.rs`, `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/waveform.rs`, `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`, `crates/vidcut/src/paths.rs`, `crates/vidcut/src/preferences.rs`, `crates/vidcut/src/services.rs`

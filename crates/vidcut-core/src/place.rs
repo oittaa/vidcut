@@ -25,6 +25,7 @@ const SAME_MAP: f64 = 1e-9;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Level {
     pub back: [f64; 8],
+    pub sized: Option<[f64; 8]>,
     pub shown: [f64; 4],
     pub edge: [f64; 4],
     pub soft: Soft,
@@ -1752,8 +1753,11 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
         0.0,
         0.0,
     ];
+    let back = leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw());
+    let steadied = placed.steadied();
     Level {
-        back: leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw()),
+        back: steadied.map_or(back, |s| chain(&back, &s)),
+        sized: steadied.map(|_| back),
         shown: crop,
         edge,
         soft,
@@ -1828,6 +1832,27 @@ pub fn frame_back((w, h): (f64, f64)) -> [f64; 8] {
     [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]
 }
 
+fn reached(m: &[f64; 8], [x, y]: [f64; 2], [u0, v0, u1, v1]: [f64; 4]) -> Option<([f64; 2], f64)> {
+    let [a, b, e, c, d, f, g, h] = *m;
+    let w = g * x + h * y + 1.0;
+    if !w.is_finite() || w.abs() < 1e-12 {
+        return None;
+    }
+    let (u, v) = ((a * x + b * y + e) / w, (c * x + d * y + f) / w);
+    if !u.is_finite() || !v.is_finite() {
+        return None;
+    }
+    let (du, dv) = (
+        (a - u * g).hypot(b - u * h) / w.abs(),
+        (c - v * g).hypot(d - v * h) / w.abs(),
+    );
+    let cover = [(u - u0) / du, (u1 - u) / du, (v - v0) / dv, (v1 - v) / dv]
+        .into_iter()
+        .map(|e| (e + 0.5).clamp(0.0, 1.0))
+        .product();
+    Some(([u, v], cover))
+}
+
 pub fn apply(m: &[f64; 8], [x, y]: [f64; 2]) -> [f64; 2] {
     let [a, b, e, c, d, f, g, h] = *m;
     let w = g * x + h * y + 1.0;
@@ -1868,11 +1893,16 @@ impl Level {
         near(&self.back, &still) && near(&self.shown, &all)
     }
 
+    pub fn area(&self) -> &[f64; 8] {
+        self.sized.as_ref().unwrap_or(&self.back)
+    }
+
     pub fn forward(&self, uv: [f64; 2]) -> [f64; 2] {
-        ahead(&self.back, uv)
+        ahead(self.area(), uv)
     }
 
     pub fn open(&mut self) {
+        self.sized = None;
         self.edge = [-Self::OPEN, -Self::OPEN, Self::OPEN, Self::OPEN];
         self.soft = Soft::default();
     }
@@ -1885,6 +1915,7 @@ impl Level {
         let (x, y) = ((tw - w) / 2.0, (th - h) / 2.0);
         Self {
             back: [1.0 / w, 0.0, -x / w, 0.0, 1.0 / h, -y / h, 0.0, 0.0],
+            sized: None,
             shown: [0.0, 0.0, 1.0, 1.0],
             edge: [0.0, 0.0, 1.0, 1.0],
             soft: Soft::default(),
@@ -1944,7 +1975,7 @@ impl Placing {
             .and_then(|g| Working::graded(&g.at(p.source as f64), windows));
         effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
-        let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
+        let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(own.area(), c));
         if u0 < u1 && v0 < v1 && own.soft == Soft::default() && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
         }
@@ -1967,25 +1998,11 @@ impl Placing {
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {
         let l = &self.level;
-        let [a, b, e, c, d, f, g, h] = l.back;
-        let w = g * x + h * y + 1.0;
-        if !w.is_finite() || w.abs() < 1e-12 {
-            return None;
-        }
-        let (u, v) = ((a * x + b * y + e) / w, (c * x + d * y + f) / w);
-        if !u.is_finite() || !v.is_finite() {
-            return None;
-        }
-        let (du, dv) = (
-            (a - u * g).hypot(b - u * h) / w.abs(),
-            (c - v * g).hypot(d - v * h) / w.abs(),
-        );
-        let [u0, v0, u1, v1] = l.edge;
-        let mut cover = l.soft.alpha([u, v]) * l.opacity;
-        for edge in [(u - u0) / du, (u1 - u) / du, (v - v0) / dv, (v1 - v) / dv] {
-            cover *= (edge + 0.5).clamp(0.0, 1.0);
-        }
-        (cover > 0.0).then_some(([u, v], cover))
+        let (uv, source) = reached(&l.back, [x, y], [0.0, 0.0, 1.0, 1.0])?;
+        let (at, area) = reached(l.area(), [x, y], l.edge)?;
+        let inside = if l.sized.is_some() { source } else { 1.0 };
+        let cover = l.soft.alpha(at) * l.opacity * area * inside;
+        (cover > 0.0).then_some((uv, cover))
     }
 
     pub fn step(&self) -> [f64; 4] {
@@ -1996,8 +2013,8 @@ impl Placing {
     pub fn share(&self, (w, h): (f64, f64)) -> f64 {
         let l = &self.level;
         let [u0, v0, u1, v1] = l.edge;
-        let [a, b, _, c, d, _, g, k] = l.back;
-        let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|p| ahead(&l.back, p));
+        let [a, b, _, c, d, _, g, k] = *l.area();
+        let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|p| ahead(l.area(), p));
         let quad = if g == 0.0 && k == 0.0 {
             (u1 - u0) * (v1 - v0) / (a * d - b * c).abs()
         } else {
@@ -2011,7 +2028,7 @@ impl Placing {
 
     pub fn bounds(&self, (w, h): (f64, f64)) -> Option<[u32; 4]> {
         let [u0, v0, u1, v1] = self.level.edge;
-        let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&self.level.back, c));
+        let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(self.level.area(), c));
         let mut out = [0.0, 0.0, w, h];
         if corners.iter().all(|c| c[0].is_finite() && c[1].is_finite()) {
             let xs = corners.map(|c| c[0]);

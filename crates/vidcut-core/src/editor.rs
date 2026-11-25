@@ -192,6 +192,18 @@ pub trait Env {
         ))
     }
 
+    fn shake(
+        &self,
+        media: &Media,
+        plan: &RenderPlan,
+        look: crate::analysis::Shaky,
+    ) -> Result<Arc<crate::analysis::Shake>> {
+        let _ = (media, plan, look);
+        Err(Error::usage(
+            "the motion of the camera is measured by the vidcut program",
+        ))
+    }
+
     fn ai_upscaler(&self, upscaler: crate::model::Upscaler, download: bool) -> Result<()> {
         let _ = (upscaler, download);
         Err(Error::usage("the AI upscalers run in the vidcut program"))
@@ -5008,6 +5020,7 @@ fn mutate(
             scaling,
             at,
             dynamic_zoom,
+            stabilization,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let at = match at {
@@ -5016,6 +5029,7 @@ fn mutate(
             };
             let change = ops::picture::PictureChange {
                 dynamic_zoom: *dynamic_zoom,
+                stabilization: *stabilization,
                 position: position
                     .as_deref()
                     .map(|at| ops::picture::point("position", at))
@@ -5048,6 +5062,12 @@ fn mutate(
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::picture::clear(p, &ids, *tool)?;
             Value::Null
+        }
+        Request::PictureStabilize { .. } => {
+            let s = stabilize_plan(p, request, playhead)?;
+            let shake = env.shake(&s.media, &s.plan, s.look)?;
+            let made = crate::stabilize::steadied(&shake, &s.stabilization.values, s.shot);
+            ops::picture::stabilized(p, &s.id, s.stabilization, made)?
         }
         Request::GradeSet {
             clips,
@@ -8572,6 +8592,79 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
     };
     let plan = find_plan(p, request, playhead).ok();
     plan.map(|f| (f.media, *subject, f.look, *download))
+        .into_iter()
+        .collect()
+}
+
+struct StabilizePlan {
+    id: String,
+    media: Media,
+    plan: RenderPlan,
+    look: crate::analysis::Shaky,
+    stabilization: crate::model::Stabilization,
+    shot: crate::stabilize::Shot,
+}
+
+fn stabilize_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<StabilizePlan> {
+    let Request::PictureStabilize {
+        clip,
+        mode,
+        camera_lock,
+        zoom,
+        cropping_ratio,
+        smooth,
+        strength,
+    } = request
+    else {
+        return Err(Error::invalid("not a picture.stabilize request"));
+    };
+    let id = resolve_clip(p, clip, playhead)?;
+    let set = crate::request::StabilizationSet {
+        mode: *mode,
+        camera_lock: *camera_lock,
+        zoom: *zoom,
+        cropping_ratio: *cropping_ratio,
+        smooth: *smooth,
+        strength: *strength,
+        on: None,
+    };
+    let (media, stabilization) = ops::picture::stabilizable(p, &id, &set)?;
+    let c = p
+        .clip(&id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    let frames = crate::composition::Frames::of(p, c);
+    let plan = crate::render::own_picture(p, &id)?;
+    let look = crate::analysis::Shaky {
+        mode: stabilization.values.mode,
+        frames: (
+            frames.mark_in - frames.first,
+            frames.mark_out - frames.first + 1,
+        ),
+    };
+    let shot = crate::stabilize::Shot {
+        first: frames.zero + frames.mark_in,
+        fps: plan.fps.as_f64(),
+        height: f64::from(plan.height),
+    };
+    Ok(StabilizePlan {
+        id,
+        media,
+        plan,
+        look,
+        stabilization,
+        shot,
+    })
+}
+
+pub type StabilizeLook = (Media, RenderPlan, crate::analysis::Shaky);
+
+pub fn stabilize_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+) -> Vec<StabilizeLook> {
+    let plan = stabilize_plan(p, request, playhead).ok();
+    plan.map(|s| (s.media, s.plan, s.look))
         .into_iter()
         .collect()
 }

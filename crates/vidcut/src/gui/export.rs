@@ -2037,6 +2037,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "sync" => Some("multicam.create"),
         "find" => Some("motion.find"),
         "track" => Some("motion.track"),
+        "stabilize" => Some("picture.stabilize"),
         _ => None,
     }
 }

@@ -46,8 +46,34 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It compares the wait in the early calls with the wait in the last calls. A longer wait at the end can show a GPU that slows when it gets hot.
 - From the `[subjects] gpu` lines, it prints the GPU time for each picture, each stage and the slowest layers.
 - The finds and their cache go to a temporary folder. Thus each run measures again.
-- `CLIP=FILE` and `RANGE=A..B` time another clip.
-- It needs the model file. `vidcut models check retinaface-r34 --download` gets it.
+
+**Stabilize speed:** `python3 scripts/stabilize-speed.py [--modes M,M] [--runs N] [--seconds S] [--json FILE] CLIP…` (release build).
+
+- For each clip and each mode, it runs `picture.stabilize` on the whole clip.
+- It prints the frames a second of the analysis, the zoom, and the `motion` and the `shake` before and after.
+- It also prints the cost of the analysis, from `scripts/usage.py`.
+- Before each timed run, it removes the analysis from its cache. Thus each run reads and measures every frame again.
+- An untimed run of each clip comes first. Thus the decoder and the disk are ready.
+- The time includes the start of vidcut and the decode, with the GPU settings of this computer.
+- `--runs N` prints the median of N runs. `--seconds S` uses only the first S seconds of each clip. `--json FILE` writes each result.
+- The projects and their cache go to a temporary folder.
+
+**Cost of a program:** `python3 scripts/usage.py -- COMMAND…`
+
+- It runs the command and prints the wall time, the CPU time, the CPU use, the peak memory and the use of each GPU engine.
+- CPU use is the CPU time over the wall time, in cores and in percent of all threads.
+- GPU use is the mean busy time of each engine type (3D, Compute, VideoDecode), as Task Manager shows it.
+- `--name NAME --log FILE` samples the processes with that name four times a second, until it stops. Use it for a program that runs already, for example an other editor. `--pid PID` samples one process.
+- `--log FILE --from T0 --to T1` prints the cost between two times of that log, in seconds since 1970.
+- Memory, GPU use and `--name` need Windows.
+
+**Stabilize scores:** `uv run --with opencv-python-headless --with numpy scripts/stabilize-score.py --original VIDEO [--clips N] [--names A,B] NAME=VIDEO…`
+
+- It gives the three usual scores of video stabilization (Liu et al. 2013) for each stabilized video against the original.
+- Cropping: the mean share of the picture that the output keeps. Distortion: the worst stretch of a frame. Stability: the share of the slow motion in the camera path.
+- Each score goes from 0 to 1. Higher is better.
+- `--clips N` scores each N frames as one clip.
+- The docstring of the script gives each formula.
 
 **Face check:** `uv run scripts/face-check.py [SIZE]` (release build).
 

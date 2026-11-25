@@ -189,7 +189,7 @@ impl Shown {
     }
 
     fn back(&self, l: &Level, p: Pos2) -> [f64; 2] {
-        apply(&l.back, self.frame_at(p))
+        apply(l.area(), self.frame_at(p))
     }
 
     fn end(&self, e: Boxed) -> &Level {
@@ -264,8 +264,8 @@ impl Shown {
 
     fn inside(&self, p: Pos2, margin: f32) -> bool {
         let at = self.frame_at(p);
-        let [u, v] = apply(&self.level.back, at);
-        let [du, dv] = slopes(&self.level.back, at);
+        let [u, v] = apply(self.level.area(), at);
+        let [du, dv] = slopes(self.level.area(), at);
         let per = |d: f64| f64::from(margin / self.scale.x) * d;
         let (mu, mv) = (per(du), per(dv));
         let [u0, v0, u1, v1] = self.level.shown;
@@ -313,7 +313,7 @@ impl Shown {
                     .max_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
                     .map(Hold::ZoomMove)
             }
-            PictureTool::Composite | PictureTool::Composition => None,
+            PictureTool::Composite | PictureTool::Composition | PictureTool::Stabilization => None,
         }
     }
 
@@ -835,7 +835,10 @@ impl Workspace {
         let switch = match tool {
             PictureTool::Transform => Some(("transform_off", pic.transform_off)),
             PictureTool::Crop => Some(("crop_off", pic.crop_off)),
-            PictureTool::DynamicZoom | PictureTool::Composite | PictureTool::Composition => None,
+            PictureTool::DynamicZoom
+            | PictureTool::Composite
+            | PictureTool::Composition
+            | PictureTool::Stabilization => None,
         };
         if let Some((key, off)) = switch {
             let mut on = !off;
@@ -1116,7 +1119,7 @@ impl Workspace {
             }
             Hold::Crop(side) => {
                 let at = s.frame_at(to);
-                let [u, v] = apply(&s.level.back, at);
+                let [u, v] = apply(s.level.area(), at);
                 let [cx, cy, cw, ch] = s.within;
                 let (u, v) = ((u - cx) / cw, (v - cy) / ch);
                 let k = &mut next.now.crop;
@@ -1334,7 +1337,7 @@ impl Workspace {
                 }
             }
             PictureTool::DynamicZoom => paint_boxes(&painter, s),
-            PictureTool::Composite | PictureTool::Composition => {}
+            PictureTool::Composite | PictureTool::Composition | PictureTool::Stabilization => {}
         }
         if let Some(h) = &self.timeline.picture_grab.held {
             let guide = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 140));

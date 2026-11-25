@@ -652,6 +652,7 @@ Writing:
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`). Effects (`Glow`, `Vignette`, `GrainComposite`) and `GradeTool::LayerMixer` take `BlendMode`, which has only the 27 blend modes.
   - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur`, a `MosaicBlur`, a `Glow`, a `FilmGrain`, a `Vignette` or a `Sharpen` ([export](export.md#effects))
   - its `composition`: the nodes that work on its own picture before all of the above ([compositions](#compositions))
+  - its `stabilization` (`Stabilization`): the values (`Stabilizing`), the switch, and the correction that `picture.stabilize` made (`Stabilized`, [analysis](analysis.md#stabilization)). Only footage takes it (`ops::picture::footage`).
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts only goes into the frame by the timeline's `Scaling`.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
@@ -663,6 +664,8 @@ Writing:
   - `ops::picture::takes_effects` tells which of them take effects: not generators and not titles ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
+  - `picture.set` takes a `StabilizationSet` in the same way (`StabilizationSet::on`). A changed value keeps the old correction until `picture.stabilize` runs again (`Stabilization::ready`).
+  - `ops::picture::stabilized` stores a new correction with the values that made it.
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
 - `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
 - The `keys` of an `Effect` hold one `EffectKeys` for each `EffectValue` with keyframes, sorted by value.

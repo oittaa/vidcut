@@ -29,6 +29,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - Auto Color, with the legacy method (§8.25, X174)
+- stabilization of a clip of a video file (§8.27)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
@@ -43,7 +44,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
 - the Fusion tools that §8.19 does not have
 - LUT files other than `.cube` ([todo](todo/luts.md))
-- Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
@@ -4486,6 +4486,62 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A generator takes no effects, grade or composition.
   - A copied speed with keyframes does not paste. The request gives an error.
   - Clip Color gives the color that the copied clip shows.
+
+### 8.27 Stabilization (pp. 295, 737–738, 769, 923–924, 1209–1210, 3502–3503; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Video Inspector of the Cut page and of the Edit page has a Stabilization section (pp. 737–738, 923–924, 1209–1210).
+  - The Stabilization tool of the Cut page viewer Tools has the same controls (p. 769).
+  - The Tracker palette of the Color page has them too, with a graph of the analysis (pp. 3502–3503). All of them set the same data.
+  - The method comes first. Then Stabilize analyzes the clip. Another method needs Stabilize again (pp. 737, 769).
+  - A change of any value needs Stabilize again (p. 769).
+  - Perspective takes out perspective, pan, tilt, zoom and rotation. Similarity takes out pan, tilt, zoom and rotation. Translation takes out pan and tilt (p. 737).
+  - The Color page also has Camera Gyro, for clips of some cameras with a gyroscope (p. 3502).
+  - The switch turns the stabilization off and on, to compare the two pictures (p. 737).
+  - Camera Lock takes out all camera motion. It turns off Cropping Ratio and Smooth (p. 737).
+  - Zoom enlarges the picture until no black edge shows. Off, the black edges show (p. 737).
+  - Cropping Ratio limits the correction. At 1.0 there is no correction. Lower values correct more and zoom more (p. 737).
+  - Smooth smooths the path of the camera. Higher values smooth more (p. 738).
+  - Strength multiplies the correction. At 0 there is no correction. A negative value inverts it (p. 738).
+  - The transform of the stabilization comes between Edit Sizing and Input Sizing. It refers back to the source, or to the output of the Fusion page (p. 295).
+- Measured:
+  - The Mode menu has Perspective, Similarity and Translation. Perspective is the usual mode.
+  - The usual values are Camera Lock off, Zoom on, Cropping Ratio 0.500, Smooth 0.250 and Strength 1.000.
+  - Cropping Ratio and Smooth go from 0.25 to 1.0. Strength goes from −1 to 1. A typed value past an end takes that end.
+  - Camera Lock greys out Cropping Ratio, Smooth and Strength.
+  - Stabilize takes less than 5 s for 119 frames of 1080i. Then the button is grey until a value changes.
+  - The scripting API has no property of the stabilization.
+  - An OpenTimelineIO export keeps nothing of the stabilization.
+  - A higher Smooth gives a larger zoom. Smooth 0.25, 0.5 and 1.0 give a mean zoom of 1.33, 1.50 and 1.67 on a rally clip.
+    - On a crowd clip, they give 1.32, 1.63 and 2.01.
+  - On these two clips, Cropping Ratio 0.25, 0.5 and 0.75 change the zoom by 3% or less.
+    - On a downhill clip with a large correction, Cropping Ratio 0.75 gives a mean zoom of 1.40.
+  - The smoothing follows a fast pan. The crowd clip has pans of more than one picture width in less than 0.5 s. At Smooth 0.25, its zoom stays 1.32.
+  - The smoothing is local in time. The first 150 frames of the crowd clip get the same correction as the first 299 frames, except near the end.
+  - The record is section R14 of `fixtures/program/NOTES.md` in the test data.
+- vidcut:
+  - `picture.stabilize` analyzes the clip and stores the correction on the clip, with the values that it used.
+    - It reads each frame of the file from the In to the Out of the clip.
+    - It reads the picture after the composition of the Effects page, before the crop and the transform. Thus it refers back to the source, as on p. 295.
+    - `mode`, `camera_lock`, `zoom`, `cropping_ratio`, `smooth` and `strength` set the values first.
+    - It returns the frames, the zoom, and the motion and the shake before and after the correction.
+  - `picture.set` with `stabilization` sets the values and the switch (`on`).
+    - A changed value changes nothing until `picture.stabilize` runs again. `picture.get` then shows `changed`.
+    - The switch acts at once.
+  - `picture.clear` with `stabilization` removes the values and the correction.
+  - `picture.set` and `picture.stabilize` refuse a value past an end, with the range in the error.
+  - Each run of `picture.stabilize` is one undo step.
+  - The Video tab of the Inspector has the Stabilization section: the switch, Reset, Mode, Camera Lock, Zoom, Cropping Ratio, Smooth, Strength and Stabilize.
+    - Stabilize is grey while the correction has the values that the section shows. It is grey while a stabilization runs too.
+    - Camera Lock greys out Cropping Ratio, Smooth and Strength.
+  - The correction moves the cropped picture, before its transform. Thus it works in the coordinates of the source, as on p. 295.
+  - With Zoom on, one zoom for the whole clip keeps the black edges out of each frame.
+  - Camera Lock holds the view of the first frame of the clip.
+  - Only a clip of a video file takes a stabilization.
+  - The viewer Tools have no Stabilization tool. The Color page has no Tracker palette.
+  - An OpenTimelineIO file of vidcut keeps the stabilization in the vidcut metadata of the picture. Other editors read nothing of it.
+  - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
+  - [design](design/analysis.md#stabilization) gives the method.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

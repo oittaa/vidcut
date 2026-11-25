@@ -681,6 +681,45 @@ impl Words<'_> {
                 });
             }
         }
+        if let Some(st) = p.get("stabilization") {
+            let of = |q: &Picture| q.stabilization.clone().unwrap_or_default().values;
+            if !st["on"].is_null() {
+                s.add("Stabilization", &st["on"], &raw, Value::Null, |q| {
+                    json!(q.stabilization.as_ref().is_none_or(|x| !x.off))
+                });
+            }
+            if !st["mode"].is_null() {
+                s.add("Mode", &st["mode"], &word, Value::Null, |q| {
+                    json!(of(q).mode)
+                });
+            }
+            if !st["camera_lock"].is_null() {
+                s.add("Camera Lock", &st["camera_lock"], &raw, Value::Null, |q| {
+                    json!(of(q).camera_lock)
+                });
+            }
+            if !st["zoom"].is_null() {
+                s.add("Stabilization Zoom", &st["zoom"], &raw, Value::Null, |q| {
+                    json!(of(q).zoom)
+                });
+            }
+            for (key, label) in [
+                ("cropping_ratio", "Cropping Ratio"),
+                ("smooth", "Smooth"),
+                ("strength", "Strength"),
+            ] {
+                if !st[key].is_null() {
+                    s.add(label, &st[key], &number, Value::Null, |q| {
+                        let v = of(q);
+                        match key {
+                            "cropping_ratio" => json!(v.cropping_ratio()),
+                            "smooth" => json!(v.smooth()),
+                            _ => json!(v.strength()),
+                        }
+                    });
+                }
+            }
+        }
         s.f.text()
     }
 

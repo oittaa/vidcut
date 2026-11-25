@@ -14,9 +14,9 @@ use crate::model::{
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
     MergeOperator, Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType,
-    Place, ReferenceTime, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode,
-    VignetteShape, WindowKind, ZoomBox,
+    Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
+    SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
+    TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2789,16 +2789,19 @@ pub enum Request {
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
     /// its `anchor`, its `pitch`, its `yaw`, its flips, its `crop`, its
     /// `dynamic_zoom` (null when it has none), its `composite_mode`, its
-    /// `opacity` and its `scaling`, every value given, usual ones too.
+    /// `opacity`, its `scaling` and its `stabilization`, every value given,
+    /// usual ones too. In `stabilization`, `stabilized` tells that the clip
+    /// has a correction, and `changed` that a value changed after it was made.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
     /// Move, zoom, turn, pitch, yaw, flip, crop, scale, mix or fade clips'
-    /// pictures, or give them a Dynamic Zoom: footage, stills, image
-    /// sequences, compound clips, generators and titles. On a title, this is
-    /// the picture of the timeline's size that its text is drawn on; its
-    /// text has its own place (`titles.set`). Each field given replaces its
-    /// own. At its usual values a picture goes into the frame by the scaling
-    /// of the timeline; the tracks below show wherever it doesn't cover the
+    /// pictures, give them a Dynamic Zoom, or set their stabilization:
+    /// footage, stills, image sequences, compound clips, generators and
+    /// titles. Only footage takes a stabilization. On a title, this is the
+    /// picture of the timeline's size that its text is drawn on; its text
+    /// has its own place (`titles.set`). Each field given replaces its own.
+    /// At its usual values a picture goes into the frame by the scaling of
+    /// the timeline; the tracks below show wherever it doesn't cover the
     /// frame: in its bars, around it, where it is cropped and through its
     /// soft edges and its opacity.
     #[serde(rename = "picture.set")]
@@ -2893,14 +2896,52 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         dynamic_zoom: Option<Option<DynamicZoomSet>>,
+        /// The values of the stabilization and its switch. A new value
+        /// changes the picture only when `picture.stabilize` runs again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stabilization: Option<StabilizationSet>,
+    },
+    /// Analyze the motion of the camera in a clip (`c3`, or `V2@15s`) and
+    /// steady its picture. Each value given replaces its own first. The
+    /// clip keeps the correction for each frame of its file, and the
+    /// viewer and an export play it. Each frame of the clip is read when
+    /// the mode changes or the clip has no analysis yet. Only footage
+    /// from a video file takes a stabilization. Returns the zoom and the
+    /// motion of the picture before and after, in pixels of the picture:
+    /// `motion` is the mean move from frame to frame, and `shake` is the
+    /// mean change of that move.
+    #[serde(rename = "picture.stabilize")]
+    PictureStabilize {
+        clip: ClipRef,
+        /// The motion that the analysis finds and takes out: `perspective`,
+        /// `similarity` or `translation`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<StabilizeMode>,
+        /// On, the picture holds the view of the first frame.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        camera_lock: Option<bool>,
+        /// On, the picture is zoomed so that no edge shows in the frame.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zoom: Option<bool>,
+        /// The share of the picture that stays in the frame at the most,
+        /// from 0.25 to 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cropping_ratio: Option<f64>,
+        /// How smooth the camera path becomes, from 0.25 to 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smooth: Option<f64>,
+        /// How much of the correction the picture gets, from -1 to 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strength: Option<f64>,
     },
     /// Put clips' pictures back at their usual values: the `transform`
     /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
-    /// composite mode and the opacity), or all of them when no `tool` is
-    /// given. Their effects and compositions stay. `composition` takes off
-    /// the composition with the motion paths of its trackers, and each
-    /// picture comes as it is.
+    /// composite mode and the opacity), the `stabilization` (its values and
+    /// its correction), or all of them when no `tool` is given. Their
+    /// effects and compositions stay. `composition` takes off the
+    /// composition with the motion paths of its trackers, and each picture
+    /// comes as it is.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,
@@ -7351,6 +7392,62 @@ impl ZoomBoxSet {
         ZoomBox {
             center: self.center.unwrap_or(b.center),
             size: self.size.unwrap_or(b.size),
+        }
+    }
+}
+
+/// A change to the stabilization of a clip: each field given replaces its
+/// own, and the rest stay as they are. A change of `mode`, `camera_lock`,
+/// `zoom`, `cropping_ratio`, `smooth` or `strength` changes the picture
+/// only when `picture.stabilize` runs again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StabilizationSet {
+    /// The motion that the analysis finds and takes out: `perspective`,
+    /// `similarity` or `translation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<StabilizeMode>,
+    /// On, the picture holds the view of the first frame. The cropping
+    /// ratio, the smoothing and the strength do nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_lock: Option<bool>,
+    /// On, the picture is zoomed so that no edge shows in the frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<bool>,
+    /// The share of the width and the height of the picture that stays in
+    /// the frame at the most, from 0.25 to 1. At 1 there is no correction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cropping_ratio: Option<f64>,
+    /// How smooth the camera path becomes, from 0.25 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smooth: Option<f64>,
+    /// How much of the correction the picture gets, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f64>,
+    /// False turns the correction off: it stays and does nothing. True
+    /// turns it on again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+impl StabilizationSet {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn on(&self, s: &Stabilization) -> Stabilization {
+        let v = s.values;
+        Stabilization {
+            values: Stabilizing {
+                mode: self.mode.unwrap_or(v.mode),
+                camera_lock: self.camera_lock.unwrap_or(v.camera_lock),
+                zoom: self.zoom.unwrap_or(v.zoom),
+                cropping_ratio: self.cropping_ratio.or(v.cropping_ratio),
+                smooth: self.smooth.or(v.smooth),
+                strength: self.strength.or(v.strength),
+            },
+            off: self.on.map_or(s.off, |on| !on),
+            made: s.made.clone(),
         }
     }
 }

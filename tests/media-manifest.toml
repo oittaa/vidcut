@@ -187,3 +187,59 @@ url = "https://archive.org/download/scm-10794-mtstestfile/00007.mts"
 license = "CC BY-SA 3.0, dean, Seattle Community Media, https://archive.org/details/scm-10794-mtstestfile"
 purpose = "1080i 29.97 H.264 in MPEG-TS, top field first, coded in fields: a packet and a timestamp for each field, and no rate in the header. The probe must give 30000/1001, not 60000/1001"
 sha256 = "65d14615ceebe15e2fa832d35335c0940bc2f00f55c4eac52d7ba6199ae925cc"
+
+[[clip]]
+name = "stab-road-4k"
+file = "Vlog_2160P-255c_crf_10_ss_00_t_20.0.mp4"
+url = "https://storage.googleapis.com/ugc-dataset/original_videos_h264/Vlog_2160P-255c_crf_10_ss_00_t_20.0.mp4"
+license = "CC BY 4.0, 'East Sussex Road Trip! Vlog #014[4k]' by Mark Stinchon, excerpt in the YouTube UGC dataset"
+purpose = "stabilization: 4K handheld from a car"
+sha256 = "92224438f28614fb09fe0e925305160e7656fad4605a671f3672c69b59a8f099"
+
+[[clip]]
+name = "stab-moto"
+file = "Vlog_1080P-64b6_crf_10_ss_00_t_20.0.mp4"
+url = "https://storage.googleapis.com/ugc-dataset/original_videos_h264/Vlog_1080P-64b6_crf_10_ss_00_t_20.0.mp4"
+license = "CC BY 4.0, 'Motorradtour Südfrankreich 2018-09-22-006-b inj' by DraKuhla, excerpt in the YouTube UGC dataset"
+purpose = "stabilization: 1080p motorcycle camera"
+sha256 = "7f6069f2fed1c9f8d991c5ecef436b8cebec2c7b21add52c312dc954d3cb7335"
+
+[[clip]]
+name = "stab-rally"
+file = "Sports_1080P-7584_crf_10_ss_00_t_20.0.mp4"
+url = "https://storage.googleapis.com/ugc-dataset/original_videos_h264/Sports_1080P-7584_crf_10_ss_00_t_20.0.mp4"
+license = "CC BY 4.0, 'RallySprint Eskiltuna del2 2014' by GalskapMotorsportcom, excerpt in the YouTube UGC dataset"
+purpose = "stabilization: 1080p rally, fast motion"
+sha256 = "fa5cd5b94fbeeb45427b0cde36da86c6663def6ad1a16de2d539425e2fa1ef4e"
+
+[[clip]]
+name = "stab-crowd-4k"
+file = "Vlog_2160P-5874_crf_10_ss_00_t_20.0.mp4"
+url = "https://storage.googleapis.com/ugc-dataset/original_videos_h264/Vlog_2160P-5874_crf_10_ss_00_t_20.0.mp4"
+license = "CC BY 4.0, 'VLOG 2 | MILAN FASHIONWEEK' by Maria Jernov, excerpt in the YouTube UGC dataset"
+purpose = "stabilization: 4K handheld walk in a crowd"
+sha256 = "a496b7b7344364f9dcbdcb028545a1b365ed891b3083d4b1e3bf6b1e9d7365d9"
+
+[[clip]]
+name = "stab-night-market"
+file = "20251106_213507_Shengli_night_market_walk_video2commons.webm"
+url = "https://upload.wikimedia.org/wikipedia/commons/8/8d/20251106_213507_Shengli_night_market_walk_video2commons.webm"
+license = "CC0, Wikimedia Commons File:20251106_213507_Shengli_night_market_walk_video2commons.webm"
+purpose = "stabilization: 1080p walk in low light and a crowd"
+sha256 = "49c99efeb68757b17a1ecad581ea9e66728791f9156c6cb09f10db78fe968092"
+
+[[clip]]
+name = "stab-dashcam"
+file = "Dashcam_Recording_(urban).ogv"
+url = "https://upload.wikimedia.org/wikipedia/commons/e/ea/Dashcam_Recording_%28urban%29.ogv"
+license = "CC0, Fernost, Wikimedia Commons File:Dashcam_Recording_(urban).ogv"
+purpose = "stabilization: 1080p dashcam"
+sha256 = "adc81709b01e3028cffe69039d300ddc74edb385a8afb66b982dd067a7ca4363"
+
+[[clip]]
+name = "stab-downhill"
+file = "Downhill_footage_taken_with_GoPro_on_a_Fullface_helmet_installed_with_NINJA_MOUNT.ogv"
+url = "https://upload.wikimedia.org/wikipedia/commons/d/de/Downhill_footage_taken_with_GoPro_on_a_Fullface_helmet_installed_with_NINJA_MOUNT.ogv"
+license = "CC BY-SA 4.0, Cabblers, Wikimedia Commons"
+purpose = "stabilization: 1080p helmet camera, downhill ride"
+sha256 = "a119bd911d0db52597aaace33a379685f3579c4653232e4c6c4357e1b69ca624"

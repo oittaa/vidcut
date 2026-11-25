@@ -293,14 +293,14 @@ fn pieces(plan: &RenderPlan, from: i64, to: i64) -> Vec<VideoPiece> {
     out
 }
 
-struct Reader<'a> {
-    plan: &'a RenderPlan,
-    size: (u32, u32),
-    gpu: Option<&'a crate::hw::GpuDecoder>,
+pub(crate) struct Reader<'a> {
+    pub(crate) plan: &'a RenderPlan,
+    pub(crate) size: (u32, u32),
+    pub(crate) gpu: Option<&'a crate::hw::GpuDecoder>,
 }
 
 impl Reader<'_> {
-    fn run(&self, from: i64, to: i64) -> Result<VideoFrames> {
+    pub(crate) fn run(&self, from: i64, to: i64) -> Result<VideoFrames> {
         let colors = (self.plan.colors, None, None);
         let pixel = format::Pixel::RGB24;
         let frames =
@@ -326,7 +326,7 @@ impl Reader<'_> {
     }
 }
 
-fn going<T>(r: Result<T>) -> Result<Option<T>> {
+pub(crate) fn going<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Err(_) if crate::cancel::cancelled() => Ok(None),
         r => r.map(Some),
@@ -339,14 +339,14 @@ fn ended(frame: i64) -> Error {
     ))
 }
 
-struct Shown<'a> {
-    path: &'a Path,
-    started: Instant,
-    all: f64,
+pub(crate) struct Shown<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) started: Instant,
+    pub(crate) all: f64,
 }
 
 impl Shown<'_> {
-    fn report(&self, done: usize) {
+    pub(crate) fn report(&self, done: usize) {
         let seen = Progress::measuring(done as f64 / self.all, self.started.elapsed());
         crate::progress::report(self.path, seen);
     }

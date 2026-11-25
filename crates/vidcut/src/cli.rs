@@ -98,6 +98,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.get", &["clip"]),
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
+    ("picture.stabilize", &["clip"]),
     ("grade.get", &["clip"]),
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
@@ -493,12 +494,21 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut picture set c3 --composite-mode multiply\n  \
          vidcut picture set c3 --dynamic-zoom '{}'\n  \
          vidcut picture set c3 --dynamic-zoom '{\"end\":{\"center\":[0.3,0.4],\"size\":0.5},\"ease\":\"ease_in_out\"}'\n  \
-         vidcut picture set c3 --dynamic-zoom null",
+         vidcut picture set c3 --dynamic-zoom null\n  \
+         vidcut picture set c3 --stabilization '{\"on\":false}'",
     ),
     (
         "picture.clear",
         "vidcut picture clear c3\n  vidcut picture clear c3 --tool crop\n  \
-         vidcut picture clear c3 --tool dynamic_zoom\n  vidcut picture clear c3 --tool composite",
+         vidcut picture clear c3 --tool dynamic_zoom\n  vidcut picture clear c3 --tool composite\n  \
+         vidcut picture clear c3 --tool stabilization",
+    ),
+    (
+        "picture.stabilize",
+        "vidcut picture stabilize c3\n  \
+         vidcut picture stabilize c3 --mode translation\n  \
+         vidcut picture stabilize V1@10s --camera-lock true\n  \
+         vidcut picture stabilize c3 --smooth 1 --strength 0.5 --zoom false",
     ),
     (
         "effects.add",

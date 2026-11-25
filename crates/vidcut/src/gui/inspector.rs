@@ -6608,7 +6608,8 @@ impl Workspace {
                     PictureTool::Crop => p.crop_off = !on,
                     PictureTool::DynamicZoom
                     | PictureTool::Composite
-                    | PictureTool::Composition => return None,
+                    | PictureTool::Composition
+                    | PictureTool::Stabilization => return None,
                 }
                 Some(p)
             }),
@@ -6914,6 +6915,10 @@ impl Workspace {
                     speed_section(ui, state, (&paced, at), ripple, &mut acts);
                 } else if tab == Tab::Video && !first.takes_speed() {
                     shut_group(ui, "Speed");
+                }
+                if tab == Tab::Video && !chosen.is_empty() {
+                    let ids: Vec<String> = chosen.iter().map(|c| c.id.clone()).collect();
+                    self.stabilization_section(ui, p, &ids);
                 }
                 if tab == Tab::Audio && !sounds.is_empty() {
                     let ids: Vec<String> = sounds.iter().map(|s| s.id.clone()).collect();
