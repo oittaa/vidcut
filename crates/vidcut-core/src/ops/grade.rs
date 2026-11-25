@@ -4,7 +4,7 @@ use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
     AutoColor, COMBINER_INPUTS, Clip, Corrector, DynamicsProfile, Grade, GradeKey, GradeLink,
-    GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput, Project, SPLIT_OUTPUTS,
+    GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput, Project, SPLIT_OUTPUTS, Track,
     WindowKind,
 };
 use crate::preferences::ColorPrefs;
@@ -300,6 +300,19 @@ fn split(g: &Grade, n: u32) -> bool {
 }
 
 pub fn checked(g: &Grade) -> Result<()> {
+    if g.layers.len() + g.kept_layers.len() >= NODE_STACK_LAYERS {
+        return Err(Error::invalid(format!(
+            "a grade has {NODE_STACK_LAYERS} node stack layers at most"
+        )));
+    }
+    for layer in g.layers.iter().chain(&g.kept_layers) {
+        if !layer.layers.is_empty() || !layer.kept_layers.is_empty() {
+            return Err(Error::invalid(
+                "a node stack layer has no layers of its own",
+            ));
+        }
+        checked(layer)?;
+    }
     if let Some(o) = g.output {
         if o.node > g.last() {
             return Err(no_node(o.node));
@@ -376,10 +389,40 @@ pub fn printed(
     })
 }
 
+pub const NODE_STACK_LAYERS: usize = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GradeOf {
     Timeline,
-    Clip(String),
+    Clip(String, usize),
+}
+
+impl GradeOf {
+    pub fn fields(&self, key: &str) -> serde_json::Map<String, Value> {
+        let mut m = serde_json::Map::new();
+        match self {
+            Self::Timeline => {
+                m.insert("timeline".into(), Value::Bool(true));
+            }
+            Self::Clip(id, layer) => {
+                m.insert(key.into(), Value::String(id.clone()));
+                if *layer > 1 {
+                    m.insert("layer".into(), Value::from(*layer));
+                }
+            }
+        }
+        m
+    }
+}
+
+pub fn layer_checked(p: &Project, layer: usize) -> Result<usize> {
+    let count = p.settings.node_stack_layers.len();
+    match (1..=count).contains(&layer) {
+        true => Ok(layer),
+        false => Err(Error::invalid(format!(
+            "the project has {count} node stack layers: give a layer from 1 to {count}"
+        ))),
+    }
 }
 
 fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
@@ -400,7 +443,7 @@ fn no_timeline() -> Error {
 pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
     match of {
         GradeOf::Timeline => Ok(at),
-        GradeOf::Clip(id) => {
+        GradeOf::Clip(id, _) => {
             let (ti, ci) = locate(p, id)?;
             Ok(p.tracks[ti].clips[ci].content_at(at))
         }
@@ -408,44 +451,99 @@ pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
 }
 
 pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
-    let grade = match of {
-        GradeOf::Timeline => {
-            if !p.compound_path.is_empty() {
-                return Err(Error::invalid("a compound clip has no timeline grade"));
-            }
-            p.timeline().ok_or_else(no_timeline)?.grade.as_ref()
-        }
-        GradeOf::Clip(id) => {
-            let (ti, ci) = locate(p, id)?;
-            let c = &p.tracks[ti].clips[ci];
-            grades(p, ti, c)?;
-            c.picture.as_ref().and_then(|pic| pic.grade.as_ref())
-        }
-    };
-    Ok(grade
-        .cloned()
-        .unwrap_or_else(|| Grade::usual(p.frame_size())))
-}
-
-fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
-    checked(grade)?;
-    let grade = (!grade.is_usual(p.frame_size())).then(|| grade.clone());
+    let frame = p.frame_size();
     match of {
         GradeOf::Timeline => {
             if !p.compound_path.is_empty() {
                 return Err(Error::invalid("a compound clip has no timeline grade"));
             }
+            let t = p.timeline().ok_or_else(no_timeline)?;
+            Ok((t.grade.clone()).unwrap_or_else(|| Grade::usual(frame)))
+        }
+        GradeOf::Clip(id, layer) => {
+            let layer = layer_checked(p, *layer)?;
+            Ok(match whole(p, id)? {
+                Some(g) => g.layer(layer, frame),
+                None => Grade::usual(frame),
+            })
+        }
+    }
+}
+
+pub fn whole(p: &Project, id: &str) -> Result<Option<Grade>> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    grades(p, ti, c)?;
+    Ok(c.picture.as_ref().and_then(|pic| pic.grade.clone()))
+}
+
+fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
+    checked(grade)?;
+    let frame = p.frame_size();
+    match of {
+        GradeOf::Timeline => {
+            if !grade.layers.is_empty() || !grade.kept_layers.is_empty() {
+                return Err(Error::invalid(
+                    "the timeline grade has no node stack layers",
+                ));
+            }
+            if !p.compound_path.is_empty() {
+                return Err(Error::invalid("a compound clip has no timeline grade"));
+            }
+            let grade = (!grade.is_usual(frame)).then(|| grade.clone());
             p.timeline_mut().ok_or_else(no_timeline)?.grade = grade;
         }
-        GradeOf::Clip(id) => {
-            let (ti, ci) = locate(p, id)?;
-            let c = &mut p.tracks[ti].clips[ci];
-            let mut picture = c.picture.take().unwrap_or_default();
-            picture.grade = grade;
-            c.picture = (!picture.is_usual()).then_some(picture);
+        GradeOf::Clip(id, layer) => {
+            let layer = layer_checked(p, *layer)?;
+            let was = whole(p, id)?.unwrap_or_else(|| Grade::usual(frame));
+            put_whole(p, id, was.with_layer(layer, grade.layer(1, frame), frame))?;
         }
     }
     Ok(())
+}
+
+fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
+    checked(&grade)?;
+    let grade = (!grade.is_usual(p.frame_size())).then_some(grade);
+    let (ti, ci) = locate(p, id)?;
+    let c = &mut p.tracks[ti].clips[ci];
+    let mut picture = c.picture.take().unwrap_or_default();
+    picture.grade = grade;
+    c.picture = (!picture.is_usual()).then_some(picture);
+    Ok(())
+}
+
+pub fn clear_layers(p: &mut Project, of: &[GradeOf]) -> Result<()> {
+    let frame = p.frame_size();
+    for o in of {
+        let GradeOf::Clip(id, _) = o else {
+            return Err(Error::invalid(
+                "the timeline grade has no node stack layers",
+            ));
+        };
+        if let Some(mut g) = whole(p, id)? {
+            g.reset_layers(frame);
+            put_whole(p, id, g)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn count_layers(p: &mut Project, count: usize) {
+    let frame = p.frame_size();
+    let counted = |tracks: &mut [Track]| {
+        let clips = tracks.iter_mut().flat_map(|t| t.clips.iter_mut());
+        for g in clips.filter_map(|c| c.picture.as_mut()?.grade.as_mut()) {
+            g.counted(count, frame);
+        }
+    };
+    counted(&mut p.tracks);
+    for t in &mut p.timelines {
+        counted(&mut t.tracks);
+    }
+    for k in &mut p.compounds {
+        counted(&mut k.tracks);
+    }
 }
 
 pub(super) fn edited(
@@ -946,7 +1044,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
 }
 
 fn oldest_taker(g: &mut Grade, from: GradeLink) -> Option<&mut Option<GradeLink>> {
-    let Grade { nodes, output } = g;
+    let Grade { nodes, output, .. } = g;
     nodes
         .iter_mut()
         .flat_map(|d| d.inputs.iter_mut().chain([&mut d.key_from]))
@@ -1304,7 +1402,7 @@ fn lone_input(g: &Grade, m: u32) -> Option<GradeLink> {
 fn start_of(p: &Project, of: &GradeOf) -> Result<i64> {
     match of {
         GradeOf::Timeline => Ok(0),
-        GradeOf::Clip(id) => {
+        GradeOf::Clip(id, _) => {
             let (ti, ci) = locate(p, id)?;
             let c = &p.tracks[ti].clips[ci];
             Ok(c.content_at(c.start))

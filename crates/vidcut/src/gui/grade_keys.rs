@@ -135,7 +135,7 @@ struct Span {
 impl Span {
     fn of(p: &Project, of: &GradeOf) -> Option<Self> {
         match of {
-            GradeOf::Clip(id) => {
+            GradeOf::Clip(id, _) => {
                 let c = p.clip(id)?;
                 Some(Self {
                     lo: c.start as f64,
@@ -177,25 +177,18 @@ impl Map {
 }
 
 fn target(of: &GradeOf, more: Value) -> Value {
-    let mut v = match of {
-        GradeOf::Clip(id) => json!({ "clip": id }),
-        GradeOf::Timeline => json!({ "timeline": true }),
-    };
-    if let (Value::Object(to), Value::Object(from)) = (&mut v, more) {
-        to.extend(from);
-    }
-    v
+    with_fields(of.fields("clip"), more)
 }
 
 fn clips_target(of: &GradeOf, more: Value) -> Value {
-    let mut v = match of {
-        GradeOf::Clip(id) => json!({ "clips": id }),
-        GradeOf::Timeline => json!({ "timeline": true }),
-    };
-    if let (Value::Object(to), Value::Object(from)) = (&mut v, more) {
+    with_fields(of.fields("clips"), more)
+}
+
+fn with_fields(mut to: serde_json::Map<String, Value>, more: Value) -> Value {
+    if let Value::Object(from) = more {
         to.extend(from);
     }
-    v
+    Value::Object(to)
 }
 
 fn with_node(node: Option<u32>, more: Value) -> Value {

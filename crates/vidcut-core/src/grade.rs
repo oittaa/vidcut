@@ -1232,6 +1232,7 @@ impl Graded {
     }
 
     fn made(g: &Grade, tapped: bool) -> Option<Self> {
+        let g = &*g.stacked();
         if !complete(g) {
             return None;
         }

@@ -1866,6 +1866,15 @@ pub fn violation(p: &Project, ti: usize, c: &Clip) -> Option<String> {
     {
         return Some(e.message);
     }
+    let count = p.settings.node_stack_layers.len();
+    if let Some(g) = &picture.grade
+        && (g.layers.len() >= count || !g.kept_layers.is_empty() && g.layers.len() + 1 != count)
+    {
+        return Some(format!(
+            "{}: the grade does not fit {count} node stack layers",
+            c.id
+        ));
+    }
     checked(picture)
         .err()
         .map(|e| format!("{}: {}", c.id, e.message))

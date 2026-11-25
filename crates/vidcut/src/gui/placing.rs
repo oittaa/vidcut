@@ -818,7 +818,7 @@ impl Workspace {
         }
         let graded = self.graded(clip.as_ref());
         let kept = clip.as_ref().and_then(|(id, p)| {
-            let frame = self.grade_frame(&GradeOf::Clip(id.clone())) as f64;
+            let frame = self.grade_frame(&GradeOf::Clip(id.clone(), 1)) as f64;
             let node = p.grade.as_ref()?.node(1)?;
             node.corrector_at(frame)?.auto_color.clone()
         });
@@ -983,7 +983,7 @@ impl Workspace {
         let (w, h) = (f64::from(p.width()), f64::from(p.height()));
         let windows = match of {
             GradeOf::Timeline => frame_back((w, h)),
-            GradeOf::Clip(id) => {
+            GradeOf::Clip(id, _) => {
                 let c = p.clip(id)?;
                 let at = self.snap.timeline.position;
                 let run = Run {

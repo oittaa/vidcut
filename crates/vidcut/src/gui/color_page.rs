@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{
     BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
-    KeyOutput, Picture, Project, WindowKind,
+    KeyOutput, Picture, Project, Settings, WindowKind,
 };
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
@@ -209,6 +209,7 @@ enum FieldAct {
     Splitter,
     Combiner,
     ResetAll,
+    ResetLayers,
     KeepNodes,
     Zoom(NodeZoom),
     Wide,
@@ -673,18 +674,12 @@ fn key_changes(from: KeyOutput, to: KeyOutput) -> Map<String, Value> {
 
 const BAR: Vec2 = Vec2::new(16.0, 110.0);
 
-fn named(of: &GradeOf) -> (String, Value) {
-    match of {
-        GradeOf::Clip(id) => ("clips".into(), json!(id)),
-        GradeOf::Timeline => ("timeline".into(), json!(true)),
-    }
+fn named(of: &GradeOf) -> Map<String, Value> {
+    of.fields("clips")
 }
 
-fn window_target(of: &GradeOf) -> (String, Value) {
-    match of {
-        GradeOf::Clip(id) => ("clip".into(), json!(id)),
-        GradeOf::Timeline => ("timeline".into(), json!(true)),
-    }
+fn window_target(of: &GradeOf) -> Map<String, Value> {
+    of.fields("clip")
 }
 
 const PRINTER_COLORS: [PrinterColor; 7] = [
@@ -711,14 +706,11 @@ fn printer_label(color: PrinterColor, points: f64) -> String {
 }
 
 fn params(of: &GradeOf, field: &str, more: Value) -> Value {
-    let mut v = match of {
-        GradeOf::Clip(id) => json!({ field: id }),
-        GradeOf::Timeline => json!({ "timeline": true }),
-    };
-    if let (Value::Object(to), Value::Object(from)) = (&mut v, more) {
-        to.extend(from);
+    let mut v = of.fields(field);
+    if let Value::Object(from) = more {
+        v.extend(from);
     }
-    v
+    Value::Object(v)
 }
 
 fn command(method: &str, params: Value) -> Value {
@@ -759,14 +751,21 @@ fn kind(tool: &GradeTool) -> &'static str {
     }
 }
 
-fn shot_of(shots: &NodeShots, n: u32) -> Shot {
+#[derive(Clone, Copy)]
+struct ShotPlace {
+    start: u32,
+    stand_in: Option<u32>,
+}
+
+fn shot_of(shots: &NodeShots, n: u32, at: ShotPlace) -> Shot {
+    let n = at.stand_in.unwrap_or(at.start + n);
     let cell = shots.cells.iter().find(|(k, ..)| *k == n);
     Shot {
         picture: cell.and_then(|&(_, uv, size)| Some((shots.texture?, uv, size))),
     }
 }
 
-fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
+fn tiles(g: &Grade, shots: Option<(&NodeShots, ShotPlace)>) -> Vec<Tile<Port>> {
     let input = |slot: usize, name: String| Inlet {
         slot,
         side: Side::Left,
@@ -813,7 +812,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
                     key_input(KEY_PORT, "Key Input".into()),
                 ],
                 vec![outlet(0, "RGB Output"), outlet(KEY_PORT, "Key Output")],
-                shots.map(|s| shot_of(s, n)),
+                shots.map(|(s, at)| shot_of(s, n, at)),
             ),
             GradeTool::KeyMixer { .. } => (
                 kind(&d.tool).to_string(),
@@ -1146,7 +1145,7 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
     }
 }
 
-fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
+fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>, clip: bool) {
     let mut pick = |ui: &mut Ui, text: &str, a: FieldAct| {
         if ui.button(text).clicked() {
             *act = Some(a);
@@ -1154,6 +1153,9 @@ fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
         }
     };
     pick(ui, "Reset All Grades and Nodes", FieldAct::ResetAll);
+    ui.add_enabled_ui(clip, |ui| {
+        pick(ui, "Reset All Node Stack Layers", FieldAct::ResetLayers);
+    });
     pick(ui, "Reset Grades and Keep Nodes", FieldAct::KeepNodes);
     ui.menu_button("Add Node", |ui| {
         pick(ui, "Corrector", FieldAct::Corrector);
@@ -1174,20 +1176,120 @@ fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
     pick(ui, "Cleanup Node Graph", FieldAct::Cleanup);
 }
 
-fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
+pub(super) struct GradeChoice {
+    level: GradeLevel,
+    layer: usize,
+    names: Vec<String>,
+}
+
+pub(super) fn layer_label(name: &str) -> String {
+    format!("Clip - {name}")
+}
+
+fn layer_menu(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)> {
+    let mut picked = None;
+    ui.menu_button("Switch to Node Layer", |ui| {
+        let mut item = |ui: &mut Ui, (on, open): (bool, bool), text: String, to| {
+            if ui
+                .add_enabled(open, egui::Button::selectable(on, text))
+                .clicked()
+                && !on
+            {
+                picked = to;
+                ui.close();
+            }
+        };
+        item(ui, (false, false), "Group Pre Clip".into(), None);
+        for n in 1..=vidcut_core::ops::grade::NODE_STACK_LAYERS {
+            let name =
+                (choice.names.get(n - 1).cloned()).unwrap_or_else(|| Settings::layer_name(n));
+            let on = choice.level == GradeLevel::Clip && choice.layer == n;
+            let open = n <= choice.names.len();
+            item(
+                ui,
+                (on, open),
+                layer_label(&name),
+                Some((GradeLevel::Clip, n)),
+            );
+        }
+        item(ui, (false, false), "Group Post Clip".into(), None);
+        let on = choice.level == GradeLevel::Timeline;
+        let to = Some((GradeLevel::Timeline, choice.layer));
+        item(ui, (on, true), "Timeline".into(), to);
+    });
+    picked
+}
+
+fn layer_dots(ui: &mut Ui, room: Rect, choice: &GradeChoice) -> Option<(GradeLevel, usize)> {
+    let count = choice.names.len() + 1;
+    let gap = 14.0;
+    let left = room.center().x - gap * (count - 1) as f32 / 2.0;
+    let painter = ui.painter_at(room);
+    let c = theme::colors();
+    let mut picked = None;
+    for i in 0..count {
+        let at = egui::pos2(left + gap * i as f32, room.bottom() - 10.0);
+        let (to, text) = match choice.names.get(i) {
+            Some(name) => ((GradeLevel::Clip, i + 1), layer_label(name)),
+            None => ((GradeLevel::Timeline, choice.layer), "Timeline".to_string()),
+        };
+        let on = match to.0 {
+            GradeLevel::Clip => choice.level == GradeLevel::Clip && choice.layer == to.1,
+            GradeLevel::Timeline => choice.level == GradeLevel::Timeline,
+        };
+        let spot = Rect::from_center_size(at, Vec2::splat(12.0));
+        let r = ui.interact(spot, ui.scope_id().with(("layer-dot", i)), Sense::click());
+        let color = if on { Color32::WHITE } else { c.text_dim };
+        painter.circle_filled(at, 3.5, color);
+        if r.on_hover_text(text).clicked() && !on {
+            picked = Some(to);
+        }
+    }
+    picked
+}
+
+fn grade_switch(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)> {
+    let GradeChoice {
+        level,
+        layer,
+        names,
+    } = choice;
+    let (level, layer) = (*level, *layer);
     let mut picked = None;
     let right = egui::Layout::right_to_left(egui::Align::Center);
     ui.with_layout(right, |ui| {
-        super::dialog::switch(ui, |ui| {
-            for (l, text) in [
-                (GradeLevel::Clip, "Clip"),
-                (GradeLevel::Timeline, "Timeline"),
-            ] {
-                if ui.selectable_label(level == l, text).clicked() && level != l {
-                    picked = Some(l);
+        if names.len() < 2 {
+            super::dialog::switch(ui, |ui| {
+                for (l, text) in [
+                    (GradeLevel::Clip, "Clip"),
+                    (GradeLevel::Timeline, "Timeline"),
+                ] {
+                    if ui.selectable_label(level == l, text).clicked() && level != l {
+                        picked = Some((l, layer));
+                    }
                 }
-            }
-        });
+            });
+            return;
+        }
+        let shown = match level {
+            GradeLevel::Clip => layer_label(&names[layer - 1]),
+            GradeLevel::Timeline => "Timeline".to_string(),
+        };
+        egui::ComboBox::from_id_salt("grade-level")
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    let on = level == GradeLevel::Clip && layer == i + 1;
+                    if ui.selectable_label(on, layer_label(name)).clicked() && !on {
+                        picked = Some((GradeLevel::Clip, i + 1));
+                    }
+                }
+                ui.separator();
+                let on = level == GradeLevel::Timeline;
+                if ui.selectable_label(on, "Timeline").clicked() && !on {
+                    picked = Some((GradeLevel::Timeline, layer));
+                }
+            });
     });
     picked
 }
@@ -1576,14 +1678,17 @@ impl Workspace {
             return None;
         }
         let h = self.effects_page.graded.as_ref()?;
-        let GradeOf::Clip(id) = &h.of else {
+        let GradeOf::Clip(id, layer) = &h.of else {
             return None;
         };
         let p = self.project()?;
         let c = p.clip(id)?;
         let mut picture = c.picture.clone().unwrap_or_default();
         checked(&h.grade).ok()?;
-        picture.grade = (!h.grade.is_usual(p.frame_size())).then(|| h.grade.clone());
+        let frame = p.frame_size();
+        let was = picture.grade.take().unwrap_or_else(|| Grade::usual(frame));
+        let grade = was.with_layer(*layer, h.grade.clone(), frame);
+        picture.grade = (!grade.is_usual(frame)).then_some(grade);
         Some((id.clone(), picture))
     }
 
@@ -1601,16 +1706,77 @@ impl Workspace {
         }
     }
 
+    pub(super) fn set_layer(&mut self, layer: usize) -> Result<(), String> {
+        let count = self.layer_names().len();
+        if !(1..=count).contains(&layer) {
+            return Err(format!("The project has {count} node stack layers"));
+        }
+        if layer != self.effects_page.layer {
+            self.effects_page.graded = None;
+            self.effects_page.layer = layer;
+        }
+        Ok(())
+    }
+
+    pub(super) fn layer_names(&self) -> Vec<String> {
+        (self.project()).map_or_else(Settings::one_layer, |p| {
+            p.settings.node_stack_layers.clone()
+        })
+    }
+
+    pub(super) fn shown_layer(&self) -> usize {
+        self.effects_page.layer.clamp(1, self.layer_names().len())
+    }
+
+    fn shot_place(&self, of: &GradeOf) -> ShotPlace {
+        let first = ShotPlace {
+            start: 0,
+            stand_in: None,
+        };
+        let (GradeOf::Clip(id, layer), Some(p)) = (of, self.project()) else {
+            return first;
+        };
+        let frame = p.frame_size();
+        let whole = (p.clip(id))
+            .and_then(|c| c.picture.as_ref()?.grade.clone())
+            .unwrap_or_else(|| Grade::usual(frame));
+        match *layer > 1 && whole.layers.len() + 1 < *layer {
+            true => ShotPlace {
+                start: 0,
+                stand_in: whole.stacked().output.map(|l| l.node).filter(|n| *n > 0),
+            },
+            false => ShotPlace {
+                start: whole.layer_start(*layer),
+                stand_in: None,
+            },
+        }
+    }
+
+    pub(super) fn grade_choice(&self) -> GradeChoice {
+        GradeChoice {
+            level: self.effects_page.grading,
+            layer: self.shown_layer(),
+            names: self.layer_names(),
+        }
+    }
+
+    pub(super) fn switch_grade(&mut self, (level, layer): (GradeLevel, usize)) {
+        let to = json!({ "page": Page::Color, "grade": level, "layer": layer });
+        self.send("gui.page", to);
+    }
+
     pub(super) fn grade_shown(&self) -> Option<(GradeOf, String, Grade)> {
         let p = self.project()?;
         match self.effects_page.grading {
             GradeLevel::Clip => {
                 let id = self.color_clip()?;
                 let c = p.clip(&id)?;
-                let stored = c.picture.as_ref().and_then(|pic| pic.grade.clone());
+                let layer = self.shown_layer();
+                let frame = p.frame_size();
+                let whole = c.picture.as_ref().and_then(|pic| pic.grade.as_ref());
+                let stored = whole.map_or_else(|| Grade::usual(frame), |g| g.layer(layer, frame));
                 let name = p.clip_name(c).unwrap_or_else(|| id.clone());
-                let usual = || Grade::usual(p.frame_size());
-                Some((GradeOf::Clip(id), name, stored.unwrap_or_else(usual)))
+                Some((GradeOf::Clip(id, layer), name, stored))
             }
             GradeLevel::Timeline => {
                 if !p.compound_path.is_empty() {
@@ -1700,7 +1866,7 @@ impl Workspace {
     pub(super) fn grade_frame(&self, of: &GradeOf) -> i64 {
         let at = self.snap.timeline.position;
         match of {
-            GradeOf::Clip(id) => (self.project())
+            GradeOf::Clip(id, _) => (self.project())
                 .and_then(|p| p.clip(id))
                 .map_or(at, |c| c.content_at(at)),
             GradeOf::Timeline => at,
@@ -1714,6 +1880,7 @@ impl Workspace {
 
     fn palette(&mut self, ui: &mut Ui) -> bool {
         let level = self.effects_page.grading;
+        let choice = self.grade_choice();
         let mut picked = None;
         let Some((of, name, stored)) = self.grade_shown() else {
             self.effects_page.graded = None;
@@ -1722,10 +1889,10 @@ impl Workspace {
                     GradeLevel::Clip => "No Clip at the Playhead",
                     GradeLevel::Timeline => "No Timeline",
                 });
-                picked = grade_switch(ui, level);
+                picked = grade_switch(ui, &choice);
             });
             if let Some(l) = picked {
-                self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+                self.switch_grade(l);
             }
             return false;
         };
@@ -1759,10 +1926,10 @@ impl Workspace {
                 ui.strong(&name);
                 ui.separator();
                 ui.label(what);
-                picked = grade_switch(ui, level);
+                picked = grade_switch(ui, &choice);
             });
             if let Some(l) = picked {
-                self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+                self.switch_grade(l);
             }
             return false;
         };
@@ -1787,7 +1954,7 @@ impl Workspace {
             ui.separator();
             if palette != GradePalette::Primaries {
                 reset = ui.button("Reset").clicked();
-                picked = grade_switch(ui, level);
+                picked = grade_switch(ui, &choice);
                 return;
             }
             for (m, text) in [
@@ -1800,7 +1967,7 @@ impl Workspace {
                 }
             }
             ui.separator();
-            if let GradeOf::Clip(_) = &of {
+            if let GradeOf::Clip(..) = &of {
                 auto = ui.button("A").on_hover_text("Auto Color").clicked();
             }
             reset = ui.button("Reset").clicked();
@@ -1845,7 +2012,7 @@ impl Workspace {
                     (low + 0.001, 0.999),
                 );
             }
-            picked = grade_switch(ui, level);
+            picked = grade_switch(ui, &choice);
         });
         let mut view = Map::new();
         if let Some(p) = palette_picked {
@@ -1854,8 +2021,9 @@ impl Workspace {
         if let Some(m) = mode_picked {
             view.insert("primaries".into(), json!(m));
         }
-        if let Some(l) = picked {
+        if let Some((l, layer)) = picked {
             view.insert("grade".into(), json!(l));
+            view.insert("layer".into(), json!(layer));
         }
         if !view.is_empty() {
             view.insert("page".into(), json!(Page::Color));
@@ -1877,7 +2045,7 @@ impl Workspace {
             }
             GradePalette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
         };
-        let (field, target) = named(&of);
+        let target = named(&of);
         let locked = grade.node(n).is_some_and(|d| d.locked);
         if locked {
             changes.clear();
@@ -1892,7 +2060,8 @@ impl Workspace {
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
             let part = ("palette".to_string(), json!(palette));
-            let params = Map::from_iter([(field, target), node, at, part]);
+            let mut params = target;
+            params.extend([node, at, part]);
             self.send("grade.clear", Value::Object(params));
             return palette == GradePalette::Primaries;
         }
@@ -1956,16 +2125,16 @@ impl Workspace {
                 self.effects_page.graded = None;
             }
             Some((mut params, sets)) => {
-                let (one, clip) = window_target(&of);
+                let clip = window_target(&of);
                 for (i, mut set) in sets {
-                    set.insert(one.clone(), clip.clone());
+                    set.extend(clip.clone());
                     set.insert("node".into(), json!(n));
                     set.insert("window".into(), json!(i));
                     set.insert("at".into(), json!(at));
                     self.send("grade.window.set", Value::Object(set));
                 }
                 if !params.is_empty() {
-                    params.insert(field, target);
+                    params.extend(target);
                     params.insert("node".into(), json!(n));
                     params.insert("at".into(), json!(at));
                     self.send("grade.set", Value::Object(params));
@@ -1986,6 +2155,10 @@ impl Workspace {
         (stored, grade): (&Grade, &Grade),
         (n, frame, at): (u32, i64, i64),
     ) {
+        let choice = GradeChoice {
+            level,
+            ..self.grade_choice()
+        };
         let Some(d) = grade.node(n) else {
             return;
         };
@@ -1998,10 +2171,10 @@ impl Workspace {
             ui.label(kind(&d.tool));
             ui.separator();
             reset = ui.button("Reset").clicked();
-            picked = grade_switch(ui, level);
+            picked = grade_switch(ui, &choice);
         });
         if let Some(l) = picked {
-            self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+            self.switch_grade(l);
         }
         let mut mixes: Vec<(usize, Change)> = Vec::new();
         let linked = (mix.iter().copied().enumerate()).filter(|(i, _)| d.inputs[*i].is_some());
@@ -2018,11 +2191,11 @@ impl Workspace {
         }
         if reset {
             self.effects_page.graded = None;
-            let (field, target) = named(of);
+            let mut params = named(of);
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
             let part = ("palette".to_string(), json!(GradePalette::Key));
-            let params = Map::from_iter([(field, target), node, at, part]);
+            params.extend([node, at, part]);
             self.send("grade.clear", Value::Object(params));
             return;
         }
@@ -2054,10 +2227,10 @@ impl Workspace {
         match ready {
             Some(sets) if sets.is_empty() => self.effects_page.graded = None,
             Some(sets) => {
-                let (field, target) = named(of);
+                let target = named(of);
                 let commands = (sets.into_iter())
                     .map(|mut set| {
-                        set.insert(field.clone(), target.clone());
+                        set.extend(target.clone());
                         set.insert("node".into(), json!(n));
                         set.insert("at".into(), json!(at));
                         command("grade.set", Value::Object(set))
@@ -2113,10 +2286,10 @@ impl Workspace {
             .effects_page
             .window
             .min(windows.len().saturating_sub(1));
-        let (field, target) = window_target(of);
+        let target = window_target(of);
         let send = |this: &mut Self, method: &str, mut params: Map<String, Value>| {
             this.effects_page.graded = None;
-            params.insert(field.clone(), target.clone());
+            params.extend(target.clone());
             params.insert("node".into(), json!(n));
             this.send(method, Value::Object(params));
         };
@@ -2167,11 +2340,9 @@ impl Workspace {
                 }
             }
             WindowAct::Copy => {
-                let params = Map::from_iter([
-                    (field.clone(), target.clone()),
-                    ("node".to_string(), json!(n)),
-                    ("window".to_string(), json!(current)),
-                ]);
+                let mut params = target.clone();
+                params.insert("node".into(), json!(n));
+                params.insert("window".into(), json!(current));
                 self.send("grade.window.copy", Value::Object(params));
             }
             WindowAct::Paste(append) => {
@@ -2236,8 +2407,7 @@ impl Workspace {
             c.offset = printed(c.offset, point, &lights);
             h.grade = with_corrector(&h.grade, n, h.frame, c);
         }
-        let (field, target) = named(&of);
-        let mut params = Map::from_iter([(field, target)]);
+        let mut params = named(&of);
         params.insert("node".into(), json!(n));
         params.insert("at".into(), json!(self.snap.timeline.position));
         params.insert("color".into(), json!(point.0));
@@ -2317,9 +2487,12 @@ impl Workspace {
             NodesItem::Key(_) | NodesItem::Act(_) => current.is_some(),
         };
         let mut picked = None;
+        let mut layer_to = None;
         for (i, group) in NODES_MENU.iter().enumerate() {
             if i > 0 {
                 ui.separator();
+            } else {
+                layer_to = layer_menu(ui, &self.grade_choice());
             }
             for &(text, item) in *group {
                 let key = match item {
@@ -2332,6 +2505,9 @@ impl Workspace {
                     ui.close();
                 }
             }
+        }
+        if let Some(to) = layer_to {
+            self.switch_grade(to);
         }
         match (picked, shown, n) {
             (Some(NodesItem::Key(a)), _, _) => self.grade_keys_struck(&[a]),
@@ -2533,14 +2709,13 @@ impl Workspace {
     }
 
     fn auto_color(&mut self, of: &GradeOf, n: u32) {
-        let GradeOf::Clip(id) = of else {
+        if let GradeOf::Timeline = of {
             return;
-        };
-        let at = self.snap.timeline.position;
-        self.send(
-            "grade.auto_color",
-            json!({ "clip": id, "node": n, "at": at }),
-        );
+        }
+        let mut params = window_target(of);
+        params.insert("node".into(), json!(n));
+        params.insert("at".into(), json!(self.snap.timeline.position));
+        self.send("grade.auto_color", Value::Object(params));
     }
 
     fn switch_grade_nodes(&mut self, of: &GradeOf, g: &Grade, picked: Option<&[u32]>, label: &str) {
@@ -2763,6 +2938,16 @@ impl Workspace {
                 self.effects_page.pick_grade(vec![1], false);
                 ("grade.clear", json!({}))
             }
+            FieldAct::ResetLayers => {
+                let GradeOf::Clip(id, _) = of else {
+                    return;
+                };
+                self.effects_page.pick_grade(vec![1], false);
+                self.effects_page.graded = None;
+                let params = json!({ "clips": id, "all_layers": true });
+                self.send("grade.clear", params);
+                return;
+            }
         };
         let field = match method {
             "grade.add" | "grade.cleanup" => "clip",
@@ -2839,7 +3024,7 @@ impl Workspace {
             let playing = self.snap.timeline.playing;
             self.shots_want = Some(ShotsWanted {
                 of: match &of {
-                    GradeOf::Clip(id) => ShotsOf::Clip(id.clone()),
+                    GradeOf::Clip(id, _) => ShotsOf::Clip(id.clone()),
                     GradeOf::Timeline => ShotsOf::Timeline,
                 },
                 height: (pixels.ceil() as u32).next_multiple_of(SHOT_STEP),
@@ -2850,7 +3035,7 @@ impl Workspace {
             self.send("gui.node_view", json!({ "list": list }));
         }
         let salt = match &of {
-            GradeOf::Clip(id) => format!("grade-node-{id}"),
+            GradeOf::Clip(id, layer) => format!("grade-node-{id}-{layer}"),
             GradeOf::Timeline => "grade-node-timeline".to_string(),
         };
         let selected: Vec<Port> = (self.effects_page.picked_grade().iter())
@@ -2861,7 +3046,7 @@ impl Workspace {
             salt,
             tiles: tiles(
                 &stored,
-                self.snap.show_thumbnails.then_some(&self.node_shots),
+                (self.snap.show_thumbnails).then(|| (&self.node_shots, self.shot_place(&of))),
             ),
             wires: wires(&stored),
             selected: &selected,
@@ -2884,12 +3069,17 @@ impl Workspace {
                 node_act = Some((a, n));
             }
         };
+        let room = ui.available_rect_before_wrap();
+        let clip = matches!(of, GradeOf::Clip(..));
         let done = match listed {
             true => node_editor::list(ui, &mut self.effects_page.grade_view, &graph, menu),
             false => node_editor::show(ui, &mut self.effects_page.grade_view, &graph, menu, |ui| {
-                field_menu(ui, &mut field_act)
+                field_menu(ui, &mut field_act, clip)
             }),
         };
+        if let Some(to) = layer_dots(ui, room, &self.grade_choice()) {
+            self.switch_grade(to);
+        }
         if let Some((inside, off)) = done.band {
             let inside: Vec<u32> = (inside.into_iter())
                 .filter_map(|p| match p {

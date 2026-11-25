@@ -831,7 +831,7 @@ impl GradeNode {
 
 impl Grade {
     pub fn is_keyed(&self) -> bool {
-        self.nodes.iter().any(|d| !d.keys.is_empty())
+        self.nodes.iter().any(|d| !d.keys.is_empty()) || self.layers.iter().any(Grade::is_keyed)
     }
 
     pub fn at(&self, frame: f64) -> Cow<'_, Grade> {
@@ -852,6 +852,9 @@ impl Grade {
             d.keys.clear();
             d.animated = false;
         }
+        for (layer, from) in g.layers.iter_mut().zip(&self.layers) {
+            *layer = from.at(frame).into_owned();
+        }
         Cow::Owned(g)
     }
 
@@ -859,6 +862,9 @@ impl Grade {
         for d in &mut self.nodes {
             d.keys.clear();
             d.animated = false;
+        }
+        for layer in self.layers.iter_mut().chain(&mut self.kept_layers) {
+            layer.clear_keys();
         }
     }
 
@@ -874,12 +880,19 @@ impl Grade {
     }
 
     pub fn map_key_frames(&mut self, map: impl Fn(i64) -> i64) {
+        self.map_frames(&map);
+    }
+
+    fn map_frames(&mut self, map: &dyn Fn(i64) -> i64) {
         for d in &mut self.nodes {
             for k in &mut d.keys {
                 k.frame = map(k.frame);
             }
             d.keys.sort_by_key(|k| k.frame);
             d.keys.dedup_by_key(|k| k.frame);
+        }
+        for layer in self.layers.iter_mut().chain(&mut self.kept_layers) {
+            layer.map_frames(map);
         }
     }
 }

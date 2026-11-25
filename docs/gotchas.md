@@ -684,6 +684,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Use Legacy Auto Color is on. Two clicks on the A button of the Primaries palette, then one Ctrl+Z, take back both results.
   - Ctrl+Shift+Z then gives nothing back. The Edit menu shows Redo.
   - vidcut: each run of Auto Color is one undo step, and Redo gives it back.
+- **Undo does not take back Reset All Node Stack Layers.**
+  - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
+  - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
+  - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
 
 - **Close Up leaves the Out frame out.**
   - With a timeline Out at frame 200 alone, the copy ends before frame 200.

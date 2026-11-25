@@ -814,6 +814,11 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
   - After `grade.add` and `grade.connect`, `stamped` gives each new link the next `made` number. After `grade.add`, `walked` numbers the nodes again, in the order of a walk from the source.
   - Why: the node numbers then follow the measured rule of the spec (§8.21).
+- A clip grade holds node stack layer 1 in its own nodes and the layers after it in `Grade::layers`. Each layer is a `Grade` of its own.
+  - `ops::grade::stored` gives one layer (`Grade::layer`), and `store` puts it back (`Grade::with_layer`). Thus each request changes one layer and numbers its nodes from 1.
+  - `with_layer` removes the usual layers at the end. Thus a clip with one changed layer stores no empty layers after it.
+  - A lower `node_stack_layers` count moves the layers above it to `Grade::kept_layers`, in each clip of the project (`ops::grade::count_layers`, `Grade::counted`). A higher count moves them back.
+  - `ops::grade::clear_layers` resets each layer for `grade.clear` with `all_layers` (`Grade::reset_layers`). It keeps `kept_layers`.
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
@@ -826,6 +831,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
+  - First `Grade::stacked` joins the node stack layers into one tree. Each layer gets the numbers after the layers under it.
+  - A link from the picture that comes into a layer becomes the `output` link of the layer under it. Thus a layer takes the result of the one before it.
+  - Why: the passes, the thumbnails and the render cache then need no case for layers.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
   - It works when something goes out, each input of a corrector has a link, and each node goes somewhere.
   - It also needs a link on each Parallel Mixer and Layer Mixer. A Key Mixer with no link gives a key of 1. A node that gives only its key goes somewhere.

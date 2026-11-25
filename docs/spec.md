@@ -3888,7 +3888,6 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.add` with `window` turns that first window of the new corrector on. The four items and their keys do the same.
   - vidcut: the curve of Alt+B has no points ([§8.23](#823-windows-pp-32653279)).
   - vidcut: on the Color page, Alt+B adds a node and does not make a subclip ([§11](#11-keyboard-shortcuts)).
-  - vidcut: Switch to Node Layer is not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -4145,6 +4144,35 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Their Add Node submenu has Add Serial (Alt+S) and Add Serial Before (Shift+S).
   - vidcut: the Add Node submenu of a Splitter has only Add Serial Before ([todo](todo/color-page.md)).
   - Not measured: what Add Serial on a Splitter does, with its three outputs.
+
+- **Node Stack Layers** (pp. 3400–3401):
+  - Node Stack Layers split the grade of a clip into node graphs that act one after the other (p. 3400).
+  - Project Settings > General Options > Color sets the number of layers and their names (p. 3400).
+  - The layers act in this order: pre-clip, L1, L2, L3, L4, post-clip, Timeline (p. 3400).
+  - A lower number removes the grades of the removed layers in the whole project. A higher number gives them back (p. 3400).
+  - Measured in Resolve Studio 21.2: Node Stack Layers is a dropdown from 1 to 8. At 2 or more, each layer has a name field.
+  - Measured: the default names are L1, L2 and so on.
+  - Measured: with one layer, the switch of the Node Editor reads Clip. Its items are Clip and Timeline.
+  - Measured: with three layers, it reads Clip - L1. Its items are Clip - L1, Clip - L2, Clip - L3 and Timeline.
+  - Measured: dots at the bottom center of the Node Editor match these items. The dot of the shown grade is white. A click on a dot shows that grade.
+  - Measured: Color > Nodes > Switch to Node Layer has Group Pre Clip, Clip - L1 to Clip - L8, Group Post Clip and Timeline.
+  - Measured: the items of the groups and of the layers that the project does not have are grey.
+  - Measured: each layer has its own graph. A new layer has one corrector, 01. The first node that L2 gets has the number 02.
+  - Measured: a switch to the Deliver page and back keeps the shown layer.
+  - Measured: with Offset 35 in L1 and Gain 2 in L2, a gray of 0.5 gives (0.5 + 0.0733) × 2. Thus L2 takes the output of L1.
+  - Measured: the Keyframes panel shows only the nodes of the shown layer.
+  - Measured: the thumbnail of a node shows its output in the whole stack. A node of L2 shows the result of L1 under it.
+  - Measured: Reset All Node Stack Layers, in the menu of the empty Node Editor, resets each layer of the clip. Each layer keeps one node with no grade.
+  - Measured: the number of layers stays. One undo does not give the grades back.
+  - vidcut: `project.set` with `node_stack_layers` sets the names. Their number is the number of layers. Project Settings has the same dropdown and fields.
+  - vidcut: a lower number keeps the grades of the removed layers in `kept_layers`. They do not act. A higher number gives them back.
+  - Not measured: whether a higher number gives the grades back. vidcut does what the manual says.
+  - vidcut: each grade request takes `layer`, from 1. A clip grade keeps layer 1 in its nodes and the layers after it in `layers`.
+  - vidcut: the viewer, the export and the thumbnails join the layers in order. The picture that comes into a layer is the output of the layer under it.
+  - vidcut: at one layer, the switch has Clip and Timeline. At more, it is a menu with the measured items.
+  - vidcut: the dots, Switch to Node Layer and the Keyframes panel are as measured. `gui.page` with `layer` shows a layer, and `gui.state` gives it.
+  - vidcut: `grade.clear` with `all_layers` resets each layer. Undo gives the grades back ([gotchas](gotchas.md#resolves-edits)).
+  - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still need groups and a Gallery ([gaps](todo/gaps.md)).
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
