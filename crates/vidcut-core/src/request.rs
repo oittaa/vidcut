@@ -4280,9 +4280,16 @@ pub enum Request {
     PreferencesReset {},
     /// The keyboard shortcuts in force, one action each, with a few plain
     /// words where the action's name doesn't say what it does (spec §11).
-    /// Ctrl and Alt are Cmd and Option on macOS.
+    /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
+    /// key of an action works: `app`, `transcription`, `effects` or
+    /// `color`.
     #[serde(rename = "keys.list")]
-    KeysList {},
+    KeysList {
+        /// Only the actions of this key, like `Ctrl+B`, at each level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<String>")]
+        key: Option<crate::shortcuts::Combo>,
+    },
     /// Give an action other keys in place of the ones it has (spec §11). A
     /// key belongs to one action: a key that another action has is refused,
     /// and the refusal names that action. A running GUI follows at once.
@@ -4332,8 +4339,7 @@ pub enum Request {
         overwrite: bool,
     },
     /// Delete one of your key sets. Built-in sets can't be deleted. When the
-    /// set is in force, its keys stay in force, as changes to vidcut's own
-    /// keys.
+    /// set is in force, vidcut's own set is put in force.
     #[serde(rename = "keys.delete")]
     KeysDelete { name: String },
     /// Write a key set to a file, for another computer (`keys.import`). A
@@ -4344,8 +4350,8 @@ pub enum Request {
         set: String,
         path: PathBuf,
     },
-    /// Add a key set from a file that `keys.export` wrote. The set is not
-    /// put in force (`keys.use`).
+    /// Add a key set from a file that `keys.export` wrote, and put it in
+    /// force.
     #[serde(rename = "keys.import")]
     KeysImport {
         path: PathBuf,
@@ -4596,6 +4602,9 @@ pub enum Request {
         /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parade_mode: Option<crate::preferences::ParadeMode>,
+        /// The Vectorscope shows a line at the skin tone angle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_tone: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -8222,7 +8231,7 @@ impl Request {
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
-                | Self::KeysList {}
+                | Self::KeysList { .. }
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
                 | Self::KeysSets {}
@@ -8324,7 +8333,7 @@ impl Request {
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
-                    | Self::KeysList {}
+                    | Self::KeysList { .. }
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
                     | Self::KeysSets {}
