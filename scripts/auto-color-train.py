@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 import csv
 import json
 import math
@@ -155,6 +156,30 @@ class AutoColorNet(nn.Module):
         return e, w
 
 
+CCM_BANK = [
+    [[1.8750, -0.9947, 0.1197], [-0.2361, 1.7776, -0.5415], [-0.0202, -0.4678, 1.4880]],
+    [[1.7450, -0.8200, 0.0750], [-0.2000, 1.6500, -0.4500], [0.0100, -0.5200, 1.5100]],
+    [[1.8200, -0.9000, 0.0800], [-0.2600, 1.6800, -0.4200], [0.0200, -0.4800, 1.4600]],
+    [[1.6500, -0.7200, 0.0700], [-0.1800, 1.5500, -0.3700], [0.0300, -0.4200, 1.3900]],
+    [[1.4000, -0.4500, 0.0500], [-0.1200, 1.3500, -0.2300], [0.0200, -0.2500, 1.2300]],
+]
+
+
+def sample_ccm(device):
+    if random.random() < 0.10:
+        return torch.eye(3, device=device, dtype=torch.float32)
+    base = np.array(random.choice(CCM_BANK), dtype=np.float32)
+    jitter = np.random.uniform(-0.08, 0.08, size=(3, 3)).astype(np.float32)
+    np.fill_diagonal(jitter, 0.0)
+    m = base + jitter
+    m = m / m.sum(axis=1, keepdims=True)
+    return torch.from_numpy(m).to(device)
+
+
+def apply_ccm(img_3hw, ccm):
+    return torch.einsum("ij,jhw->ihw", ccm, img_3hw)
+
+
 def load_simplecube(root, device):
     with open(os.path.join(root, "train", "gt.csv")) as f:
         rows = list(csv.DictReader(f))
@@ -241,15 +266,14 @@ def scurve(x, strength):
 
 
 PRESETS = [
-    (1.8, 1.0, 1.5),
-    (2.2, 1.0, 1.4),
-    (2.5, 1.0, 1.25),
-    (2.9, 1.0, 1.15),
-    (1.3, 1.0, 2.8),
-    (1.2, 1.0, 3.4),
     (1.05, 1.0, 3.8),
+    (1.20, 1.0, 3.4),
+    (1.30, 1.0, 3.4),
     (1.45, 1.0, 2.4),
-    (1.9, 1.0, 2.2),
+    (1.80, 1.0, 1.5),
+    (2.20, 1.0, 1.4),
+    (2.50, 1.0, 1.25),
+    (2.90, 1.0, 1.15),
 ]
 
 
@@ -263,19 +287,45 @@ def make_batch(sc_imgs, sc_gts, fr_imgs, batch_size, device):
     srcs, tgts, cleans = [], [], []
     for i in range(n_sc):
         raw, light = raw_b[i], gt_b[i]
-        lin_t = raw * (light[1] / light).view(3, 1, 1)
-        p96 = torch.quantile(lin_t.reshape(-1), 0.96).clamp(min=1e-3)
+        ccm = sample_ccm(device)
+        wb_raw = raw * (light[1] / light).view(3, 1, 1)
+        lin_t_base = apply_ccm(wb_raw, ccm).clamp(min=0.0)
+        p96 = torch.quantile(lin_t_base.reshape(-1), 0.96).clamp(min=1e-3)
         bscale = random.uniform(0.72, 0.96) / p96
         tm, cs = random.randint(0, 3), random.uniform(0.0, 0.35)
         rk = random.random()
-        if rk < 0.20:
-            tgt = scurve(transfer(lin_t * bscale, tm), cs)
+        if rk < 0.25:
+            tgt = scurve(transfer(lin_t_base * bscale, tm), cs)
             src = tgt
             cl = 1.0
-        elif rk < 0.62:
-            eb = math.exp(random.uniform(-0.7, 0.35))
-            tgt = scurve(transfer(lin_t * (bscale * eb), tm), cs)
-            if random.random() < 0.65:
+        elif rk < 0.50:
+            eb = math.exp(random.uniform(-0.75, 0.45)) if random.random() < 0.5 else 1.0
+            tgt = scurve(transfer((lin_t_base * (bscale * eb)).clamp(0.0, 1.0), tm), cs)
+            lr, lg, lb = (
+                random.uniform(-0.85, 0.85),
+                random.uniform(-0.85, 0.85),
+                random.uniform(-0.85, 0.85),
+            )
+            if random.random() < 0.30:
+                lr = lg = random.uniform(-0.90, -0.35) if random.random() < 0.5 else 0.0
+                lb = random.uniform(0.25, 0.95) if lr < 0 else random.uniform(-0.90, -0.30)
+            cast = torch.tensor(
+                [math.exp(lr), math.exp(lg), math.exp(lb)], device=device
+            ).view(3, 1, 1)
+            if random.random() < 0.5:
+                lin_s = apply_ccm(wb_raw * cast, ccm).clamp(min=0.0)
+            else:
+                lin_s = (lin_t_base * cast).clamp(min=0.0)
+            sa = (lin_t_base.mean() / lin_s.mean().clamp(min=1e-5)) * (bscale * eb)
+            src = scurve(transfer((lin_s * sa).clamp(0.0, 1.0), tm), cs)
+            if random.random() < 0.35:
+                lf = random.uniform(-0.04, 0.14)
+                src = (lf + (1.0 - lf) * src).clamp(0.0, 1.0)
+            cl = 0.0
+        else:
+            eb = math.exp(random.uniform(-0.80, 0.45)) if random.random() < 0.5 else 1.0
+            tgt = scurve(transfer((lin_t_base * (bscale * eb)).clamp(0.0, 1.0), tm), cs)
+            if random.random() < 0.72:
                 pr = random.choice(PRESETS)
                 gc = torch.tensor(
                     [
@@ -285,35 +335,21 @@ def make_batch(sc_imgs, sc_gts, fr_imgs, batch_size, device):
                     ],
                     device=device,
                 ).view(3, 1, 1)
-                lin_s = raw * gc
+                lin_s = apply_ccm(raw * gc, ccm).clamp(min=0.0)
             else:
-                dt, dn = random.uniform(-0.85, 0.85), random.uniform(-0.18, 0.18)
-                lin_s = lin_t * torch.tensor(
-                    [math.exp(dt), math.exp(dn), math.exp(-dt)], device=device
-                ).view(3, 1, 1)
-            sa = (lin_t.mean() / lin_s.mean().clamp(min=1e-5)) * (bscale * eb)
-            src = scurve(transfer(lin_s * sa, tm), cs)
-            cl = 0.0
-        else:
-            tgt = scurve(transfer(lin_t * bscale, tm), cs)
-            pr = random.choice(PRESETS)
-            gc = torch.tensor(
-                [
-                    pr[0] * math.exp(random.uniform(-0.25, 0.25)),
-                    1.0,
-                    pr[2] * math.exp(random.uniform(-0.25, 0.25)),
-                ],
-                device=device,
-            ).view(3, 1, 1)
-            lin_s = raw * gc
-            sa = (
-                (lin_t.mean() / lin_s.mean().clamp(min=1e-5))
-                * bscale
-                * math.exp(random.uniform(-0.85, 0.55))
-            )
-            src = scurve(transfer(lin_s * sa, tm), cs)
-            if random.random() < 0.5:
-                lf = random.uniform(-0.04, 0.14)
+                dt, dn = random.uniform(-0.85, 0.85), random.uniform(-0.22, 0.22)
+                lin_s = apply_ccm(
+                    wb_raw
+                    * torch.tensor(
+                        [math.exp(dt), math.exp(dn), math.exp(-dt)], device=device
+                    ).view(3, 1, 1),
+                    ccm,
+                ).clamp(min=0.0)
+            exp_jit = eb if eb != 1.0 else math.exp(random.uniform(-0.85, 0.55))
+            sa = (lin_t_base.mean() / lin_s.mean().clamp(min=1e-5)) * (bscale * exp_jit)
+            src = scurve(transfer((lin_s * sa).clamp(0.0, 1.0), tm), cs)
+            if random.random() < 0.45:
+                lf = random.uniform(-0.04, 0.16)
                 src = (lf + (1.0 - lf) * src).clamp(0.0, 1.0)
             cl = 0.0
         srcs.append(src)
@@ -333,27 +369,37 @@ def make_batch(sc_imgs, sc_gts, fr_imgs, batch_size, device):
                 )
             src = tgt = card
             cl = 1.0
-        elif rk < 0.33:
+        elif rk < 0.35:
             src = tgt
             cl = 1.0
         else:
             v = tgt
             if random.random() < 0.65:
-                dt, dn = random.uniform(-0.35, 0.35), random.uniform(-0.12, 0.12)
-                wg = torch.tensor(
-                    [math.exp(dt), math.exp(dn), math.exp(-dt)], device=device
-                ).view(3, 1, 1)
+                if random.random() < 0.35:
+                    lr, lg, lb = (
+                        random.uniform(-0.55, 0.55),
+                        random.uniform(-0.55, 0.55),
+                        random.uniform(-0.55, 0.55),
+                    )
+                    wg = torch.tensor(
+                        [math.exp(lr), math.exp(lg), math.exp(lb)], device=device
+                    ).view(3, 1, 1)
+                else:
+                    dt, dn = random.uniform(-0.45, 0.45), random.uniform(-0.15, 0.15)
+                    wg = torch.tensor(
+                        [math.exp(dt), math.exp(dn), math.exp(-dt)], device=device
+                    ).view(3, 1, 1)
                 v = v * (wg / wg.mean())
-            if random.random() < 0.80:
-                g = math.exp(random.uniform(-0.85, 0.70))
-                gm = math.exp(random.uniform(-0.60, 0.60))
-                lf = random.uniform(-0.10, 0.30)
+            if random.random() < 0.85:
+                g = math.exp(random.uniform(-0.90, 0.70))
+                gm = math.exp(random.uniform(-0.65, 0.65))
+                lf = random.uniform(-0.10, 0.38)
                 sat = random.uniform(-0.45, 0.40)
                 v = (v.clamp(min=1e-6) ** gm) * g
                 v = lf + (1.0 - lf) * v
-                if random.random() < 0.45:
-                    ct = random.uniform(0.45, 0.90)
-                    piv = random.uniform(0.35, 0.65)
+                if random.random() < 0.65:
+                    ct = random.uniform(0.35, 0.90)
+                    piv = random.uniform(0.35, 0.68)
                     v = piv + ct * (v - piv)
                 y = 0.299 * v[0:1] + 0.587 * v[1:2] + 0.114 * v[2:3]
                 v = y + (1.0 + sat) * (v - y)
@@ -423,7 +469,7 @@ def main():
     p.add_argument("--frames", required=True, help="Path to extracted video frames directory")
     p.add_argument("--exclude-dir", default="", help="Optional holdout directory of test video names")
     p.add_argument("--out", default="crates/vidcut-av/src/auto_color.safetensors")
-    p.add_argument("--epochs", type=int, default=160)
+    p.add_argument("--epochs", type=int, default=220)
     p.add_argument("--steps", type=int, default=60)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--seed", type=int, default=42)
@@ -441,6 +487,8 @@ def main():
     print(f"loaded {len(sc_imgs)} SimpleCube++ train and {len(fr_imgs)} video frames on {device}")
 
     net = AutoColorNet().to(device)
+    ema = copy.deepcopy(net).eval()
+    ema_decay = 0.995
     opt = torch.optim.AdamW(net.parameters(), lr=1.5e-3, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=args.epochs * args.steps, eta_min=2e-5
@@ -449,8 +497,8 @@ def main():
     id_w = torch.tensor([1.0, 1.0, 1.0], device=device)
 
     t0 = time.perf_counter()
-    net.train()
     for ep in range(1, args.epochs + 1):
+        net.train()
         el = 0.0
         for _ in range(args.steps):
             src, tgt, cl = make_batch(sc_imgs, sc_gts, fr_imgs, args.batch_size, device)
@@ -458,23 +506,55 @@ def main():
             pred = apply_ew(src, e, w)
             lp, lt = srgb_to_lab(pred), srgb_to_lab(tgt)
             dL, da, db = lp[:, 0] - lt[:, 0], lp[:, 1] - lt[:, 1], lp[:, 2] - lt[:, 2]
+            per_px = torch.sqrt(dL * dL + 2.2 * (da * da + db * db) + 1e-4)
+            per_img = per_px.mean(dim=(1, 2))
+            topk_loss = torch.topk(per_img, max(1, args.batch_size // 4)).values.mean()
+            mean_chroma_mse = (
+                da.mean(dim=(1, 2)).pow(2) + db.mean(dim=(1, 2)).pow(2)
+            ).mean()
+            neutral_mask = ((lt[:, 1].pow(2) + lt[:, 2].pow(2)).sqrt() < 8.0).float()
+            neutral_chroma = torch.sqrt(lp[:, 1].pow(2) + lp[:, 2].pow(2) + 1e-4)
+            neutral_loss = (neutral_mask * neutral_chroma).sum() / neutral_mask.sum().clamp(
+                min=1.0
+            )
             loss = (
-                torch.sqrt(dL * dL + 1.4 * (da * da + db * db) + 1e-4).mean()
-                + 15.0 * F.l1_loss(pred, tgt)
-                + 12.0 * (F.relu(pred - 1.02).pow(2) + F.relu(-0.02 - pred).pow(2)).mean()
-                + 1.5 * (cl * ((e - id_e).pow(2).sum(1) + (w - id_w).pow(2).sum(1))).mean()
-                + 0.05 * ((e[:, 0] - 1.0).pow(2).mean() + e[:, 1].pow(2).mean() + e[:, 5].pow(2).mean())
+                per_img.mean()
+                + 0.5 * topk_loss
+                + 0.06 * mean_chroma_mse
+                + 2.0 * neutral_loss
+                + 12.0 * F.l1_loss(pred, tgt)
+                + 12.0
+                * (F.relu(pred - 1.02).pow(2) + F.relu(-0.02 - pred).pow(2)).mean()
+                + 2.0 * (cl * ((e - id_e).pow(2).sum(1) + (w - id_w).pow(2).sum(1))).mean()
+                + 0.05
+                * (
+                    (e[:, 0] - 1.0).pow(2).mean()
+                    + e[:, 1].pow(2).mean()
+                    + e[:, 5].pow(2).mean()
+                )
             )
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 2.0)
             opt.step()
             sched.step()
+            with torch.no_grad():
+                for p_ema, param in zip(ema.parameters(), net.parameters()):
+                    p_ema.mul_(ema_decay).add_(param, alpha=1.0 - ema_decay)
+                for b_ema, buf in zip(ema.buffers(), net.buffers()):
+                    b_ema.copy_(buf)
             el += float(loss.item())
         if ep % 20 == 0 or ep == 1:
             print(f"epoch {ep:3d}/{args.epochs} loss={el/args.steps:.3f} ({time.perf_counter()-t0:.1f}s)")
 
-    export_safetensors(net, args.out)
+    ema.train()
+    with torch.no_grad():
+        for _ in range(50):
+            src, _, _ = make_batch(sc_imgs, sc_gts, fr_imgs, args.batch_size, device)
+            ema(src)
+    ema.eval()
+
+    export_safetensors(ema, args.out)
     print(f"wrote {args.out} ({os.path.getsize(args.out):,} bytes)")
 
 
