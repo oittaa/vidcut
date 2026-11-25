@@ -3346,8 +3346,9 @@ pub struct TitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
     /// Text height as a fraction of the picture height, from 1/1080 to
-    /// 4096/1080. Usual: 96/1080 for `text`, 108/1080 for `scroll`, and for a
-    /// `lower_third` 76/1080 on its lower line and 48/1080 on its upper line.
+    /// 4096/1080. Usual: 96/1080 for `text`, 108 pixels of the timeline for
+    /// `scroll` at any timeline height, and for a `lower_third` 76/1080 on its
+    /// lower line and 48/1080 on its upper line.
     /// A size set here goes on both lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
@@ -3404,10 +3405,10 @@ pub struct TitleShape {
     /// changed by the background's opacity. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline_color: Option<String>,
-    /// The width of its outline in pixels of the timeline, from 0 to 30. Half
-    /// of it is outside the box. Usual: 0.
+    /// The width of its outline in whole pixels of the timeline, from 0 to
+    /// 30. Half of it is outside the box. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outline_width: Option<f64>,
+    pub outline_width: Option<u32>,
 }
 
 /// A title's drop shadow. A field left out keeps the usual look.
@@ -3483,7 +3484,8 @@ impl Title {
     pub const BOX_WIDTH: f64 = 0.9;
     pub const BOX_WHOLE: f64 = 1e-6;
     pub const BOX_CORNER: f64 = 1.0 / 27.0;
-    pub const BOX_MOST_OUTLINE: f64 = 30.0;
+    pub const BOX_MOST_OUTLINE: u32 = 30;
+    pub const BOX_OPACITY: f64 = 0.5;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -3493,6 +3495,7 @@ impl Title {
     pub const SCROLL_IN: f64 = 0.01;
     pub const SCROLL_LINE: f64 = 4.0 / 3.0;
     pub const SCROLL_LEAD: f64 = 10.0;
+    pub const SCROLL_SIZE: f64 = 108.0;
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const UPPER_TRACKING: f64 = 11.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
@@ -3569,10 +3572,10 @@ impl Title {
             .fractions()
     }
 
-    pub fn usual_size(kind: TitleKind) -> f64 {
+    pub fn usual_size(kind: TitleKind, timeline_height: u32) -> f64 {
         match kind {
             TitleKind::Text => 96.0 / 1080.0,
-            TitleKind::Scroll => 108.0 / 1080.0,
+            TitleKind::Scroll => Self::SCROLL_SIZE / f64::from(timeline_height.max(1)),
             TitleKind::LowerThird => 76.0 / 1080.0,
         }
     }
@@ -3606,8 +3609,10 @@ impl Title {
         self.kind == TitleKind::Scroll
     }
 
-    pub fn text_fraction(&self) -> f64 {
-        self.style.size.unwrap_or(Self::usual_size(self.kind))
+    pub fn text_fraction(&self, timeline_height: u32) -> f64 {
+        self.style
+            .size
+            .unwrap_or(Self::usual_size(self.kind, timeline_height))
     }
 
     fn tracking_share(tracking: f64) -> f64 {
@@ -3655,9 +3660,19 @@ impl Title {
         (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
-    pub fn seated_left(&self, across: f64, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
+    pub fn block_width(line: f64, freed: f64, pixel: f64) -> f64 {
+        ((line - freed.min(pixel)) / pixel + Self::WIDTH_SLACK).floor() + 1.0
+    }
+
+    pub fn seated_left(
+        &self,
+        across: f64,
+        middle: f64,
+        width: f64,
+        (widest, wrap): (f64, f64),
+        pixel: f64,
+    ) -> f64 {
         let lined = self.align().fraction();
-        let width = (widest / pixel + Self::WIDTH_SLACK).floor();
         ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 
@@ -3718,12 +3733,8 @@ impl Title {
         let s = self.style.shape.as_ref();
         (
             paint(s.and_then(|s| s.outline_color.as_deref()), [0, 0, 0]),
-            s.and_then(|s| s.outline_width).unwrap_or(0.0),
+            s.and_then(|s| s.outline_width).map_or(0.0, f64::from),
         )
-    }
-
-    pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
-        (picture_width * Self::SAFE).max(self.text_fraction() * picture_height)
     }
 
     pub fn scale(&self) -> f64 {
@@ -3734,9 +3745,9 @@ impl Title {
         self.rotation.unwrap_or(0.0)
     }
 
-    pub fn lower_line(&self) -> f64 {
+    pub fn lower_line(&self, timeline_height: u32) -> f64 {
         let lines = crate::rich::lines(&self.text);
-        let base = self.text_fraction();
+        let base = self.text_fraction(timeline_height);
         let size = lines
             .last()
             .map_or(base, |line| crate::rich::largest(line, base));
@@ -5638,7 +5649,7 @@ pub struct Merge {
     pub alpha_gain: Option<f64>,
     /// How much less the alpha of the foreground covers the background,
     /// from 0 to 1. The foreground is still added in full. Only a `normal`
-    /// merge uses it. Usual: 0.
+    /// merge with the `over` operator uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
     /// The width that the center is shown in: its x shows as x × this
@@ -9360,8 +9371,8 @@ impl TextStroke {
 pub struct SubtitleBackground {
     /// `#rrggbb`, `#rgb` or a name.
     pub color: String,
-    /// From 0 to 1. `0` draws no box on a subtitle track. Usual: 1/2 on a
-    /// subtitle track, 1 on a title.
+    /// From 0 to 1. `0` draws no box on a subtitle track. On a title, it is
+    /// in steps of 1/100. Usual: 1/2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `true` draws no box and keeps these values.
@@ -9537,7 +9548,10 @@ fn stroke_of(o: Option<&SubtitleOutline>, usual: f64, ink: [u8; 3]) -> Option<Te
 
 fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
     let b = b.filter(|b| !b.is_off())?;
-    Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
+    Some((
+        paint(Some(&b.color), [0, 0, 0]),
+        b.opacity.unwrap_or(Title::BOX_OPACITY),
+    ))
 }
 
 /// A subtitle track: cues shown over the picture, one language or use.
@@ -10749,7 +10763,7 @@ impl Hash for TitleShape {
             pair_bits(*center),
             floats_bits(*corner),
             outline_color,
-            floats_bits(*outline_width),
+            outline_width,
         )
             .hash(h);
     }

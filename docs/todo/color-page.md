@@ -35,8 +35,10 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- Measure the node numbers after Alt+P, Alt+K and a delete in Resolve, then match them ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
-  - The spec has measured cases for a serial node, a node before, an outside node, a layer mixer and a new link.
-  - After a delete or an Extract, each moved link keeps the order of the link into the removed node. No measurement shows that this is correct.
+- Measure the node numbers after an Extract, and the order of the moved links after a delete or an Extract, then match them ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
+  - vidcut gives each moved link the order of the link into the removed node. No measurement shows that this is correct.
 - The Qualifier controls of the Key palette (p. 3436).
 - Measure Add Serial in the menu of a Splitter, which has three outputs, then match it ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- Input Sizing, a mode of the Sizing palette (pp. 3497–3500). It acts before the node graph (p. 3498).
+  - The Sizing mode and the Sizing track of the Keyframe Editor need it (pp. 3455, 3460).
+  - Measure its order against the Transform of the Edit page first.

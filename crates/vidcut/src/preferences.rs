@@ -279,6 +279,10 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
             .collect::<Vec<_>>()
             .join("+")
     };
+    let level = match s.keys {
+        Keys::Own(a, _) | Keys::Same(a) => Some(s.group.level().unwrap_or(a.panel()).name()),
+        Keys::Hold(..) | Keys::Pointer(_) => None,
+    };
     let (action, default_keys, custom, follows) = match s.keys {
         Keys::Own(a, _) => {
             let defaults: Vec<String> = b.set_keys(a).iter().map(Combo::shown).collect();
@@ -291,6 +295,7 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
     json!({
         "group": s.group,
         "group_title": s.group.title(),
+        "level": level,
         "title": s.title,
         "action": action,
         "keys": b.row(s).into_iter().map(shown).collect::<Vec<_>>(),
@@ -305,9 +310,13 @@ fn in_force(b: &Bindings) -> Value {
     json!({ "set": b.set_name().unwrap_or(OWN), "changed": b.any_custom() })
 }
 
-pub fn keys_list() -> Result<Value> {
+pub fn keys_list(key: Option<Combo>) -> Result<Value> {
     let b = bindings_of(&read()?)?;
-    let rows: Vec<Value> = SHORTCUTS.iter().map(|s| key_row(&b, s)).collect();
+    let rows: Vec<Value> = SHORTCUTS
+        .iter()
+        .filter(|s| key.is_none_or(|k| b.combos(s).contains(&k)))
+        .map(|s| key_row(&b, s))
+        .collect();
     let mut out = in_force(&b);
     out["shortcuts"] = json!(rows);
     Ok(out)
@@ -388,10 +397,18 @@ pub fn keys_use(set: &str, dry_run: bool) -> Result<Value> {
     keys_changed(&p, &before, dry_run)
 }
 
-pub fn keys_save(name: &str, overwrite: bool, dry_run: bool) -> Result<Value> {
+pub fn keys_save(
+    name: &str,
+    overwrite: bool,
+    keys: Option<&Custom>,
+    dry_run: bool,
+) -> Result<Value> {
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = load()?;
-    let keys = bindings_of(&p)?.changes();
+    let keys = match keys {
+        Some(keys) => Bindings::of(keys)?.changes(),
+        None => bindings_of(&p)?.changes(),
+    };
     let (set, path) = key_sets::save(&key_sets::dir(), name, &keys, overwrite, dry_run)?;
     p.keys = keys;
     p.key_set = Some(set.name.clone());
@@ -412,6 +429,7 @@ pub fn keys_delete(name: &str, dry_run: bool) -> Result<Value> {
         .is_some_and(|s| key_sets::same(s, name));
     if was_in_force {
         p.key_set = None;
+        p.keys = Custom::new();
         if !dry_run {
             write(&p)?;
         }
@@ -430,8 +448,16 @@ pub fn keys_import(
     overwrite: bool,
     dry_run: bool,
 ) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let before = bindings_of(&p)?;
     let (set, path) = key_sets::import(&key_sets::dir(), from, name, overwrite, dry_run)?;
-    Ok(json!({ "imported": set.name, "path": path }))
+    p.keys = set.keys;
+    p.key_set = named_set(&set.name);
+    let mut out = keys_changed(&p, &before, dry_run)?;
+    out["imported"] = json!(set.name);
+    out["path"] = json!(path);
+    Ok(out)
 }
 
 fn write(p: &Preferences) -> Result<()> {

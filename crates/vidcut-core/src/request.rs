@@ -4041,6 +4041,19 @@ pub enum Request {
     /// step.
     #[serde(rename = "render.add")]
     RenderAdd(ExportParams),
+    /// Change a job of the render queue, as Update Job after its pencil on
+    /// the Export page does: the job gets the export and the range that
+    /// `render.add` takes, of the open timeline. It keeps its place, its
+    /// name and its status. A job that renders is refused. An output file
+    /// that is there is an error, unless `overwrite`. A dry run returns the
+    /// `existing` files.
+    #[serde(rename = "render.update")]
+    RenderUpdate {
+        /// The job, like `r1`.
+        job: String,
+        #[serde(flatten)]
+        export: ExportParams,
+    },
     /// The jobs of the render queue, from the top: the `id`, `timeline`,
     /// `export` and `status` of each.
     #[serde(rename = "render.list")]
@@ -4277,9 +4290,16 @@ pub enum Request {
     PreferencesReset {},
     /// The keyboard shortcuts in force, one action each, with a few plain
     /// words where the action's name doesn't say what it does (spec §11).
-    /// Ctrl and Alt are Cmd and Option on macOS.
+    /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
+    /// key of an action works: `app`, `transcription`, `effects` or
+    /// `color`.
     #[serde(rename = "keys.list")]
-    KeysList {},
+    KeysList {
+        /// Only the actions of this key, like `Ctrl+B`, at each level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<String>")]
+        key: Option<crate::shortcuts::Combo>,
+    },
     /// Give an action other keys in place of the ones it has (spec §11). A
     /// key belongs to one action: a key that another action has is refused,
     /// and the refusal names that action. A running GUI follows at once.
@@ -4327,10 +4347,15 @@ pub enum Request {
         /// Replace your set of that name.
         #[serde(default)]
         overwrite: bool,
+        /// The keys to save in place of the keys in force: each action whose
+        /// keys differ from vidcut's own set, with its keys, like
+        /// `{"play_forward": ["Ctrl+F12"]}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<std::collections::BTreeMap<String, Vec<String>>>")]
+        keys: Option<crate::shortcuts::Custom>,
     },
     /// Delete one of your key sets. Built-in sets can't be deleted. When the
-    /// set is in force, its keys stay in force, as changes to vidcut's own
-    /// keys.
+    /// set is in force, vidcut's own set is put in force.
     #[serde(rename = "keys.delete")]
     KeysDelete { name: String },
     /// Write a key set to a file, for another computer (`keys.import`). A
@@ -4341,8 +4366,8 @@ pub enum Request {
         set: String,
         path: PathBuf,
     },
-    /// Add a key set from a file that `keys.export` wrote. The set is not
-    /// put in force (`keys.use`).
+    /// Add a key set from a file that `keys.export` wrote, and put it in
+    /// force.
     #[serde(rename = "keys.import")]
     KeysImport {
         path: PathBuf,
@@ -4593,6 +4618,9 @@ pub enum Request {
         /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parade_mode: Option<crate::preferences::ParadeMode>,
+        /// The Vectorscope shows a line at the skin tone angle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_tone: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -4891,6 +4919,21 @@ pub enum Request {
         /// and frame rate, and the audio and the length. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_details: Option<bool>,
+        /// The Thumbnail timeline of the `export` page: a picture of each
+        /// clip of the video tracks, over the timeline. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<bool>,
+        /// The text under each picture of the Thumbnail timeline. Left out,
+        /// it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip_label: Option<ClipLabel>,
+        /// The job of the render queue that the Render Settings edit, as its
+        /// pencil does: they get the job's settings, and the timeline gets
+        /// its range. Update Job then changes the job. `""` stops, and the
+        /// job keeps its settings. A job is refused while jobs render. Left
+        /// out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edit_job: Option<String>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
     /// last one is the active node. An empty list selects none. Answers
@@ -5337,6 +5380,17 @@ pub enum PrinterColor {
     Yellow,
     /// Red, green and blue.
     Master,
+}
+
+/// The text under each picture of the Thumbnail timeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipLabel {
+    /// The codec of the clip's video. A clip with no media shows its name.
+    #[default]
+    Codec,
+    /// The name of the clip.
+    Name,
 }
 
 /// What to export and how.
@@ -6410,6 +6464,9 @@ pub enum GuiPanel {
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.
     SelectTool,
+    /// The Effects Search window: it finds an effect by its name or its group,
+    /// and adds it to the first selected clip with a picture.
+    EffectsSearch,
     /// The Equalizer window of a track with sound: the switch, the Type,
     /// the curve and the bands of its equalizer.
     Equalizer,
@@ -8236,7 +8293,7 @@ impl Request {
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
-                | Self::KeysList {}
+                | Self::KeysList { .. }
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
                 | Self::KeysSets {}
@@ -8256,6 +8313,7 @@ impl Request {
         matches!(
             self,
             Self::RenderAdd(_)
+                | Self::RenderUpdate { .. }
                 | Self::RenderRemove { .. }
                 | Self::RenderMove { .. }
                 | Self::RenderRename { .. }
@@ -8337,7 +8395,7 @@ impl Request {
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
-                    | Self::KeysList {}
+                    | Self::KeysList { .. }
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
                     | Self::KeysSets {}
@@ -8398,7 +8456,10 @@ impl Request {
                 .chain(search.iter_mut())
                 .chain(unpack.iter_mut())
                 .collect(),
-            Self::ExportPlan(p) | Self::ExportStart(p) | Self::RenderAdd(p) => vec![&mut p.output],
+            Self::ExportPlan(p)
+            | Self::ExportStart(p)
+            | Self::RenderAdd(p)
+            | Self::RenderUpdate { export: p, .. } => vec![&mut p.output],
             Self::FrameRender { out, .. }
             | Self::FrameScope { out, .. }
             | Self::StoryboardRender { out, .. }

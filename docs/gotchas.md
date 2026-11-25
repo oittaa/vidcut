@@ -705,11 +705,25 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
   - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+- **While jobs render, the pencils of the other jobs look active.**
+  - On the Deliver page, the pencil of the job that renders is dim. The pencils of the other jobs stay white.
+  - A click on a white pencil does nothing.
+  - vidcut greys all pencils while jobs render ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 - **Delete removes only one of the selected points of a curve window.**
   - The manual says that a Shift drag box selects points to delete them all at once (p. 3274).
   - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.
   - Two runs gave the same result.
   - vidcut does not copy this fault. Delete removes each selected point ([spec §8.23](spec.md#823-windows-pp-32653279)).
+
+## Resolve's scopes
+
+These facts come from measurements in Resolve Studio 21.2, on the floating Scopes window.
+
+- **Percentage with Video Level Scopes adds four dashed lines.**
+  - They are at 38.0, 58.1, 75.0 and 83.0 %. These are the PQ places of 26, 203, 1000 and 2000 nits.
+  - Two runs showed them: a 10-step chart in one scope, and SMPTE bars in four scopes.
+  - Data Level Scopes, 10-bit and mV do not show them.
+  - vidcut does not copy this fault. Percentage has no dashed lines (`dashed`).
 
 ## Resolve's renders
 

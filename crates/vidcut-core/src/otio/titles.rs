@@ -431,7 +431,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         .as_deref()
         .or(drawn.family.as_deref())
         .unwrap_or(USUAL_FAMILY);
-    let size = t.text_fraction();
+    let size = t.text_fraction(height);
     let points = size * f64::from(height);
     let color = hex(t.ink());
     let line = size * Title::LINE;
@@ -593,7 +593,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                     TitleKind::Text => y - h * down,
                     TitleKind::Scroll => y - h / 2.0,
                     TitleKind::LowerThird => {
-                        y + (1.0 - down) * t.lower_line() + Title::PADDING * size - h
+                        y + (1.0 - down) * t.lower_line(height) + Title::PADDING * size - h
                     }
                 };
                 let middle = if t.kind == TitleKind::Text {
@@ -974,7 +974,7 @@ fn shape_of(all: &[&Value]) -> Option<TitleShape> {
     let width = value(g, "backgroundOutlineWidth")
         .as_f64()
         .unwrap_or(0.0)
-        .clamp(0.0, Title::BOX_MOST_OUTLINE);
+        .clamp(0.0, f64::from(Title::BOX_MOST_OUTLINE)) as u32;
     Some(TitleShape {
         size: box_size(g)?,
         center: (across != 0.0 || up != 0.0)
@@ -982,12 +982,12 @@ fn shape_of(all: &[&Value]) -> Option<TitleShape> {
         corner: value(g, "backgroundCornerRadius")
             .as_f64()
             .map(|c| c.clamp(0.0, 1.0)),
-        outline_color: (width > 0.0)
+        outline_color: (width > 0)
             .then(|| value(g, "backgroundOutlineColor").as_str())
             .flatten()
             .filter(|c| crate::ops::subtitles::checked_color(Some(c), "outline").is_ok())
             .map(str::to_string),
-        outline_width: (width > 0.0).then_some(width),
+        outline_width: (width > 0).then_some(width),
     })
 }
 
@@ -1000,7 +1000,7 @@ fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
                 .to_string(),
             opacity: value(g, "backgroundOpacity")
                 .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+                .map(|o| (o.trunc() / 100.0).clamp(0.0, 1.0)),
             off: None,
         })
     })
