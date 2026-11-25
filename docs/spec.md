@@ -5412,12 +5412,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: tab 1 shows the full panel. Its Export Video switch is greyed and stays on.
   - Measured: each other tab shows Create Additional Output, Video Format, Codec, Encoder, File Subfolder, a Data burn-in row and Delete Output.
   - Measured: with ProRes, Type takes the place of Encoder. Type is the ProRes profile.
-  - Measured: a new additional output is MP4 and H.264, with Encoder Auto and no subfolder.
+  - Measured: a new additional output is H.264, with Encoder Auto and no subfolder. Its format was MP4 in one run and QuickTime in another.
   - Measured: Create Additional Output on any tab adds a tab at the end. The open tab does not change.
   - Measured: Delete Output removes the output at once, with no prompt. Then the tab before it shows.
   - Measured: when the last additional output goes, the tab row goes, and Export Video is free again. Tab 1 has no Delete Output.
   - Measured: an additional output has the file name of output 1 and the extension of its own format.
   - Measured: all outputs have the frame size, the frame rate and the range of output 1.
+  - Measured: each output has the audio of output 1, with its codec and its bit rate. A QuickTime output also has the AAC of an MP4 output 1.
+  - Measured: each output has the Quality of output 1, and its own encoder applies it. In the run, Auto used NVIDIA (High profile), and output 1 used Native (Main profile).
+  - Measured: with Best, output 1 had 118 kb/s and the others 332 kb/s each. With Least, output 1 had 104 kb/s and the others 88 kb/s each.
   - Measured: two outputs with the same path stop Add. The prompt is "Duplicate Render Paths", with one button, OK. No job is added.
   - Measured: its text is "Please enter unique sub-folder names for each additional output in the render settings".
   - Measured: the queue has one job, and one render writes all outputs. The row of the job shows the path and the details of output 1.
@@ -5482,8 +5485,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An additional output has no Data burn-in row, because vidcut has no data burn-in ([gaps](todo/gaps.md)).
   - Type shows for each format with fixed profiles: ProRes, DNxHR, TIFF and OpenEXR. Only ProRes is measured.
   - With additional outputs, the Format menu of tab 1 has only the formats that hold video. The Preset menu greys the presets with no video.
-  - An additional output gets the audio of output 1 when its format takes that codec, else no audio. Its codec gives its default quality.
-  - The audio and the quality of an additional output are not measured.
+  - An additional output gets the audio of output 1 when its format takes that codec, else no audio.
+  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, its codec gives its default quality. That case is not measured.
   - An additional output gets the subtitle streams of output 1. Burned-in subtitles are in the picture of each output.
   - `render.add`, `render.update` and `export.start` refuse two outputs with the same path. `export.plan` gives the note `written_twice`.
   - The text of the prompt has no "Please", because GUI text has 12 words at most.

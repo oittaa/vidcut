@@ -747,9 +747,10 @@ pub struct Numbering {
 }
 
 /// One more file of a render: the frames of `output` in a format of its
-/// own. It has the frame size, the frame rate and the range of `output`,
-/// and the default quality of its codec. It has the audio of `output`
-/// when its format takes that codec, else no audio.
+/// own. It has the frame size, the frame rate and the range of `output`.
+/// It has the `quality` of `output`, and its own encoder makes it. With a
+/// `bitrate` on `output`, it has the default quality of its codec. It has
+/// the audio of `output` when its format takes that codec, else no audio.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MoreOutput {
@@ -822,6 +823,9 @@ impl MoreOutput {
         if let Some(f) = &first.video {
             (v.width, v.height) = (f.width, f.height);
             v.use_proxy_media = f.use_proxy_media;
+            if f.bitrate.is_none() {
+                v.quality = f.quality;
+            }
             if f.hdr == HdrMode::Sdr || color::carries_hdr(self.codec) {
                 v.hdr = f.hdr;
             }
