@@ -722,7 +722,17 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
   - Measured: 10-bit has a line each 128, 12-bit each 512, Percentage each 10, and mV each 100.
   - Measured: HDR has lines at 0, 1, 10, 100, 1000 and 10000 nits on the PQ curve.
+  - Measured: HDR also has dashed lines with no label between those lines.
+    - The figure on p. 3092 shows them at 26, 203 and 2000 nits, to the precision of the figure. vidcut draws them there.
+    - The exact nits are not measured in Resolve.
   - On an HLG timeline, HDR uses the nits of the HLG curve. This is not measured in Resolve.
+    - vidcut draws no dashed lines on an HLG timeline.
+  - The same menu has Video Level Scopes and Data Level Scopes (p. 3095). Data Level Scopes is the default (measured).
+    - Video Level Scopes changes only what the scopes show. The monitor and the export do not change (p. 3095).
+    - The figure on p. 3095 shows full-range white at code 940 of the 10-bit scale with Video Level Scopes.
+    - vidcut: with Video Level Scopes, the Waveform and the Parade show black at code 64 and white at code 940. The marks of the scale stay.
+    - `viewer.scopes` with `video_levels` sets it.
+    - Not measured in Resolve: the marks of Percentage, mV and HDR with Video Level Scopes, and the Vectorscope with Video Level Scopes.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
@@ -2868,10 +2878,11 @@ A mask with a mask on its effect mask input (p. 2474):
   - Invert: i + n − 2 × i × n.
   - Copy: n. Ignore: i.
   - Replace: n, the same as Copy. The manual says that the areas where n is 0 keep i (p. 2465) ([gotchas](gotchas.md#resolves-fusion-page)).
+    - vidcut follows the manual: n where n is above 0, else i.
   - The forms agree with the reads within 0.00001. The new mask of the reads has Level 0.7.
   - A delete of the input mask stops the render of the mask and of the tool after it ([gotchas](gotchas.md#resolves-fusion-page)).
 - The manual says that Level and Invert act on the whole mask (p. 2491). The render shows otherwise. vidcut follows the render.
-- vidcut: Merge is the only mode ([todo](todo/effects-page.md)).
+- vidcut: the Paint Mode row shows only when a mask is on the effect mask input. A mask with nothing on that input is its own shape n.
 
 The Image tab of a mask (pp. 2500–2501). Measured in Resolve Studio 21.2:
 
@@ -3850,6 +3861,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
   - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. A current node that is not selected stays. The last corrector then becomes the current node.
+  - vidcut: with selected points of a curve window, these keys delete the points and no node ([§8.23](#823-windows-pp-32653279)).
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
@@ -4111,6 +4123,15 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
   - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
+  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([gaps](todo/gaps.md)).
+  - The header of a node track has an Enable/Disable button, a Lock button and an Auto-Keyframe button (p. 3454).
+  - Enable/Disable turns the node off or on. A locked node takes no changes, and the Node Editor shows a lock on it (p. 3454).
+  - With Auto-Keyframe on, each change to a value of the node adds a Dynamic keyframe (pp. 3454, 3461).
+  - Without Auto-Keyframe, a change goes to a keyframe that is there, by the playhead rule below (p. 3461).
+  - vidcut: the three buttons are at the right of the name of each node track. They send `grade.set` with `on`, `locked` and `auto_key`.
+  - vidcut: with `auto_key`, a change on a frame where the node has no keyframe first adds a Dynamic keyframe there. The new keyframe takes the values that the picture has on its frame, and the change then goes to it.
+  - vidcut: the changes of `grade.set`, `grade.printer`, `grade.clear` with `node` or `keep_nodes`, `grade.auto_color`, `grade.window.set` and a `grade.window.paste` onto a window of the same shape do so. A change of the window list does not.
+  - Not measured: where Resolve keeps the Auto-Keyframe state, and whether a reset adds a keyframe. vidcut keeps it in the node.
 - **Dynamic and Static keyframes** (pp. 3456–3459):
   - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).
   - Mark > Make Static Keyframe (Command-]) adds a Static keyframe (p. 3457).
@@ -4181,6 +4202,10 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
   - vidcut: a drag in the Master track moves the keyframe of each corrector on that frame. A drag in a node track moves the keyframe of that node.
   - vidcut: a drag sends `grade.keys.move`. A corrector has one keyframe on a frame at most. Thus a move onto another keyframe of that corrector fails.
+  - A drag of a box around keyframes selects them, in red. A drag of one of them moves them all (p. 3462).
+  - vidcut: a box selects the keyframes of the track where it starts. A drag of a selected keyframe moves the selection of its track. The menu of a selected keyframe changes or deletes the whole selection of its track.
+  - Playback > Next > Keyframe (]) and Playback > Previous > Keyframe ([) move the playhead to the next or the previous keyframe (p. 3462).
+  - vidcut: on the Color page, ] and [ go to the next and the previous keyframe of the grade, in all nodes.
   - Mark > Delete Keyframe (Option-]) deletes every keyframe at the playhead (p. 3463).
   - Delete Selected Keyframe in the menu of a keyframe deletes only that keyframe (p. 3463).
   - Mark > Delete All Keyframes deletes every keyframe of the clip (p. 3463).
@@ -4192,6 +4217,11 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
 - **The timeline grade** (p. 3465):
   - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
   - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.
+  - Add EDL Marks on Tracks is in the menu of a Corrector track of the timeline grade. It adds a Static keyframe at each edit point of the timeline (p. 3465).
+  - Delete EDL Marks on Tracks removes only those marks. The other keyframes stay (p. 3465).
+  - vidcut: `grade.keys.add` and `grade.keys.remove` with `edl`. The menu of each track of the timeline grade has the two items. The Master track acts on each node.
+  - vidcut: the marks go where a clip starts or ends on a video track, after the first frame and before the end. A node that has a keyframe on that frame keeps it.
+  - Not measured: which edits count, and whether the marks go on the right-clicked track only. vidcut puts them on the track of the menu.
   - Measured in Resolve Studio 21.2: an edit of the timeline does not move them. After a ripple delete, they stay on their timeline frames.
   - vidcut: the same.
 - vidcut: the viewer, the export, `frame.render` and the storyboard give each frame the grade of its own frame.
@@ -4346,11 +4376,33 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
-  - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box. A dashed box with 8 handles stays around them.
+  - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box.
+    - The box is the dragged rectangle, with 8 handles: 4 corners and 4 side middles. It stays after the drag.
+    - The selected points and their softness points are blue.
     - A drag of a selected point moves all the selected points and the box.
     - A drag of a side handle scales the selected points about the opposite side.
-    - Delete with two selected points removed one of them. A second Delete removed nothing.
-  - vidcut: Shift and a drag box are not there yet ([todo](todo/color-page.md)).
+    - A drag of a corner handle scales the selected points about the opposite corner, by the same amount on the two axes.
+      - In two drags, the scale was the smaller of the two ratios of the pointer.
+      - Shift or Alt during the drag changes nothing.
+    - The softness points move with their points. Their distance from the curve does not change.
+    - Ctrl+Z gives back the points. The box keeps its new size.
+    - A press 3 px outside a corner takes the handle. A press 8 px outside it clears the selection.
+    - These clear the selection and the box: a click on an empty place, a change of the palette or of the node, and Escape.
+    - A click on a point that is not selected selects that point alone, with its softness points and no box.
+    - The box has no control to turn the points.
+    - Delete with two selected points removed one of them. A second Delete removed nothing. This is a fault of Resolve ([gotchas](gotchas.md#resolves-edits)).
+    - Not measured: the Bezier handles of the selected points.
+  - vidcut: Shift and a drag from any place on the current curve draw a dashed box. The points in the box are selected while the drag goes on.
+    - The box is the dragged rectangle, in the axes of the frame, with 8 square handles. The selected points and their softness points are blue.
+    - A drag of a selected point moves the selected points, their Bezier handles and the box.
+    - A drag of a side handle scales the selected points, their handles and the box about the opposite side.
+    - A drag of a corner handle scales them about the opposite corner, by the smaller of the two ratios of the pointer.
+    - The softness points keep their distance from their points.
+    - A press within 6 px of a handle takes it. Undo gives back the points, and the box keeps its size.
+    - Delete and Shift+Backspace remove each selected point, as p. 3274 says. They then remove no node.
+    - A click or a drag outside the selected points and the handles clears the selection. So do Escape and a change of the window, the node or the palette.
+    - A click on a point that is not selected then selects that point alone, with no box.
+    - `grade.window.set` with `points` gives the same results to a script.
   - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
   - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
     - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
@@ -4385,7 +4437,6 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: an added, removed or converted window changes the window list of each keyframe.
   - vidcut: the Window palette and the viewer show the windows of the keyframe that a change goes to.
     - Not measured: the outline in the viewer of Resolve between two keyframes.
-  - The Shift box comes later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 

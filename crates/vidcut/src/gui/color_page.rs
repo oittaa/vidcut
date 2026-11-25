@@ -2427,7 +2427,7 @@ impl Workspace {
                 self.send("grade.paste", params(&of, "clips", json!({ "node": n })));
             }
         }
-        if struck(Action::DeleteNode) {
+        if struck(Action::DeleteNode) && !self.delete_window_points() {
             let picked: Vec<u32> = (self.effects_page.picked_grade().iter())
                 .copied()
                 .filter(|n| g.node(*n).is_some())
