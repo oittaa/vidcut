@@ -5094,7 +5094,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - **Range:** the timeline In–Out range if it is set, else the whole timeline.
 - **Output:** one file. Individual clips are for the Export page (§10.1).
 - **Preset models** (Deliver page):
-  - H.264 Master (QuickTime, AAC 320 kb/s)
+  - H.264 Master (QuickTime, AAC)
   - H.265 Master (Main10)
   - ProRes 422 HQ (LPCM audio)
   - YouTube 720p–2160p (MP4, H.264 High)
@@ -5108,12 +5108,18 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
-  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
+  - Measured in Resolve Studio 21.2: the YouTube and Tencent presets set AAC to 320 kb/s.
+  - Measured: TikTok, H.264 Master, H.265 Master, Vimeo, Dropbox, Replay and Presentations have no AAC rate. They keep the rate that was set before them.
+  - Measured: the rate of the preset is the rate of the file. An imported preset with 384 to 512 kb/s loads as 320 kb/s.
+  - The YouTube presets set AAC to 320 kb/s. TikTok, H.264 Master, H.265 Master and Vimeo keep the AAC rate that was set before them.
+  - A preset with no AAC rate and nothing set before, as in a script, gives 320 kb/s.
   - H.264 and H.265 round an odd side up to even. The side is of the timeline or of a custom size.
     - A size of 1281 x 721 gives a file of 1282 x 722. A size of 1281 x 720 gives a file of 1282 x 720.
     - With a timeline of an odd side, one factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
     - With a custom size, the picture fits into the rounded size with one draw.
-    - Resolve Studio 21.1.2 writes these sizes at 1281 x 721 with H.264 and H.265, on a timeline and as a custom size. It writes 258 x 258 for 257 x 257 with H.264. Other odd sizes were not measured.
+    - Measured in Resolve Studio 21.2 with H.264 and H.265 on the CPU: each odd side goes up by one. This is so on a timeline and as a custom size.
+    - 1279 x 719 gives 1280 x 720, and 853 x 481 gives 854 x 482. 1001 x 1001 gives 1002 x 1002, and 257 x 257 gives 258 x 258.
+    - Measured: a timeline of 1279 x 719 leaves the bottom row and the left and right columns part dark. As a custom size, the edges are full.
     - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.

@@ -614,14 +614,30 @@ impl Render {
     }
 
     pub(super) fn use_preset(&mut self, preset: &PresetInfo) {
+        let rate = (self.settings.audio.as_ref())
+            .filter(|a| a.codec == AudioCodec::Aac)
+            .and_then(|a| a.bitrate);
         self.preset = preset.name.clone();
         self.base = preset.settings.clone();
         self.settings = preset.settings.clone();
+        if let Some(a) = self.settings.audio.as_mut()
+            && a.codec == AudioCodec::Aac
+            && a.bitrate.is_none()
+        {
+            a.bitrate = rate;
+        }
         self.stashed_video = None;
     }
 
     pub(super) fn changed(&self) -> bool {
-        self.settings != self.base
+        let mut base = self.base.clone();
+        if let (Some(b), Some(s)) = (base.audio.as_mut(), self.settings.audio.as_ref())
+            && b.codec == AudioCodec::Aac
+            && b.bitrate.is_none()
+        {
+            b.bitrate = s.bitrate;
+        }
+        self.settings != base
     }
 
     pub(super) fn load_job(
