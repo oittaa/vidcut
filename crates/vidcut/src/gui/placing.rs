@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
+use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     AutoColor, Clip, ClipScaling, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project,
     TrackKind, ZoomBox,
@@ -79,6 +80,7 @@ enum Hold {
     Crop(Side),
     ZoomMove(Boxed),
     ZoomSize(Boxed),
+    Path(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +114,14 @@ pub struct Grab {
     landing: Option<(String, Picture, Instant, Picture)>,
     sent: Vec<(String, Picture)>,
     graded: Option<vidcut_core::model::Grade>,
+    pub(crate) path_menu: Option<(String, i64)>,
+    path_landing: Option<(String, Picture, Instant, Picture)>,
+}
+
+#[derive(Debug, Default)]
+struct MotionPath {
+    dots: Vec<Pos2>,
+    points: Vec<(i64, Pos2)>,
 }
 
 impl Grab {
@@ -142,6 +152,8 @@ struct Shown {
     plain: Level,
     ends: [Level; 2],
     within: [f64; 4],
+    size: (f64, f64),
+    fit: [f64; 4],
 }
 
 impl Shown {
@@ -178,6 +190,28 @@ impl Shown {
 
     fn pivot(&self) -> Pos2 {
         self.at(self.anchor)
+    }
+
+    fn path(&self) -> MotionPath {
+        let pic = &self.picture;
+        let keys = pic.keys_of(PictureValue::Position);
+        if keys.len() < 2 {
+            return MotionPath::default();
+        }
+        let spot = |f: i64| {
+            let at = Picture {
+                position: Some(pic.place_at(f as f64)),
+                anchor: Some(pic.channel_at(PictureValue::Anchor, f as f64)),
+                ..Picture::default()
+            };
+            self.at(anchored(&at, self.size, self.fit))
+        };
+        let first = keys.iter().map(|k| k.frame).min().unwrap_or(0);
+        let last = keys.iter().map(|k| k.frame).max().unwrap_or(0);
+        MotionPath {
+            dots: (first..=last).map(spot).collect(),
+            points: keys.iter().map(|k| (k.frame, spot(k.frame))).collect(),
+        }
     }
 
     fn zoom(&self) -> DynamicZoom {
@@ -334,7 +368,7 @@ impl Shown {
             }
         };
         match hold {
-            Hold::Move | Hold::ZoomMove(_) => CursorIcon::Move,
+            Hold::Move | Hold::ZoomMove(_) | Hold::Path(_) => CursorIcon::Move,
             Hold::Turn => CursorIcon::PointingHand,
             Hold::Corner => diagonal(p - self.pivot()),
             Hold::ZoomSize(e) => diagonal(p - self.end_middle(e)),
@@ -464,6 +498,8 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         plain,
         ends,
         within: extent.within(fit),
+        size: (w, h),
+        fit,
     })
 }
 
@@ -623,6 +659,9 @@ impl Workspace {
         if let Some(graded) = self.graded_wanted() {
             return vec![graded];
         }
+        if let Some(moved) = self.path_wanted() {
+            return vec![moved];
+        }
         match self.grab_wanted() {
             Some((id, picture, baseline)) => vec![preview(&id, &baseline, &picture)],
             None => self
@@ -640,9 +679,28 @@ impl Workspace {
         }
     }
 
+    fn path_wanted(&self) -> Option<(String, Picture)> {
+        let g = &self.timeline.picture_grab;
+        if let Some(h) = g.held.as_ref().filter(|h| matches!(h.hold, Hold::Path(_))) {
+            return Some((h.clip.clone(), h.now.clone()));
+        }
+        let (clip, to, since, from) = g.path_landing.as_ref()?;
+        let stored = self
+            .project()?
+            .clip(clip)?
+            .picture
+            .clone()
+            .unwrap_or_default();
+        let landed = landing(to, since.elapsed(), from, &stored)?;
+        Some((clip.clone(), landed.clone()))
+    }
+
     pub(super) fn sync_picture_preview(&mut self) {
         if self.grab_wanted().is_none() {
             self.timeline.picture_grab.landing = None;
+        }
+        if self.path_wanted().is_none() {
+            self.timeline.picture_grab.path_landing = None;
         }
         self.settle_inspector();
         let shown = self.picture_wanted();
@@ -676,6 +734,40 @@ impl Workspace {
             self.timeline.picture_grab.landing =
                 Some((clip.to_string(), to.clone(), Instant::now(), from.clone()));
         }
+    }
+
+    fn land_path(&mut self, held: &Held, frame: i64) {
+        let Some(value) = held.now.key_value(PictureValue::Position, frame) else {
+            return;
+        };
+        if held.now == held.start {
+            return;
+        }
+        let params = json!({
+            "clips": [held.clip], "param": PictureValue::Position.name(),
+            "frames": [frame], "value": value,
+        });
+        self.send("keyframes.set", params);
+        self.timeline.picture_grab.path_landing = Some((
+            held.clip.clone(),
+            held.now.clone(),
+            Instant::now(),
+            held.start.clone(),
+        ));
+    }
+
+    pub(super) fn path_menu(&mut self, ui: &mut egui::Ui) -> bool {
+        let Some((clip, frame)) = self.timeline.picture_grab.path_menu.clone() else {
+            return false;
+        };
+        if ui.button("Delete Keyframe").clicked() {
+            let param = PictureValue::Position.name();
+            let params = json!({ "clips": [clip], "param": param, "frames": [frame] });
+            self.send("keyframes.remove", params);
+            self.timeline.picture_grab.path_menu = None;
+            ui.close();
+        }
+        true
     }
 
     pub(super) fn end_picture_wheel(&mut self) {
@@ -1075,6 +1167,17 @@ impl Workspace {
                 next.now.position = Some([at(x), at(y)]);
                 next.guides = guides;
             }
+            Hold::Path(frame) => {
+                if let Some([x0, y0]) = p0.key_value(PictureValue::Position, frame) {
+                    let d = to - held.from;
+                    let at =
+                        |v: f64| rounded(v.clamp(0.5 - Picture::REACH, 0.5 + Picture::REACH), 4);
+                    let x = at(x0 + f64::from(d.x / picture.width()));
+                    let y = at(y0 + f64::from(d.y / picture.height()));
+                    next.now = p0.clone();
+                    next.now.put_channel(PictureValue::Position, frame, [x, y]);
+                }
+            }
             Hold::Corner => {
                 let (d0, d1) = (held.from.distance(pivot), to.distance(pivot));
                 let d1 = f64::from(if d1 < 1.0 { 0.0 } else { d1 });
@@ -1202,9 +1305,24 @@ impl Workspace {
         let pointer = ui.input(|i| i.pointer.hover_pos());
         let mods = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
         let held = self.timeline.picture_grab.held.clone();
+        let path = match tool {
+            PictureTool::Transform => s.path(),
+            _ => MotionPath::default(),
+        };
+        let on_point = |p: Pos2| {
+            path.points
+                .iter()
+                .find(|(_, q)| q.distance(p) <= GRAB * 1.6)
+                .map(|(f, _)| *f)
+        };
+        let grip = |p: Pos2| on_point(p).map(Hold::Path).or_else(|| s.grip(p, tool));
+        if resp.secondary_clicked() {
+            self.timeline.picture_grab.path_menu =
+                pointer.and_then(on_point).map(|f| (s.clip.clone(), f));
+        }
         let hover = pointer
             .filter(|_| resp.hovered())
-            .and_then(|p| s.grip(p, tool).map(|h| (h, p)));
+            .and_then(|p| grip(p).map(|h| (h, p)));
         let cursor = match &held {
             Some(h) => pointer.map(|p| s.cursor(h.hold, p)),
             None => hover.map(|(h, p)| s.cursor(h, p)),
@@ -1214,13 +1332,14 @@ impl Workspace {
         }
         if resp.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
-            && let Some(hold) = s.grip(press, tool)
+            && let Some(hold) = grip(press)
         {
             let at = self.snap.player(crate::live::PlayerId::Timeline).position;
             let frame = self
                 .project_shared()
                 .and_then(|p| p.clip(&s.clip).map(|c| c.content_at(at)));
             let start = frame
+                .filter(|_| !matches!(hold, Hold::Path(_)))
                 .map(|f| s.picture.adopt(f as f64))
                 .unwrap_or_else(|| s.picture.clone());
             self.timeline.picture_grab.held = Some(Held {
@@ -1257,7 +1376,10 @@ impl Workspace {
             && let Some(held) = self.timeline.picture_grab.held.take()
         {
             busy = true;
-            self.land_picture(&held.clip, &held.start, &held.now);
+            match held.hold {
+                Hold::Path(frame) => self.land_path(&held, frame),
+                _ => self.land_picture(&held.clip, &held.start, &held.now),
+            }
         }
         let g = &self.timeline.picture_grab;
         let readout = match (&g.held, &g.wheel) {
@@ -1317,6 +1439,7 @@ impl Workspace {
                 for arm in [vec2(GRAB, 0.0), vec2(0.0, GRAB)] {
                     painter.line_segment([anchor - arm, anchor + arm], stroke);
                 }
+                paint_path(&painter, &s.path(), accent);
             }
             PictureTool::Crop => {
                 let whole = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]].map(|uv| s.screen(uv));
@@ -1350,6 +1473,25 @@ impl Workspace {
                 painter.line_segment([pos2(picture.min.x, gy), pos2(picture.max.x, gy)], guide);
             }
         }
+    }
+}
+
+fn paint_path(painter: &egui::Painter, path: &MotionPath, accent: Color32) {
+    if path.dots.is_empty() {
+        return;
+    }
+    let white = Color32::from_rgba_unmultiplied(255, 255, 255, 200);
+    painter.add(egui::Shape::line(
+        path.dots.clone(),
+        Stroke::new(1.0, white),
+    ));
+    for d in &path.dots {
+        painter.circle_filled(*d, 1.5, white);
+    }
+    for (_, q) in &path.points {
+        let r = Rect::from_center_size(*q, Vec2::splat(GRAB * 1.2));
+        painter.rect_filled(r, 1.0, Color32::BLACK);
+        painter.rect_stroke(r, 1.0, Stroke::new(1.5, accent), egui::StrokeKind::Middle);
     }
 }
 

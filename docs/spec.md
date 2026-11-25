@@ -6785,6 +6785,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Crop handles move one side each. The uncropped picture shows dashed.
     - A Crop handle crosses the picture until the crop of its side is 1, the whole picture. The handle stays (measured in Resolve Studio 21.1.2).
     - When two Crop handles are on the same point, a drag takes the side with the larger crop.
+    - With the Transform handles and two or more Position keyframes, the viewer shows the motion path (pp. 1252–1254).
+      - The path goes through the anchor point of each frame, from the first Position keyframe to the last.
+      - A dot marks each frame. Thus close dots show slow motion.
+      - A square marks each keyframe. A drag on it moves the position of that keyframe, and the path and the picture follow.
+      - One `keyframes.set` with the `frames` of the keyframe follows on release.
+      - The right-click menu of a square has Delete Keyframe. It sends `keyframes.remove`.
+      - Smooth points are not in vidcut yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
     - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
     - With Shift too, Alt+wheel turns it to the next multiple of 15°.
