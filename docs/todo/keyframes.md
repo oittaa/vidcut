@@ -21,7 +21,6 @@ This file lists what vidcut does not have yet. The page numbers are those of the
 In order of value:
 
 - **Select All and Deselect All.** Ctrl+A in the Keyframes tab or the keyframe tray selects all the keyframes of the shown item (p. 1262). Ctrl+Shift+A clears that selection. Now both keys act on the clips of the timeline.
-- **Keyframe buttons on the sections.** The Transform, Crop, Composite and Audio sections get a Keyframe button between Previous and Next. Resolve has one on each group, and it keys each value of the group (p. 747; [§8.15](../spec.md#815-transform-and-crop-pp-766768)).
 - **The motion path.** With the Transform handles on, the viewer shows the path of the Position keyframes (pp. 1252–1254). It has a point on each keyframe and a dot on each frame. A drag on a point changes its keyframe. Its right-click menu has Delete Keyframe.
   - Thus the user sees the motion in the picture.
 - **Stretch to Fit in Change Clip Speed.** The window gets Maintain Timing and Stretch to Fit (p. 1217). Stretch keeps each Transform, Crop and Composite keyframe on its source frame ([gotchas](../gotchas.md#resolves-otio-files)). Now a speed change always maintains the timing.
@@ -53,6 +52,8 @@ In order of value:
   - Run: Shift-click two points in the Curve Editor.
 - **Keyframes of several clips.** The manual shows the keyframes of all the selected clips, side by side or stacked (p. 1268). Resolve Studio 21.1.2 showed the item selected first.
   - Run: select two clips side by side, then stacked, on the Cut page and the Edit page.
+- **The group button of Volume and Pan.** Resolve has a group button for Volume and Pan ([§8.15](../spec.md#815-transform-and-crop-pp-766768)). vidcut has a button on each of the two values.
+  - Run: see if Volume and Pan are one group or two, and which values the group button keys.
 - **Film Grain Freeze keyframes.** Freeze takes a curve on the Fusion page ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
   - Run: the Keyframe button of Film Grain in the Inspector of the Cut page, with Freeze on. Also the grain of a frozen frame before the first Freeze keyframe.
 - **Dynamic Zoom at other times.** vidcut keeps the two boxes at the ends of the clip.

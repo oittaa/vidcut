@@ -3593,6 +3593,8 @@ enum Act {
     EffectSet(usize, Value),
     EffectStep(usize, i64),
     EffectKey(usize, Option<Ease>),
+    GroupStep(PictureTool, i64),
+    GroupKey(PictureTool, Option<Ease>),
     EffectReset(usize),
     EffectRemove(usize),
     EffectMove(usize, usize),
@@ -4063,23 +4065,76 @@ pub(super) fn switched_fold<R>(
 fn section(
     ui: &mut egui::Ui,
     (name, tool): (&str, PictureTool),
-    (set, switch): (bool, Option<bool>),
+    (set, switch, keys): (bool, Option<bool>, Option<KeyMark>),
     acts: &mut Vec<Act>,
     rows: impl FnOnce(&mut egui::Ui, &mut Vec<Act>),
 ) {
-    let reset = |ui: &mut egui::Ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_enabled(set, egui::Button::new("Reset")).clicked()
-        })
-        .inner
+    let header = |ui: &mut egui::Ui| {
+        let click = keys
+            .as_ref()
+            .and_then(|k| key_buttons(ui, k, &Ease::ALL, None));
+        let reset = ui
+            .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled(set, egui::Button::new("Reset")).clicked()
+            })
+            .inner;
+        (reset, click)
     };
-    let (flipped, cleared) = switched_group(ui, name, switch, reset, |ui| rows(ui, acts));
+    let (flipped, (cleared, click)) = switched_group(ui, name, switch, header, |ui| rows(ui, acts));
     if let Some(on) = flipped {
         acts.push(Act::Switch(tool, on));
     }
     if cleared {
         acts.push(Act::Clear(tool));
     }
+    match click {
+        Some(KeyClick::Step(dir)) => acts.push(Act::GroupStep(tool, dir)),
+        Some(KeyClick::Toggle) => acts.push(Act::GroupKey(tool, None)),
+        Some(KeyClick::Ease(e)) => acts.push(Act::GroupKey(tool, Some(e))),
+        None => {}
+    }
+}
+
+fn group_values(tool: PictureTool) -> &'static [PictureValue] {
+    match tool {
+        PictureTool::Transform => &[
+            PictureValue::Zoom,
+            PictureValue::Position,
+            PictureValue::Rotation,
+            PictureValue::Anchor,
+            PictureValue::Pitch,
+            PictureValue::Yaw,
+        ],
+        PictureTool::Crop => &[
+            PictureValue::CropLeft,
+            PictureValue::CropRight,
+            PictureValue::CropTop,
+            PictureValue::CropBottom,
+            PictureValue::CropSoftness,
+        ],
+        PictureTool::Composite => &[PictureValue::Opacity],
+        PictureTool::DynamicZoom | PictureTool::Composition | PictureTool::Stabilization => &[],
+    }
+}
+
+fn value_times(c: &Clip, v: PictureValue) -> Vec<i64> {
+    let keys = c.picture.as_ref().map_or(&[][..], |pic| pic.keys_of(v));
+    keys.iter()
+        .map(|k| c.key_time(k.frame).round() as i64)
+        .collect()
+}
+
+fn group_mark(tool: PictureTool, p: &Project, at: i64, chosen: &[Chosen]) -> Option<KeyMark> {
+    let [one] = chosen else {
+        return None;
+    };
+    let c = p.clip(&one.id)?;
+    let keys: Vec<Keyframe> = group_values(tool)
+        .iter()
+        .flat_map(|v| c.picture.as_ref().map_or(&[][..], |pic| pic.keys_of(*v)))
+        .copied()
+        .collect();
+    Some(mark(c, &keys, at))
 }
 
 fn transform(
@@ -4094,10 +4149,11 @@ fn transform(
     let set = chosen
         .iter()
         .any(|c| uses(&c.shown, PictureTool::Transform));
+    let keys = group_mark(PictureTool::Transform, p, at, chosen);
     section(
         ui,
         ("Transform", PictureTool::Transform),
-        (set, Some(!first.shown.transform_off)),
+        (set, Some(!first.shown.transform_off), keys),
         acts,
         |ui, acts| {
             let [zx, zy] = first.shown.sampled(first.frame as f64).scale();
@@ -4155,10 +4211,11 @@ fn crop(
 ) {
     let set = chosen.iter().any(|c| uses(&c.shown, PictureTool::Crop));
     let switch = Some(!chosen[0].shown.crop_off);
+    let keys = group_mark(PictureTool::Crop, p, at, chosen);
     section(
         ui,
         ("Crop", PictureTool::Crop),
-        (set, switch),
+        (set, switch, keys),
         acts,
         |ui, acts| {
             for f in [
@@ -4186,7 +4243,8 @@ fn composite(
         .iter()
         .any(|c| uses(&c.shown, PictureTool::Composite));
     let section_name = ("Composite", PictureTool::Composite);
-    section(ui, section_name, (set, None), acts, |ui, acts| {
+    let keys = group_mark(PictureTool::Composite, p, at, chosen);
+    section(ui, section_name, (set, None, keys), acts, |ui, acts| {
         let now = chosen[0].shown.mode();
         let mixed = chosen
             .iter()
@@ -4252,7 +4310,7 @@ fn dynamic_zoom(
     let on = !zooms.is_empty();
     let first = chosen[0].shown.dynamic_zoom;
     let section_name = ("Dynamic Zoom", PictureTool::DynamicZoom);
-    section(ui, section_name, (on, None), acts, |ui, acts| {
+    section(ui, section_name, (on, None, None), acts, |ui, acts| {
         label(ui, "Dynamic Zoom", on);
         dialog::switch(ui, |ui| {
             if ui
@@ -5753,6 +5811,56 @@ impl Workspace {
         }
     }
 
+    fn step_group(&mut self, tool: PictureTool, dir: i64, chosen: &[Chosen]) {
+        let at = self.snap.timeline.position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = chosen.first().and_then(|c| p.clip(&c.id)) else {
+            return;
+        };
+        let times = group_values(tool).iter().flat_map(|v| value_times(c, *v));
+        if let Some(t) = next_key(times, at, dir) {
+            self.seek(PlayerId::Timeline, t, false);
+        }
+    }
+
+    fn key_group(&mut self, tool: PictureTool, ease: Option<Ease>, chosen: &[Chosen]) {
+        let at = self.snap.timeline.position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = chosen.first().and_then(|c| p.clip(&c.id)) else {
+            return;
+        };
+        let values = group_values(tool);
+        let keyed: Vec<PictureValue> = values
+            .iter()
+            .copied()
+            .filter(|v| value_times(c, *v).contains(&at))
+            .collect();
+        let each = |vs: &[PictureValue]| -> Vec<Value> {
+            vs.iter()
+                .map(|v| json!({ "clips": [c.id], "param": v.name(), "at": at }))
+                .collect()
+        };
+        match ease {
+            Some(ease) => {
+                let eased: Vec<PictureValue> = keyed
+                    .into_iter()
+                    .filter(|v| *v != PictureValue::Anchor)
+                    .collect();
+                let mut list = each(&eased);
+                for params in &mut list {
+                    params["ease"] = json!(ease);
+                }
+                self.send_each("keyframes.set", list);
+            }
+            None if keyed.is_empty() => self.send_each("keyframes.add", each(values)),
+            None => self.send_each("keyframes.remove", each(&keyed)),
+        }
+    }
+
     fn key_effect(&mut self, n: usize, ease: Option<Ease>, chosen: &[Chosen]) {
         let at = self.snap.timeline.position;
         let params = match ease {
@@ -6691,6 +6799,8 @@ impl Workspace {
             Act::EffectSet(n, params) => self.send_effect("effects.set", chosen, n, params),
             Act::EffectStep(n, dir) => self.step_effect(n, dir, chosen),
             Act::EffectKey(n, ease) => self.key_effect(n, ease, chosen),
+            Act::GroupStep(tool, dir) => self.step_group(tool, dir, chosen),
+            Act::GroupKey(tool, ease) => self.key_group(tool, ease, chosen),
             Act::EffectReset(n) => self.send_effect("effects.reset", chosen, n, json!({})),
             Act::EffectRemove(n) => self.send_effect("effects.remove", chosen, n, json!({})),
             Act::EffectMove(n, to) => {

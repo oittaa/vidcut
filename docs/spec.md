@@ -2005,7 +2005,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Resolve's Inspector also has a Keyframe button between Previous and Next arrows on each group (measured in Resolve Studio 21.1.1).
     - The groups with buttons are Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, and Volume and Pan.
     - The text of the Video panel names no Keyframe buttons for Transform, Cropping or Dynamic Zoom (pp. 734–737).
-    - vidcut does not have the buttons on Transform, Crop, Composite and Audio yet ([todo](todo/keyframes.md#buildable)).
+    - The button of a group adds or removes a keyframe at the playhead on each value of the group. The manual tells this for the groups of the Effects panel (p. 747).
+    - vidcut does not have a group button for Volume and Pan yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+  - The Transform, Crop and Composite sections have the group button, with one clip selected:
+    - On a frame with a keyframe of the section, it removes each keyframe of the section on that frame.
+    - On any other frame, it adds a keyframe on each value of the section, at the value of that frame.
+    - A right-click on the button sets the ease of the keyframes on that frame. The anchor point stays linear.
+    - The arrows go to the keyframes of all the values of the section.
+    - The button sends one `apply` with a `keyframes.add`, `keyframes.remove` or `keyframes.set` for each value.
   - A right-click on the button sets the ease. The ease is the volume curve (X74).
   - After the first keyframe, a change at another frame adds a keyframe.
   - This applies to the Inspector and to the viewer handles.
