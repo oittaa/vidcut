@@ -31,11 +31,6 @@
   - In Arial at size 192, `Ⅷ` moves the words down by 35 pixels in vidcut and 9 pixels in Resolve. `Ⓐ` moves them 33 pixels in vidcut and 0 in Resolve.
   - The two programs draw these letters in different fonts. Find which font Resolve takes.
 
-## Background in the Inspector
-
-- The measurements of `shape` read files. Measure the range and the units of these controls in Resolve's Inspector.
-- vidcut uses the numbers of the file until then.
-
 ## Edit in place
 
 - **Lower third:** Resolve edits only the line under the pointer, inside an outline of that line.

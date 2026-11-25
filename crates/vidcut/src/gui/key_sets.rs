@@ -1,12 +1,16 @@
+use std::collections::VecDeque;
+
 use eframe::egui;
 use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
-use vidcut_core::key_sets::{OWN, same};
-use vidcut_core::shortcuts::Bindings;
+use vidcut_core::key_sets::{self, OWN, same};
+use vidcut_core::shortcuts::{Bindings, Custom};
 
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::workspace::Workspace;
+
+const DRAFT_STEPS: usize = 100;
 
 enum Want {
     Use(String),
@@ -16,12 +20,19 @@ enum Want {
     Import,
 }
 
+enum Sent {
+    InForce,
+    Delete(String),
+    Export,
+}
+
 #[derive(Default)]
 pub(super) struct KeySetsUi {
     sets: Vec<(String, bool)>,
     listed: bool,
     listing: Option<Ask>,
     doing: Option<Ask>,
+    sent: Option<Sent>,
     exporting: Option<(String, Picked)>,
     importing: Option<Picked>,
     naming: Option<String>,
@@ -29,8 +40,12 @@ pub(super) struct KeySetsUi {
     focus_cancel: bool,
     confirm_use: Option<String>,
     confirm_delete: Option<String>,
+    confirm_close: bool,
     want: Option<Want>,
     error: Option<String>,
+    draft: Option<Bindings>,
+    back: VecDeque<Option<Bindings>>,
+    forward: Vec<Option<Bindings>>,
 }
 
 impl KeySetsUi {
@@ -39,7 +54,9 @@ impl KeySetsUi {
         self.naming = None;
         self.confirm_use = None;
         self.confirm_delete = None;
+        self.confirm_close = false;
         self.error = None;
+        self.discard();
     }
 
     fn mine(&self, name: &str) -> bool {
@@ -47,18 +64,101 @@ impl KeySetsUi {
             .iter()
             .any(|(n, built_in)| !built_in && same(n, name))
     }
+
+    pub(super) fn shown<'a>(&'a self, in_force: &'a Bindings) -> &'a Bindings {
+        self.draft.as_ref().unwrap_or(in_force)
+    }
+
+    pub(super) fn drafting(&self) -> bool {
+        self.draft.is_some()
+    }
+
+    pub(super) fn change(&mut self, in_force: &Bindings, custom: vidcut_core::Result<Custom>) {
+        match custom.and_then(|c| self.shown(in_force).with(&c)) {
+            Ok(next) => self.put(in_force, next),
+            Err(e) => self.error = Some(e.message),
+        }
+    }
+
+    fn put(&mut self, in_force: &Bindings, next: Bindings) {
+        let next = (next != *in_force).then_some(next);
+        if next == self.draft {
+            return;
+        }
+        if self.back.len() == DRAFT_STEPS {
+            self.back.pop_front();
+        }
+        self.back
+            .push_back(std::mem::replace(&mut self.draft, next));
+        self.forward.clear();
+        self.error = None;
+    }
+
+    fn pick(&mut self, in_force: &Bindings, name: &str) {
+        let picked = key_sets::find(&key_sets::dir(), name).and_then(|set| {
+            let named = (!same(&set.name, OWN)).then(|| set.name.clone());
+            Bindings::in_set(named, &set.keys, &set.keys)
+        });
+        match picked {
+            Ok(next) => self.put(in_force, next),
+            Err(e) => self.error = Some(e.message),
+        }
+    }
+
+    pub(super) fn undo(&mut self) {
+        if let Some(before) = self.back.pop_back() {
+            let now = std::mem::replace(&mut self.draft, before);
+            self.forward.push(now);
+        }
+    }
+
+    pub(super) fn redo(&mut self) {
+        if let Some(after) = self.forward.pop() {
+            let now = std::mem::replace(&mut self.draft, after);
+            self.back.push_back(now);
+        }
+    }
+
+    fn discard(&mut self) {
+        self.draft = None;
+        self.back.clear();
+        self.forward.clear();
+    }
+
+    pub(super) fn save(&mut self, in_force: &Bindings) {
+        let shown = self.shown(in_force);
+        let name = shown.set_name().unwrap_or(OWN).to_string();
+        match (shown.any_custom(), self.mine(&name)) {
+            (false, _) => self.want = Some(Want::Use(name)),
+            (true, true) => self.want = Some(Want::Save(name, true)),
+            (true, false) => {
+                self.naming = Some(name);
+                self.focus_name = true;
+            }
+        }
+    }
+
+    pub(super) fn may_close(&mut self) -> bool {
+        if self.draft.is_none() {
+            return true;
+        }
+        self.confirm_close = true;
+        self.focus_cancel = true;
+        false
+    }
 }
 
-pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
-    let in_force = b.set_name().unwrap_or(OWN).to_string();
+pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, in_force: &Bindings) {
+    let b = s.shown(in_force).clone();
+    let name = b.set_name().unwrap_or(OWN).to_string();
     let changed = b.any_custom();
-    let mine = s.mine(&in_force);
+    let mine = s.mine(&name);
     let any_mine = s.sets.iter().any(|(_, built_in)| !built_in);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button(icon::DOTS_THREE, |ui| {
                 if ui.button("Save As New Set…").clicked() {
-                    s.naming = Some(in_force.clone());
+                    s.naming = Some(name.clone());
                     s.focus_name = true;
                     ui.close();
                 }
@@ -67,54 +167,44 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                     ui.close();
                 }
                 ui.menu_button("Export Set", |ui| {
-                    for (name, _) in &s.sets {
-                        if ui.button(name).clicked() {
-                            s.want = Some(Want::Export(name.clone()));
+                    for (set, _) in &s.sets {
+                        if ui.button(set).clicked() {
+                            s.want = Some(Want::Export(set.clone()));
                             ui.close();
                         }
                     }
                 });
                 ui.add_enabled_ui(any_mine, |ui| {
                     ui.menu_button("Delete Set", |ui| {
-                        for (name, built_in) in &s.sets {
-                            if !built_in && ui.button(name).clicked() {
-                                s.confirm_delete = Some(name.clone());
+                        for (set, built_in) in &s.sets {
+                            if !built_in && ui.button(set).clicked() {
+                                s.confirm_delete = Some(set.clone());
                                 s.focus_cancel = true;
                                 ui.close();
                             }
                         }
                     });
                 });
-                ui.separator();
-                if ui.add_enabled(changed, egui::Button::new("Save")).clicked() {
-                    match mine {
-                        true => s.want = Some(Want::Save(in_force.clone(), true)),
-                        false => {
-                            s.naming = Some(in_force.clone());
-                            s.focus_name = true;
-                        }
-                    }
-                    ui.close();
-                }
             });
             let shown = match changed {
-                true => format!("{in_force}*"),
-                false => in_force.clone(),
+                true => format!("{name}*"),
+                false => name.clone(),
             };
+            let sets = s.sets.clone();
             egui::ComboBox::from_id_salt("key-set")
                 .selected_text(shown)
                 .show_ui(ui, |ui| {
-                    for (name, _) in &s.sets {
-                        let current = same(name, &in_force);
-                        if !ui.selectable_label(current, name).clicked() || (current && !changed) {
+                    for (set, _) in &sets {
+                        let current = same(set, &name);
+                        if !ui.selectable_label(current, set).clicked() || (current && !changed) {
                             continue;
                         }
                         match changed {
                             true => {
-                                s.confirm_use = Some(name.clone());
+                                s.confirm_use = Some(set.clone());
                                 s.focus_cancel = true;
                             }
-                            false => s.want = Some(Want::Use(name.clone())),
+                            false => s.pick(in_force, set),
                         }
                     }
                 });
@@ -123,36 +213,50 @@ pub(super) fn bar(ui: &mut egui::Ui, s: &mut KeySetsUi, b: &Bindings) {
                 .on_hover_text("Delete Set")
                 .clicked()
             {
-                s.confirm_delete = Some(in_force.clone());
+                s.confirm_delete = Some(name.clone());
                 s.focus_cancel = true;
             }
         })
     });
     naming_row(ui, s);
-    if let Some(name) = s.confirm_use.clone()
+    if let Some(set) = s.confirm_use.clone()
         && let Some(discard) = ask(ui, &mut s.focus_cancel, "Discard Changes?", "Discard")
     {
         if discard {
-            s.want = Some(Want::Use(name));
+            s.pick(in_force, &set);
         }
         s.confirm_use = None;
     }
-    if let Some(name) = s.confirm_delete.clone()
+    if let Some(set) = s.confirm_delete.clone()
         && let Some(delete) = ask(
             ui,
             &mut s.focus_cancel,
-            &format!("Delete \"{name}\"?"),
+            &format!("Delete \"{set}\"?"),
             "Delete",
         )
     {
         if delete {
-            s.want = Some(Want::Delete(name));
+            s.want = Some(Want::Delete(set));
         }
         s.confirm_delete = None;
     }
     if let Some(e) = &s.error {
         dialog::warn(ui, e.clone());
     }
+}
+
+pub(super) fn close_row(ui: &mut egui::Ui, s: &mut KeySetsUi) -> bool {
+    if !s.confirm_close {
+        return false;
+    }
+    let Some(discard) = ask(ui, &mut s.focus_cancel, "Discard Changes?", "Discard") else {
+        return false;
+    };
+    s.confirm_close = false;
+    if discard {
+        s.discard();
+    }
+    discard
 }
 
 fn ask(ui: &mut egui::Ui, focus: &mut bool, question: &str, main: &str) -> Option<bool> {
@@ -229,6 +333,7 @@ impl Workspace {
         let folder = self.export_folder();
         let dialogs = self.dialogs.clone();
         let live = self.live.clone();
+        let in_force = self.snap.bindings.clone();
         let s = &mut self.preferences.key_sets;
         if let Some(answer) = s.listing.as_ref().and_then(Ask::take) {
             s.listing = None;
@@ -239,12 +344,20 @@ impl Workspace {
         }
         if let Some(answer) = s.doing.as_ref().and_then(Ask::take) {
             s.doing = None;
-            match answer {
-                Ok(_) => {
+            match (answer, s.sent.take()) {
+                (Err(e), _) => s.error = Some(e.message),
+                (Ok(_), sent) => {
                     s.error = None;
                     s.listed = false;
+                    let drafted = s.draft.as_ref().and_then(Bindings::set_name);
+                    match sent {
+                        Some(Sent::InForce) => s.discard(),
+                        Some(Sent::Delete(set)) if drafted.is_some_and(|d| same(d, &set)) => {
+                            s.discard()
+                        }
+                        _ => {}
+                    }
                 }
-                Err(e) => s.error = Some(e.message),
             }
         }
         if !s.listed && s.listing.is_none() {
@@ -258,6 +371,7 @@ impl Workspace {
                 Some(Some(path)) => {
                     let params = json!({ "set": name, "path": path });
                     s.doing = Some(Ask::send(&live, ctx, "keys.export", params));
+                    s.sent = Some(Sent::Export);
                 }
             }
         }
@@ -268,18 +382,21 @@ impl Workspace {
                 Some(Some(path)) => {
                     let params = json!({ "path": path });
                     s.doing = Some(Ask::send(&live, ctx, "keys.import", params));
+                    s.sent = Some(Sent::InForce);
                 }
             }
         }
         let Some(want) = s.want.take() else {
             return;
         };
-        let (method, params) = match want {
-            Want::Use(set) => ("keys.use", json!({ "set": set })),
+        let (method, params, sent) = match want {
+            Want::Use(set) => ("keys.use", json!({ "set": set }), Sent::InForce),
             Want::Save(name, overwrite) => {
-                ("keys.save", json!({ "name": name, "overwrite": overwrite }))
+                let keys = s.shown(&in_force).changes();
+                let params = json!({ "name": name, "overwrite": overwrite, "keys": keys });
+                ("keys.save", params, Sent::InForce)
             }
-            Want::Delete(name) => ("keys.delete", json!({ "name": name })),
+            Want::Delete(name) => ("keys.delete", json!({ "name": name }), Sent::Delete(name)),
             Want::Export(name) => {
                 let file = format!("{} Keys.toml", name.replace(['/', '\\'], "-"));
                 let picked = Picked::ask(ctx, move || {
@@ -297,5 +414,6 @@ impl Workspace {
             }
         };
         s.doing = Some(Ask::send(&live, ctx, method, params));
+        s.sent = Some(sent);
     }
 }

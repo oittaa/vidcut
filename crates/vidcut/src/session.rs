@@ -274,9 +274,14 @@ pub fn run_with(
         }
         Request::KeysSets {} => answer(crate::preferences::keys_sets()?),
         Request::KeysUse { set } => answer(crate::preferences::keys_use(set, envelope.dry_run)?),
-        Request::KeysSave { name, overwrite } => answer(crate::preferences::keys_save(
+        Request::KeysSave {
+            name,
+            overwrite,
+            keys,
+        } => answer(crate::preferences::keys_save(
             name,
             *overwrite,
+            keys.as_ref(),
             envelope.dry_run,
         )?),
         Request::KeysDelete { name } => {

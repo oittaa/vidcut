@@ -182,7 +182,7 @@ impl TitleDialog {
         self.align = t.align();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
-        self.shape = ShapeFields::load(t.style.shape.as_ref());
+        self.shape = ShapeFields::load(t.style.shape.as_ref(), self.size);
         self.line_spacing = plain(t.style.line_spacing);
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
@@ -295,11 +295,15 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
     let was = Parts::of_title(&stored.style);
-    let mut style = d.fields.refilled(&was).parts(&was, None)?.title();
+    let fields = d.fields.refilled(&was);
+    let mut style = fields.parts(&was, None)?.title();
+    if let Some(b) = style.background.as_mut() {
+        b.opacity = fields.whole_opacity(was.background.as_ref().and_then(|b| b.opacity))?;
+    }
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
     style.case = (d.case != TitleCase::Mixed).then_some(d.case);
-    style.shape = d.shape.shape(stored.style.shape.as_ref())?;
+    style.shape = d.shape.shape(stored.style.shape.as_ref(), d.size)?;
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;

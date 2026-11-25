@@ -3400,10 +3400,10 @@ pub struct TitleShape {
     /// changed by the background's opacity. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline_color: Option<String>,
-    /// The width of its outline in pixels of the timeline, from 0 to 30. Half
-    /// of it is outside the box. Usual: 0.
+    /// The width of its outline in whole pixels of the timeline, from 0 to
+    /// 30. Half of it is outside the box. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outline_width: Option<f64>,
+    pub outline_width: Option<u32>,
 }
 
 /// A title's drop shadow. A field left out keeps the usual look.
@@ -3479,7 +3479,8 @@ impl Title {
     pub const BOX_WIDTH: f64 = 0.9;
     pub const BOX_WHOLE: f64 = 1e-6;
     pub const BOX_CORNER: f64 = 1.0 / 27.0;
-    pub const BOX_MOST_OUTLINE: f64 = 30.0;
+    pub const BOX_MOST_OUTLINE: u32 = 30;
+    pub const BOX_OPACITY: f64 = 0.5;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -3727,7 +3728,7 @@ impl Title {
         let s = self.style.shape.as_ref();
         (
             paint(s.and_then(|s| s.outline_color.as_deref()), [0, 0, 0]),
-            s.and_then(|s| s.outline_width).unwrap_or(0.0),
+            s.and_then(|s| s.outline_width).map_or(0.0, f64::from),
         )
     }
 
@@ -9335,8 +9336,8 @@ impl TextStroke {
 pub struct SubtitleBackground {
     /// `#rrggbb`, `#rgb` or a name.
     pub color: String,
-    /// From 0 to 1. `0` draws no box on a subtitle track. Usual: 1/2 on a
-    /// subtitle track, 1 on a title.
+    /// From 0 to 1. `0` draws no box on a subtitle track. On a title, it is
+    /// in steps of 1/100. Usual: 1/2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `true` draws no box and keeps these values.
@@ -9512,7 +9513,10 @@ fn stroke_of(o: Option<&SubtitleOutline>, usual: f64, ink: [u8; 3]) -> Option<Te
 
 fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
     let b = b.filter(|b| !b.is_off())?;
-    Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
+    Some((
+        paint(Some(&b.color), [0, 0, 0]),
+        b.opacity.unwrap_or(Title::BOX_OPACITY),
+    ))
 }
 
 /// A subtitle track: cues shown over the picture, one language or use.
@@ -10723,7 +10727,7 @@ impl Hash for TitleShape {
             pair_bits(*center),
             floats_bits(*corner),
             outline_color,
-            floats_bits(*outline_width),
+            outline_width,
         )
             .hash(h);
     }

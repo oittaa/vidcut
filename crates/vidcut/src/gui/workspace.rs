@@ -1843,7 +1843,7 @@ impl Workspace {
         }
         let lift = fired.pressed(Action::Lift);
         if fired.pressed(Action::Delete) || lift {
-            if self.pool_focus {
+            if self.pool_takes_keys() {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
             } else if !self.delete_editor_keys() && !self.delete_keys() {
@@ -1914,7 +1914,7 @@ impl Workspace {
             true => (false, false),
             false => (all, nothing),
         };
-        if (all || nothing) && self.pool_focus {
+        if (all || nothing) && self.pool_takes_keys() {
             let media: Vec<String> = match self.project() {
                 Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)
                     .iter()
