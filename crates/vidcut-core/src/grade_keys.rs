@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::model::{
-    Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
-    KeyOutput, WindowShape,
+    Corrector, DynamicsProfile, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow,
+    KeyInput, KeyMix, KeyOutput, WindowShape,
 };
 use crate::window_key::{circle_scale, circle_size, linear_scale, linear_size};
 
@@ -788,6 +788,32 @@ impl GradeNode {
             None => self.key,
             Some((k, Some((n, w)))) => k.key.blended(&n.key, w),
             Some((k, None)) => k.key,
+        }
+    }
+
+    pub fn key_here(&self, frame: i64, kind: GradeKeyKind, profile: DynamicsProfile) -> GradeKey {
+        let at = frame as f64;
+        GradeKey {
+            frame,
+            kind,
+            start: profile.start,
+            end: profile.end,
+            values: self
+                .corrector_at(at)
+                .map(Cow::into_owned)
+                .unwrap_or_default(),
+            key: self.key_output_at(at),
+            key_input: self.key_input_at(at),
+            mix: self.mix_at(at).map_or_else(Vec::new, Cow::into_owned),
+            windows: self.windows_at(at).into_owned(),
+            edl: false,
+        }
+    }
+
+    pub fn auto_keyed(&mut self, frame: i64, profile: DynamicsProfile) {
+        if self.auto_key && self.takes_keyframes() && self.key_on(frame).is_none() {
+            let key = self.key_here(frame, GradeKeyKind::Dynamic, profile);
+            self.put_key(key);
         }
     }
 

@@ -4353,6 +4353,12 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// Auto-Keyframe of a corrector or a key mixer: a change to the node
+    /// on a frame where it has no keyframe first adds a Dynamic keyframe
+    /// there. That keyframe holds the values that the picture has on its
+    /// frame. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_key: bool,
     /// The windows of a corrector, in the order of the window list. They
     /// make the key of the corrector. A corrector has a linear, a circle, a
     /// polygon and a gradient window first, off at first, which stay. The
@@ -4376,6 +4382,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: GradeWindow::fixed(frame),
         }
     }
@@ -4393,6 +4400,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: Vec::new(),
         }
     }
@@ -4785,6 +4793,11 @@ pub struct GradeKey {
     /// mixer leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// A mark of Add EDL Marks on Tracks, on an edit of the timeline.
+    /// Delete EDL Marks on Tracks removes only these marks. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edl: bool,
 }
 
 /// What a keyframe does up to the next keyframe.

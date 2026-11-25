@@ -996,7 +996,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
-  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile` (`GradeNode::key_here`).
+  - `ops::grade_keys::add_marks` puts a Static keyframe with `edl` on each edit of the video tracks (`edl_frames`). `ops::grade_keys::remove_marks` removes only those.
+  - With `GradeNode::auto_key` on, a change first adds a Dynamic keyframe on its frame (`GradeNode::auto_keyed`). `grade.set`, `grade.printer`, `grade.clear`, `grade.auto_color` and the window changes call it (`ops::grade::auto_keyed`).
 - `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
   - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
