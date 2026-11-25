@@ -6448,6 +6448,9 @@ pub enum GuiPanel {
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.
     SelectTool,
+    /// The Effects Search window: it finds an effect by its name or its group,
+    /// and adds it to the first selected clip with a picture.
+    EffectsSearch,
 }
 
 /// Media tab sort orders.

@@ -28,8 +28,3 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 - Ctrl+Left, Ctrl+Right, Ctrl+Up and Ctrl+Down move the clip selection in the manual (pp. 825, 900).
 - The manual does not tell which clip counts as previous or above.
 - To do: measure that rule, then build the four keys.
-
-**Effects Search:**
-
-- Shift+Space is Effects Search on the Cut page (p. 1144).
-- vidcut has no Effects Search.
