@@ -225,18 +225,16 @@ pub struct Grading {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolGrading {
-    pub lift: [f64; 4],
-    pub weight: [f64; 4],
+    pub exposure: [f64; 6],
+    pub white: [f64; 3],
 }
 
 impl ToolGrading {
     fn of(a: &crate::model::AutoColor) -> Self {
-        let mut lift = [0.0; 4];
-        let mut weight = [0.0; 4];
-        for i in 0..4 {
-            (lift[i], weight[i], _) = wheel(a.lift[i], 0.0, a.gain[i]);
+        Self {
+            exposure: a.exposure,
+            white: crate::auto_color::white_scale(a.white),
         }
-        Self { lift, weight }
     }
 }
 

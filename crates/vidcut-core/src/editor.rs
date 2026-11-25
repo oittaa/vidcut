@@ -137,8 +137,12 @@ pub trait Env {
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
-    fn auto_balance(&self, plan: &RenderPlan) -> Result<crate::auto_color::Balance> {
-        let _ = plan;
+    fn auto_balance(
+        &self,
+        plan: &RenderPlan,
+        legacy: bool,
+    ) -> Result<crate::auto_color::AutoResult> {
+        let _ = (plan, legacy);
         Err(Error::usage(
             "Auto Color reads the picture in the vidcut program",
         ))
@@ -5157,8 +5161,9 @@ fn mutate(
             let of = grade_of(p, clip, (false, *layer), playhead)?;
             let n = node.unwrap_or(1);
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
-            let plan = auto_color_plan(p, &of, (n, *tool), at)?;
-            ops::grade::auto_color(p, &of, (n, at, *tool), env.auto_balance(&plan)?)?;
+            let legacy = !*tool && env.printer_lights().use_legacy_auto_color;
+            let plan = auto_color_plan(p, &of, (n, legacy), at)?;
+            ops::grade::auto_color(p, &of, (n, at), env.auto_balance(&plan, legacy)?)?;
             Value::Null
         }
         Request::GradeAdd {
@@ -8483,7 +8488,12 @@ fn track_start(
 
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
-pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
+pub fn auto_color_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    use_legacy: bool,
+) -> Vec<(RenderPlan, bool)> {
     let Request::GradeAutoColor {
         clip,
         layer,
@@ -8496,14 +8506,15 @@ pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -
     };
     let of = grade_of(p, clip, (false, *layer), playhead);
     let at = time_or_playhead(p, at.as_ref(), playhead);
-    let plan = of.and_then(|of| auto_color_plan(p, &of, (node.unwrap_or(1), *tool), at?));
-    plan.into_iter().collect()
+    let legacy = !*tool && use_legacy;
+    let plan = of.and_then(|of| auto_color_plan(p, &of, (node.unwrap_or(1), legacy), at?));
+    plan.into_iter().map(|p| (p, legacy)).collect()
 }
 
 fn auto_color_plan(
     p: &Project,
     of: &ops::grade::GradeOf,
-    (n, tool): (u32, bool),
+    (n, legacy): (u32, bool),
     at: Option<i64>,
 ) -> Result<RenderPlan> {
     let ops::grade::GradeOf::Clip(id, layer) = of else {
@@ -8522,7 +8533,7 @@ fn auto_color_plan(
     let frame = ops::grade::frame_of(p, of, t)?;
     let mut g = ops::grade::stored(p, of)?.at(frame as f64).into_owned();
     match g.node_mut(n).map(|d| &mut d.tool) {
-        Some(crate::model::GradeTool::Corrector(c)) if tool => {
+        Some(crate::model::GradeTool::Corrector(c)) if !legacy => {
             **c = crate::model::Corrector::default();
         }
         Some(crate::model::GradeTool::Corrector(c)) => {

@@ -270,10 +270,20 @@ fn auto_floats(g: &Grading) -> Vec<f64> {
     let Some(a) = &g.auto else {
         return vec![0.0; 12];
     };
-    let mut floats = vec![1.0, 0.0, 0.0, 0.0];
-    floats.extend(a.lift);
-    floats.extend(a.weight);
-    floats
+    vec![
+        1.0,
+        a.exposure[0],
+        a.exposure[1],
+        a.exposure[2],
+        a.exposure[3],
+        a.exposure[4],
+        a.exposure[5],
+        0.0,
+        a.white[0],
+        a.white[1],
+        a.white[2],
+        0.0,
+    ]
 }
 
 fn grade_bytes(g: &Grading, blend: f64) -> Vec<u8> {
