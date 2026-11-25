@@ -514,6 +514,8 @@ The render queue:
 
 - `Project.queue` holds the jobs (`RenderJob`) in the project file. Thus a job and its status stay after a quit.
 - `render.add` keeps the open timeline and the export params of the job (`ops::render::add`). It fixes the range in frames. Why: a later change of the marks does not change a job.
+- `render.update` gives a job new export params in the same way (`ops::render::update`). `Live` and the headless session check its files as they check those of `render.add`.
+- The pencil of a job loads its params into the render settings (`Render::load_job`), the reverse of `Render::params`. `Workspace::edit_job` opens its timeline and sets its range in one `apply`.
 - Before it adds a job, `queue::existing` checks the job as `render.add` does, and finds the files that are there. `Live` and the headless session refuse them without `overwrite`. A dry run returns them, and the page asks its prompt from them.
 - `queue::plan` picks the jobs that `render.start` renders. It opens the timeline of each job in a copy of the project (`ops::render::source`).
   - It finds the files that are there with `export::prepare`, as the export does. Thus it also finds the frames of an image sequence and the subtitle files.

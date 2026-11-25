@@ -5394,6 +5394,20 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A render again of a completed job writes over its file with no other prompt (measured).
   - After Clear Render Status, a render over a file with the same name asks first: "Replace Existing File?", with Cancel and Replace (measured).
   - The X removes a job with no prompt (p. 4131; measured). A drag by the handle moves a job, with no ghost row (measured).
+  - A pencil is at the right of each job, beside the X (measured).
+  - A click on the pencil puts the settings of the job in the Render Settings. The timeline gets the range of the job (p. 4132).
+  - Measured: the pencil of a job of another timeline opens that timeline. The pencil of a job of the entire timeline sets Entire Timeline.
+  - Update Job then shows at the bottom of the Render Settings. It changes the job (p. 4132).
+  - Measured: Update Job keeps the status of the job. A completed job stays completed.
+  - Measured: after Update Job, no job is edited, and the job stays selected.
+  - Add New Job adds a job with the changes, and the first job does not change (p. 4132).
+  - Measured: Add New Job selects the new job. Then no job is edited.
+  - A click on the pencil again without Update Job asks Save, Cancel or Don't Save (p. 4132).
+  - Measured: a click on the pencil of the edited job asks nothing. The edit stays, and the File Name field gets the focus.
+  - Measured: a click on the pencil of another job asks "Update Render Job?". The text is "Job 40 is being edited and has unsaved changes.", also with no changes.
+  - Measured: the buttons are Discard Changes, Cancel and Update Job. Update Job has the focus.
+  - Measured: Cancel keeps the edit. Discard Changes edits the other job. Update Job changes the edited job, then edits the other job.
+  - Measured: while jobs render, a click on a pencil does nothing, and the click is not kept. The pencil and the X of the job that renders are dim.
   - A click in the empty part of the queue clears the selection (measured).
   - The right-click menu has Reveal in Media Storage, Open File Location and Clear Render Status (pp. 4131–4132; measured). Clear Render Status acts on all selected jobs (p. 4131).
   - The "..." menu has Show All Projects, Refresh, Show Job Details, Review Before Upload, Clear Rendered and Clear All (measured). Clear All asks nothing.
@@ -5415,13 +5429,24 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the Cut page, Alt+X with In/Out Range sets Entire Timeline, which clears the marks.
   - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
-  - The queue is `render.add`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
+  - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
   - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
   - Each render is a job, and Jobs shows it too ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - A job that failed shows "Failed:" and the error, in red.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
+  - The pencil of a job puts its settings in the Render Settings. `gui.page` with `edit_job` does the same.
+  - The timeline of the job opens. A job of the whole timeline sets Entire Timeline. A job of a part sets the marks of its range and In/Out Range.
+  - Update Job and Add New Job then take the place of Add to Render Queue. The pencil of the job shows that it is picked.
+  - Update Job is `render.update`. The job keeps its place, its name and its status. Add New Job is `render.add`.
+  - Each of them asks first about files that are there, as Add does. After each of them, no job is edited.
+  - Update Job keeps the job selected. Add New Job selects the new job.
+  - A click on the pencil of the edited job puts the focus in File Name.
+  - A click on the pencil of another job asks "Update Render Job?", with Discard Changes, Cancel and Update Job.
+  - Update Job changes the edited job, then edits the other job. Discard Changes edits the other job. Cancel keeps the edit.
+  - While jobs render, the pencils are greyed, and `edit_job` refuses a job. A job that is removed, or that starts to render, is not edited.
+  - Before the Render Settings are ready, `edit_job` waits for them. A switch to another page ends the wait.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - With Individual clips, the File tab has Filename Uses, Custom Name, File Suffix, Unique Names, Source Frame Count and File Subfolder.
   - Then Filename Digits, First Frame for image sequences, Replace Files, Separate Folders, Source Folder Levels, Count Levels and Render Speed.
