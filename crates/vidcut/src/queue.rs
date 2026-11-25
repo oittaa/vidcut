@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use vidcut_core::model::{Project, RenderStatus};
 use vidcut_core::ops::render;
-use vidcut_core::request::ExportParams;
+use vidcut_core::request::{ExportParams, Request};
 use vidcut_core::{Error, Result};
 
 pub struct Picked {
@@ -81,8 +81,26 @@ impl Plan {
     }
 }
 
-pub fn existing(p: &Project, params: &ExportParams, proxies: &Path) -> Result<Vec<PathBuf>> {
-    render::add(&mut p.clone(), params.clone())?;
+pub fn updated(request: &Request) -> Option<&str> {
+    match request {
+        Request::RenderUpdate { job, .. } => Some(job),
+        _ => None,
+    }
+}
+
+pub fn existing(
+    p: &Project,
+    job: Option<&str>,
+    params: &ExportParams,
+    proxies: &Path,
+) -> Result<Vec<PathBuf>> {
+    let mut changed = p.clone();
+    match job {
+        Some(job) => render::update(&mut changed, job, params.clone())?,
+        None => {
+            render::add(&mut changed, params.clone())?;
+        }
+    }
     let files = taken(&render::top(p), params, proxies)?;
     Ok(if params.overwrite { Vec::new() } else { files })
 }

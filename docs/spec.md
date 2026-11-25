@@ -5118,7 +5118,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a pencil while a job is edited asks "Save Job Changes?", with Save, Don't Save and Cancel.
   - Save updates the job. Don't Save leaves the job as it was, and the Render Settings keep the changes.
   - After Save or Don't Save, a click on the pencil of another job edits that job.
-  - The pencil of a job that renders is greyed. A job that is removed is not edited.
+  - The pencil of a job that renders is greyed. A job that is removed, or that starts to render, is not edited.
+  - `edit_job` refuses a job that renders. Before the Render Settings are ready, `edit_job` waits for them.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - With Individual clips, the File tab has Filename Uses, Custom Name, File Suffix, Unique Names, Source Frame Count and File Subfolder.
   - Then Filename Digits, First Frame for image sequences, Replace Files, Separate Folders, Source Folder Levels, Count Levels and Render Speed.

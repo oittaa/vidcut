@@ -1910,7 +1910,8 @@ impl Live {
             && let Some(open) = &self.project
         {
             let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
-            let files = match crate::queue::existing(open.project(), params, &proxies) {
+            let updated = crate::queue::updated(&envelope.request);
+            let files = match crate::queue::existing(open.project(), updated, params, &proxies) {
                 Ok(f) => f,
                 Err(e) => return self.finish(job, Err(e)),
             };

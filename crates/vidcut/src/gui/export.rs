@@ -193,6 +193,7 @@ pub struct ExportUi {
     pub(super) viewer_before: Option<vidcut_core::request::ViewerMode>,
     pub(super) selected: Vec<String>,
     pub(super) editing: Option<String>,
+    pub(super) edit_wanted: Option<String>,
     pub(super) leave_edit: Option<super::export_page::LeaveEdit>,
     pub(super) job_details: bool,
     pub(super) queue: Option<super::export_page::QueueStep>,
@@ -235,6 +236,7 @@ impl ExportUi {
         self.render_wanted = false;
         self.selected.clear();
         self.editing = None;
+        self.edit_wanted = None;
         self.leave_edit = None;
         self.queue = None;
         self.renaming = None;
@@ -643,7 +645,7 @@ impl Render {
         {
             v.encoder = encoder;
         }
-        if e.audio_only {
+        if e.audio_only || settings.container.audio_only() {
             settings.video = None;
         }
         self.preset = preset.name.clone();

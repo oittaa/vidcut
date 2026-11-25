@@ -31,6 +31,8 @@ impl Workspace {
         let ctx = ui.ctx().clone();
         if self.export.render.is_none() {
             self.want_render_settings(&ctx);
+        } else if let Some(id) = self.export.edit_wanted.take() {
+            self.try_edit(&id);
         }
         let panel = theme::colors().panel;
         egui::Panel::left("render-settings")
@@ -399,6 +401,9 @@ impl Workspace {
         let Some(job) = p.queue.iter().find(|j| j.id == id).cloned() else {
             return Err(format!("no render job {id}"));
         };
+        if self.job_renders(id) {
+            return Err(format!("{id} renders now; stop it first"));
+        }
         let opened = p.open_id() == Some(job.timeline.as_str());
         let source = vidcut_core::ops::render::source(p, &job).map_err(|e| e.message)?;
         let name = (job.export.preset.as_deref())
@@ -459,15 +464,21 @@ impl Workspace {
         Ok(())
     }
 
+    fn job_renders(&self, id: &str) -> bool {
+        (self.snap.jobs.iter()).any(|k| k.render.as_deref() == Some(id) && k.unfinished())
+    }
+
+    fn try_edit(&mut self, id: &str) {
+        if let Err(e) = self.edit_job(id)
+            && let Some(d) = &mut self.export.render
+        {
+            d.error = Some(e);
+        }
+    }
+
     fn pencil(&mut self, job: &str) {
         match &self.export.editing {
-            None => {
-                if let Err(e) = self.edit_job(job)
-                    && let Some(d) = &mut self.export.render
-                {
-                    d.error = Some(e);
-                }
-            }
+            None => self.try_edit(job),
             Some(now) => {
                 let next = (now != job).then(|| job.to_string());
                 self.export.leave_edit = Some(LeaveEdit { next });
@@ -477,13 +488,25 @@ impl Workspace {
 
     pub(super) fn set_edit_job(&mut self, job: Option<String>) -> Result<(), String> {
         self.export.leave_edit = None;
-        match job {
-            Some(id) => self.edit_job(&id),
-            None => {
-                self.export.editing = None;
-                Ok(())
-            }
+        self.export.edit_wanted = None;
+        let Some(id) = job else {
+            self.export.editing = None;
+            return Ok(());
+        };
+        if self.export.render.is_some() {
+            return self.edit_job(&id);
         }
+        let Some(p) = self.project() else {
+            return Err("Open a project first".into());
+        };
+        if !p.queue.iter().any(|j| j.id == id) {
+            return Err(format!("no render job {id}"));
+        }
+        if self.job_renders(&id) {
+            return Err(format!("{id} renders now; stop it first"));
+        }
+        self.export.edit_wanted = Some(id);
+        Ok(())
     }
 
     fn leave_edit_prompt(&mut self, ctx: &egui::Context) {
@@ -495,11 +518,8 @@ impl Workspace {
             Some(SaveJob::Cancel) => {}
             Some(SaveJob::DontSave) => {
                 self.export.editing = None;
-                if let Some(next) = leave.next
-                    && let Err(e) = self.edit_job(&next)
-                    && let Some(d) = &mut self.export.render
-                {
-                    d.error = Some(e);
+                if let Some(next) = leave.next {
+                    self.try_edit(&next);
                 }
             }
             Some(SaveJob::Save) => {
@@ -540,7 +560,8 @@ impl Workspace {
         self.export
             .selected
             .retain(|id| queue.iter().any(|j| &j.id == id));
-        if (self.export.editing.as_ref()).is_some_and(|id| !queue.iter().any(|j| &j.id == id)) {
+        let gone = |id: &String| !queue.iter().any(|j| &j.id == id) || self.job_renders(id);
+        if self.export.editing.as_ref().is_some_and(gone) {
             self.export.editing = None;
             self.export.leave_edit = None;
         }
