@@ -76,6 +76,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("keyframes.remove", &["clips"]),
     ("keyframes.copy", &["clip"]),
     ("keyframes.cut", &["clip"]),
+    ("keyframes.reverse", &["clip"]),
     ("keyframes.paste", &["clips"]),
     ("markers.move", &["marker"]),
     ("markers.remove", &["marker"]),
