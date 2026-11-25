@@ -5607,6 +5607,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: an action that has no command of Resolve gets a comment line, like `#vidcut ducking := Alt+D`. Thus vidcut reads its own files back with all their keys.
     - Its keys have the same names as in the command lines, for example `#vidcut lift := Alt+Del`.
   - An import starts from the set that the import line names.
+    - An action that gets the keys of the table, in any order, keeps the table.
   - A file without an import line lists all commands. A command that it leaves out has no key, as in a built-in preset (measured, case 25 of shortcuts-resolve-runs.md). Whether an import does the same is not measured (case 27).
   - An import leaves out these lines and keys. `keys.import` names them in its answer.
     - The commands that vidcut does not have.

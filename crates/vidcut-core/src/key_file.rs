@@ -348,7 +348,10 @@ pub fn parse(text: &str, base: impl Fn(&str) -> Result<Custom>) -> Result<Read> 
         custom.insert(action, keys);
     }
     custom.extend(own);
-    custom.retain(|action, keys| *keys != action.default_keys());
+    custom.retain(|action, keys| {
+        let table = action.default_keys();
+        keys.len() != table.len() || keys.iter().any(|k| !table.contains(k))
+    });
     Bindings::of(&custom)?;
     read.keys = custom;
     Ok(read)
