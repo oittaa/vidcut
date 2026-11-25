@@ -5068,10 +5068,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A typed gain or Q outside its range goes to the nearest limit.
     - Earth, Air and Ice show no Q for a shelf. Fire shows it. A Notch shows no gain and no Q.
     - The strip of a track shows FX, DY and EQ in this order.
-  - A preset file of the window keeps the Q as a whole step n from 15 to 164 (measured):
-    - The window shows (n − 10) / 15, with one decimal.
+  - A preset file of the window keeps the Q as a whole step n from 15 to 165 (measured):
+    - The window shows (n − 10) / 15, with one decimal. Step 21 shows 0.8, not 0.7 ([gotchas](gotchas.md#resolves-edits)).
     - A new Bell has the step 26, and a new shelf has the step 45.
-    - A typed Q goes to a near step. The typed values 0.5, 1.1 and 4.0 gave the steps 18, 26 and 70.
+  - A typed Q q goes to the step floor((q − 0.3) × 15 + 15) (31 typed values, measured):
+    - Each operation of the rule is in 32-bit floating point.
+    - Thus 0.5 gives 18, 0.55 gives 18, 1.1 gives 27 and 4.0 gives 70.
+    - The rounding error moves some values one step down. 7.7 gives 125 and 9.9 gives 158, not 126 and 159.
+    - A value below 0.3 gives step 15, and 10.3 gives step 165.
+    - Typed text that is the same as the shown text keeps the step. Other text sets the step, also "0.70" on a step that shows 0.7.
+    - The Type and the filter of the band do not change the rule.
   - Renders of white noise at 48 kHz give these filters, to −150 dB (measured):
     - Each filter is a biquad filter of the Audio EQ Cookbook. Its frequency is prewarped as in the Cookbook.
     - A Bell has the typed gain times 1 with Earth and Air, 10/9 with Ice and 50/37 with Fire.
@@ -5106,8 +5112,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A row has the switch, the filter, the frequency, the gain, the Q and the slope of a pass filter.
     - The Q shows only where it changes the sound. The slope shows only with Fire.
     - A change applies at once. A drag on a handle or on a field makes one change when it stops.
+    - Typed text that is the same as the shown text changes nothing.
     - Reset and Close are at the bottom of the window.
-  - vidcut uses the measured filters. The step of a Q is 15 times the Q, plus 10. It is not rounded to a whole step.
+  - vidcut uses the measured filters and the measured rule from a Q to its step (`track::stepped`):
+    - A request or a typed value keeps the Q of its step, (n − 10) / 15, at most 10.3.
+    - Step 21 shows 0.7 ([gotchas](gotchas.md#resolves-edits)).
   - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-equalizer.md)):
     - The Low Pass of Fire at the slopes 6 and 18 adds a filter of the first order, as its High Pass does.
     - Other sample rates use the same rules.

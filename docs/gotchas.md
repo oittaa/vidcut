@@ -769,6 +769,13 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The ramp of Inside and Outside fits best at (x − 0.5, y − 0.5).
   - Thus the edge and the ramp are half a pixel apart in x, and one pixel apart in y.
   - vidcut reads both at (x, y + 0.5) (`CURVE_SAMPLE`, `window_curve`).
+- **Step 21 of a track equalizer Q shows 0.8.**
+  - The Equalizer window of a track shows the step n of a Q as (n − 10) / 15, with one decimal.
+  - Step 21 is 0.733, but the window shows 0.8. Earth, Ice and Fire show the same.
+  - Steps 36 and 51 are 1.733 and 2.733, and the window shows 1.7 and 2.7.
+  - A typed 0.7 goes to step 21. Thus the window shows 0.8 after a typed 0.7.
+  - In renders, the Earth bell of step 21 has the width 21/30 = 0.7.
+  - vidcut does not copy this fault. Step 21 shows 0.7 ([spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
 - **A circle window that Resolve makes with Toggle Display Mode on has no radius.**
   - With the viewer hidden, the grade of a new circle has no base radius.
   - The circle then renders about 30 pixels wide. The viewer draws the usual oval.

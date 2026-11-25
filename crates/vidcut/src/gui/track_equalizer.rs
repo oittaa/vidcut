@@ -187,6 +187,11 @@ impl Workspace {
                     .clicked();
             });
         });
+        for (band, was) in eq.bands.iter_mut().zip(&shown.bands) {
+            if band.q != was.q {
+                band.q = track::stepped(band.q);
+            }
+        }
         let now = Some(Instant::now());
         let draft_of = |from: TrackEqualizer, to: TrackEqualizer, since| Draft {
             owners: vec![id.clone()],

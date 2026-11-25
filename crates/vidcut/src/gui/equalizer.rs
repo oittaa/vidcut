@@ -151,6 +151,8 @@ pub(super) fn number(
     decimals: usize,
     unit: &str,
 ) -> bool {
+    let kept = *value;
+    let shown = format!("{kept:.decimals$}");
     ui.add_enabled(
         free,
         egui::DragValue::new(value)
@@ -158,6 +160,19 @@ pub(super) fn number(
             .range(range)
             .speed(speed)
             .fixed_decimals(decimals)
+            .custom_formatter(move |v, _| format!("{v:.decimals$}"))
+            .custom_parser(move |text| {
+                let text: String = text
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .map(|c| if c == '\u{2212}' { '-' } else { c })
+                    .collect();
+                if text == shown {
+                    Some(kept)
+                } else {
+                    text.parse().ok()
+                }
+            })
             .suffix(unit),
     )
     .dragged()
