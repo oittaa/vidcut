@@ -1203,6 +1203,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Speed Change controls of the Inspector set the same (pp. 736–737).
   - vidcut: the Speed section of the Inspector tab (X70).
   - vidcut: the window also sets Retime Process (X93).
+  - Keyframes: Maintain Timing or Stretch to Fit (p. 1217).
+    - Maintain Timing keeps each keyframe at its frame of the clip.
+    - Stretch to Fit keeps each Transform, Crop and Composite keyframe on its source frame. The volume, the pan and the effects keep their timing.
+    - Thus at twice the speed, the keyframes are half as far apart. Their handles change in the same ratio.
+    - A change of direction puts the keyframes in the opposite order. Their In and Out handles change places.
+    - A freeze frame keeps the timing. A clip that was a freeze frame keeps it too.
+    - `edit.change_speed` takes `keyframes`: `maintain` or `stretch`.
 - **Change Clip Duration** (Ctrl+D, p. 693; Resolve Studio 21.1.1):
   - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
   - End runs to the end of the media.
@@ -6727,7 +6734,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.
-    - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
+    - A speed change keeps each keyframe at its frame of the clip, as volume does (D81). Stretch to Fit in Change Clip Speed keeps it on its source frame ([§8.6](#86-trimming-pp-693-716-718-726732)).
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - That picture has the size of the frame, and it is made first. These facts follow (measured in Resolve Studio 21.2.0):

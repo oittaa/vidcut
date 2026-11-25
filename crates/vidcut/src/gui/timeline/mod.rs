@@ -420,6 +420,7 @@ pub struct SpeedDialog {
     pub freeze: bool,
     pub ripple: bool,
     pub retime: ClipRetime,
+    pub stretch: bool,
 }
 
 impl SpeedDialog {
@@ -437,6 +438,7 @@ impl SpeedDialog {
             freeze: speed == 0.0,
             ripple,
             retime: ClipRetime::Project,
+            stretch: false,
         }
     }
 
@@ -455,7 +457,10 @@ impl SpeedDialog {
     }
 
     pub fn params(&self, clips: &[String]) -> Value {
-        json!({ "clips": clips, "speed": self.speed(), "ripple": self.ripple })
+        let keyframes = if self.stretch { "stretch" } else { "maintain" };
+        json!({
+            "clips": clips, "speed": self.speed(), "ripple": self.ripple, "keyframes": keyframes,
+        })
     }
 }
 
@@ -3980,6 +3985,14 @@ impl Workspace {
                         });
                     });
                 }
+                super::dialog::row(ui, "Keyframes", |ui| {
+                    ui.add_enabled_ui(!d.freeze, |ui| {
+                        super::dialog::switch(ui, |ui| {
+                            ui.selectable_value(&mut d.stretch, false, "Maintain Timing");
+                            ui.selectable_value(&mut d.stretch, true, "Stretch to Fit");
+                        });
+                    });
+                });
                 super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
             super::dialog::footer(ui, |ui| {

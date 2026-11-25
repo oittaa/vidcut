@@ -1542,6 +1542,10 @@ pub enum Request {
         ripple: Option<bool>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Where the Transform, Crop and Composite keyframes go. Default:
+        /// `maintain`.
+        #[serde(default)]
+        keyframes: KeyTiming,
         /// Download the model of the Retime Process that the clips then use,
         /// if this computer doesn't have it yet, checked against its SHA-256.
         /// Without it, an export asks for it.
@@ -5276,14 +5280,16 @@ pub enum ClipAttribute {
     DialogueLeveler,
 }
 
-/// Where `clip.paste_attributes` puts the keyframes in each clip.
+/// Where `clip.paste_attributes` and `edit.change_speed` put the keyframes
+/// in each clip.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyTiming {
     /// The same frames from the start of the clip (Maintain Timing).
     #[default]
     Maintain,
-    /// The same part of the length of the clip (Stretch to Fit).
+    /// Stretch to Fit: in a paste, the same part of the length of the clip.
+    /// In a speed change, the same source frames.
     Stretch,
 }
 

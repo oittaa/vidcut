@@ -4225,6 +4225,7 @@ fn mutate(
             speed,
             ripple,
             at,
+            keyframes,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -4232,7 +4233,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            ops::change_speed(p, &ids, *speed, *ripple, at)?;
+            ops::change_speed(p, &ids, *speed, (*ripple, at), *keyframes)?;
             if *download && !dry_run {
                 ready_retimes(env, p, &ids)?;
             }

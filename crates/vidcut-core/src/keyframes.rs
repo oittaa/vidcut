@@ -948,15 +948,19 @@ impl Picture {
     }
 
     pub fn scale_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: &impl Fn(i64) -> f64) {
-        for v in PictureValue::ALL {
-            let (keys, y) = parts_mut(self, v);
-            scale_channel(keys, y, &conv, ratio);
-        }
+        self.scale_value_times(conv, ratio);
         for e in &mut self.effects {
             e.scale_key_times(conv, ratio);
         }
         if let Some(g) = &mut self.grade {
             g.map_key_frames(conv);
+        }
+    }
+
+    pub fn scale_value_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: &impl Fn(i64) -> f64) {
+        for v in PictureValue::ALL {
+            let (keys, y) = parts_mut(self, v);
+            scale_channel(keys, y, &conv, ratio);
         }
     }
 

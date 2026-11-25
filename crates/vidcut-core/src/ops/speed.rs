@@ -3,6 +3,7 @@ use super::{change_speed, check_source, linked, repaced, retimed, split_clip};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Ease, Project, Section, Speed};
 use crate::render::source_frame;
+use crate::request::KeyTiming;
 
 fn clip_of(p: &Project, id: &str) -> Result<Clip> {
     let c = p
@@ -195,7 +196,13 @@ fn freeze_from(p: &mut Project, c: &Clip, t: i64) -> Result<()> {
     let part = split_clip(p, &c.id, &[t])?
         .pop()
         .unwrap_or_else(|| c.id.clone());
-    change_speed(p, &[part], 0.0, Some(false), Some(t.min(c.end() - 1)))
+    change_speed(
+        p,
+        &[part],
+        0.0,
+        (Some(false), Some(t.min(c.end() - 1))),
+        KeyTiming::Maintain,
+    )
 }
 
 pub fn set(
@@ -218,7 +225,13 @@ pub fn set(
         }
         let c = under(p, &id, t)?;
         if plain {
-            change_speed(p, std::slice::from_ref(&id), speed, ripple, Some(t))?;
+            change_speed(
+                p,
+                std::slice::from_ref(&id),
+                speed,
+                (ripple, Some(t)),
+                KeyTiming::Maintain,
+            )?;
             continue;
         }
         if !speed.is_finite() || !Speed::RANGE.contains(&speed) {
@@ -332,7 +345,13 @@ pub fn reverse(p: &mut Project, ids: &[String], t: i64, backward: bool) -> Resul
             continue;
         }
         if c.speed.as_ref().is_none_or(|s| s.sections.len() < 2) {
-            change_speed(p, std::slice::from_ref(id), -v, Some(false), Some(t))?;
+            change_speed(
+                p,
+                std::slice::from_ref(id),
+                -v,
+                (Some(false), Some(t)),
+                KeyTiming::Maintain,
+            )?;
             continue;
         }
         let (mut map, skip) = sections(&c);
