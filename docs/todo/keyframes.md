@@ -2,375 +2,60 @@
 
 **When:** not decided.
 
-A keyframe is a value of a clip at one frame. Between two keyframes, the value goes from one to the other. In this file, a keyframe is never a video keyframe of a codec.
+A keyframe is a value of a clip at one frame. In this file, a keyframe is never a video keyframe of a codec.
 
-- **In vidcut:**
-  - A clip has volume keyframes on its volume line ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
-  - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` and `ClipAudio::pan_keys` hold the volume and pan keyframes.
-  - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../spec.md#815-transform-and-crop-pp-766768), D75).
-  - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
-  - The Keyframes tab shows each value of the item selected first that can have keyframes.
-  - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
-  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
-  - Rotation, Pitch and Yaw are values of their own. Each crop side, the crop softness and the opacity are values of their own.
-  - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
-  - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
-  - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
-- **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of the other values of a [title](#titles).
+vidcut has keyframes on the picture, the volume, the pan, the effects, the speed, titles, subtitles and the Four Color Gradient. The spec tells how they work:
 
-## What Resolve has
+- The Keyframes tab and the keyframe tray: [spec §2](../spec.md#2-layout-pp-636637).
+- Transform, Crop and Composite: [§8.15](../spec.md#815-transform-and-crop-pp-766768) and D75. The volume and the pan: D81 to D85.
+- Effects: [§8.16](../spec.md#816-effects-pp-765-3526-3536). Titles: [§8.14](../spec.md#814-titles-pp-762764-11761178). Subtitles: [§8.12](../spec.md#812-subtitles-pp-645646-702-12271248).
+- The model: [design/model.md](../design/model.md#pictures). Resolve's files: [gotchas](../gotchas.md#resolves-otio-files).
 
-**The Cut page** (Ch. 33–37):
+This file lists what vidcut does not have yet. The page numbers are those of the manual.
 
-- The Cut page has a Keyframe Editor tab on the left (p. 636).
-- A Timeline control at the upper left opens the Keyframe Editor (p. 649).
-- Timeline Options has Display Speed Keyframes (p. 645).
-- Speed % and Frames Per Second of Speed Change can have keyframes (p. 737).
-- The Effects panel of the Inspector has a Keyframe button with Previous and Next buttons on each group of an applied effect (p. 747).
-  - The button adds or removes a keyframe at the playhead, on each parameter of the group.
-- The text of the Video panel (pp. 734–737) names no keyframe buttons for Transform, Cropping or Dynamic Zoom.
+- **Buildable:** the manual or a measurement gives the behavior.
+- **Needs a Resolve run:** the item names the run that gives the behavior.
 
-**The keyframing chapter** (Ch. 60, pp. 1249–1269) is for the Edit page and the Cut page (p. 1249):
+## Buildable
 
-- Most parameters of the Inspector can have keyframes, for example Zoom, Opacity and the crop (p. 1250).
-- Each such parameter has a Keyframe button between Previous and Next arrows. The button is orange on a keyframe (p. 1250).
-- With the playhead outside the selected clip, the Inspector shows the curve at the playhead's clip time (measured in Resolve Studio 21.1.2). The button and a typed value add a keyframe there, outside the clip.
-- With several clips selected, the Inspector has no Keyframe buttons (measured in Resolve Studio 21.1.2). A value with keyframes on one of these clips is off, and its Reset does nothing.
-- After the first keyframe of a parameter, each change at another frame adds a keyframe. The onscreen controls of the viewer also do this (p. 1251).
-- A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out (p. 1251).
-- The reset button of a parameter removes its keyframes. The reset button of a group removes the keyframes of the group (p. 1251).
-- A clip with keyframes shows a keyframe icon on its name bar (p. 1250).
-- Keyframes of Position X and Y make a motion path in the viewer, with Bezier points (pp. 1252–1254).
-- Mark > Add Keyframe adds a keyframe, also during playback (pp. 1254–1255).
-  - Resolve selects the parameter in this order: the retime controls, the open curve of the Keyframe Editor, the Inspector control changed last, the audio gain.
-- The Keyframes tab opens the Keyframe and Curve Editor on the Cut page and on the Edit page (p. 1255).
-- **The Keyframe Editor** (pp. 1255–1259):
-  - It has a track for each parameter, in a group track for each group, for example Transform and Cropping.
-  - Zoom is one track, and Position XY is one track (p. 1256).
-  - A move on a group track moves the keyframes at that time of all its parameters (p. 1256).
-  - A keyframe can be outside the clip after a trim. An arrow then marks it (p. 1258).
-  - A keyframe tray shows the keyframes of the selected clip in the timeline, on the Cut page and the Edit page (p. 1259).
-  - It opens in a window of its own only on the Edit page (p. 1260).
-- The Curve Editor adds Bezier handles, Step In, Step Out, Loop, Ping Pong, Reverse and a Shape Box (pp. 1261–1267).
-- Keyframes can be edited on several selected clips at once (p. 1268).
+In order of value:
 
-**The Edit page** (p. 1217):
+- **Select All and Deselect All.** Ctrl+A in the Keyframes tab or the keyframe tray selects all the keyframes of the shown item (p. 1262). Ctrl+Shift+A clears that selection. Now both keys act on the clips of the timeline.
+- **Keyframe buttons on the sections.** The Transform, Crop, Composite and Audio sections get a Keyframe button between Previous and Next. Resolve has one on each group, and it keys each value of the group (p. 747; [§8.15](../spec.md#815-transform-and-crop-pp-766768)).
+- **The motion path.** With the Transform handles on, the viewer shows the path of the Position keyframes (pp. 1252–1254). It has a point on each keyframe and a dot on each frame. A drag on a point changes its keyframe. Its right-click menu has Delete Keyframe.
+  - Thus the user sees the motion in the picture.
+- **Stretch to Fit in Change Clip Speed.** The window gets Maintain Timing and Stretch to Fit (p. 1217). Stretch keeps each Transform, Crop and Composite keyframe on its source frame ([gotchas](../gotchas.md#resolves-otio-files)). Now a speed change always maintains the timing.
+- **The time ruler and the curve tooltips.** The ⋯ menu gets Display Time Ruler in Seconds, Display Time Ruler in Frames and Show Curve Tooltips (pp. 1258, 1264). A tooltip gives the name and the value of the curve under the pointer.
+- **The parameter filters.** The ⋯ menu gets Display All Video Parameters and Display Selected Parameters (p. 1256). The second opens a check box for each value, in a Video and an Audio group. A clip with effects has many tracks, and the user needs only some of them.
+- **Reverse Keyframes.** The ⋯ menu gets Reverse Keyframes (pp. 1264, 1267). It runs the selected keyframes backward over their span. Thus their times change places, and their In and Out handles change places.
+- **The parts of the keyframe tray.** The tray gets a divider for its height, a track with the clip's name, and a group track for each section and each effect. It also gets a curve view and a Parameters menu ([spec §2](../spec.md#2-layout-pp-636637), Keyframe tray).
+- **The clips of the keyframe tray.** With no clip selected, the tray shows the clip under the playhead. With more than one clip selected, it shows a group for each clip ([spec §2](../spec.md#2-layout-pp-636637), Keyframe tray).
+- **Display Speed Keyframes.** Timeline Options gets this switch (p. 645). It shows or hides the speed marks on the clips.
+- **Hand Mode.** The header of the graph gets Hand Mode. Then a drag moves the view (p. 1263).
 
-- Change Clip Speed has Maintain Timing and Stretch to fit.
-  - Maintain Timing keeps the keyframes where they are.
-  - Stretch scales the Composite, Transform and Cropping keyframes with the clip.
+## Needs a Resolve run
 
-## Measured in Resolve Studio 21.1.1
-
-These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 1920×1080 at 30 fps, and started at 01:00:00:00.
-
-**Scripting:**
-
-- Resolve's scripting API has no call that adds, reads or removes the keyframes of a clip.
-- A scripted value on a parameter with keyframes changes nothing that Resolve shows or plays.
-- A script can change the speed, with or without stretching the keyframes, and can export and import OTIO.
-
-**The file** (OTIO, as Resolve exports it):
-
-- A keyframe time is a whole frame of the clip: the timeline frames from its first frame.
-  - At speed 1, this is the source frame less the first source frame of the clip, the start of its `source_range`.
-  - This is so in media with a timecode too. A key on the second frame of a clip is at `1`.
-- Transform: Zoom X and Zoom Y have keyframes of their own. Pan and Tilt are fractions of the width and the height of the timeline. Rotation is in degrees.
-  - A keyframe on Position keys X and Y. A later change of X alone adds a keyframe to X only.
-- Cropping: Crop Left is a fraction of the width, as its plain value is.
-- With keyframes, `Parameter Value` is not the value at the playhead, and not the value of the last keyframe. An import reads the keyframes.
-- Dynamic Zoom: Resolve writes its keyframes at the source frames 0 and 1000, on a clip with Dynamic Zoom on or off.
-  - In the file, these times are −s and 1000 − s. s is the first source frame of the clip, counted from the first frame of the media, also in media with a timecode.
-  - For a still, they are −g and 1000 − g. g is the timeline's `global_start_time` in frames.
-- Resolve reads a written file as written. Times, values and eases come back in its Inspector and in its next export.
-
-**Speed:** a key time is the frame of the clip at any speed. The source frame is the first frame that the clip shows, plus the time times the speed.
-
-- At 50 %, a key 30 source frames into the clip is at `60`. At 200 %, it is at `15`.
-- A clip that plays backward shows its highest source frame first. Frame f shows that frame less f.
-  - A render of a clip with numbered frames showed this. vidcut plays a reversed clip the same way.
-  - Thus a key on source frame 239 of a clip that shows 388 first is at `149`.
-- These facts hold in media with a timecode too.
-- A speed change that stretches the keyframes keeps each key on its source frame. Played backward, Resolve's stretch moves each key by one source frame.
-- A speed change that does not stretch keeps the numbers in the file. Thus the keys go to other frames of the clip.
-- `Timing` converts the times both ways. In a clip that plays backward, the file's time runs against the source. Thus `Timing` swaps `InBez` and `OutBez`.
-
-**Curves** (from renders):
-
-- Zoom changes in value. From 0.1 to 0.4 over 30 frames, it is 0.25 at the middle.
-- Position, rotation and crop change in value too.
-- An ease of the picture is a Bezier handle, as on the volume. Ease Out and Ease In put a flat handle at a third of the gap.
-  - Thus the two together play an S-curve, as vidcut's eases do ([gotchas](../gotchas.md#resolves-otio-files)).
-
-**The Cut page:**
-
-- The Inspector has a Keyframe button between Previous and Next arrows on each value and each group. Dynamic Zoom has no button.
-  - The groups with buttons: Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, Volume and Pan.
-- The Keyframes tab shows the Keyframe Editor: a track for each value with its keyframes, Volume and Pan too.
-- The Mark menu has Add Keyframe (Ctrl+[), Delete Keyframe (Alt+]), Delete All Keyframes, and Move Selected Keyframes Left, Right, Up and Down.
-  - It also has Add Static Keyframe (Ctrl+]) and a Keyframe Timeline Mode submenu. Both are disabled on the Cut page.
-  - Resolve Studio 21.1.2 shows these items and shortcuts.
-- The speed tool of the viewer has its own Keyframe button.
-- A right-click on a keyframe in the Keyframe Editor opens no menu, on the Cut page and on the Edit page.
-
-**Better than Resolve** (proposals for the stages):
-
-- The ease menu is on each keyframe: on the Keyframe button and in the Keyframe Editor.
-- A bar shows the value, time and ease of the selected keyframe ([spec §2](../spec.md#2-layout-pp-636637)).
-- A double-click on a track adds a keyframe there ([spec §2](../spec.md#2-layout-pp-636637)).
-
-## Scope
-
-**The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-tab-in-frame-pixels).
-
-**The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../spec.md#2-layout-pp-636637).
-
-- One track for each value that can have keyframes, in a group for its section. The ⋯ menu can hide the values without keyframes.
-- Each track has the curve button, the Keyframe button with its arrows, and Reset Keyframes.
-- A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
-- Shift and a drag on a curve point change only the time or only the value.
-- With Enable Snapping on, a dragged keyframe goes to the playhead and to the keyframes of other values.
-- A drag on a group track moves that group's keyframes at that time.
-- Volume and Pan are tracks in the Audio group.
-- The curve of a value shows under its track. A drag on an In or Out handle changes that handle and lines up the other one. With Alt, the handle moves alone.
-- A drag on the line between two keyframes moves the values of the two keyframes. Alt and a press on the line adds a keyframe.
-- The Graph button shows the curves together in one large graph in the place of the tracks.
-- One click selects one keyframe. Ctrl-click adds a keyframe to the selection or removes it. Delete removes the selection.
-- A drag from an empty part draws a box. The box replaces the selection with the keyframes in it.
-- Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
-- A click on the name of a value selects its row. Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected rows.
-- Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the keyframes on the selected clips, the first at the playhead.
-- [§2](../spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
-- A right-click sets the ease of that keyframe, or of all the selected keyframes, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
-- A bar shows the value, time and ease of the selected keyframe (X90).
-- The time ruler moves the playhead. Full Extend Zoom, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
-- A scroll bar under the tracks moves the range.
-- The Keyframes button of the lower timeline shows a tray under its tracks. It has the keyed tracks of the clip, on the time of the timeline.
-- `keyframes.add`, `keyframes.remove`, `keyframes.set`, `keyframes.move`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do these edits.
-- **To do:**
-  - the motion path in the viewer (pp. 1252–1254)
-  - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
-  - keyframes of several selected clips at once (p. 1268)
-  - the Lock control (p. 1257)
-  - the ruler in frames, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
-  - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
-  - the parts of Resolve's tray that vidcut does not have ([§2](../spec.md#2-layout-pp-636637), Keyframe tray)
-  - Zoom X and Zoom Y as two keyframes when the zoom is not linked
-    - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
-
-## Model
-
-The picture uses the `Keyframe` of the volume ([D81](../spec.md#12-decisions-on-gaps-and-contradictions)): the same source frames, handles, curve, eases and edits.
-
-- **Where:** the keyframes of each value are in `Picture`, beside the plain values.
-- **Checks:**
-  - `ops::picture::checked` checks the values of each keyframe as it checks plain values.
-  - `Picture::is_usual` is false while a value has keyframes.
-- **Compound clips:** the keyframes of a compound clip count its frames.
-  - `edit.decompose` drops them.
-- **Another rate:** an import scales the keyframe times to the project's rate (`at_project_rate`), as for the volume.
-
-## Playback and export
-
-- [export](../design/export.md#placed-pictures) tells how the viewer and the export sample the keyed values (`Picture::sampled`).
-- The curve of a value between keys is the volume Bezier curve (`value_at`). Position Y and zoom Y keep the handle frames, with a value offset of 0 (`value_paired`).
-
-## Interchange
-
-**What vidcut reads and writes for the picture** (`otio::effects`, `otio::picture`):
-
-- A clip effect is an OTIO `Effect.1` with the `effect_name` `Resolve Effect`.
-- Its data is in `metadata.Resolve_OTIO`: `Effect Name`, `Name`, `Type`, `Enabled`, `Display Type` and `Parameters`.
-- A parameter has `Parameter ID`, `Parameter Value`, `Default Parameter Value`, `Variant Type`, and can have `minValue`, `maxValue` and `Key Frames`.
-- `Key Frames` is an object. Each name is a keyframe time, a frame count as a string. Each value has `Value` and `Variant Type`, and can have `InBez` and `OutBez`.
-- `effects::read` keeps an effect that is on when a parameter or a keyframe `Value` is off its default (`in_use`). It keeps a Dynamic Zoom that is on.
-- `carry` sets the `from` field of `Effects` to the first source frame of the clip, or of its sound. Thus the code takes time 0 as the first source frame of the item.
-- `Effects::written` moves the times by `from` less the first source frame of the written item.
-- `otio::picture` reads Transform, Cropping and Retime and Scaling as a `Picture` when each keyed parameter fits the model.
-  - The keyed parameters that it reads are Zoom, Pan, Tilt, Rotation, the anchor point, Pitch, Yaw, the crop sides, Crop Softness and Opacity.
-  - Each key of `transformationAnchorPoint` is a `POINTF`, as the keys of `dynamicZoomCenter` are. Keys with Bezier handles stay unplayed.
-  - Anchor point keys stay unplayed on a picture that Retime and Scaling sizes to another size than the fit. Its move would then go into `position`.
-  - The center and scale of Dynamic Zoom need exactly two keyframes (`ends`). The earlier keyframe is the start box.
-- vidcut writes the two keyframes of Dynamic Zoom at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
-  - Resolve writes them at −s and 1000 − s. s is the first source frame of the clip ([Measured](#measured-in-resolve-studio-2111)).
-  - Resolve reads the earlier key as the start, whatever the times ([gotchas](../gotchas.md#resolves-otio-files)). Thus both forms play the same.
-- vidcut writes the keyframes of each keyed value in the `Key Frames` of its parameter. It writes the other picture parameters with an empty `Key Frames`.
-  - It writes the anchor point keys without Bezier handles. Resolve's anchor point keys are linear too ([D92](../spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys and gives the same keys.
-  - Resolve Studio 21.2 imports a file that vidcut writes with these keys, and renders and exports the same keys.
-
-**The one test file:** `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` has Resolve's metadata, 24 fps and g = 86400.
-
-- Its keyframes are only on the Dynamic Zoom of its six title clips. That Dynamic Zoom is off.
-- Each of these clips has keyframes at `0` and `1000`, also the clips later in the timeline. All have a source start of 0.
-- One of its parameters, from the first clip:
-
-```json
-{
-  "Default Parameter Value": 1.0,
-  "Key Frames": {
-    "0": { "Value": 0.8, "Variant Type": "Double" },
-    "1000": { "Value": 1.0, "Variant Type": "Double" }
-  },
-  "Parameter ID": "dynamicZoomScale",
-  "Parameter Value": 1.0,
-  "Variant Type": "Double",
-  "maxValue": 100.0,
-  "minValue": 0.01
-}
-```
-
-**What vidcut would write:**
-
-- The `vidcut` metadata of the clip holds the keyframes exactly, as `gain_keys` holds the volume keyframes.
-- Resolve's effects get each keyframe in the `Key Frames` of its parameter, in Resolve's units through `Shape`, as `otio::picture::effects` converts plain values.
-- An import plays the keyframes of Transform and Cropping when they fit the model.
-- Some keyframes stay in the kept effects, unplayed, with the warning of the import:
-  - Step
-  - anchor point keys with Bezier handles, or on a picture that is not at its fitted size
-
-## Titles
-
-**Measured in Resolve Studio 21.1.2** (Text, a lower third and Scroll, with renders and OTIO exports):
-
-- These values take keyframes, play them and export them:
-  - `position`, `transformationZoomX`, `transformationZoomY` and `transformationRotationAngle` in `Rich Text`
-  - `position` in the `Text` group of a scroll
-  - `opacity` in the `Composite` clip effect, from 0 to 100
-- Between two keyframes with no handles, each value changes evenly.
-- A key time counts from the first frame that the clip shows.
-- A position goes from -4 to 4 on each axis, from the bottom left. A move of x from -0.5 to 1.5 plays.
-- A key of zoom, rotation or opacity takes `InBez` and `OutBez`.
-- A position key also takes handles:
-  - A plain key exports as `{"30": {"Value": [0.5, 0.5], "Variant Type": "POINTF"}}`.
-  - A key with a handle adds `"OutBez": {"OutBez": [x, y], "Variant Type": "POINTF"}` or the same with `InBez`. The numbers are fractions of the picture.
-  - The import keeps these handles.
-- The path between two position keys is a cubic. P1 = P0 + `OutBez`, and P2 = P3 + `InBez`. A key with no handle gives a handle of zero.
-- The title moves at one speed along that path:
-  - The fraction of the time between the keys is the fraction of the length of the path.
-  - The length is in fractions of the picture, not pixels.
-  - Six sets of handles, with each frame rendered, fit this with a largest error of 0.00074 of the picture.
-- The right-click menu of the Inspector's Position key depends on the place of the key:
-  - The first key has Linear and Ease Out.
-  - The last key has Linear and Ease In.
-  - A middle key has Linear, Ease In, Ease Out and Ease In and Out.
-  - A lone key has only Linear.
-  - A check mark is on the current item. A new choice replaces the old one.
-- A Zoom key has the same menu. Three keys at 30, 60 and 90 show the first, middle and last items above, with the check mark.
-- A lone Rotation key has only Linear.
-- Rotation and Opacity keys take the same menu.
-- On Zoom, Rotation and Opacity, a handle is flat and a third of the gap. On a gap of 30 frames, Ease In writes `[-10, 0]`, and Ease Out writes `[10, 0]`. Zoom writes them on X and on Y.
-- The Position menu writes these values, in fractions of the picture, with Y from the bottom as in the file:
-  - `OutBez` of a key is (value of the next key - value of the previous key) / 8.
-  - `InBez` of a key is minus that value.
-  - A missing neighbor counts as (0, 0).
-  - The gap between the keys and the distance between them do not change the values.
-- Ease In sets only `InBez`. Ease Out sets only `OutBez`. Ease In and Out sets both.
-- Linear removes the handles of that key. The handles of its neighbors stay.
-- The menu reads the neighbors when the user chooses the item. A later change of a value does not change the stored handles.
-- A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
-- A title that is copied and pasted keeps its keys and handles. In the measured paste, the paste took the range between the timeline's marks, and the keys moved by the same amount.
-- The Keyframes panel of a title has only the rows of the clip. A key on the Position of the Title tab has no row.
-- The Inspector also has Keyframe buttons on these values of a title:
-  - Drop Shadow: Offset, Blur and Opacity
-  - Background: Outline Width, Width, Height, Corner Radius, Center and Opacity
-  - the Transform and Cropping of the clip
-
-**In vidcut:**
-
-- A Text title and a lower third take keyframes on the position, zoom and rotation of the text: `text_position`, `text_zoom` and `text_rotation`. A scroll takes them on the position of its text.
-- The picture of its clip takes keyframes as on a media clip, with the same names. Opacity is one of them.
-- Each line of a lower third takes its own keyframes on position, zoom and rotation. `upper_position`, `lower_position` and the like in the `keyframes` requests name the line. Opacity is the whole title's.
-- The Title section has the Keyframe button on Across, Zoom and Rotation. Across holds the keyframes of Across and Down. A lower third has these buttons on each line.
-- The right-click menu of the Keyframe button of Across, Zoom and Rotation has the items of the measured menu (`key_buttons`, `eases`). It sends `keyframes.set`.
-- On Position, the check mark is on the item that the sides of the key's handles give (`Title::position_ease`).
-- On Zoom and Rotation, the check mark is on the item that `ease_of` gives. A key with other handles has no check mark.
-- A scroll's Position key has no menu, and `keyframes.set` gives it no handles. Nothing measures them.
-- The Keyframes tab shows these values of a selected title ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)). In that tab, Position has no curve button and no ease.
-- Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
-- `keyframes.set` and `keyframes.add` with `ease` write the measured values on the chosen position keys (`Title::ease_position`). `keyframes.list` shows the handles as `in` and `out`, with Y from the top.
-- An ease that the place of the key does not offer follows the rule of the other values. The side with no neighbor gets no handle, and the old handles of the key go.
-- `keyframes.set` refuses `in` and `out` on a title's position keys. The handles of those keys are points in the picture, not frames and a value.
-- `edit.copy`, `edit.cut` and `edit.paste` carry the keys and the handles with the title.
-- `keyframes.copy` and `keyframes.cut` return the handles of a title's position key as `in_point` and `out_point`. `keyframes.paste` puts them on the position key of a title, as they are.
-- `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
-- With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
-- `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
-- A switch to Scroll drops the zoom and rotation keyframes and the position handles.
-- A `look` in `titles.set` keeps the keyframes and the position handles. A look that makes a scroll drops what a switch to Scroll drops.
-- A `look` in `titles.set` adds no keyframe. Its number for a value with keyframes shows when the last of them goes.
-
-**In a file:**
-
-- `otio::titles` writes the keyframes in the `Key Frames` of each parameter, on the `Rich Text` group of each line of a lower third.
-- It reads each line's keyframes from its own group.
-- Position keys convert as the plain position does. `InBez` and `OutBez` go to `position_handles` and come back, with Y turned over.
-- A scroll reads and writes no position handles, because nothing measures them.
-- The `vidcut` metadata holds the keyframes on source frames, as for a `Picture`.
-
-**To do:**
-
-- keyframes of the shadow and the background
-
-## Subtitles
-
-A subtitle has keyframes. [§8.12](../spec.md#812-subtitles-pp-645646-702-12271248) tells how they work.
-
-**Measured in Resolve Studio 21.1.2:**
-
-- The Inspector of a subtitle has only Caption and Track tabs, with no Keyframe buttons.
-- The Keyframes panel of a selected subtitle lists these values, and adds keyframes on them:
-  - Transform: Zoom X and Y, Position X and Y, Rotation, Pitch and Yaw. It has no Anchor Point.
-  - Cropping: Left, Right, Top, Bottom and Softness
-  - Composite Opacity
-- Each subtitle has its own keyframes.
-- A subtitle acts as a picture as large as the frame, with the Transform and Cropping of a clip:
-  - An Opacity keyframe dims the subtitle.
-  - Zoom and Rotation act about the middle of the picture. A small positive Rotation moves bottom text to the right.
-  - Position X is in pixels. A keyframe at 500 moved the subtitle about 503 pixels.
-  - A positive Pitch enlarges bottom text and moves it down. A positive Yaw lowers the left end and raises the right end.
-  - Crop Left is in pixels of the frame width, up to 1920. At about 968, it cuts the text at the middle of the frame, and the rest stays in place.
-  - Softness fades the text at the cropped edge.
-- A head trim, a split and a keyframe's timeline frame:
-  - A head trim leaves each keyframe on its timeline frame.
-  - A split gives both parts each keyframe, on the same timeline frame.
-  - A move takes the keyframes along.
-- With the playhead outside the selected subtitle, the Keyframe button of a row adds a keyframe there.
-- The arrows of a row go to keyframes outside the subtitle. They went from 14 s to 15 s to 18 s and back to 15 s.
-- A ripple delete of Track 1 inside a subtitle gives two subtitles, with or without keyframes:
-  - A subtitle from 12 s to 20 s has keys at 13, 15 and 18 s. A cut from 14 s to 16 s gives 12–14 (keys 13, 15, 18) and 14–18 (keys 11, 13, 16).
-  - Then a cut from 13 s to 15 s gives 12–13 (keys 13, 15, 18) and 13–16 (keys 9, 11, 14).
-  - A subtitle from 27 s to 30 s with no keys, cut from 28 s to 29 s, gives 27–28 and 28–29.
-- Timeline > Join Clips joins two subtitles that share an edit point:
-  - Parts 2–6 s (key at 4 s) and 6–10 s (key at 8 s) become 2–10 s with the key at 4 s only.
-  - With different text, the result keeps the text of the first part.
-  - With a gap, the join gives an error: the clips "don't share an edit point".
-- The Keyframes panel shows the item selected first. A clip, then Ctrl+subtitle, shows the clip. A subtitle, then Ctrl+clip, shows the subtitle. A later subtitle, then Ctrl+an earlier one, shows the later one.
-- A typed In on a subtitle leaves each keyframe on its timeline frame.
-- A double-click in a row of the Keyframes panel adds no keyframe.
-- A burn-in render shows the keyframes, the crop and the softness.
-- An OTIO export leaves subtitle tracks out. Thus these keyframes reach no file.
-
-## Scripting
-
-Rule 3: each GUI action has a request.
-
-- `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
-- `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../spec.md#12-decisions-on-gaps-and-contradictions)).
-- `timeline.get` names the values of a clip that have keyframes, as it names `volume`.
-- `keyframes.copy` returns the selected keyframes with their offsets. `keyframes.paste` puts them on clips. `keyframes.cut` copies, then removes.
-- `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
-- `gui.show keyframe_tray` opens the keyframe tray. `gui.close keyframe_tray` closes it.
-
-## Effect Freeze
-
-- Measured in Resolve Studio 21.2, on the Fusion page, with the Film Grain plugin:
-  - Freeze takes a curve from 0 to 1. Freeze is on where the curve is 0.5 or more.
-  - A frozen frame shows the grain of the latest Freeze keyframe at or before it.
-- Not measured: the grain of a frozen frame before the first Freeze keyframe, and Freeze keys in the Inspector of the Cut page.
-- **To do:** Freeze keyframes on a Film Grain, with these rules ([X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
-
-## Open questions
-
-- **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
+- **X and Y keyed apart.** In Resolve's file, Position X and Y have keyframes of their own, and so do Zoom X and Y ([gotchas](../gotchas.md#resolves-otio-files)). vidcut keys X and Y together. Thus an import with keys apart leaves Transform unplayed.
+  - Run: key Position X alone after an XY key, and Zoom X alone with the link off. Then look at the tracks, the arrows, a drag and a delete.
+- **Smooth points on the motion path.** Smooth gives a point Bezier handles in the viewer, and an acceleration handle sets the ease (pp. 1252–1254).
+  - Run: set Smooth on a point, drag its handles, export OTIO and render each frame.
+- **Step In and Step Out.** Each holds a value and then jumps (pp. 1263, 1266). The two pages of the manual do not agree on which value holds.
+  - Run: set each on Zoom keys, render each frame and export OTIO.
+- **Loop and Ping Pong.** Each repeats the selected keyframes to the end of the clip (p. 1267).
+  - Run: set each. See if Resolve adds keyframes, how far, and what a trim then does. Export OTIO.
+- **The Shape Box.** A box around keyframes stretches them, and Alt on a corner skews them (p. 1265).
+  - Run: drag each edge and an Alt corner around three keys. Read the times, the values and the handles.
+- **Lock.** The lock of a track prevents accidental changes (p. 1257). Shift-click locks all the tracks, and Alt-click locks all but one.
+  - Run: lock a track, then try a drag, Delete, an Inspector change and Reset. Save and open the project again.
+- **Show Handles and Flat Handle.** Show Handles shows the handles of all the points, and Flat Handle turns a handle restraint on or off (p. 1263). vidcut always shows all the handles.
+  - Run: switch each, and look at the handles and a handle drag.
+- **Shift-click in the graph.** The manual says that Shift-click selects the keyframes between two clicks (p. 1262). In the tracks, Shift-click selects one keyframe ([spec §2](../spec.md#2-layout-pp-636637)).
+  - Run: Shift-click two points in the Curve Editor.
+- **Keyframes of several clips.** The manual shows the keyframes of all the selected clips, side by side or stacked (p. 1268). Resolve Studio 21.1.2 showed the item selected first.
+  - Run: select two clips side by side, then stacked, on the Cut page and the Edit page.
+- **Film Grain Freeze keyframes.** Freeze takes a curve on the Fusion page ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
+  - Run: the Keyframe button of Film Grain in the Inspector of the Cut page, with Freeze on. Also the grain of a frozen frame before the first Freeze keyframe.
+- **Dynamic Zoom at other times.** vidcut keeps the two boxes at the ends of the clip.
+  - Run: import a file with the two keys at other times, and look for a control that moves them.
+- **The shadow and the background of a title.** Resolve's Inspector keys the Drop Shadow and the Background values of a title ([§8.14](../spec.md#814-titles-pp-762764-11761178)).
+  - Run: key each value, render and export OTIO.
