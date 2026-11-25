@@ -1608,6 +1608,7 @@ struct Merging {
     y: vec4<f32>,
     how: vec4<f32>,
     slide: vec4<f32>,
+    more: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> merging: Merging;
@@ -1784,6 +1785,10 @@ fn merge_rgb(y: vec3<f32>) -> vec3<f32> {
     );
 }
 
+fn merge_cover(c: vec4<f32>) -> vec4<f32> {
+    return select(c, min(c, vec4<f32>(1.0)), merging.more.x > 0.5);
+}
+
 fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let mode = i32(merging.how.x);
     let op = i32(merging.how.y);
@@ -1792,15 +1797,15 @@ fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let keep = select(1.0, 1.0 - merging.slide.z, mode == 0 && op == 0);
     switch mode {
         case 0: {
-            return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, op);
+            let cover = array(merge_cover(vec4<f32>(fa)), merge_cover(vec4<f32>(ba)));
+            return merge_operated(fore, back, cover, keep, op);
         }
         case 2: {
             return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, 0);
         }
         case 1: {
-            let cf = vec4<f32>(min(fore.rgb, vec3<f32>(1.0)), fa);
-            let cb = vec4<f32>(min(back.rgb, vec3<f32>(1.0)), ba);
-            return merge_operated(fore, back, array(cf, cb), keep, op);
+            let cover = array(merge_cover(fore), merge_cover(back));
+            return merge_operated(fore, back, cover, keep, op);
         }
         case 25: {
             return sqrt(fore * fore + back * back);

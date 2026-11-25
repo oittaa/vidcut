@@ -5901,6 +5901,12 @@ pub struct Merge {
     /// merge with the `over` operator uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// On, a `normal` or a `screen` merge counts an alpha above 1 as 1
+    /// where the foreground covers the background, and a `screen` merge
+    /// also each color. Off, such a foreground takes away more than the
+    /// whole background. Usual: on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp_coverage: Option<bool>,
     /// The width that the center is shown in: its x shows as x × this
     /// width. It does not change the picture. From 1 to 32767. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]

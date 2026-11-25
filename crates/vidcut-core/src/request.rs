@@ -7210,6 +7210,10 @@ pub struct NodeChange {
     /// background, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// On, a `normal` or a `screen` merge counts an alpha above 1 as 1
+    /// where the foreground covers the background.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp_coverage: Option<bool>,
     /// The width that the center of a merge is shown in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_width: Option<f64>,

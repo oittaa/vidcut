@@ -572,6 +572,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.subtractive_additive, &mut m.subtractive_additive);
             given(&mut left.alpha_gain, &mut m.alpha_gain);
             given(&mut left.burn_in, &mut m.burn_in);
+            given(&mut left.clamp_coverage, &mut m.clamp_coverage);
             given(&mut left.reference_width, &mut m.reference_width);
             given(&mut left.reference_height, &mut m.reference_height);
             taken(&mut left.auto_resolution, &mut m.auto_resolution);

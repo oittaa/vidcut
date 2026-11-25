@@ -1071,6 +1071,7 @@ pub struct Merging {
     pub gain: f64,
     pub burn: f64,
     pub blend: f64,
+    pub clamp: bool,
     pub masks: Masks,
     pub replaces: bool,
 }
@@ -1087,6 +1088,7 @@ impl Merging {
             gain: m.gain(),
             burn: m.burn(),
             blend,
+            clamp: m.clamps(),
             masks,
         }
     }

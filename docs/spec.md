@@ -3162,6 +3162,13 @@ The controls of the sums (pp. 2213–2217):
 - Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
 - Blend mixes the background with the result (p. 2217): BG × (1 − Blend) + result × Blend.
+- Clamp Coverage: on. The manual does not describe it. Only Normal and Screen use it.
+  - On, fa counts as 1 where it is above 1. Thus a foreground with an alpha above 1 does not take more than the whole background away.
+  - Off, the sums use fa as it is. Then 1 − fa is below 0.
+  - Example: a foreground of (2, 2, 2, 1.5) over (0.2, 0.2, 0.2, 1) with Normal and Over. On gives (2, 2, 2, 1.5), and off gives (1.9, 1.9, 1.9, 1).
+  - With fa at 1 or below, Normal gives the same result on and off. This is also true with a color above 1.
+  - vidcut also counts ba as 1 where it is above 1.
+  - vidcut: the merge of a tracker has no Clamp Coverage row. It clamps, as a new Merge does.
 
 The Operators of Normal give FG × x + BG × y (p. 2215):
 
@@ -3176,7 +3183,10 @@ The Operators of Normal give FG × x + BG × y (p. 2215):
 - Mask: BG × fa.
 - Stencil: BG × (1 − fa).
 
-Screen uses the same sums with a coverage for each color channel. The coverage of a channel c is min(1, c), of F and of B in place of fa and ba. The alpha uses fa and ba.
+Screen uses the same sums with a coverage for each channel. The coverage of a channel is its value, of F and of B, in place of fa and ba.
+
+- With Clamp Coverage on, each coverage stops at 1. Off, it does not stop.
+- Example: the foreground (2, 2, 2, 1.5) over (0.2, 0.2, 0.2, 1) gives (2, 2, 2, 1.5) on, and (1.8, 1.8, 1.8, 1) off.
 
 The sliders, with Normal and Over:
 
@@ -3224,7 +3234,7 @@ The rows of the sliders change with the mode (measured in Resolve Studio 21.2):
 - Normal with Over: Subtractive/Additive, Alpha Gain, Burn In and Blend. Normal with another Operator: the same rows without Burn In.
 - Screen and the 25 other modes: Gain and Blend.
 - Gain is Alpha Gain with another name. It keeps its value when the mode changes.
-- Resolve also shows Clamp Coverage under Blend with Normal and with Screen.
+- Normal and Screen also show Clamp Coverage under Blend.
 
 With a mode other than Normal (measured in Resolve Studio 21.2):
 
