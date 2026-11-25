@@ -498,7 +498,8 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
     - Thus a key on source frame 239 of a clip that shows 388 first is at `149`.
     - The time of the file runs against the source. Thus `InBez` and `OutBez` change places.
   - A speed change that stretches the keyframes keeps each key on its source frame.
-    - On a clip that plays backward, the stretch moves each key by one source frame.
+    - On a clip that plays backward, the stretch moves each key by one source frame. This is a bug in Resolve.
+    - vidcut keeps each key on its source frame, also on a clip that plays backward.
   - A speed change that does not stretch keeps the numbers in the file. Thus each key stays on its frame of the clip, over another source frame.
   - Resolve reads a file as written. Times, values and eases come back in its Inspector and in its next export.
 - **X and Y have keyframes of their own** (Resolve Studio 21.1.1).
