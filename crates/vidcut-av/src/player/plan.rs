@@ -348,7 +348,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                             .effects
                             .iter_mut()
                             .for_each(|e| e.render_cache = false);
-                        picture
+                        (picture, p.mapped)
                     })
                     .collect()
             };
@@ -519,6 +519,7 @@ mod tests {
                     zoom: Some([zoom, zoom]),
                     ..Picture::default()
                 },
+                mapped: None,
                 run: None,
                 source: 0,
                 frame: 0,

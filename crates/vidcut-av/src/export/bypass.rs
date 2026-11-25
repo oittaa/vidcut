@@ -1058,7 +1058,11 @@ fn copyable(
         && match (alone, placed.as_slice()) {
             (false, []) => true,
             (true, [p]) => {
-                plain_picture(&p.picture) && p.ramp.is_none() && !p.crossing && p.moving.is_none()
+                plain_picture(&p.picture)
+                    && p.mapped.is_none()
+                    && p.ramp.is_none()
+                    && !p.crossing
+                    && p.moving.is_none()
             }
             _ => false,
         }

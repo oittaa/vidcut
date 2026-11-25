@@ -89,6 +89,7 @@ fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), timeline: u32, t: i64) 
                 vec![Placed {
                     clip: String::new(),
                     picture: picture.clone(),
+                    mapped: None,
                     run: None,
                     source: t - c.start,
                     frame: t - c.start,

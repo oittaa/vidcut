@@ -92,6 +92,9 @@ fn own_of(base: TimelineSettings, f: &TimelineFormat) -> Result<TimelineSettings
     if let Some(colors) = f.timeline_colors {
         own.timeline_colors = colors;
     }
+    if let Some(scaling) = f.scaling {
+        own.scaling = scaling;
+    }
     Ok(own)
 }
 
@@ -102,6 +105,7 @@ fn settings_with(p: &Project, f: TimelineSettings) -> Settings {
         height: f.height,
         drop_frame: f.drop_frame,
         timeline_colors: f.timeline_colors,
+        scaling: f.scaling,
         ..p.settings.clone()
     }
 }

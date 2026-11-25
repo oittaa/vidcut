@@ -3,8 +3,8 @@ use serde_json::{Map, Value, json};
 use super::EDITOR;
 use super::effects::{effect, group, handle_point, handle_value, keyed, plain, ranged, rounded};
 use crate::model::{
-    ClipRetime, CompositeMode, Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, Retime,
-    VideoInfo, ZoomBox,
+    ClipRetime, ClipScaling, CompositeMode, Crop, DynamicZoom, Ease, Handle, Keyframe, Picture,
+    Retime, Scaling, VideoInfo, ZoomBox,
 };
 
 const TRANSFORM: &str = "Transform";
@@ -37,7 +37,6 @@ const EASE: &str = "dynamicZoomEase";
 const CENTER: &str = "dynamicZoomCenter";
 const SIZE: &str = "dynamicZoomScale";
 
-const FIT: u8 = 2;
 const RETIME_NEAREST: u8 = 1;
 const RETIME_BLEND: u8 = 2;
 const RETIME_FLOW: u8 = 3;
@@ -51,24 +50,26 @@ const LATER: i64 = 1000;
 const SIZES: (f64, f64) = DynamicZoom::SIZE;
 const SOFT: f64 = Picture::SOFT;
 const PERCENT: f64 = 100.0;
-const SAME: f64 = 1e-6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shape {
     frame: [f64; 2],
-    fitted: [f64; 2],
-    source: [f64; 2],
+    sizes: [[f64; 2]; 4],
+    timeline: Scaling,
 }
 
 impl Shape {
-    pub fn of(v: &VideoInfo, (w, h): (u32, u32)) -> Self {
+    pub fn of(v: &VideoInfo, (w, h): (u32, u32), timeline: Scaling) -> Self {
         let sar = (v.sar[0], v.sar[1]);
-        let [_, _, fw, fh] = crate::place::fitted((v.width, v.height), sar, v.rotation, (w, h));
-        let (dw, dh) = v.display_size();
+        let size = |s: Scaling| {
+            let [_, _, pw, ph] =
+                crate::place::mapped(s, (v.width, v.height), sar, v.rotation, (w, h));
+            [pw, ph]
+        };
         Self {
             frame: [w.into(), h.into()],
-            fitted: [fw, fh],
-            source: [dw.into(), dh.into()],
+            sizes: Scaling::ALL.map(size),
+            timeline,
         }
     }
 
@@ -76,23 +77,20 @@ impl Shape {
         let frame = [w.into(), h.into()];
         Self {
             frame,
-            fitted: frame,
-            source: frame,
+            sizes: [frame; 4],
+            timeline: Scaling::Fit,
         }
     }
 
-    fn picture(&self, scale: u8) -> [f64; 2] {
-        let ([w, h], [dw, dh]) = (self.frame, self.source);
-        match scale {
-            1 => self.source,
-            3 => {
-                let s = (w / dw).max(h / dh);
-                [dw * s, dh * s]
-            }
-            4 => self.frame,
-            _ => self.fitted,
-        }
+    fn picture(&self, scaling: ClipScaling) -> [f64; 2] {
+        let s = scaling.or(self.timeline);
+        let at = Scaling::ALL.iter().position(|x| *x == s).unwrap_or(1);
+        self.sizes[at]
     }
+}
+
+fn scale_code(s: ClipScaling) -> u8 {
+    ClipScaling::ALL.iter().position(|x| *x == s).unwrap_or(0) as u8
 }
 
 fn kind(e: &Value) -> Option<&'static str> {
@@ -385,7 +383,10 @@ pub(crate) fn with_retime(mut effects: Vec<Value>, retime: ClipRetime) -> Vec<Va
         ps.retain(|p| p["Parameter ID"] != RETIME && p["Parameter ID"] != MOTION);
         ps.extend(params);
     } else {
-        effects.push(effect(group(SCALING, 22, 1, params)));
+        let at = (effects.iter())
+            .position(|e| kind(e) == Some(COMPOSITE))
+            .unwrap_or(effects.len());
+        effects.insert(at, effect(group(SCALING, 22, 1, params)));
     }
     effects
 }
@@ -401,7 +402,7 @@ struct Placement {
     flips: [bool; 2],
     crop: [f64; 4],
     softness: f64,
-    scale: u8,
+    scaling: ClipScaling,
     dynamic: Option<DynamicZoom>,
     mode: CompositeMode,
     opacity: f64,
@@ -427,9 +428,9 @@ fn placement(effects: &[Value]) -> Option<Placement> {
             [x(0)?, x(1)?]
         }
     };
-    let scale = match given(SCALE) {
-        None => 0,
-        Some(v) => uint_in(v, 4)?,
+    let scaling = match given(SCALE) {
+        None => ClipScaling::Project,
+        Some(v) => ClipScaling::ALL[usize::from(uint_in(v, 4)?)],
     };
     let crop = [
         number(CROPS[0], 0.0)?,
@@ -451,7 +452,7 @@ fn placement(effects: &[Value]) -> Option<Placement> {
         flips: [switch(FLIP_X)?, switch(FLIP_Y)?],
         crop,
         softness: number(SOFTNESS, 0.0)?,
-        scale,
+        scaling,
         dynamic,
         mode: match given(MODE) {
             None => CompositeMode::Normal,
@@ -463,13 +464,10 @@ fn placement(effects: &[Value]) -> Option<Placement> {
 
 impl Placement {
     fn picture(&self, shape: &Shape) -> Picture {
-        let [pw, ph] = shape.picture(self.scale);
-        let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
+        let [pw, ph] = shape.picture(self.scaling);
+        let [w, h] = shape.frame;
         let ([zx, zy], [ax, ay]) = (self.zoom, self.anchor);
-        let d = [
-            ax * (pw - fw) + self.moved[0] * pw,
-            -ay * (ph - fh) - self.moved[1] * ph,
-        ];
+        let d = [self.moved[0] * pw, -self.moved[1] * ph];
         let turn = if self.turn.abs() > TURNS {
             self.turn % 360.0
         } else {
@@ -482,7 +480,7 @@ impl Placement {
         let opacity = rounded(self.opacity);
         Picture {
             position: Some([rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]),
-            zoom: Some([rounded(pw / fw * zx), rounded(ph / fh * zy)]),
+            zoom: Some([rounded(zx), rounded(zy)]),
             rotation: Some(rounded(turn)),
             anchor: Some([rounded(0.5 + ax), rounded(0.5 - ay)]),
             pitch: (pitch != 0.0).then_some(pitch),
@@ -499,6 +497,7 @@ impl Placement {
             dynamic_zoom: self.dynamic,
             composite_mode: (self.mode != CompositeMode::Normal).then_some(self.mode),
             opacity: (opacity != 1.0).then_some(opacity),
+            scaling: self.scaling,
             ..Picture::default()
         }
     }
@@ -511,16 +510,10 @@ impl Placement {
         };
         let mut picture = self.picture(shape);
         let zoom = merge(keys(ZOOM_X)?, keys(ZOOM_Y)?, self.zoom[0], self.zoom[1])?;
-        let [pw, ph] = shape.picture(self.scale);
-        let [fw, fh] = shape.fitted;
         (picture.anchor_keys, picture.anchor_y) = match values.iter().find(|(k, _)| *k == ANCHOR) {
             None => (Vec::new(), Vec::new()),
             Some((_, p)) => read_point_keys(p, origin)?,
         };
-        let scaled = (pw - fw).abs() > SAME || (ph - fh).abs() > SAME;
-        if scaled && !picture.anchor_keys.is_empty() {
-            return None;
-        }
         picture.pitch_keys = keys(PITCH)?
             .into_iter()
             .map(|k| Keyframe {
@@ -535,10 +528,9 @@ impl Placement {
                 ..k
             })
             .collect();
-        (picture.zoom_keys, picture.zoom_y) = scaled_pair(zoom, pw / fw, ph / fh);
+        (picture.zoom_keys, picture.zoom_y) = rounded_pair(zoom);
         let moved = merge(keys(PAN)?, keys(TILT)?, self.moved[0], self.moved[1])?;
-        (picture.position_keys, picture.position_y) =
-            placed_pair(moved, self.anchor, self.scale, shape);
+        (picture.position_keys, picture.position_y) = placed_pair(moved, self.scaling, shape);
         picture.rotation_keys = keys(ROTATION)?
             .into_iter()
             .map(|k| Keyframe {
@@ -644,18 +636,16 @@ pub fn take(
 }
 
 fn moved(p: &Picture, shape: &Shape) -> [f64; 2] {
-    let [x, y] = p.place();
-    let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
-    [rounded((x - 0.5) * w / fw), rounded(-(y - 0.5) * h / fh)]
+    moved_at(p.place(), p.scaling, shape)
 }
 
 pub fn reaches(p: &Picture, shape: &Shape) -> bool {
     moved(p, shape).iter().all(|v| v.abs() <= REACH)
 }
 
-fn moved_at([x, y]: [f64; 2], shape: &Shape) -> [f64; 2] {
-    let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
-    [rounded((x - 0.5) * w / fw), rounded(-(y - 0.5) * h / fh)]
+fn moved_at([x, y]: [f64; 2], scaling: ClipScaling, shape: &Shape) -> [f64; 2] {
+    let ([w, h], [pw, ph]) = (shape.frame, shape.picture(scaling));
+    [rounded((x - 0.5) * w / pw), rounded(-(y - 0.5) * h / ph)]
 }
 
 pub(super) fn read_keys(p: &Value, origin: i64) -> Option<Vec<Keyframe>> {
@@ -753,55 +743,36 @@ fn scale_handle(h: Option<Handle>, factor: f64) -> Option<Handle> {
     })
 }
 
-fn scaled_pair((x, y): (Vec<Keyframe>, Vec<f64>), fx: f64, fy: f64) -> (Vec<Keyframe>, Vec<f64>) {
-    if x.is_empty() {
-        return (Vec::new(), Vec::new());
-    }
+fn rounded_pair((x, y): (Vec<Keyframe>, Vec<f64>)) -> (Vec<Keyframe>, Vec<f64>) {
     let keys = x
         .into_iter()
         .map(|k| Keyframe {
-            value: rounded(k.value * fx),
-            in_handle: scale_handle(k.in_handle, fx),
-            out_handle: scale_handle(k.out_handle, fx),
+            value: rounded(k.value),
             ..k
         })
         .collect();
-    (keys, y.into_iter().map(|v| rounded(v * fy)).collect())
+    (keys, y.into_iter().map(rounded).collect())
 }
 
 fn placed_pair(
     (x, y): (Vec<Keyframe>, Vec<f64>),
-    anchor: [f64; 2],
-    scale: u8,
+    scaling: ClipScaling,
     shape: &Shape,
 ) -> (Vec<Keyframe>, Vec<f64>) {
-    if x.is_empty() {
-        return (Vec::new(), Vec::new());
-    }
-    let [pw, _] = shape.picture(scale);
-    let ([w, _], _) = (shape.frame, shape.fitted);
+    let ([w, h], [pw, ph]) = (shape.frame, shape.picture(scaling));
     let fx = pw / w;
     let mut keys = Vec::new();
     let mut ys = Vec::new();
     for (k, tilt) in x.into_iter().zip(y) {
-        let at = position_of(k.value, tilt, anchor, scale, shape);
         keys.push(Keyframe {
-            value: at[0],
+            value: rounded(0.5 + k.value * fx),
             in_handle: scale_handle(k.in_handle, fx),
             out_handle: scale_handle(k.out_handle, fx),
             frame: k.frame,
         });
-        ys.push(at[1]);
+        ys.push(rounded(0.5 - tilt * ph / h));
     }
     (keys, ys)
-}
-
-fn position_of(pan: f64, tilt: f64, anchor: [f64; 2], scale: u8, shape: &Shape) -> [f64; 2] {
-    let [pw, ph] = shape.picture(scale);
-    let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
-    let [ax, ay] = anchor;
-    let d = [ax * (pw - fw) + pan * pw, -ay * (ph - fh) - tilt * ph];
-    [rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]
 }
 
 pub(super) fn file_curve(
@@ -931,24 +902,22 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
     let [ax, ay] = p.pivot();
     let [pan, tilt] = moved(p, shape).map(|v| v.clamp(-REACH, REACH));
     let (zoom, reach) = (Picture::ZOOM, (-REACH, REACH));
-    let (sx, sy) = (
-        shape.frame[0] / shape.fitted[0],
-        shape.frame[1] / shape.fitted[1],
-    );
+    let [pw, ph] = shape.picture(p.scaling);
+    let (sx, sy) = (shape.frame[0] / pw, shape.frame[1] / ph);
     let zoom_x = file_curve(&p.zoom_keys, None, source, |v| v, 1.0);
     let zoom_y = file_curve(&p.zoom_keys, Some(&p.zoom_y), source, |v| v, 1.0);
     let pan_keys = file_curve(
         &p.position_keys,
         None,
         source,
-        |v| moved_at([v, 0.5], shape)[0],
+        |v| moved_at([v, 0.5], p.scaling, shape)[0],
         sx,
     );
     let tilt_keys = file_curve(
         &p.position_keys,
         Some(&p.position_y),
         source,
-        |v| moved_at([0.5, v], shape)[1],
+        |v| moved_at([0.5, v], p.scaling, shape)[1],
         -sy,
     );
     let turn_keys = file_curve(&p.rotation_keys, None, source, |v| v, 1.0);
@@ -957,12 +926,12 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
     let pan = p
         .position_keys
         .first()
-        .map_or(pan, |k| moved_at([k.value, 0.5], shape)[0]);
+        .map_or(pan, |k| moved_at([k.value, 0.5], p.scaling, shape)[0]);
     let tilt = p
         .position_y
         .first()
         .copied()
-        .map_or(tilt, |y| moved_at([0.5, y], shape)[1]);
+        .map_or(tilt, |y| moved_at([0.5, y], p.scaling, shape)[1]);
     let turn = p.rotation_keys.first().map_or(p.turn(), |k| k.value);
     let anchor_keys = point_curve(&p.anchor_keys, &p.anchor_y, source);
     let (ax, ay) = match (p.anchor_keys.first(), p.anchor_y.first()) {
@@ -1030,7 +999,10 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
         (-SOFT, SOFT),
         soft_keys,
     ));
-    let scaling = vec![keyed(SCALE, json!(FIT), json!(0), "UInt")];
+    let scaling: Vec<Value> = (p.scaling.own())
+        .map(|_| keyed(SCALE, json!(scale_code(p.scaling)), json!(0), "UInt"))
+        .into_iter()
+        .collect();
     let dynamic = p.dynamic_zoom.map_or_else(Vec::new, |z| zooming(&z, g));
     let opacity_keys = file_curve(
         &p.opacity_keys,
@@ -1055,8 +1027,8 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
     [
         (TRANSFORM, 2, transform),
         (CROPPING, 3, cropping),
-        (SCALING, 22, scaling),
         (ZOOMING, 59, dynamic),
+        (SCALING, 22, scaling),
         (COMPOSITE, 1, composite),
     ]
     .into_iter()
@@ -1068,11 +1040,9 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::place::Placing;
-    use crate::render::Placed;
     use crate::test_support::still_info;
 
-    fn given(transform: &[(&str, Value)], scale: u8) -> Vec<Value> {
+    fn given(transform: &[(&str, Value)]) -> Vec<Value> {
         let param = |(id, v): &(&str, Value)| json!({ "Parameter ID": id, "Parameter Value": v });
         let made = |name: &str, kind: u32, params: Vec<Value>| {
             json!({
@@ -1083,25 +1053,7 @@ mod tests {
                 } },
             })
         };
-        vec![
-            made(TRANSFORM, 2, transform.iter().map(param).collect()),
-            made(SCALING, 22, vec![param(&(SCALE, json!(scale)))]),
-        ]
-    }
-
-    fn filled() -> Shape {
-        let v = still_info(1440, 1080).video.expect("video");
-        Shape::of(&v, (1920, 1080))
-    }
-
-    fn filled_turned() -> Vec<Value> {
-        let transform = [
-            (ZOOM_X, json!(1.5)),
-            (ZOOM_Y, json!(1.5)),
-            (ROTATION, json!(90.0)),
-            (ANCHOR, json!([0.25, 0.1])),
-        ];
-        given(&transform, 3)
+        vec![made(TRANSFORM, 2, transform.iter().map(param).collect())]
     }
 
     fn read(effects: &[Value], shape: &Shape) -> Option<Picture> {
@@ -1117,7 +1069,7 @@ mod tests {
             (PAN, json!(0.1)),
             (ANCHOR, json!([0.25, 0.1])),
         ];
-        let got = read(&given(&transform, FIT), &Shape::whole((1920, 1080)));
+        let got = read(&given(&transform), &Shape::whole((1920, 1080)));
         let want = Picture {
             position: Some([0.6, 0.5]),
             zoom: Some([2.0, 2.0]),
@@ -1129,46 +1081,9 @@ mod tests {
     }
 
     #[test]
-    fn a_filled_pictures_scaling_move_goes_into_its_position() {
-        let want = Picture {
-            position: Some([0.5625, 0.466667]),
-            zoom: Some([2.0, 2.0]),
-            rotation: Some(90.0),
-            anchor: Some([0.75, 0.4]),
-            ..Picture::default()
-        };
-        assert_eq!(read(&filled_turned(), &filled()), Some(want));
-    }
-
-    #[test]
-    fn a_filled_pictures_middle_lands_where_the_file_puts_it() {
-        let picture = read(&filled_turned(), &filled()).expect("a picture");
-        let placed = Placed {
-            clip: "c1".into(),
-            picture,
-            run: None,
-            source: 0,
-            frame: 0,
-            start: 0,
-            ready: true,
-            ramp: None,
-            crossing: false,
-            moving: None,
-            clock: Default::default(),
-            adjustment: false,
-        };
-        let fitted = [240.0, 0.0, 1440.0, 1080.0];
-        let level = Placing::new(&[placed], (1920.0, 1080.0), fitted, (1440.0, 1080.0)).level;
-        let middle = level
-            .forward([0.5, 0.5])
-            .map(|v| (v * 100.0).round() / 100.0);
-        assert_eq!(middle, [1656.0, 1116.0]);
-    }
-
-    #[test]
     fn a_transform_without_an_anchor_reads_without_one() {
         let transform = [(ZOOM_X, json!(2.0)), (ZOOM_Y, json!(2.0))];
-        let got = read(&given(&transform, FIT), &Shape::whole((1920, 1080)));
+        let got = read(&given(&transform), &Shape::whole((1920, 1080)));
         let want = Picture {
             zoom: Some([2.0, 2.0]),
             ..Picture::default()
@@ -1236,7 +1151,7 @@ mod tests {
             ..Picture::default()
         };
         let v = still_info(960, 1080).video.expect("video");
-        let written = effects(&p, &Shape::of(&v, (1920, 1080)), 0, 0);
+        let written = effects(&p, &Shape::of(&v, (1920, 1080), Scaling::Fit), 0, 0);
         let out = |id: &str| {
             written[0]["metadata"][EDITOR]["Parameters"]
                 .as_array()
@@ -1345,7 +1260,7 @@ mod tests {
                 22,
                 1,
                 vec![
-                    keyed(SCALE, json!(FIT), json!(0), "UInt"),
+                    keyed(SCALE, json!(scale_code(ClipScaling::Fit)), json!(0), "UInt"),
                     keyed(RETIME, json!(1), json!(0), "UInt"),
                 ],
             )),
@@ -1354,7 +1269,12 @@ mod tests {
         assert_eq!(effects.len(), 2);
         assert_eq!(
             effects[1]["metadata"][EDITOR]["Parameters"],
-            json!([keyed(SCALE, json!(FIT), json!(0), "UInt")])
+            json!([keyed(
+                SCALE,
+                json!(scale_code(ClipScaling::Fit)),
+                json!(0),
+                "UInt"
+            )])
         );
     }
 

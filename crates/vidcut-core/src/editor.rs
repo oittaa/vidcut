@@ -4985,6 +4985,7 @@ fn mutate(
             crop_softness,
             composite_mode,
             opacity,
+            scaling,
             at,
             dynamic_zoom,
         } => {
@@ -5018,6 +5019,7 @@ fn mutate(
                 crop_softness: *crop_softness,
                 composite_mode: *composite_mode,
                 opacity: *opacity,
+                scaling: *scaling,
             };
             ops::picture::set(p, &ids, &change, at)?;
             Value::Null
@@ -7283,7 +7285,7 @@ fn place_imported(
             .info
             .video
             .as_ref()
-            .map(|v| otio::picture::Shape::of(v, frame));
+            .map(|v| otio::picture::Shape::of(v, frame, p.scaling()));
         let (effects, picture) = imported_picture(c, shape, p.frame_size(), warnings);
         let effects = carry(&effects, c.source_in);
         let id = clip_id(p, &c.id);
@@ -8616,6 +8618,9 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     }
     if let Some(colors) = set.timeline_colors {
         p.settings.timeline_colors = colors;
+    }
+    if let Some(scaling) = set.scaling {
+        p.settings.scaling = scaling;
     }
     if let Some(retime) = set.retime {
         p.settings.retime = retime;
