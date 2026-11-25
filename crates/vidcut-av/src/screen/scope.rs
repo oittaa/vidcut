@@ -27,7 +27,7 @@ const FULL_AT: u64 = 16;
 
 const HISTOGRAM_SHARE: u64 = 64;
 
-const PARAMS: usize = 1600;
+const PARAMS: usize = 1616;
 
 const SKIN_DEGREES: f64 = 123.0;
 
@@ -60,6 +60,10 @@ const WAVE_TICK: f64 = 0.0095;
 const GAMUT_NAME: &str = "Rec.709";
 
 const TEXT_COLOR: [u8; 3] = [152, 152, 152];
+
+const GRID_COLOR: [u8; 3] = [90, 72, 20];
+
+const SCALE_COLOR: [u8; 3] = [182, 144, 44];
 
 const LOCUS: [[f64; 2]; 65] = [
     [0.1741, 0.0050],
@@ -369,7 +373,7 @@ fn chart_marks(prefs: Scopes, size: (u32, u32)) -> Vec<Mark> {
     };
     let mark = |label, at, align| shifted(label, at, align, [0.0, 0.0]);
     let axis = |label, at, align| Mark {
-        color: None,
+        color: Some(GRID_COLOR),
         ..mark(label, at, align)
     };
     let mut marks = Vec::new();
@@ -392,12 +396,12 @@ fn chart_marks(prefs: Scopes, size: (u32, u32)) -> Vec<Mark> {
     };
     let corner = [rect[2], rect[3] + LABEL_GAP];
     marks.push(Mark {
-        color: None,
+        color: Some(GRID_COLOR),
         ..shifted(across.to_string(), corner, [0.0, 0.0], [ACROSS_SHIFT, 0.0])
     });
     let top = [rect[0] - LABEL_GAP, rect[1]];
     marks.push(Mark {
-        color: None,
+        color: Some(GRID_COLOR),
         ..shifted(up.to_string(), top, [1.0, 0.5], [UP_SHIFT, 0.0])
     });
     let name = GAMUT_NAME;
@@ -477,7 +481,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 at: [0.0, from_top(v) as f32],
                 align: [0.0, 1.0],
                 shift: [0.0, 0.0],
-                color: None,
+                color: Some(SCALE_COLOR),
             })
             .collect(),
         Scope::Histogram => levels(prefs.scale, colors)
@@ -487,7 +491,7 @@ pub fn marks(scope: Scope, (colors, prefs): (Option<Hdr>, Scopes), size: (u32, u
                 at: [v as f32, 0.0],
                 align: [0.5, 0.0],
                 shift: [0.0, 0.0],
-                color: None,
+                color: Some(SCALE_COLOR),
             })
             .collect(),
         Scope::Chromaticity => chart_marks(prefs, size),
@@ -647,6 +651,8 @@ fn params(
         slot[1] = f(p[1]);
     }
     bytes.extend(curve);
+    bytes.extend(GRID_COLOR.map(|c| f(f64::from(c) / 255.0)));
+    bytes.push(f(0.0));
     bytes
         .try_into()
         .expect("the fields of the scope's parameters")

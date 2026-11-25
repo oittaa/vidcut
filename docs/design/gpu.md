@@ -402,6 +402,8 @@ How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):
   - `chart_marks` gives the labels of the axes, the name of the gamut and its coordinates. The name of the gamut and its coordinates have their own color (`TEXT_COLOR`).
 - A render pass then paints the counters into a `Target` of the scope's own size (`fs`).
   - The brightness is the square root of the count, so that a thin trace still shows.
+  - The lines of the graticule are in `GRID_COLOR`. The parameters carry it (`grid`), so that the labels and the lines use one value.
+  - The labels of the scales are in `SCALE_COLOR`.
   - One column of a scope can take more columns of the canvas than the next one. `evened` scales each count for that. Thus the trace has no stripes.
   - The pass adds the lines of the scale.
 - Each size is clamped from `SMALLEST` to `LARGEST`.

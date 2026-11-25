@@ -711,6 +711,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
   - vidcut: the View menu and the header of the viewer turn on each scope by itself.
   - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
+  - The lines of the scales and the graticules are orange (90, 72, 20). The labels of the scales are orange (182, 144, 44) (measured in Resolve Studio 21.2).
+  - vidcut: the letters of the Vectorscope have the color of the GUI text. Their color in Resolve is not measured.
   - The Waveform has the modes Y, CbCr and RGB (p. 3103).
     - Y shows luma. CbCr shows the two color differences over one another. RGB shows red, green and blue over one another (p. 3097).
     - In RGB mode, the R, G and B buttons turn each graph on and off (p. 3103).
@@ -741,6 +743,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - vidcut: each point of the graph is in the color of its chromaticity.
     - The axes go from 0 to 1. There is a line each 0.1 and a label each 0.2. There is no line at 0 (measured).
     - Short ticks on the two axes mark each 0.025 (measured).
+    - The grid, its ticks and the labels of the axes are in the orange of the graticule (measured).
     - The graph is a square at the left of the scope. The names of the axes are beside the 1.0 labels (pp. 3100–3101).
     - The name of the gamut and its coordinates are in a column at the right of the scope (pp. 3100–3101).
     - vidcut: the horseshoe uses the CIE 1931 2-degree observer from 380 nm to 700 nm.

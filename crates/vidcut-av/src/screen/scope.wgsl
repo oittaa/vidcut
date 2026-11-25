@@ -15,14 +15,13 @@ struct Params {
     from_xyz: array<vec4<f32>, 3>,
     chart: vec4<u32>,
     curve: array<vec4<f32>, 78>,
+    grid: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var canvas: texture_2d<f32>;
 @group(0) @binding(2) var<storage, read_write> hits: array<atomic<u32>>;
 @group(0) @binding(3) var<storage, read> counted: array<u32>;
-
-const GRID: vec3<f32> = vec3<f32>(0.3, 0.3, 0.3);
 
 const DASH: u32 = 4u;
 
@@ -432,16 +431,16 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     let x = i32(p.x);
     let y = i32(p.y);
     if params.how.x == 2u {
-        let grid = select(vec3<f32>(0.0), GRID, on_graticule(p));
+        let grid = select(vec3<f32>(0.0), params.grid.rgb, on_graticule(p));
         return vec4<f32>(max(grid, vec3<f32>(level(spread(x, y)))), 1.0);
     }
     if params.how.x == 4u {
-        let grid = select(vec3<f32>(0.0), GRID, on_chart_grid(p));
+        let grid = select(vec3<f32>(0.0), params.grid.rgb, on_chart_grid(p));
         let lines = max(grid, vec3<f32>(chart_line(p)));
         return vec4<f32>(max(lines, chart_color(p) * level(spread(x, y))), 1.0);
     }
     if params.how.x == 3u {
-        let grid = select(vec3<f32>(0.0), GRID, ruled(p));
+        let grid = select(vec3<f32>(0.0), params.grid.rgb, ruled(p));
         return vec4<f32>(max(grid, histogram_color(x, y)), 1.0);
     }
     var color = vec3<f32>(0.0);
@@ -465,6 +464,6 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
             color = WHITE * level(hit(x, y) * even);
         }
     }
-    let grid = select(vec3<f32>(0.0), GRID, edge || ruled(p));
+    let grid = select(vec3<f32>(0.0), params.grid.rgb, edge || ruled(p));
     return vec4<f32>(max(grid, min(color, WHITE)), 1.0);
 }
