@@ -722,6 +722,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - In 3 of 12 double-clicks, the caret went to the start of the line, not to the pointer.
   - These were the first edit of the first Text title and the first edit of each line of a Left Lower Third. The cause was not found.
   - vidcut always puts the caret at the letter boundary nearest to the pointer.
+- **Esc does not end the edit of a title.**
+  - In the edit of a Text title, Esc kept the change and moved the caret to the start of the text. The edit stayed open.
+  - Only a click outside the title ended the edit. Thus no key ends it.
+  - vidcut does not copy this fault. Esc keeps the change and ends the edit, as in most editors ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 
 ## Resolve's scopes
 
