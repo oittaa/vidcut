@@ -3639,6 +3639,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A Corrector node has an RGB input and an RGB output. Inputs are triangles, and outputs are squares (p. 3388).
   - A corrector has an effect only when its RGB input and its RGB output have connections (p. 3389).
   - A node with no connection turns the grade off. With no connection to the Node Tree output, the grade is off too (p. 3389).
+  - Measured in Resolve Studio 21.2: a node whose RGB output has no link does not turn the grade off. A corrector with no link into its RGB input does.
+  - vidcut: the same. A Splitter needs its input link, and a mixer or a Combiner needs one input link at least.
   - Only one RGB output connects to the Node Tree output (p. 3389).
   - Nodes are numbered in the order in which they were added (pp. 3390, 3395).
   - Measured in Resolve Studio 21.2: the still file of a grade holds the number of each node in the Node Editor.
@@ -3739,11 +3741,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the same rule. Each link holds the order in which it was made (`made`).
   - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
   - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
-  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
+  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `splitter_combiner`, `corrector`, `key_mixer`, `splitter` or `combiner`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+O. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K, Alt+O and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -3784,7 +3786,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.add` with `window` turns that first window of the new corrector on. The four items and their keys do the same.
   - vidcut: the curve of Alt+B has no points ([§8.23](#823-windows-pp-32653279)).
   - vidcut: on the Color page, Alt+B adds a node and does not make a subclip ([§11](#11-keyboard-shortcuts)).
-  - vidcut: Switch to Node Layer and Add Splitter Combiner Node are not in the submenu ([todo](todo/color-page.md)).
+  - vidcut: Switch to Node Layer is not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -4006,6 +4008,41 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Not measured: Add Serial on a Key Mixer whose key goes to two or more nodes, to no node or to an RGB input.
     - vidcut moves each link from the key of the mixer to the RGB output of the corrector.
   - Not measured: Add Serial Before on a Key Mixer with no link on input 0. vidcut gives the corrector no input link.
+- **Splitter and Combiner** (p. 3441):
+  - A Splitter has one RGB input and three RGB outputs: red at the top, green in the middle and blue at the bottom.
+  - Each output of a Splitter gives its channel to all three channels of the next node.
+  - A Combiner takes red from its first input, green from its second input and blue from its third input. It makes one RGB picture again.
+  - Add Splitter Combiner Node (Option-Y) adds a Splitter, three correctors and a Combiner, already linked.
+  - The Add Node submenu of the empty Node Editor also has Splitter and Combiner. These nodes have no links.
+  - Measured in Resolve Studio 21.2: Alt+Y adds a Splitter after the current node. Each Splitter output goes to its own corrector. The three correctors go to the Combiner.
+  - Measured: Splitter output i gives channel i in R, G and B. The Combiner takes channel i from input i.
+  - Measured: the Add Node submenu of the empty Node Editor has Corrector, Parallel Mixer, Layer Mixer, Key Mixer, Splitter and Combiner.
+  - vidcut: the same. `grade.add` with `splitter_combiner` adds the five nodes as `serial` adds one node. `splitter` and `combiner` add one node at `place`.
+  - vidcut: `grade.connect` with `output` links an output of a Splitter: 0 red, 1 green and 2 blue.
+  - Measured: after Alt+Y, the current node stays first. The corrector of red is in its row, and the correctors of green and blue are under it.
+    - The Combiner is to the right of the corrector of red. It takes the old links of the current node.
+    - The corrector of blue becomes the current node.
+  - vidcut: Alt+Y and Color > Nodes > Add Splitter Combiner Node add the five nodes in these places.
+    - The Splitter goes one column to the right of the current node, and the correctors go one column further.
+    - The corrector of blue becomes the current node.
+  - Measured: the numbers of the five nodes follow the walk of Add nodes. The Splitter and the Combiner show no number.
+  - vidcut: the same walk gives the numbers.
+  - vidcut: the Combiner takes only the oldest link out of the current node, as a serial node does. A case with two such links is not measured.
+  - vidcut: the alpha of the Combiner comes from its first input that has a link.
+  - Not measured: the alpha of each picture between the Splitter and the Combiner. vidcut keeps the alpha of the clip.
+  - Measured: a Combiner input with no link gives 0 in its channel. The other channels do not change.
+  - vidcut: the same. A Combiner with no link on its three inputs turns the grade off. This part is not measured.
+  - Measured: a Splitter output does not link to a key input. It links to the Node Tree output, and the viewer then shows that channel in gray.
+  - vidcut: the same. `grade.connect` refuses a link from a Splitter into a key input.
+  - Measured: a click on the Splitter selects it, and the current node does not change. Alt+S and Alt+P then act on the current node.
+  - vidcut: a click on a Splitter or a Combiner selects it, and the current node does not change. `gui.grade_nodes` refuses them as `current`.
+  - Not measured: a click on the Combiner.
+  - Measured: a delete of a Splitter or a Combiner removes only that node. The nodes that took its outputs then have no input, and the viewer shows the source.
+  - vidcut: the same.
+  - Measured: the menus of the Splitter and of the Combiner are the same: Add Node, Lock Node and Delete Node (Shift+Backspace).
+    - Their Add Node submenu has Add Serial (Alt+S) and Add Serial Before (Shift+S).
+  - vidcut: the Add Node submenu of a Splitter has only Add Serial Before ([todo](todo/color-page.md)).
+  - Not measured: what Add Serial on a Splitter does, with its three outputs.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.

@@ -473,6 +473,8 @@ The bar and the Jobs button:
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
   - A key mixer has a key input for each input, and a key output.
+  - A splitter has an RGB input and three RGB outputs. A combiner has three RGB inputs and an RGB output.
+  - The green and blue outputs of a splitter have the outlet slots after the key slot (`outlet_slot`, `output_of`).
   - The key ports are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
   - Each link has its own line (`Wire::line`). On the Color page, a link from a key output is blue. On the Effects page, a link into a mask input is blue.
   - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
@@ -502,9 +504,11 @@ The bar and the Jobs button:
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
+  - A splitter and a combiner are never the current node. A click selects them, and the current node stays (`leads`). After Alt+Y, the corrector of blue is the current node.
   - On a key mixer, the keys add only an appended node. Its menu adds a serial node after it or before it (`Workspace::grade_add_sent`).
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
   - A drag from any output to any input links them. A link from a key output sends `key`. The key input of a corrector is input 1 (`KEY_PORT`).
+  - A link from the green or the blue output of a splitter sends `output`.
   - A drop of an output on a node links the input of the same kind (`grade_links`). A drop of a key output on a key mixer adds an input.
   - A node can drop only into a link with `Wire::drops`: a link from an RGB output to an RGB input.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).

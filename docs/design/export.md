@@ -804,11 +804,13 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
   - Each input holds a link (`GradeLink`): the number of a node and the output that the link leaves, RGB or key. The number 0 is the picture that comes in.
   - A link also holds the order in which it was made (`made`). Two links are the same when they leave the same output, whatever their order.
+  - A link from a splitter also holds which of its three RGB outputs it leaves (`GradeLink::output`).
   - `Grade::output` is the link that goes out.
   - Why: a key output can go to an RGB input, and an RGB output to a key input. The place of a link gives only the kind of its input.
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a key from a node with no key output, and a picture from a key mixer (`gives`).
   - It also refuses a corrector without one input and a mixer without an input.
+  - It also refuses a splitter without one input, a combiner without three inputs and a link from a splitter into a key input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
   - After `grade.add` and `grade.connect`, `stamped` gives each new link the next `made` number. After `grade.add`, `walked` numbers the nodes again, in the order of a walk from the source.
   - Why: the node numbers then follow the measured rule of the spec (§8.21).
@@ -857,6 +859,12 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - The same walk adds the reads of a picture that a luma key or a second texture (`Uses::twice`) needs. Each node then has all its readers before the walk comes to it.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
+  - A splitter has a picture slot for each output (`split_slots`). Output 0 has slot v. Output j has slot v plus j + 1 times the slot count.
+    - Thus the plan has `SLOTS` picture slots for each node: the picture, the key as a picture, green and blue.
+    - A `Spread` pass gives one channel of the input in R, G and B, for each output that a node reads. An output that no node reads costs no pass.
+    - `grade::passed` gives each output its own path. Thus the base of two outputs of one splitter is the input of the splitter.
+  - A combiner takes the texture of its first input that has a link. A `Take` pass then puts the channel of each other linked input into it.
+    - A `Clear` pass sets the channel of an input with no link to 0.
   - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
@@ -886,7 +894,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
   - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
 - `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `KEY_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
-- `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
+- `fs_grade_mix` makes a `Parallel`, a `Layer`, a `Spread`, a `Take` or a `Clear` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.

@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
-    AutoColor, Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow,
-    KeyInput, KeyMix, KeyOutput, Project, WindowKind,
+    AutoColor, COMBINER_INPUTS, Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool,
+    GradeWindow, KeyInput, KeyMix, KeyOutput, Project, SPLIT_OUTPUTS, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -239,6 +239,13 @@ fn key_input_checked(i: &KeyInput) -> Result<()> {
 fn gives(g: &Grade, l: GradeLink) -> Result<()> {
     let d = g.node(l.node);
     let keyed = d.is_some_and(|d| matches!(d.tool, GradeTool::Corrector(_)) || d.takes_keys());
+    let outputs = d.map_or(1, |d| d.tool.outputs());
+    if l.output > 0 && (l.key || l.output >= outputs) {
+        return Err(Error::invalid(format!(
+            "node {} has no RGB output {}: a splitter has outputs 0, 1 and 2",
+            l.node, l.output
+        )));
+    }
     match (l.key, d) {
         (true, _) if !keyed => Err(Error::invalid(format!(
             "node {} gives out no key: a corrector or a key mixer gives a key",
@@ -260,6 +267,16 @@ fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
     for l in n.links() {
         gives(g, l)?;
     }
+    let keyed = n.key_from.into_iter().chain(match n.takes_keys() {
+        true => n.inputs.iter().flatten().copied().collect(),
+        false => Vec::new(),
+    });
+    if let Some(l) = keyed.into_iter().find(|l| split(g, l.node)) {
+        return Err(Error::invalid(format!(
+            "splitter {} gives no key: link it to an RGB input",
+            l.node
+        )));
+    }
     if n.tool.is_mixer() && (n.key_from.is_some() || !n.key_input.is_usual()) {
         return Err(Error::invalid(format!("mixer {k} has no key input")));
     }
@@ -274,6 +291,11 @@ fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
         }
     }
     key_input_checked(&n.key_input)
+}
+
+fn split(g: &Grade, n: u32) -> bool {
+    g.node(n)
+        .is_some_and(|d| matches!(d.tool, GradeTool::Splitter))
 }
 
 pub fn checked(g: &Grade) -> Result<()> {
@@ -298,6 +320,12 @@ pub fn checked(g: &Grade) -> Result<()> {
                     )));
                 }
                 corrector_checked(c)?;
+            }
+            GradeTool::Splitter if n.inputs.len() != 1 => {
+                return Err(Error::invalid(format!("splitter {k} has one input")));
+            }
+            GradeTool::Combiner if n.inputs.len() != COMBINER_INPUTS => {
+                return Err(Error::invalid(format!("combiner {k} has three inputs")));
             }
             _ if n.inputs.is_empty() => {
                 return Err(Error::invalid(format!("mixer {k} needs an input")));
@@ -592,6 +620,12 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
             (GradeTool::KeyMixer { .. }, _) => {
                 return Err(Error::invalid(format!("node {n} is a key mixer")));
             }
+            (GradeTool::Splitter, _) => {
+                return Err(Error::invalid(format!("node {n} is a splitter")));
+            }
+            (GradeTool::Combiner, _) => {
+                return Err(Error::invalid(format!("node {n} is a combiner")));
+            }
             (GradeTool::LayerMixer { .. }, GradeMixer::LayerMixer) => d.tool.clone(),
             (_, GradeMixer::LayerMixer) => GradeTool::LayerMixer {
                 mode: Default::default(),
@@ -851,7 +885,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
     let at = g.node(n).map_or([0.0; 2], |d| d.place);
     let added = g.last() + 1;
     let takers = takers(g, n);
-    let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.is_mixer());
+    let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.takes_inputs());
     let mixer = match (takers.as_slice(), g.output == Some(GradeLink::picture(n))) {
         ([(m, _)], false) => Some(*m).filter(|m| mixes(*m)),
         _ => None,
@@ -977,6 +1011,15 @@ pub fn add(
     if window.is_some() && kind == GradeAdd::KeyMixer {
         return Err(Error::invalid("a key mixer has no window"));
     }
+    let splits = matches!(
+        kind,
+        GradeAdd::SplitterCombiner | GradeAdd::Splitter | GradeAdd::Combiner
+    );
+    if window.is_some() && splits {
+        return Err(Error::invalid(
+            "give `window` with a corrector: a splitter and a combiner have no window",
+        ));
+    }
     let frame = p.frame_size();
     let mut made = 0;
     edited(p, of, |g| {
@@ -1001,9 +1044,17 @@ fn grown(
         Ok((GradeLink::new(n, d.takes_keys()), d.place))
     };
     let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
+    let single = |g: &Grade, from: GradeLink| match split(g, from.node) {
+        true => Err(Error::invalid(format!(
+            "node {} is a splitter, with three outputs: give a node after it",
+            from.node
+        ))),
+        false => Ok(from),
+    };
     let made = match kind {
         GradeAdd::Serial => {
             let (from, [x, y]) = around(g)?;
+            let from = single(g, from)?;
             shifted(g, x + 1.0);
             if let Some(v) = oldest_taker(g, from) {
                 *v = Some(GradeLink::picture(added));
@@ -1064,6 +1115,44 @@ fn grown(
             g.nodes.push(GradeNode::mixer(tool, vec![None; 2], at));
             added
         }
+        GradeAdd::Splitter => {
+            let at = place.unwrap_or([0.0, below]);
+            g.nodes
+                .push(GradeNode::mixer(GradeTool::Splitter, vec![None], at));
+            added
+        }
+        GradeAdd::Combiner => {
+            let at = place.unwrap_or([0.0, below]);
+            let inputs = vec![None; COMBINER_INPUTS];
+            g.nodes
+                .push(GradeNode::mixer(GradeTool::Combiner, inputs, at));
+            added
+        }
+        GradeAdd::SplitterCombiner => {
+            let (from, [x, y]) = around(g)?;
+            let from = single(g, from)?;
+            for _ in 0..3 {
+                shifted(g, x + 1.0);
+            }
+            let combined = added + 1 + u32::from(SPLIT_OUTPUTS);
+            if let Some(v) = oldest_taker(g, from) {
+                *v = Some(GradeLink::picture(combined));
+            }
+            let tool = GradeTool::Splitter;
+            g.nodes
+                .push(GradeNode::mixer(tool, vec![Some(from)], [x + 1.0, y]));
+            for (out, row) in (0..SPLIT_OUTPUTS).zip([y, y + 1.0, y + 2.0]) {
+                let input = Some(GradeLink::split(added, out));
+                g.nodes
+                    .push(GradeNode::corrector(input, [x + 2.0, row], frame));
+            }
+            let inputs = (1..=u32::from(SPLIT_OUTPUTS))
+                .map(|i| Some(GradeLink::picture(added + i)))
+                .collect();
+            let tool = GradeTool::Combiner;
+            g.nodes.push(GradeNode::mixer(tool, inputs, [x + 3.0, y]));
+            added + u32::from(SPLIT_OUTPUTS)
+        }
     };
     if let Some(w) = window {
         let d = node(g, made)?;
@@ -1122,18 +1211,19 @@ pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
     };
     let mut fed = Vec::new();
     unkeyed(g, n);
-    let picture = Some(GradeLink::picture(n));
+    let picture = |v: &Option<GradeLink>| v.is_some_and(|l| l.leaves_picture_of(n));
     for (d, k) in g.nodes.iter_mut().zip(1..) {
-        let mixer = d.tool.is_mixer();
-        let to = if mixer { None } else { input };
-        for v in d.inputs.iter_mut().filter(|v| **v == picture && k != n) {
+        let passes = matches!(d.tool, GradeTool::Corrector(_) | GradeTool::Splitter);
+        let to = if passes { input } else { None };
+        let joins = d.tool.takes_inputs() && corrector;
+        for v in d.inputs.iter_mut().filter(|v| picture(v) && k != n) {
             *v = to;
-            if mixer && corrector {
+            if joins {
                 fed.push(k);
             }
         }
     }
-    if g.output == picture {
+    if picture(&g.output) {
         g.output = input;
     }
     let mut gone = vec![n];
@@ -1404,6 +1494,11 @@ pub fn remove_input(p: &mut Project, of: &GradeOf, n: u32) -> Result<()> {
                 "node {n} is a corrector, not a mixer"
             )));
         }
+        if !d.tool.takes_inputs() {
+            return Err(Error::invalid(format!(
+                "node {n} has a fixed number of inputs"
+            )));
+        }
         let empty = d.inputs.iter().rposition(Option::is_none);
         let Some(i) = empty.filter(|_| d.inputs.len() > 1) else {
             return Ok(());
@@ -1420,12 +1515,16 @@ pub fn connect(
     p: &mut Project,
     of: &GradeOf,
     (n, input): (u32, Option<u32>),
-    (from, key): (Option<u32>, bool),
+    (from, key, output): (Option<u32>, bool, Option<u8>),
 ) -> Result<()> {
     if key && from.is_none() {
         return Err(Error::usage("`key` needs `from`"));
     }
-    let from = from.map(|node| GradeLink::new(node, key));
+    if output.is_some() && from.is_none() {
+        return Err(Error::usage("`output` needs `from`"));
+    }
+    let from = from.map(|node| GradeLink::split(node, output.unwrap_or(0)));
+    let from = from.map(|l| GradeLink { key, ..l });
     edited(p, of, |g| {
         let before = g.clone();
         if let Some(f) = from.filter(|f| f.node > g.last()) {
@@ -1459,6 +1558,27 @@ pub fn connect(
                         mix.push(KeyMix::default());
                     }
                 }
+            }
+            GradeTool::Splitter => match input {
+                None | Some(0) => d.inputs[0] = from,
+                Some(_) => {
+                    return Err(Error::invalid(format!("splitter {n} has one input, 0")));
+                }
+            },
+            GradeTool::Combiner => {
+                let i = match input {
+                    Some(i) => i as usize,
+                    None => d.inputs.iter().position(Option::is_none).ok_or_else(|| {
+                        Error::invalid(format!(
+                            "each input of combiner {n} has a link: give `input`"
+                        ))
+                    })?,
+                };
+                let slot = d
+                    .inputs
+                    .get_mut(i)
+                    .ok_or_else(|| Error::invalid(format!("combiner {n} has inputs 0, 1 and 2")))?;
+                *slot = from;
             }
             _ => {
                 linked(&mut d.inputs, (n, input), from)?;

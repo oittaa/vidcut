@@ -4242,11 +4242,15 @@ pub struct GradeLink {
     /// out at 0.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub made: u32,
+    /// The RGB output of a splitter that the link leaves: 0 red, 1 green,
+    /// 2 blue. Left out at 0, the one RGB output of the other nodes.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub output: u8,
 }
 
 impl PartialEq for GradeLink {
     fn eq(&self, other: &Self) -> bool {
-        (self.node, self.key) == (other.node, other.key)
+        (self.node, self.key, self.output) == (other.node, other.key, other.output)
     }
 }
 
@@ -4254,7 +4258,12 @@ impl Eq for GradeLink {}
 
 impl GradeLink {
     pub fn new(node: u32, key: bool) -> Self {
-        Self { node, key, made: 0 }
+        Self {
+            node,
+            key,
+            made: 0,
+            output: 0,
+        }
     }
 
     pub fn picture(node: u32) -> Self {
@@ -4264,6 +4273,21 @@ impl GradeLink {
     pub fn key(node: u32) -> Self {
         Self::new(node, true)
     }
+
+    pub fn split(node: u32, output: u8) -> Self {
+        Self {
+            output,
+            ..Self::new(node, false)
+        }
+    }
+
+    pub fn leaves_picture_of(&self, node: u32) -> bool {
+        self.node == node && !self.key
+    }
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
 }
 
 fn is_zero_u32(n: &u32) -> bool {
@@ -4309,8 +4333,9 @@ pub struct GradeNode {
     #[serde(flatten)]
     pub tool: GradeTool,
     /// What comes into each input, in order, or null for nothing. A
-    /// corrector has one input, its RGB input. A mixer has one or more.
-    /// The inputs of a key mixer are key inputs.
+    /// corrector and a splitter have one input, an RGB input. A combiner
+    /// has three: red, green and blue. A mixer has one or more. The inputs
+    /// of a key mixer are key inputs.
     pub inputs: Vec<Option<GradeLink>>,
     /// Off, a corrector passes on the picture that comes into it, and a
     /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
@@ -4847,13 +4872,40 @@ pub enum GradeTool {
         /// order.
         mix: Vec<KeyMix>,
     },
+    /// It splits the picture on its one input into its channels. RGB
+    /// output 0 gives red, 1 green and 2 blue, each as a gray picture: R, G
+    /// and B are that channel. It has no key input and no key output.
+    Splitter,
+    /// It joins three pictures into one: red from input 0, green from
+    /// input 1 and blue from input 2. The alpha comes from input 0. It has
+    /// three inputs, which each need a link, and no key input or key
+    /// output.
+    Combiner,
 }
 
 impl GradeTool {
     pub fn is_mixer(&self) -> bool {
         !matches!(self, Self::Corrector(_))
     }
+
+    pub fn takes_inputs(&self) -> bool {
+        matches!(
+            self,
+            Self::ParallelMixer | Self::LayerMixer { .. } | Self::KeyMixer { .. }
+        )
+    }
+
+    pub fn outputs(&self) -> u8 {
+        match self {
+            Self::Splitter => SPLIT_OUTPUTS,
+            _ => 1,
+        }
+    }
 }
+
+pub const SPLIT_OUTPUTS: u8 = 3;
+
+pub const COMBINER_INPUTS: usize = 3;
 
 /// A primary correction: the numbers of the Primaries palette. Each value
 /// keeps its own channel order, `[red, green, blue]`, with the master

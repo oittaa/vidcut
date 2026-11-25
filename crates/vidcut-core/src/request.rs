@@ -3089,10 +3089,11 @@ pub enum Request {
         timeline: bool,
         add: GradeAdd,
         /// The node it goes beside: for `serial`, `before`, `parallel`,
-        /// `layer` and `outside`.
+        /// `layer`, `outside` and `splitter_combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
-        /// Its place in the node editor, for `corrector`.
+        /// Its place in the node editor, for `corrector`, `key_mixer`,
+        /// `splitter` and `combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
         /// The first window of this kind of the new corrector is on.
@@ -3123,10 +3124,12 @@ pub enum Request {
     /// grade) to an input of `node` (0: the output of the grade), in place of
     /// what was there. Without `from`, the input takes nothing. Input 0 of a
     /// corrector is its RGB input, and input 1 is its key input. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. The
-    /// inputs of a key mixer are key inputs. A key on an RGB input is a gray
-    /// picture: R, G and B are the key. A picture on a key input gives its
-    /// Rec. 709 luma as the key. A link that makes a loop is an error.
+    /// an `input` one past the last, or no `input`, adds an input. A
+    /// combiner has inputs 0, 1 and 2: no `input` gives the first input with
+    /// no link. The inputs of a key mixer are key inputs. A key on an RGB
+    /// input is a gray picture: R, G and B are the key. A picture on a key
+    /// input gives its Rec. 709 luma as the key. A splitter gives no key. A
+    /// link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3145,6 +3148,10 @@ pub enum Request {
         /// Needs `from`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
+        /// The RGB output of the splitter `from`: 0 red, 1 green, 2 blue.
+        /// Left out: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<u8>,
     },
     /// Remove one input with no link from a mixer of the grade of a clip,
     /// or with `timeline` of the timeline grade (Remove One Input). The
@@ -5077,6 +5084,14 @@ pub enum GradeAdd {
     Outside,
     /// A key mixer with two inputs that take nothing, at `place`.
     KeyMixer,
+    /// As `serial` after `node`: a splitter, a corrector on each of its
+    /// three outputs, and a combiner that joins the three correctors. The
+    /// returned `node` is the corrector of red.
+    SplitterCombiner,
+    /// A splitter whose input takes nothing, at `place`.
+    Splitter,
+    /// A combiner whose three inputs take nothing, at `place`.
+    Combiner,
 }
 
 /// The channels of a printer point.
