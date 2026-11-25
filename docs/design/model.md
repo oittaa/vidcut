@@ -1005,6 +1005,7 @@ Requests:
 - `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
 - The key set requests are projectless too:
   - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
+  - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
   - A set file holds one table, `keys`, in the form of `Preferences.keys`. `keys.export` writes this form, and `keys.import` reads it.
   - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
   - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.

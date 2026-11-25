@@ -8,7 +8,24 @@ use crate::shortcuts::{Bindings, Custom};
 
 pub const OWN: &str = "vidcut";
 
-const PRESETS: &[(&str, &str)] = &[];
+const PRESETS: &[(&str, &str)] = &[
+    (
+        "Adobe Premiere Pro",
+        include_str!("../keys/adobe_premiere_pro.toml"),
+    ),
+    (
+        "Apple Final Cut Pro",
+        include_str!("../keys/apple_final_cut_pro.toml"),
+    ),
+    (
+        "Avid Media Composer",
+        include_str!("../keys/avid_media_composer.toml"),
+    ),
+    (
+        "Avid Pro Tools",
+        include_str!("../keys/avid_pro_tools.toml"),
+    ),
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeySet {

@@ -1,0 +1,7 @@
+[keys]
+play_or_stop = ["Space"]
+timeline_start = ["Enter"]
+timeline_end = ["Ctrl+Enter"]
+loop = ["Ctrl+Shift+L"]
+undo = ["Ctrl+Z"]
+redo = ["Ctrl+Shift+Z"]
