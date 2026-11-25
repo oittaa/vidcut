@@ -6590,7 +6590,7 @@ impl Workspace {
                 .any(|s| compressor(&s.id).is_some_and(|c| c.heard()));
             label(ui, "Compressor", compressed);
             ui.horizontal(|ui| {
-                let mut on = compressor(&first.id).is_some_and(|c| c.on);
+                let mut on = compressor(&first.id).is_some_and(|c| c.compressor.on);
                 if ui.checkbox(&mut on, "").clicked() {
                     acts.push(Act::Compress(on));
                 }

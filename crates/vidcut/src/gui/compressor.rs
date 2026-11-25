@@ -1,58 +1,64 @@
+use std::ops::RangeInclusive;
+
 use eframe::egui;
 use serde_json::{Value, json};
 use vidcut_core::compressor::{
-    self, ATTACK_MS, HOLD_MS, KNEE_DB, MAKEUP_DB, MIX, RATIO, RELEASE_MS, THRESHOLD_DB,
+    self, ATTACK_MS, HOLD_MS, KNEE, MAKEUP_DB, MIX, RATIO, RELEASE_MS, THRESHOLD_DB,
 };
-use vidcut_core::model::Compressor;
+use vidcut_core::model::{ClipCompressor, Compressor};
 
 use super::dialog;
+use super::equalizer::number;
 use super::workspace::Workspace;
 
 #[derive(Debug, Clone)]
 pub struct CompressorDialog {
     clips: Vec<String>,
-    compressor: Compressor,
+    compressor: ClipCompressor,
 }
 
 impl CompressorDialog {
     fn params(&self) -> Value {
-        let c = &self.compressor;
-        json!({
-            "clips": self.clips,
-            "compressor": {
-                "on": c.on,
-                "threshold_db": c.threshold_db,
-                "ratio": c.ratio,
-                "knee_db": c.knee_db,
-                "mix": c.mix,
-                "attack_ms": c.attack_ms,
-                "hold_ms": c.hold_ms,
-                "release_ms": c.release_ms,
-                "makeup_db": c.makeup_db,
-            },
-        })
+        json!({ "clips": self.clips, "compressor": self.compressor })
     }
 }
 
-fn number(
+pub(super) fn value_row(
     ui: &mut egui::Ui,
     name: &str,
     value: &mut f64,
-    range: std::ops::RangeInclusive<f64>,
+    range: RangeInclusive<f64>,
     decimals: usize,
     unit: &str,
-) {
+) -> bool {
+    value_row_if(ui, true, name, value, range, decimals, unit)
+}
+
+pub(super) fn value_row_if(
+    ui: &mut egui::Ui,
+    free: bool,
+    name: &str,
+    value: &mut f64,
+    range: RangeInclusive<f64>,
+    decimals: usize,
+    unit: &str,
+) -> bool {
     let speed = (range.end() - range.start()) / 300.0;
     dialog::row(ui, name, |ui| {
-        ui.add(
-            egui::DragValue::new(value)
-                .update_while_editing(false)
-                .range(range)
-                .speed(speed)
-                .fixed_decimals(decimals)
-                .suffix(unit),
-        )
-    });
+        number(ui, free, value, range, speed, decimals, unit)
+    })
+}
+
+pub(super) fn compressor_rows(ui: &mut egui::Ui, free: bool, c: &mut Compressor) -> bool {
+    let t = &mut c.threshold_db;
+    let mut held = value_row_if(ui, free, "Threshold", t, THRESHOLD_DB, 1, " dB");
+    held |= value_row_if(ui, free, "Ratio", &mut c.ratio, RATIO, 1, ":1");
+    held |= value_row_if(ui, free, "Knee", &mut c.knee, KNEE, 0, "");
+    held |= value_row_if(ui, free, "Mix", &mut c.mix, MIX, 0, "");
+    held |= value_row_if(ui, free, "Attack", &mut c.attack_ms, ATTACK_MS, 1, " ms");
+    held |= value_row_if(ui, free, "Hold", &mut c.hold_ms, HOLD_MS, 0, " ms");
+    held |= value_row_if(ui, free, "Release", &mut c.release_ms, RELEASE_MS, 0, " ms");
+    held
 }
 
 impl Workspace {
@@ -73,15 +79,9 @@ impl Workspace {
         dialog::window(ctx, "Compressor", &mut open, |ui| {
             let c = &mut d.compressor;
             dialog::form(ui, "compressor-form", |ui| {
-                dialog::row(ui, "On", |ui| ui.checkbox(&mut c.on, ""));
-                number(ui, "Threshold", &mut c.threshold_db, THRESHOLD_DB, 1, " dB");
-                number(ui, "Ratio", &mut c.ratio, RATIO, 1, ":1");
-                number(ui, "Knee", &mut c.knee_db, KNEE_DB, 1, " dB");
-                number(ui, "Mix", &mut c.mix, MIX, 0, " %");
-                number(ui, "Attack", &mut c.attack_ms, ATTACK_MS, 1, " ms");
-                number(ui, "Hold", &mut c.hold_ms, HOLD_MS, 0, " ms");
-                number(ui, "Release", &mut c.release_ms, RELEASE_MS, 0, " ms");
-                number(ui, "Makeup Gain", &mut c.makeup_db, MAKEUP_DB, 1, " dB");
+                dialog::row(ui, "On", |ui| ui.checkbox(&mut c.compressor.on, ""));
+                compressor_rows(ui, true, &mut c.compressor);
+                value_row(ui, "Makeup Gain", &mut c.makeup_db, MAKEUP_DB, 1, " dB");
             });
             dialog::footer(ui, |ui| {
                 apply = dialog::main_button(ui, "Apply", true);

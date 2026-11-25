@@ -64,6 +64,8 @@ mod timelines;
 mod title_browser;
 mod title_text;
 mod titles;
+mod track_dynamics;
+mod track_equalizer;
 mod transcription;
 mod transition_browser;
 mod trim_strips;

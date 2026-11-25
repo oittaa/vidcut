@@ -19,6 +19,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 - `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels of the current node. It sends `grade.set`, `grade.clear` and `grade.printer` with `node`.
 - Its Key palette has the Key Input and the Key Output of the current node (`KeyInput`, `KeyOutput`). A key mixer has its own Key palette.
+- Its Qualifier palette has the HSL qualifier of the current node (`Qualifier`). The Key palette has the Qualifier row of the node.
 - The key ports, the key links, the Key Mixer, the Outside node, the Splitter and the Combiner are in the Node Editor.
 - Its Window palette has the windows of the current node (`grade_windows.rs`). It sends the `grade.window` requests.
 - With the Window palette open, the viewer shows the outlines and the handles of the windows (`window_overlay.rs`).
@@ -37,7 +38,12 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 - Measure the node numbers after an Extract, and the order of the moved links after a delete or an Extract, then match them ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
   - vidcut gives each moved link the order of the link into the removed node. No measurement shows that this is correct.
-- The Qualifier controls of the Key palette (p. 3436).
+- The 3D, RGB and Luma modes of the Qualifier palette (pp. 3241–3242, 3254–3258).
+- The pickers of the Qualifier palette: the eyedropper, Add and Subtract Color Range, and Add and Subtract Softness (p. 3247).
+- Matte Finesse of the Qualifier palette (pp. 3259–3262). It needs a Resolve run first.
+  - The record has its usual values, its ranges and eleven renders on HSL keys (Q1 M1 to M11). Their math is not fitted.
+  - Fit Blur Radius, In/Out Ratio, Black Clip, White Clip, Clean Black, Clean White and the Morph operations from them first.
+- Measure Reset in the Qualifier palette and in the Key palette, and the keyframe track of a qualifier change, then match them ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 - Measure Add Serial in the menu of a Splitter, which has three outputs, then match it ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
 - Input Sizing, a mode of the Sizing palette (pp. 3497–3500). It acts before the node graph (p. 3498).
   - The Sizing mode and the Sizing track of the Keyframe Editor need it (pp. 3455, 3460).

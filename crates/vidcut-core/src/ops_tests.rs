@@ -365,7 +365,7 @@ fn clip_set_refuses_an_output_gain_past_six_db() {
     ));
 }
 
-fn compressor_of(f: &Fixture, clip: &str) -> Option<crate::model::Compressor> {
+fn compressor_of(f: &Fixture, clip: &str) -> Option<crate::model::ClipCompressor> {
     f.editor
         .project()
         .clip(clip)
@@ -392,9 +392,9 @@ fn clip_set_null_takes_the_compressor_off() {
 }
 
 #[test]
-fn clip_set_refuses_a_ratio_past_ten() {
+fn clip_set_refuses_a_ratio_past_twenty() {
     let mut f = three_clips();
-    let c = json!({"ratio": 11.0});
+    let c = json!({"ratio": 21.0});
     f.err(req("clip.set", json!({"clips": "c2", "compressor": c})));
 }
 

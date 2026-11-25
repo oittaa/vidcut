@@ -51,7 +51,7 @@ classDiagram
     kind: Video or Audio
     locked, muted, solo, volume_db
     video_enabled, voice_isolation, duck
-    render_cache
+    equalizer, render_cache
   }
   class Clip {
     id, name, color
@@ -802,6 +802,24 @@ Writing:
 - `ops::remove_track` renumbers the tracks. Then `duck::renamed` moves the sources to the new ids, and drops the removed track.
 - An OTIO file carries the `Duck` in the `vidcut` metadata of its track. An import drops the sources that its tracks do not have (`duck::tidy`).
 - [export](export.md#sound) tells how the ducking plays.
+
+## Track equalizer
+
+- A track can carry a `TrackEqualizer`. It holds `on`, the `EqType`, six `EqBand` values as a clip equalizer has, and the slopes of the pass filters.
+- `track.set` takes a `TrackEqualizerSet`. Its fields replace their own (`equalizer::track::patched`).
+- `equalizer::track::problem` is the check that `validate::violations` and the import of an OTIO file share.
+- An OTIO file carries the `TrackEqualizer` in the `vidcut` metadata of its track.
+- [export](export.md#sound) tells how it plays.
+
+## Track Dynamics
+
+- A track can carry `TrackDynamics`. They hold `on`, an `Expander`, a `Compressor`, a `Limiter` and `makeup_db`.
+- `Expander` is an Expander or, with `gate`, a Gate.
+- The compressor of a clip is a `ClipCompressor`: a `Compressor` and the `makeup_db` of the clip.
+- `track.set` takes a `TrackDynamicsSet`. Its fields replace their own (`dynamics::patched`).
+- `dynamics::problem` is the check that `validate::violations` and the import of an OTIO file share.
+- An OTIO file carries the `TrackDynamics` in the `vidcut` metadata of its track.
+- [export](export.md#sound) tells how they play.
 
 ## Looks
 

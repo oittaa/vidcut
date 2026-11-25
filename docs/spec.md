@@ -1916,6 +1916,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Editing** (pp. 763–764, 1176):
   - A double-click on the text of a title in the viewer edits the text there.
   - The text is edited in place, inside a plain outline. Typing changes the Rich Text field of the Inspector at once (measured in Resolve Studio 21.2).
+  - These are measurements in Resolve Studio 21.2, by mouse and keyboard:
+    - The double-click selects no text. The caret goes to the letter boundary nearest to the pointer.
+    - The outline is white and 1 pixel wide. It turns with the title.
+    - Up and Down go to the line above or below. On a title of one line, they do nothing.
+    - Ctrl+Z undoes the last burst of typing. After a click outside the title, each Ctrl+Z undoes one burst.
+    - Esc keeps the change and stays in the edit. The caret goes to the start. Only a click outside the title ends the edit.
+    - A double-click on a lower third edits only the line under the pointer, inside an outline of that line.
+    - A Scroll has no edit in place. Its text changes only in the Inspector.
   - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
@@ -1923,7 +1931,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
     - The double-click puts the caret at the pointer. A click or a drag in the text moves the caret or selects letters.
     - A typed letter takes the style of the letter before it. At the start of a line, it takes the style of the letter after it.
-    - The edit ends with Esc or a click outside the title. Then one `titles.set` puts the change in.
+    - Esc or a click outside the title keeps the change and ends the edit. Then each step of the edit goes in as its own `titles.set`.
+    - A word typed without a pause is one step. A space, a deletion and a paste are each a step of their own.
+    - vidcut edits the two lines of a lower third as one text, inside one outline. vidcut also edits a Scroll in place.
     - `gui.show` with `title_text` starts the edit, and `gui.close` ends it.
   - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
   - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
@@ -3882,6 +3892,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
   - vidcut: the Key badge shows when the Key Output is not at its usual values.
+  - vidcut: each palette has its own badge (p. 3390). The Qualifier badge shows when the HSL values are not at their usual values.
 - **Thumbnails** (pp. 3385, 3390):
   - Each corrector node has a thumbnail. The badges are under the thumbnail (p. 3390).
   - Show Thumbnails in the option menu of the Node Editor turns the thumbnails off or on. Without thumbnails, the nodes are shorter (p. 3385).
@@ -3948,7 +3959,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K, Alt+O and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+Y. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -4133,7 +4144,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
   - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
-  - vidcut: the Qualifier controls come later ([todo](todo/color-page.md)).
+  - vidcut: the Key palette has the Qualifier row after the Key Output ([§8.28](#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
 - **Key Input, Key Mixer and Outside node** (pp. 3388–3389, 3417–3420, 3431–3437):
   - Each corrector has a key input and a key output. They are blue, below the RGB input and the RGB output (p. 3388).
   - A link from a key output to a key input gives the key of one node to another node.
@@ -4175,7 +4186,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
-  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside.
+  - Add Outside has no key, as measured. The key list of the built-in set of Resolve Studio 21.2 also gives it no key. The manual gives Alt+O (p. 3417).
   - vidcut: the menu of a Key Mixer and its Add Node submenu are as measured.
   - vidcut: Alt+S and Shift+S do nothing on a Key Mixer. Thus its Add Node submenu shows no shortcuts.
   - Not measured: the shortcuts in the Add Node submenu of a Key Mixer.
@@ -4860,6 +4872,60 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
   - [design](design/analysis.md#stabilization) gives the method.
 
+### 8.28 Qualifier (pp. 3238–3256, 3263, 3436; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Qualifier palette pulls a key from the colors of the picture. Its modes are 3D, HSL, RGB and Luma (p. 3239).
+  - HSL is the usual mode. The Matte Finesse controls refine the key of each mode (p. 3241).
+  - HSL has a range and a softness for hue, saturation and luma (p. 3253).
+  - The Hue, Sat and Lum switches at the left of each control turn that part on or off (p. 3254).
+  - The HSL values are Hue Center, Width, Soft and Symmetry, Sat Low, High, Low Soft and High Soft, and the same four for Lum (p. 3254).
+  - A lower Symmetry makes the softness at the right of the hue range steeper. A higher one makes the left side steeper (p. 3254).
+  - The Invert button of the palette inverts the key of the palette (p. 3263).
+  - The Qualifier Invert of the Key palette also inverts the key of the palette. The Output Invert inverts the key of the whole node (p. 3263).
+  - A qualifier key and a window give the intersection of the two keys (p. 3263).
+  - The Key palette has the Qualifier controls (p. 3436).
+- Measured (float renders, YRGB, Rec.709 timeline, no color management):
+  - The usual values are Hue Center 50, Width 100, Soft 0 and Sym 50. Sat and Lum have Low 0, High 100, L.Soft 0 and H.Soft 0. The three switches are on.
+  - A new node with HSL and the usual values gives the key 1 at each pixel.
+  - Each HSL value goes from 0 to 100. A typed value past an end takes that end. A Low above its High stays.
+  - Hue Soft is at most 2 times Width. A larger Soft raises Width to half the Soft. A Width below half the Soft lowers Soft to 2 times Width.
+  - A typed Soft shows 0.1 more after a clip switch ([gotchas](gotchas.md#resolves-edits)).
+  - Hue is the Rec. 601 chroma angle atan2(Cr, Cb) in degrees. Y = 0.299 R + 0.587 G + 0.114 B, Cb = (B − Y) / 1.772 and Cr = (R − Y) / 1.402.
+  - A gray pixel has the hue 0. Thus Center 95 with Width 30 keys gray, and Center 40 with Width 10 does not.
+  - Hue Center c is at 3.6 c degrees. The key is 1 to lo = max(0, 1.8 (Width − Soft)) degrees from the center, and 0 from hi = 1.8 (Width + Soft).
+  - Sym: the side of larger angle keeps the part clamp((Sym − 30) / 20, 0, 1) of the soft span. The other side keeps clamp((70 − Sym) / 20, 0, 1).
+    - A side with no span ends hard at lo.
+  - Sat = 0.4115 hypot(Cb, Cr). Lum = 0.5 + Y / 4. Thus Lum 0 to 100 is Y −2 to 2.
+  - A Sat or Lum edge E with the softness s goes from max(0, E − s / 2) to min(1, E + s / 2). Soft 0 gives a hard edge at E.
+  - In each soft span, the key is 1 − smoothstep(t). t is 0 at the inner end and 1 at the outer end.
+  - The key is the product of the parts that are on. With all three parts off, the key is 1.
+  - The Invert of the palette gives 1 minus the key.
+  - The Key palette has a Qualifier row: an Invert button, a Matte or Mask button, Gain and Offset.
+    - The usual values are Invert off, Matte, Gain 1 and Offset 0. Gain goes from 0 to 2, and Offset from −1 to 1.
+  - With the three switches on and the Qualifier row at its usual values, the key goes out as it is.
+  - Else the key goes through Q of the Key Input ([§8.21](#821-color-page-nodes-pp-33853399-34093415)). Gain 0.5 and Offset 0.2 give Q(0.5 k + 0.2). The row's Invert gives Q(1 − k).
+    - Thus a switch that changes nothing, such as Lum off at Low 0 and High 100, changes the soft shape.
+  - With a window w in the node, the qualifier key x folds as a key input does ([§8.21](#821-color-page-nodes-pp-33853399-34093415)). x is the key after the Gain, the Offset and the Invert of the row.
+    - Matte gives clamp(1 − U(1 − Q(w), 1 − x)). Mask gives clamp(U(Q(w), x)).
+    - With the usual circle, Matte gives 0 at each pixel of the test frame, and Mask gives a mean of 0.12276.
+  - The Matte Finesse values and their ranges are in the measurement record. Their effects are not measured.
+  - The record is section Q1 of `fixtures/color/NOTES.md` in the test data.
+- vidcut:
+  - Qualifier at the top of the palette selects the Qualifier palette. It has the HSL mode, with the measured key.
+  - The palette has Invert, and the switch and the four values of each part.
+  - The Key palette has the Qualifier row after the Key Output: Invert, Matte, Gain and Offset.
+  - `grade.set` with the `qualifier_` values. It refuses a value past an end, and a Soft above 2 times Width.
+    - A change of Width or Soft alone moves the other value as measured.
+  - A typed Soft stays as it is.
+  - The qualifier reads the picture that comes into the corrector. A gray pixel has the hue 0.
+  - Renders of the 16 measured cases H0 to K4 match Resolve within 1.2e-3. Only one 8 x 8 block of J1, J2 and K2 is above 6e-4.
+  - A qualifier at its usual values gives no key.
+  - Each keyframe of a corrector holds its qualifier. The values blend as the values of the corrector do. The switches and the buttons change on the frame of the next keyframe.
+  - Reset in the Qualifier palette resets the HSL values. Reset in the Key palette also resets the Qualifier row.
+  - The node shows a Qualifier badge when the HSL values are not at their usual values. The Qualifier row counts for the Key badge.
+  - The 3D, RGB and Luma modes, the pickers and Matte Finesse come later ([todo](todo/color-page.md)).
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -4906,6 +4972,133 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The line is what the ducking takes from the track.
     - Both use one dB scale, from 0 dB at the top.
     - With Detect at Sound level, a second line shows the threshold.
+- **Track Dynamics** (pp. 3938, 3944–3948):
+  - Each channel strip of the Mixer has a Dynamics processor. A small graph on the strip shows its curve (p. 3944).
+  - A double click on the small graph opens the Dynamics window. A single click turns the Dynamics on or off (pp. 3944–3945).
+  - The Dynamics come after the FX and before the equalizer (p. 3938).
+  - The window has a switch, a reset button, a preset menu and a Make Up gain after the modules (p. 3945).
+  - The graph of the window shows the input level on the X axis and the output level on the Y axis (p. 3944).
+  - The modules are an Expander or Gate, a Compressor and a Limiter. Each module has its own switch (pp. 3945–3948).
+  - The Compressor has a Sidechain with On, Listen and Source. Source selects the track or bus that controls it (pp. 3947–3948).
+  - The Mix of the Compressor goes from all compressed sound at 0 to the input without compression at 100 (p. 3947).
+  - The manual gives a Compressor ratio of 1.0:1 to 10:1, and attacks from 0 ms (pp. 3946–3948). The window of Resolve Studio 21.2 gives other ranges.
+  - The Fairlight page of Resolve Studio 21.2 gives these values (measured):
+    - The Dynamics switch is on. Each module is off. Make Up is 0.0 dB, from 0 to 20 dB.
+    - Expander or Gate: Threshold −35.0 dB (−50 to 0), Range 18.0 dB (0 to 60), Ratio 1:1.1 (1:1.1 to 1:3.0).
+    - Expander or Gate: Attack 1.4 ms (0.50 to 100), Hold 0 ms (0 to 4000), Release 93 ms (50 to 4000). A new module is an Expander.
+    - Compressor: Threshold −15.0 dB (−50 to 0), Ratio 2.0:1 (1.2:1 to 20:1), Knee 0 (0 to 100), Mix 0 (0 to 100).
+    - Compressor: Attack 1.4 ms (0.70 to 100), Hold 0 ms (0 to 4000), Release 93 ms (50 to 4000).
+    - Limiter: Threshold −21.0 dB (−30 to 0), Attack 0.71 ms (0.70 to 30), Hold 0 ms (0 to 4000), Release 93 ms (50 to 4000).
+    - A click on Gate or Expander switches the module on. The values stay.
+    - A typed value outside its range is refused. The ends of a range are accepted.
+    - Source of the Sidechain lists no track in a project with one track.
+  - Renders of tones, bursts and noise at 48 kHz give this processor, to 0.01 dB (measured):
+    - Each module has a detector. The detector reads the output of the module before it.
+    - The detector runs once in each 3 samples. Its input is the peak of those samples over all channels, in dB, and not below −100 dB.
+    - All channels get the same gain. A new gain applies from the sample of its detector run.
+    - The level rises to a louder input with the Attack as the time constant. It falls to a softer input with the Release as the time constant.
+    - After a rise, Hold keeps the level for its time before the level falls.
+    - The level stays in the range where the module acts:
+      - Compressor: not below the threshold minus 0.13 times the Knee.
+      - Limiter: not below its threshold.
+      - Expander or Gate: not above the threshold, and not below the threshold minus the Range divided by the slope.
+    - A Compressor lowers the gain by (1 − 1/ratio) dB for each dB of the level above the threshold.
+    - Let b be the threshold plus Knee/10. Below b, the level above the threshold T is s − T + 0.153451 (b − s)^1.4, and not less than 0.
+    - Mix 50 and Mix 100 of one setting add the input to the compressed sound. The input has the gain (Mix/100)². Thus Mix 100 adds the full input.
+    - The Limiter is a Compressor with the ratio 20, no Knee, and its own threshold and times.
+    - An Expander lowers the gain by (ratio − 1) dB for each dB of the level below the threshold, down to the Range.
+    - A Gate lowers the gain by 4 dB for each dB of the level below the threshold, down to the Range. A Gate also lowers the gain by 0.1 dB.
+    - The order is the Expander or Gate, the Compressor, the Limiter and Make Up.
+    - The window shows rounded times and ratios. The processor uses values near them. For example, a shown Attack of 17 ms is 16.818 ms.
+  - An OTIO export of Resolve Studio 21.2 writes no Dynamics (measured).
+  - vidcut: `track.set` sets `dynamics`. A track starts with none. `{}` turns them on with each module off, and null takes them off.
+  - vidcut: the strip of a track in the Mixer has a small graph of the curve. A click on it switches the Dynamics on or off.
+  - vidcut: a double click on the small graph opens the Dynamics window. Its first click also switches the Dynamics.
+  - vidcut: `gui.show` with `dynamics` and a `track` opens the Dynamics window of that track.
+  - vidcut: the window has the switch, Make Up, the graph and a column for each module.
+    - The Expander/Gate column has a switch with Off, Expander and Gate.
+    - A change applies at once. A drag on a field makes one change when it stops.
+    - Reset and Close are at the bottom of the window.
+  - vidcut uses the measured processor with the typed values. The ranges are those of the window, and the defaults are the shown values.
+  - vidcut: Mix goes in a straight line from the compressed sound at 0 to the input at 100, as the manual says.
+    - Two renders of one setting do not override the manual. More cases are to measure ([todo](todo/track-dynamics.md)).
+  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-dynamics.md)):
+    - Other sample rates also run the detector once in each 3 samples.
+  - vidcut has no presets and no Sidechain ([todo](todo/track-dynamics.md)).
+  - vidcut: the Dynamics of a track work on the mix of its clips, after their ducking and with their fades.
+  - vidcut: the Dynamics of a track that holds a compound clip also work on the sound of the compound clip.
+  - vidcut: the fader of a track comes after its Dynamics and its equalizer. The meter of a track shows the sound after its fader.
+  - vidcut: an OTIO file keeps the Dynamics in the metadata of vidcut. Its export tells that other editors do not hear them.
+- **Track equalizer** (pp. 3938, 3949–3952):
+  - Each channel strip of the Mixer has an equalizer of six bands. A small graph on the strip shows its curve (p. 3949).
+  - The manual says that the small graph bypasses the equalizer, and opens its window with a double click (p. 3949).
+  - The equalizer comes after the FX and the Dynamics, and before the pan and the fader (p. 3938).
+  - The window has a switch, a reset button, the Equalizer Type, a preset menu and a Gain fader after the bands (p. 3950).
+  - The Equalizer Type is Earth, the native curve and the default, or Air, Ice or Fire, the curves of three classic desks (p. 3950).
+  - The graph has a numbered handle for each band that is on. A drag on a handle changes its frequency and gain (p. 3950).
+  - Bands 1 and 6 are off by default (p. 3951):
+    - Band 1 has Low Shelf, Bell, High Shelf and High Pass. Band 6 has Low Pass, Low Shelf, Bell and High Shelf.
+    - The pass filters have slopes from 6 to 24 dB per octave.
+  - Bands 2 to 5 are on by default. They have Low Shelf, Bell, Notch and High Shelf (p. 3951).
+  - The L, ML, MH and H buttons keep the frequency of a band in one range (p. 3952).
+  - The gain goes from −20 to 20 dB. Only the Bell and the shelves use it (pp. 3951–3952).
+  - The Q goes from 0.3 to 10.3. A Bell uses it. With the Type Fire, the other filters use it too (p. 3952).
+  - The Fairlight page of Resolve Studio 21.2 gives these values (measured):
+    - Band 1 is a High Pass at 70 Hz, and band 6 is a Low Pass at 22000 Hz. Both have the slope 12 of 6, 12, 18 and 24.
+    - Band 2 is a Low Shelf at 118 Hz, and band 5 is a High Shelf at 6048 Hz. Both have the Q 2.3.
+    - Bands 3 and 4 are Bell filters at 240 and 1223 Hz with the Q 1.1.
+    - The window shows a frequency of 1000 Hz or more in kHz, with one decimal. Thus 1223 Hz shows as 1.2K.
+    - The ranges are L 30 to 399 Hz, ML 100 to 1500 Hz, MH 450 to 8000 Hz and H 1400 to 22000 Hz.
+    - A typed frequency goes from 20 to 22000 Hz. Outside the range of its band, it moves the band to the range that holds it.
+    - A typed gain or Q outside its range goes to the nearest limit.
+    - Earth, Air and Ice show no Q for a shelf. Fire shows it. A Notch shows no gain and no Q.
+    - The strip of a track shows FX, DY and EQ in this order.
+  - A preset file of the window keeps the Q as a whole step n from 15 to 164 (measured):
+    - The window shows (n − 10) / 15, with one decimal.
+    - A new Bell has the step 26, and a new shelf has the step 45.
+    - A typed Q goes to a near step. The typed values 0.5, 1.1 and 4.0 gave the steps 18, 26 and 70.
+  - Renders of white noise at 48 kHz give these filters, to −150 dB (measured):
+    - Each filter is a biquad filter of the Audio EQ Cookbook. Its frequency is prewarped as in the Cookbook.
+    - A Bell has the typed gain times 1 with Earth and Air, 10/9 with Ice and 50/37 with Fire.
+    - The width w of a Bell is n / 30, or n / 24 with Ice.
+    - Let x be π times the frequency, divided by the sample rate.
+    - The Cookbook Q of the Bell is then tan(x) / (2 (tan(x) − tan(x (1 − 1 / (2w))))). Thus the Q is w at low frequencies.
+    - A Notch is the same with all four Types. It is a Bell of width 30 that cuts to 1/20 of the level (−26.0 dB).
+    - A Low Shelf has two zeros at its frequency. Its two poles are at its frequency divided by the square root of its gain.
+    - A High Shelf has two zeros at its frequency, and two poles at its frequency times the square root of its gain.
+    - A cut of a shelf is the inverse of the boost of the same size.
+    - The zeros and the poles of a shelf have the same Q:
+      - Earth: Q 0.707 and the typed gain.
+      - Air: Q 0.5 and the typed gain. A High Shelf is at 7/8 of the typed frequency.
+      - Ice: Q 0.5 and 20/17 of the typed gain. A Low Shelf is at 1.15 times the typed frequency, and a High Shelf at 1/1.15 times.
+      - Fire: Q 0.43 + 0.004667 n. The gain is 40/33 of the typed gain on a Low Shelf and 8/7 on a High Shelf.
+    - Earth, Air and Ice have one pass filter of the second order. They do not use the slope:
+      - Earth: Q 0.707 for a High Pass and for a Low Pass.
+      - Air: Q 0.85 for a High Pass and 0.4 for a Low Pass.
+      - Ice: Q 0.95 for a High Pass and 0.9 for a Low Pass.
+    - Fire uses the slope. Its High Pass has the Q 0.95, and its Low Pass has the Q 0.707:
+      - Each 12 dB per octave of the slope is one filter of the second order.
+      - The slopes 6 and 18 add one filter of the first order.
+    - The Gain fader of the window adds its gain at all frequencies.
+    - The renders have gains of −12 to 12 dB, and frequencies of 50 to 16000 Hz.
+  - An OTIO export of Resolve Studio 21.2 writes no track equalizer. Its tracks have only `Locked`, `SoloOn`, `Audio Type` and `Channels` (measured).
+  - vidcut: the bands start at the measured values. A new Bell has the Q 16/15, and a new shelf has 7/3. The window shows 1.1 and 2.3.
+  - vidcut: `track.set` sets `equalizer`. A track starts with none. `{}` turns on a flat one, and null takes it off with the usual values.
+  - vidcut: the strip of a track in the Mixer has a small graph of the curve. A click on it switches the equalizer on or off.
+  - vidcut: a double click on the small graph opens the Equalizer window. Its first click also switches the equalizer.
+  - vidcut: `gui.show` with `equalizer` and a `track` opens the Equalizer window of that track.
+  - vidcut: the window has the switch, the Type, the graph and a row for each band.
+    - A row has the switch, the filter, the frequency, the gain, the Q and the slope of a pass filter.
+    - The Q shows only where it changes the sound. The slope shows only with Fire.
+    - A change applies at once. A drag on a handle or on a field makes one change when it stops.
+    - Reset and Close are at the bottom of the window.
+  - vidcut uses the measured filters. The step of a Q is 15 times the Q, plus 10. It is not rounded to a whole step.
+  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-equalizer.md)):
+    - The Low Pass of Fire at the slopes 6 and 18 adds a filter of the first order, as its High Pass does.
+    - Other sample rates use the same rules.
+  - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
+  - vidcut: the equalizer of a track that holds a compound clip also works on the sound of the compound clip.
+  - vidcut: an OTIO file keeps the track equalizer in the metadata of vidcut. Its export tells that other editors do not hear it.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
@@ -4960,10 +5153,6 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Band 1: Lo-Shelf, Bell, Notch, Hi-Shelf and Hi-Pass.
     - Bands 2 to 5: Lo-Shelf, Bell, Notch and Hi-Shelf.
     - Band 6: Lo-Pass, Lo-Shelf, Bell, Notch and Hi-Shelf.
-  - The equalizer of a mixer track has these values (pp. 3950–3952):
-    - The gain goes from −20 to 20 dB, and the Q from 0.3 to 10.3.
-    - Bands 1 and 6 are off by default, and bands 2 to 5 are on.
-    - The pass filters have slopes from 6 to 24 dB per octave.
   - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip.
   - On the Cut page of Resolve Studio 21.2, the Equalizer is a section of the Audio tab of the Inspector (measured):
     - It has a switch at the left of its name, a reset button, the graph and the bands 1 to 6.
@@ -5077,8 +5266,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Attack goes from 0 to 100 ms. Its default is 1.4 ms.
     - Hold goes from 0 to 4000 ms. Its default is 0.
     - Release goes from 50 to 4000 ms. Its default is 93 ms.
-  - The scripting API of Resolve Studio 21.2 cannot read or set the Dynamics. Thus the curve and the times are not measured.
+  - The Track Dynamics item gives the ranges and the processor that Resolve Studio 21.2 has (measured).
   - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X156](deviations.md#x156-the-compressor-is-on-a-clip)).
+  - vidcut: the compressor of a clip has the processor, the ranges and the Mix of the Compressor of the Track Dynamics.
+  - vidcut: the Makeup Gain of a clip compressor goes from 0 to 24 dB. It raises the compressed sound before the Mix.
 - **Noise Reduction** (pp. 4041–4042):
   - Noise Reduction is a Fairlight FX. It reduces noise in all kinds of recordings (p. 4041).
   - It has a Bypass switch, Listen To Noise Only, Threshold, Attack, Sensitivity, Ratio, Frequency Smoothing, Time Smoothing, Dry/Wet and Level (pp. 4041–4042).
@@ -5461,7 +5652,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the Cut page, Alt+X with In/Out Range sets Entire Timeline, which clears the marks.
   - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
-  - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
+  - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it.
+  - Each change of the queue is an undo step. These are Add, Update Job, the X, a drag, a new name, Clear Rendered, Clear All and Clear Status.
+  - The status that a render records is not an undo step.
+  - On the page, Undo, Redo, History and Ctrl+Z work.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
   - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
@@ -5544,6 +5738,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A key that has an action with the modifiers that are on has a lighter color. The picture on p. 122 shows a diagonal and a number on such a key instead. Not measured (case 24 of shortcuts-resolve-runs.md).
 - Key sets (pp. 122, 124):
   - A key set gives keys to actions. vidcut's own set is the table.
+  - The table gives the keys of the built-in DaVinci Resolve preset of Resolve Studio 21.2 (measured, case 17 of shortcuts-resolve-runs.md). This applies to the actions that have a command of Resolve. The keypad keys are not in it yet ([todo](todo/egui-keypad-keys.md)).
   - The keys in force come from one set. The dropdown at the top right of the window selects the set, and `keys.use` does the same.
   - The changes of keys and the picks of a set in the window make a draft. The keys in force change only at Save (measured).
   - The dropdown shows "*" after the name of the set when the keys of the window differ from that set (measured).
@@ -5569,8 +5764,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A delete of the set in force puts vidcut's own set in force, with its keys (measured).
   - Reset puts back the keys of the set in force.
   - The built-in sets are vidcut's own set and the sets of other editors (p. 122): Adobe Premiere Pro, Apple Final Cut Pro X, Avid Media Composer and Pro Tools. These are the names of the manual.
-  - A set of another editor gives the keys that the editor's documentation gives for a command that does the same thing in vidcut. The other actions keep their keys from the table, as the next rule tells.
-  - The keys of these sets are not measured against the presets of Resolve (case 17 of shortcuts-resolve-runs.md).
+  - A set of another editor gives the keys of the Resolve preset of the same name (measured, case 17). This applies to the actions that have a command of Resolve.
+  - The presets of Adobe Premiere Pro, Apple Final Cut Pro X and Avid Media Composer leave out 20 of these commands. The Pro Tools preset leaves out 3.
+  - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
+  - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
+  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
+  - The actions that have no command of Resolve keep their keys from the table, as the next rule tells.
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
@@ -5602,7 +5801,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Shift+F12† | Append |
 | Ctrl+\ or Ctrl+B | Split at playhead: the selected clips and subtitles there, or with nothing selected, every clip there |
 | Ctrl+T | Dissolve (§8.11) |
-| Delete / Backspace | Delete (ripples on Track 1); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
+| Delete / Backspace / Shift+Backspace | Delete (ripples on Track 1, p. 725); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
 | [ / ] | Previous / next volume keyframe of the selected clips (D85) |
 | Alt+click on the volume line | Add a volume keyframe (X73) |
 
@@ -5634,7 +5833,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Alt+wheel | Zoom the lower timeline |
 | Ctrl+wheel | Move along the timeline |
 | Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| Ctrl+Z or ` / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
 | Shift+Ctrl+N | New bin |
 | Alt+F / Shift+F / Esc† | Enhanced viewer / full screen / exit |
@@ -6510,6 +6709,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Text 108 pixels of the timeline for Scroll, at any timeline height. Thus a Scroll on a 1280×720 timeline is 108/720 of the picture height.
       - Measured in Resolve Studio 21.2 on 1920×1080, 1366×768, 1280×720, 1024×576 and 2560×1440. A Text title follows the height of the timeline there.
       - The size of a Scroll is a whole number of timeline pixels, from 24 to 4096. An OTIO file with a fraction does not import.
+      - The Inspector keeps the whole-number part of a typed size. Thus 100.4, 100.5 and 100.9 all draw as 100 (measured in Resolve Studio 21.2).
+      - vidcut draws the whole-number part of a Scroll's size, and writes it to OTIO. The style keeps the exact number.
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
     - A Text title and a lower third draw a whole number of timeline pixels for the size. The style keeps the exact number.
@@ -6546,7 +6747,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - vidcut uses the first `VDMX` ratio record that has a character set and a ratio of 1:1, or of all ratios.
       - Without such an entry, the ascent and the descent are `usWinAscent` and `usWinDescent`, each rounded to a whole pixel.
       - These rules give the heights of Windows 11 for 54 of its 57 regular fonts, at sizes from 6 to 399 pixels.
-      - Each measured size gives a whole number for 4/3 of the size. vidcut rounds other sizes to the nearest whole pixel.
+      - 4/3 of the size goes to the nearest whole pixel. Sizes 100, 101 and 109 fit exactly in Arial Black (measured in Resolve Studio 21.2).
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).

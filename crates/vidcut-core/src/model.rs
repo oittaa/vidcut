@@ -1779,6 +1779,16 @@ pub struct Track {
     /// D76).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<Duck>,
+    /// The equalizer of the track, after its Dynamics and before its fader.
+    /// Left out when the track has none, as a new track: then it is off,
+    /// with the usual bands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equalizer: Option<TrackEqualizer>,
+    /// The Dynamics of the track, after its ducking and before its
+    /// equalizer. Left out when the track has none, as a new track: then
+    /// they are on, with each module off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<TrackDynamics>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -3631,6 +3641,10 @@ impl Title {
         tracking * Self::TRACKING_SHARE * Self::TRACKING_FILE / Self::tracking_share(tracking)
     }
 
+    pub fn scroll_size(text: f64, scale: f64) -> f64 {
+        (text / scale + Self::WIDTH_SLACK).floor().max(1.0) * scale
+    }
+
     pub fn whole_size(text: f64, scale: f64) -> f64 {
         (text / scale + Self::WIDTH_SLACK).round().max(1.0) * scale
     }
@@ -4529,6 +4543,9 @@ pub struct GradeNode {
     /// out at its usual value.
     #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
     pub key_input: KeyInput,
+    /// The HSL qualifier of a corrector. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Qualifier::is_usual")]
+    pub qualifier: Qualifier,
     /// A locked node keeps its grade: the values, the keyframes and the
     /// Key Output of a corrector, and the kind and mode of a mixer. It can
     /// still go, move, switch off and on, and take links. Left out when
@@ -4563,6 +4580,7 @@ impl GradeNode {
             key: KeyOutput::default(),
             key_from: None,
             key_input: KeyInput::default(),
+            qualifier: Qualifier::default(),
             locked: false,
             auto_key: false,
             windows: GradeWindow::fixed(frame),
@@ -4581,6 +4599,7 @@ impl GradeNode {
             key: KeyOutput::default(),
             key_from: None,
             key_input: KeyInput::default(),
+            qualifier: Qualifier::default(),
             locked: false,
             auto_key: false,
             windows: Vec::new(),
@@ -4612,6 +4631,7 @@ impl GradeNode {
             own(k)
                 || k.key != self.key
                 || k.key_input != self.key_input
+                || k.qualifier != self.qualifier
                 || k.windows != self.windows
         };
         !self.keys.is_empty() && (self.animated || self.keys.iter().any(changes))
@@ -4900,6 +4920,192 @@ impl KeyInput {
     }
 }
 
+pub const QUALIFIER_HUE_STEP: f64 = 3.6;
+pub const QUALIFIER_SAT_SCALE: f64 = 0.4115;
+pub const QUALIFIER_LUM_MIDDLE: f64 = 0.5;
+pub const QUALIFIER_LUM_SCALE: f64 = 0.25;
+pub const QUALIFIER_LUMA: [f64; 3] = [0.299, 0.587, 0.114];
+pub const QUALIFIER_CHROMA: [f64; 2] = [1.402, 1.772];
+pub const QUALIFIER_SYM_HARD: [f64; 2] = [30.0, 70.0];
+pub const QUALIFIER_SYM_SPAN: f64 = 20.0;
+
+/// The HSL qualifier of a corrector: a key from the hue, the saturation
+/// and the luminance of the picture that comes into the corrector. The
+/// hue is the angle of the Rec. 601 chroma, the saturation 0.4115 times
+/// its length, and the luminance 0.5 plus a quarter of the Rec. 601 luma.
+/// The values of the ranges are from 0 to 100. The key is the product of
+/// the parts that are on, and 1 with no part on. Each soft edge falls as
+/// a smoothstep. With a window on, in Matte the key is where the qualifier
+/// and the windows both are, and with `mask` where either is.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Qualifier {
+    /// The middle of the hue range. 3.6 times it is the angle in degrees.
+    /// Usual: 50.
+    pub hue_center: f64,
+    /// The width of the hue range. 3.6 times it is the range in degrees.
+    /// Usual: 100.
+    pub hue_width: f64,
+    /// The soft edge on both sides of the hue range, at most 2 times
+    /// `hue_width`. 1.8 times it is its half in degrees. Usual: 0.
+    pub hue_soft: f64,
+    /// Below 50, the soft edge on the side of the larger angles is
+    /// shorter, and at 30 and below it ends hard. Above 50, the soft edge
+    /// on the other side is, and at 70 and above. Usual: 50.
+    pub hue_sym: f64,
+    /// The lowest saturation of the range. Usual: 0.
+    pub sat_low: f64,
+    /// The highest saturation of the range. Usual: 100.
+    pub sat_high: f64,
+    /// The soft edge at `sat_low`, half below it and half above it.
+    /// Usual: 0.
+    pub sat_low_soft: f64,
+    /// The soft edge at `sat_high`. Usual: 0.
+    pub sat_high_soft: f64,
+    /// The lowest luminance of the range. Usual: 0.
+    pub lum_low: f64,
+    /// The highest luminance of the range. Usual: 100.
+    pub lum_high: f64,
+    /// The soft edge at `lum_low`. Usual: 0.
+    pub lum_low_soft: f64,
+    /// The soft edge at `lum_high`. Usual: 0.
+    pub lum_high_soft: f64,
+    /// The hue part is on. Usual: on.
+    pub hue: bool,
+    /// The saturation part is on. Usual: on.
+    pub sat: bool,
+    /// The luminance part is on. Usual: on.
+    pub lum: bool,
+    /// The key of the qualifier is turned over: 1 minus it. Usual: off.
+    pub invert: bool,
+    /// The gain of the key of the qualifier in the key of the corrector,
+    /// from 0 to 2. Usual: 1.
+    pub gain: f64,
+    /// The offset of the key of the qualifier in the key of the corrector,
+    /// from -1 to 1. Usual: 0.
+    pub offset: f64,
+    /// The key with `gain` and `offset` is turned over: 1 minus it. Usual:
+    /// off.
+    pub key_invert: bool,
+    /// The key of the qualifier adds to the key of the windows. Off, it is
+    /// Matte. Usual: off.
+    pub mask: bool,
+}
+
+impl Default for Qualifier {
+    fn default() -> Self {
+        Self {
+            hue_center: 50.0,
+            hue_width: 100.0,
+            hue_soft: 0.0,
+            hue_sym: 50.0,
+            sat_low: 0.0,
+            sat_high: 100.0,
+            sat_low_soft: 0.0,
+            sat_high_soft: 0.0,
+            lum_low: 0.0,
+            lum_high: 100.0,
+            lum_low_soft: 0.0,
+            lum_high_soft: 0.0,
+            hue: true,
+            sat: true,
+            lum: true,
+            invert: false,
+            gain: 1.0,
+            offset: 0.0,
+            key_invert: false,
+            mask: false,
+        }
+    }
+}
+
+impl Qualifier {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn row_usual(&self) -> bool {
+        let usual = Self::default();
+        self.gain == usual.gain
+            && self.offset == usual.offset
+            && self.key_invert == usual.key_invert
+            && self.mask == usual.mask
+    }
+
+    pub fn hsl_usual(&self) -> bool {
+        let usual = Self::default();
+        Self {
+            gain: usual.gain,
+            offset: usual.offset,
+            key_invert: usual.key_invert,
+            mask: usual.mask,
+            ..*self
+        } == usual
+    }
+
+    pub fn all_on(&self) -> bool {
+        self.hue && self.sat && self.lum
+    }
+
+    pub fn with_hue_width(self, width: f64) -> Self {
+        Self {
+            hue_width: width,
+            hue_soft: self.hue_soft.min(2.0 * width),
+            ..self
+        }
+    }
+
+    pub fn with_hue_soft(self, soft: f64) -> Self {
+        Self {
+            hue_soft: soft,
+            hue_width: self.hue_width.max(soft / 2.0),
+            ..self
+        }
+    }
+
+    pub fn hue_edges(&self) -> [f64; 4] {
+        let half = self.hue_width * QUALIFIER_HUE_STEP / 2.0;
+        let soft = self.hue_soft * QUALIFIER_HUE_STEP / 2.0;
+        let inner = (half - soft).max(0.0);
+        let span = half + soft - inner;
+        let [hard_low, hard_high] = QUALIFIER_SYM_HARD;
+        let share = |v: f64| (v / QUALIFIER_SYM_SPAN).clamp(0.0, 1.0);
+        [
+            self.hue_center * QUALIFIER_HUE_STEP,
+            inner,
+            inner + span * share(self.hue_sym - hard_low),
+            inner + span * share(hard_high - self.hue_sym),
+        ]
+    }
+
+    pub fn range_edges(low: f64, high: f64, low_soft: f64, high_soft: f64) -> [f64; 4] {
+        let edge = |e: f64, s: f64| {
+            let (e, s) = (e / 100.0, s / 100.0);
+            [(e - s / 2.0).max(0.0), (e + s / 2.0).min(1.0)]
+        };
+        let [a, b] = edge(low, low_soft);
+        let [c, d] = edge(high, high_soft);
+        [a, b, c, d]
+    }
+
+    pub fn sat_edges(&self) -> [f64; 4] {
+        Self::range_edges(
+            self.sat_low,
+            self.sat_high,
+            self.sat_low_soft,
+            self.sat_high_soft,
+        )
+    }
+
+    pub fn lum_edges(&self) -> [f64; 4] {
+        Self::range_edges(
+            self.lum_low,
+            self.lum_high,
+            self.lum_low_soft,
+            self.lum_high_soft,
+        )
+    }
+}
+
 /// How an input of a key mixer takes its key. The key in is `gain` times
 /// the key plus `offset`, or 1 minus that with `invert`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -4962,6 +5168,12 @@ pub struct GradeKey {
     /// the next keyframe. Left out at its usual value, and on a key mixer.
     #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
     pub key_input: KeyInput,
+    /// The HSL qualifier of a corrector on this frame. The numbers blend as
+    /// the values do. The switches, `invert`, `key_invert` and `mask`
+    /// change on the frame of the next keyframe. Left out at its usual
+    /// value, and on a key mixer.
+    #[serde(default, skip_serializing_if = "Qualifier::is_usual")]
+    pub qualifier: Qualifier,
     /// How each input of a key mixer takes its key on this frame, in the
     /// order of the inputs. Gain and offset blend as the values do. Invert
     /// and matte change on the frame of the next keyframe. A corrector
@@ -8660,7 +8872,7 @@ pub struct ClipAudio {
     pub dialogue_leveler: Option<DialogueLeveler>,
     /// The compressor. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compressor: Option<Compressor>,
+    pub compressor: Option<ClipCompressor>,
     /// Noise Reduction. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise_reduction: Option<NoiseReduction>,
@@ -8684,6 +8896,35 @@ pub struct Equalizer {
     pub bands: [EqBand; 6],
 }
 
+/// The equalizer of a track: six bands, one after the other, with one
+/// response curve for all of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackEqualizer {
+    /// The switch. Off keeps the bands.
+    pub on: bool,
+    /// The response curve of the bands.
+    pub r#type: EqType,
+    /// Bands 1 to 6, from the low end to the high end.
+    pub bands: [EqBand; 6],
+    /// The slope of band 1 as a `hi_pass` filter, in dB per octave: 6, 12,
+    /// 18 or 24.
+    pub hi_pass_slope: u32,
+    /// The slope of band 6 as a `lo_pass` filter, in dB per octave: 6, 12,
+    /// 18 or 24.
+    pub lo_pass_slope: u32,
+}
+
+/// The response curve of a track equalizer: `earth`, the usual one, or one
+/// of three classic mixing desks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EqType {
+    Earth,
+    Air,
+    Ice,
+    Fire,
+}
+
 /// One band of an equalizer.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EqBand {
@@ -8693,10 +8934,11 @@ pub struct EqBand {
     pub kind: EqKind,
     /// Its frequency in Hz, from 20 to 22000.
     pub freq: f64,
-    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
-    /// `hi_shelf` use it.
+    /// Its gain in dB: on a clip from -70 to 24, on a track from -20 to 20.
+    /// Only `bell`, `lo_shelf` and `hi_shelf` use it.
     pub gain: f64,
-    /// Its width, from 0.3 to 100. Only `bell` uses it.
+    /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// `bell` uses it, and on a track of the `fire` type the shelves too.
     pub q: f64,
 }
 
@@ -8746,22 +8988,84 @@ pub struct Compressor {
     pub on: bool,
     /// The level above which it compresses, in dB, from -50 to 0.
     pub threshold_db: f64,
-    /// The ratio of the input to the output, from 1 to 10.
+    /// The ratio of the input to the output, from 1.2 to 20.
     pub ratio: f64,
-    /// The width of the curve around the threshold, in dB, from 0 to 30.
-    /// At 0, compression starts at the threshold.
-    pub knee_db: f64,
-    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    /// How soft the curve is around the threshold, from 0 to 100. At 0,
+    /// compression starts at the threshold. At 100, it starts about 10 dB
+    /// below it and is full 10 dB above it.
+    pub knee: f64,
+    /// The share of the input in the result, from 0 to 100: 0 is all
+    /// compressed sound, and 100 is the input alone.
     pub mix: f64,
-    /// How fast it starts to compress, in ms, from 0 to 100.
+    /// How fast it starts to compress, in ms, from 0.7 to 100.
     pub attack_ms: f64,
     /// How long it keeps the reduction after the attack, in ms, from 0 to
     /// 4000.
     pub hold_ms: f64,
     /// How fast it stops to compress, in ms, from 50 to 4000.
     pub release_ms: f64,
-    /// The gain after it, in dB, from 0 to 24.
+}
+
+/// The compressor of a clip, with its own gain on the compressed sound.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipCompressor {
+    #[serde(flatten)]
+    pub compressor: Compressor,
+    /// The gain of the compressed sound before the mix, in dB, from 0 to
+    /// 24.
     pub makeup_db: f64,
+}
+
+/// The Dynamics of a track: an expander or gate, a compressor and a
+/// limiter, one after the other, then the make up gain.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackDynamics {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    pub expander: Expander,
+    pub compressor: Compressor,
+    pub limiter: Limiter,
+    /// The gain after the modules, in dB, from 0 to 20.
+    pub makeup_db: f64,
+}
+
+/// An expander or a gate: it lowers the level below its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Expander {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// A gate: it lowers the level by 4 dB for each dB below the threshold,
+    /// and by 0.1 dB when it is open. Off, an expander: by its ratio.
+    pub gate: bool,
+    /// The level below which it lowers the level, in dB, from -50 to 0.
+    pub threshold_db: f64,
+    /// The most that it lowers the level, in dB, from 0 to 60.
+    pub range_db: f64,
+    /// The expander's change of the output for each dB of the input below
+    /// the threshold, in dB, from 1.1 to 3.
+    pub ratio: f64,
+    /// How fast it opens, in ms, from 0.5 to 100.
+    pub attack_ms: f64,
+    /// How long it stays open after the level falls, in ms, from 0 to 4000.
+    pub hold_ms: f64,
+    /// How fast it closes, in ms, from 50 to 4000.
+    pub release_ms: f64,
+}
+
+/// A limiter: a compressor of ratio 20 above its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Limiter {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// The level above which it limits, in dB, from -30 to 0.
+    pub threshold_db: f64,
+    /// How fast it starts to limit, in ms, from 0.7 to 30.
+    pub attack_ms: f64,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    pub hold_ms: f64,
+    /// How fast it stops to limit, in ms, from 50 to 4000.
+    pub release_ms: f64,
 }
 
 /// Noise Reduction: it lowers the steady noise of the room and the hiss.
@@ -10586,6 +10890,8 @@ impl Track {
             volume_db: 0.0,
             voice_isolation: None,
             duck: None,
+            dynamics: None,
+            equalizer: None,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),

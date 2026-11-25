@@ -437,7 +437,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 ## Sound
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
-- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
+- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` is 0.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
@@ -451,7 +451,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - Each channel has its own noise profile, which starts at the first frame of the piece.
   - The profile of a bin follows the lowest level of that bin, and it rises slowly.
 - A piece has the `compressor` of its clip when it changes the sound.
-  - `Dynamics` runs after the equalizer and before the gain and the Pan. It adds no delay.
+  - `Dynamics::clip` runs after the equalizer and before the gain and the Pan. It adds no delay.
   - Each channel gets the same gain, from the highest peak of the channels.
 - A piece has the `leveler` of its clip when the switch and a process of its Dialogue Leveler are on.
   - `Leveler` reads ahead of the piece, as `Isolator` does, so the look ahead adds no delay.
@@ -460,7 +460,21 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 - A piece has the `equalizer` of its clip when it changes the sound.
   - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
   - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
+- Each track with sound gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer and its fader.
+  - A piece carries only the gain of its clip. The fader of its track is the `gain_db` of the bus.
+  - The inner tracks of a compound clip get the track that holds it as their `host` (`Inner`).
+  - The bus of an inner track goes `into` the bus of its host. `render::bus_for` makes the bus of a host before the buses that go into it.
+  - A piece is `silent` when a fader in its chain of hosts is at the bottom (`fader_silent`).
+  - `AudioMix::bused` mixes the lanes of each bus apart. `Mixed::process` runs the `Dynamics`, then the `Filter`, then the fader on that mix.
+  - The buses run from the last to the first. Thus each bus gets the mixes of its inner tracks before it runs. A bus with no host goes into the mix of the plan.
+  - Why: the Dynamics are not linear. They must hear the mix of the track, after the faders of its inner tracks.
+  - `Dynamics::track` runs the Expander or Gate, the Compressor and the Limiter in this order, then Make Up. Each module has its own detector.
+  - The lanes of a bus get the peaks of its top bus, after its fader, for the meters.
+  - A seek clears the Dynamics and the filters. A new plan at the same sample keeps the state of a bus that did not change.
+- `Curve` gives the biquad stages of a clip equalizer and of a track equalizer (`equalizer::track`). `Filter` and `response_db` take either.
 - A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
+  - Each lane names the timeline track at the top of its chain of hosts (`LaneTrack`). A fader preview of that track goes to all its lanes.
+  - `AudioMix` applies the preview one time, at the top bus, after the Dynamics and the equalizer of that bus (`Mixed::process`).
   - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
@@ -526,11 +540,11 @@ The render queue:
 - In a running GUI, `Live::start_queue` starts one export job for each queue job, from the top. `JobInfo::render` names the queue job.
 - When the export job ends, the core records its result with `render.ended` (`queue::status`). Without a GUI, `render.start` renders the jobs one after the other, and records each result.
 - After a job of the open timeline completes, `Live::rendered_from` gives the first frame of its range, and the timeline playhead goes there.
-- A change of the queue is not an undo step. `Editor::apply` sends each request of `Request::in_queue` to `ops::render::change`. It changes the project and its `rev`, but it adds no step.
-  - The store saves the project as it saves an edit. The history file then gets only the hash of the new project file.
-  - An undo step changes only the fields of its edit. Thus an undo keeps the queue.
-  - When another program changes the project file, `Store::load_text` copies the queue into the last saved project. Thus the queue is not in the step of that change.
-  - `apply` refuses these requests in a batch.
+- Each change of the queue is an undo step. `mutate` sends each request of `Request::in_queue` to `ops::render::change`, as it sends other edits to their ops.
+  - `render.ended` is not a step. `Editor::recorded` changes the project and its `rev`, and it adds no step. Why: a render is not an edit of the user. A step for it would clear the redo list, and Ctrl+Z after a render would take back only a status.
+  - An undo step changes only the fields of its edit. Thus an undo of a timeline edit keeps the queue, and an undo of a queue step keeps the status of the other jobs.
+  - When another program changes the project file, `Store::load_text` copies the status of each job into the last saved project. Thus the statuses are not in the step of that change.
+  - `apply` refuses these requests in a batch. Why: `Live` and the headless session check the files of `render.add` and `render.update` before the core gets them.
 
 Cancel:
 
@@ -860,10 +874,14 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - A gray picture reads the source for its alpha. Thus the source stays until the last `Gray` pass.
     - `grade::passed` takes a gray picture as a picture from the source. A Parallel Mixer with a gray picture on an input thus has the source as its base.
   - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
-    - A corrector folds the key of its windows first, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A corrector folds the key of its windows first, then the key of its qualifier, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A qualifier at its usual values is no step. The Matte of the Qualifier row folds as a Matte input. The Mask of the row folds as a Mask input.
     - The last step clamps the key and applies the Key Output.
   - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
+  - A `Qualify` pass makes the key of a qualifier with `fs_key_qualify`, from the picture that comes into the node (`Qualifying`).
+    - A node with only a qualifier, with its three parts on and the Qualifier row at its usual values, keeps its one `Qualify` pass. It applies the Key Output.
+    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
   - `cut_off` tells if a corrector takes its key input from the key output of a corrector that is off. Its key is then 0, and it reads no key from its links.
@@ -987,7 +1005,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
 - `GradeNode::keys` holds the keyframes of a corrector or a Key Mixer (`GradeNode::takes_keyframes`), in the order of their frames.
   - The other mixers have none.
   - Each `GradeKey` holds every value of the node, its `GradeKeyKind`, and its `start` and `end`.
-  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `KeyOutput` and its windows.
+  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `Qualifier`, its `KeyOutput` and its windows.
   - The values of a Key Mixer are a `KeyMix` for each input and its `KeyOutput`.
   - The window list of each keyframe has the shapes of the window list of the node. `ops::grade::checked` refuses other lists.
   - The mix list of each keyframe has one `KeyMix` for each input of the node. `ops::grade::checked` refuses other lists.
@@ -1005,6 +1023,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Why: on a circle, the radius moves in a straight line (spec §8.23).
   - On, Invert, Mask, the name, and a point list of another length keep the value of the keyframe before the frame.
 - `GradeNode::key_input_at` and `GradeNode::mix_at` give the Key Input and the mix of a Key Mixer in the same way (`KeyInput::blended`, `KeyMix::blended`).
+- `GradeNode::qualifier_at` gives the qualifier in the same way (`Qualifier::blended`). The switches and the buttons keep the value of the keyframe before the frame.
   - Invert, Mask and Matte keep the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
@@ -1029,6 +1048,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Each point of a polygon or a curve is one value, and so is each softness move of a curve.
   - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
 - The `key_input_` fields of `grade.set` change the Key Input in the same way (`GradeNode::change_key_input_at`, `KeyInput::carried`).
+- The `qualifier_` fields change the qualifier in the same way (`GradeNode::change_qualifier_at`, `Qualifier::carried`).
+  - A Width or a Soft alone moves the other value by the measured rule (`Qualifier::with_hue_width`, `Qualifier::with_hue_soft`).
+  - A request with both takes them as they are. Thus `ops::grade::checked` refuses a Soft above 2 times the Width.
 - The `mix_` fields change an input of a Key Mixer in the same way (`GradeNode::change_mix_at`, `KeyMix::carried`).
   - `grade.connect` and `grade.input.remove` change each mix list (`GradeNode::mix_lists_mut`).
 - All of these changes use one rule (`GradeNode::keyed_change`).
