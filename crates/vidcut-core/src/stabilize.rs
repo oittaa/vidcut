@@ -53,11 +53,10 @@ pub fn steadied(shake: &Shake, values: &Stabilizing, shot: Shot) -> Steadied {
                 smooth * SHAKE_RANGE,
                 aspect,
             );
+            let fixes: Vec<Matrix> = fixes.iter().map(|f| blend(f, values.strength())).collect();
             limited(&fixes, values.cropping_ratio(), aspect, rate)
         }
     };
-    let strength = if lock { 1.0 } else { values.strength() };
-    let fixes: Vec<Matrix> = fixes.iter().map(|f| blend(f, strength)).collect();
     let least = match lock {
         true => Stabilizing::CROPPING_RATIO.0,
         false => values.cropping_ratio(),
@@ -148,7 +147,7 @@ fn apply(m: &Matrix, [x, y]: [f64; 2]) -> Option<[f64; 2]> {
 }
 
 fn blend(m: &Matrix, k: f64) -> Matrix {
-    normalized(std::array::from_fn(|i| SAME[i] + k * (m[i] - SAME[i])))
+    from_parts(parts(m).map(|v| k * v))
 }
 
 fn weights(sigma: f64) -> Vec<f64> {

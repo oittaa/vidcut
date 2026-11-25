@@ -1,5 +1,5 @@
 use eframe::egui::{self, Align, Layout};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use vidcut_core::model::{Project, Stabilization, StabilizeMode, Stabilizing};
 
 use super::dialog;
@@ -36,7 +36,7 @@ fn number(
     (now, (low, high), on): (f64, (f64, f64), bool),
     clips: &[String],
     drag: &mut Option<Drag>,
-) -> Option<Value> {
+) -> Option<f64> {
     label(ui, name, now != usual);
     let mut value = match drag {
         Some(d) if d.clips == clips && d.key == key => d.value,
@@ -57,12 +57,16 @@ fn number(
             value,
         });
     }
+    let mine = drag
+        .as_ref()
+        .is_some_and(|d| d.clips == clips && d.key == key);
     let mut put = None;
-    if (r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()))
+    if mine
+        && (r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()))
         && let Some(d) = drag.take()
         && d.value != now
     {
-        put = Some(json!({ key: d.value }));
+        put = Some(d.value);
     }
     ui.end_row();
     put
@@ -73,14 +77,14 @@ fn rows(
     v: Stabilizing,
     clips: &[String],
     drag: &mut Option<Drag>,
-) -> Option<Value> {
-    let mut put = None;
+    put: &mut Map<String, Value>,
+) {
     label(ui, "Mode", !v.mode.is_usual());
     dialog::switch(ui, |ui| {
         for m in StabilizeMode::ALL {
             let picked = ui.add(egui::Button::selectable(m == v.mode, m.label()));
             if picked.clicked() && m != v.mode {
-                put = Some(json!({ "mode": m }));
+                put.insert("mode".into(), json!(m));
             }
         }
     });
@@ -92,7 +96,7 @@ fn rows(
         label(ui, name, now != usual);
         let mut on = now;
         if ui.checkbox(&mut on, "").clicked() {
-            put = Some(json!({ key: on }));
+            put.insert(key.into(), json!(on));
         }
         ui.end_row();
     }
@@ -118,11 +122,10 @@ fn rows(
             Stabilizing::STRENGTH,
         ),
     ] {
-        if let Some(change) = number(ui, row, (now, range, free), clips, drag) {
-            put = Some(change);
+        if let Some(value) = number(ui, row, (now, range, free), clips, drag) {
+            put.insert(row.1.into(), json!(value));
         }
     }
-    put
 }
 
 impl Workspace {
@@ -135,7 +138,7 @@ impl Workspace {
         let ready = clips.iter().all(|id| of(p, id).ready());
         let set = clips.iter().any(|id| !of(p, id).is_usual());
         let drag = &mut self.timeline.steady;
-        let mut put = None;
+        let mut put = Map::new();
         let mut go = false;
         let header = |ui: &mut egui::Ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -144,19 +147,19 @@ impl Workspace {
             .inner
         };
         let (flipped, cleared) = switched_group(ui, NAME, Some(!first.off), header, |ui| {
-            put = rows(ui, first.values, &clips, drag);
+            rows(ui, first.values, &clips, drag, &mut put);
             label(ui, "", false);
             let button = egui::Button::new("Stabilize");
             go = ui.add_enabled(!ready && !running, button).clicked();
             ui.end_row();
         });
         if let Some(on) = flipped {
-            put = Some(json!({ "on": on }));
+            put.insert("on".into(), json!(on));
         }
-        if let Some(change) = put {
+        if !put.is_empty() {
             self.send(
                 "picture.set",
-                json!({ "clips": clips, "stabilization": change }),
+                json!({ "clips": clips, "stabilization": put }),
             );
         }
         if cleared {

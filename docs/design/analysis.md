@@ -236,9 +236,12 @@ flowchart TD
     - `SMOOTH_SECS` and `SHAKE_RANGE` come from 12 measurements of Resolve on seven test clips, at three values of Smooth and two of Cropping Ratio.
     - With them, the mean zoom of vidcut is within about 10% of the zoom of Resolve in each measurement.
   - The fix of a frame takes the path to the goal (`from_parts`). With Camera Lock, the fix is the inverse of the product of the steps (`locked`). Thus the picture holds the view of the first frame.
-  - Cropping Ratio limits the fixes (`limited`). A fix shrinks until the picture keeps that share of its width and height in the frame.
+  - Strength multiplies each part of each fix (`blend`). Camera Lock uses the whole fix, with no limit.
+    - Why the parts: a product of the matrix values by Strength is not a motion. At Strength −1, a large zoom becomes a flip, and a turn gets a zoom.
+    - With the parts, Strength −1 gives the inverse motion: the opposite move, turn and zoom.
+  - Cropping Ratio then limits the fixes (`limited`). A fix shrinks until the picture keeps that share of its width and height in the frame.
     - The limit is the smallest limit within `NEAR_SECS`, then smoothed. Thus the limit does not jump from frame to frame.
-  - Strength scales each fix. Camera Lock uses the whole fix, with no limit.
+    - Why after Strength: the limit applies to the fix that the picture gets, also at a negative Strength.
   - With Zoom on, one zoom for the whole clip keeps the edges out of each frame (`zoom_for`). The zoom is at most one over Cropping Ratio. With Camera Lock, it is at most one over the smallest Cropping Ratio.
   - The correction of each frame is the inverse of its fix, in the coordinates of the picture (`Stabilized`).
   - `before` and `after` give the mean motion and the mean shake of five points of the picture, in pixels of the picture height.
