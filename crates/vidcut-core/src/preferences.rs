@@ -279,6 +279,10 @@ pub struct Scopes {
     pub vectorscope: bool,
     /// The scale at the left of the Waveform and the Parade.
     pub scale: ScopeScale,
+    /// Video Level Scopes: the Waveform and the Parade show black at code
+    /// 64 and white at code 940 of the 10-bit scale. Off: Data Level
+    /// Scopes, black at 0 and white at 1023. The picture does not change.
+    pub video_levels: bool,
 }
 
 /// The scale of the Waveform and the Parade. Each one spans the full range
@@ -359,6 +363,7 @@ impl Scopes {
             parade: patch.parade.unwrap_or(self.parade),
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
             scale: patch.scale.unwrap_or(self.scale),
+            video_levels: patch.video_levels.unwrap_or(self.video_levels),
         }
     }
 }
@@ -375,6 +380,8 @@ pub struct ScopesPatch {
     pub vectorscope: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<ScopeScale>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_levels: Option<bool>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
