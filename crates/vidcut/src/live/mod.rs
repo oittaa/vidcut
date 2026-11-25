@@ -2100,8 +2100,13 @@ impl Live {
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
-        if let Request::MotionFind { .. } = &envelope.request {
-            let looks = vidcut_core::editor::subject_looks(p, &envelope.request, playhead);
+        if let Request::MotionFind { .. } | Request::EditCloseUp { .. } = &envelope.request {
+            let mut looks = vidcut_core::editor::subject_looks(p, &envelope.request, playhead);
+            looks.extend(vidcut_core::editor::close_up_looks(
+                p,
+                &envelope.request,
+                playhead,
+            ));
             return Some(plain(move || {
                 use vidcut_core::Env;
                 for (media, subject, span, download) in &looks {
@@ -3827,6 +3832,7 @@ impl Live {
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::GradeAutoColor { .. }
+            | Request::EditCloseUp { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {

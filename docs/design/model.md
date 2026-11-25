@@ -428,7 +428,11 @@ Ranges and resolution:
 
 `ops::close_up` holds `edit.close_up`. The behavior is in [spec §7.2](../spec.md#72-edit-functions).
 
-- The copy is a clone of the clip. `Clip::move_head` moves its start, so it stays in sync.
+- `ops::close_up::target` gives the copy: a clone of the clip. `Clip::move_head` moves its start, so it stays in sync.
+- The editor finds the faces on the first frame of the copy with `Env::subjects`. `ops::close_up::framing` turns them into the zoom and the position.
+  - The faces are fractions of the picture. `place::fitted` puts them in the frame.
+  - In the app, `close_up_looks` gives the frame to the background step that runs the face model first, as for `motion.find`. The edit then reads the found faces from the cache.
+- `ops::close_up` puts the copy with that framing on its track.
 - `track_above` gives the track, as for `place_on_top`.
 - The result is a `Placed`, as for Source Overwrite. `playhead_after_edit` seeks to its `playhead`.
 - With no clip at the frame, the result is empty. Why: nothing changes, as in the measurements.

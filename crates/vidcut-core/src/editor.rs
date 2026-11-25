@@ -3792,23 +3792,23 @@ fn mutate(
             v["track"] = json!(track);
             v
         }
-        Request::EditCloseUp { at } => {
-            let at = match at {
-                Some(t) => Some(resolve(p, t, playhead)?),
-                None => playhead,
-            };
-            let at = if p.marks.is_empty() {
-                need(at, "at")?
-            } else {
-                at.unwrap_or(0)
-            };
-            match ops::close_up(p, at)? {
-                Some(placed) => json!({
-                    "clip": placed.clip,
-                    "track": placed.track,
-                    "reference": placed.reference,
-                    "playhead": placed.playhead,
-                }),
+        Request::EditCloseUp { at, zoom, download } => {
+            let zoom = zoom.unwrap_or(ops::close_up::FACE_ZOOM);
+            if !(1.0..=100.0).contains(&zoom) {
+                return Err(Error::usage("zoom (--zoom) is from 1 to 100"));
+            }
+            let at = close_up_at(p, at.as_ref(), playhead)?;
+            match ops::close_up::target(p, at)? {
+                Some(clip) => {
+                    let framing = close_up_framing(env, p, &clip, zoom, *download)?;
+                    let placed = ops::close_up(p, clip, framing)?;
+                    json!({
+                        "clip": placed.clip,
+                        "track": placed.track,
+                        "reference": placed.reference,
+                        "playhead": placed.playhead,
+                    })
+                }
                 None => json!({}),
             }
         }
@@ -8301,6 +8301,56 @@ pub fn models_after(
 }
 
 pub type SubjectLook = (Media, Subject, Look, bool);
+
+fn close_up_at(p: &Project, at: Option<&TimeSpec>, playhead: Option<i64>) -> Result<i64> {
+    let at = match at {
+        Some(t) => Some(resolve(p, t, playhead)?),
+        None => playhead,
+    };
+    match p.marks.is_empty() {
+        true => need(at, "at"),
+        false => Ok(at.unwrap_or(0)),
+    }
+}
+
+fn close_up_look(p: &Project, clip: &Clip) -> Option<(Media, Look, [f64; 4])> {
+    let media = p.media(&clip.media)?.clone();
+    let v = media.info.video.as_ref()?;
+    let sar = (v.sar[0], v.sar[1]);
+    let frame = (p.width(), p.height());
+    let fit = crate::place::fitted((v.width, v.height), sar, v.rotation, frame);
+    let ((first, _), rate) = ops::motion::file_frames(p, clip);
+    let look = subject_look(&media, rate, (first, first + 1));
+    Some((media, look, fit))
+}
+
+fn close_up_framing(
+    env: &dyn Env,
+    p: &Project,
+    clip: &Clip,
+    zoom: f64,
+    download: bool,
+) -> Result<ops::close_up::Framing> {
+    let size = p.frame_size();
+    let Some((media, look, fit)) = close_up_look(p, clip) else {
+        return Ok(ops::close_up::framing(&[], [0.0; 4], size, zoom));
+    };
+    let found = env.subjects(&media, Subject::Face, look, download)?;
+    let faces = found.found.first().map_or(&[][..], Vec::as_slice);
+    Ok(ops::close_up::framing(faces, fit, size, zoom))
+}
+
+pub fn close_up_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
+    let Request::EditCloseUp { at, download, .. } = request else {
+        return Vec::new();
+    };
+    let at = close_up_at(p, at.as_ref(), playhead).ok();
+    let clip = at.and_then(|at| ops::close_up::target(p, at).ok().flatten());
+    let look = clip.and_then(|c| close_up_look(p, &c));
+    look.map(|(media, look, _)| (media, Subject::Face, look, *download))
+        .into_iter()
+        .collect()
+}
 
 fn subject_look(media: &Media, fps: f64, frames: (i64, i64)) -> Look {
     let seen = if media.is_still() { (0, 1) } else { frames };

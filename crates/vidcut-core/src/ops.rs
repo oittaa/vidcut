@@ -1,5 +1,5 @@
 pub mod attributes;
-mod close_up;
+pub mod close_up;
 pub mod comp;
 pub mod compound;
 pub mod conform;

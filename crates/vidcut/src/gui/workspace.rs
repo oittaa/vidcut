@@ -794,7 +794,7 @@ impl Workspace {
 
     pub(super) fn close_up(&mut self) {
         let at = self.snap.timeline.position;
-        self.send("edit.close_up", json!({ "at": at }));
+        self.send("edit.close_up", json!({ "at": at, "download": true }));
     }
 
     pub(super) fn edit_function(&mut self, method: &str) {

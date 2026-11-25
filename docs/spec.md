@@ -893,6 +893,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Close Up** (pp. 698–699; measured in Resolve Studio 21.2):
   - It puts a copy of a timeline clip on a track above that clip, in sync, as a closer shot.
   - The manual says that the incoming clip goes in. In the measurements, the edit used the timeline clip. A source with marks did not change the result.
+  - With a source clip in the viewer, four clicks of Close Up did nothing. A clip that is only selected in the pool did not change the result.
   - **The clip** is the top clip at a frame. The frame is the first of these: the timeline In, the frame of a lone timeline Out, the playhead.
   - **The range:**
     - With no marks, it starts at the playhead and is 5 seconds long: 120 frames at 24 fps, 125 frames at 25 fps.
@@ -902,10 +903,17 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - It stops at the end of the clip.
   - **The copy:**
     - At each timeline frame, it shows the same source frame as the clip.
-    - It has no sound and no keyframes.
+    - It has no sound and no keyframes. Its Zoom, Pan and Tilt replace the picture of the clip.
     - The manual says about 150%, and a face detection that puts a face in the frame.
-    - One measured 1280×720 clip gave Zoom 2.0 and Position 0. A person off the middle stayed off the middle.
-    - The rule for the zoom and the faces is not measured yet ([todo](todo/close-up.md)).
+  - **The framing,** measured on 29 copies of 14 shots in 1280×720, 1920×1080 and 3840×2160 timelines, with media larger and smaller than the timeline:
+    - With no face found, the copy has Zoom 2.0, Pan 0 and Tilt 0.
+    - Some shots with faces gave that result: a face in profile, a large face, and small faces at a table.
+    - With faces, the zoom is 1.0 to 1.4, in steps of 0.015. Three faces across the frame gave 1.0.
+    - The same frame gives a different zoom in different timelines. One face gave 1.23, 1.305, 1.305, 1.29 and 1.275. The size of the timeline does not explain it.
+    - An undo and a second Close Up give the same values again.
+    - Pan is −Zoom × the place of the faces across the frame, measured from its middle. Tilt does the same up and down. That place is the same in each timeline.
+    - Pan and Tilt stop at (Zoom − 1) / 2 of the frame each way, so the picture fills the frame. Most copies stop at the top.
+    - A close up of a copy with Zoom 1.305 gave 1.4, at the same place of the faces.
   - **Track:** the first video track above the highest track with a clip in the range, as for Place On Top (D24). It never fills a free lower track.
     - Each new video track also makes one empty audio track.
   - **After the edit,** the timeline marks clear, and the playhead goes to the end of the copy.
@@ -913,7 +921,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With no clip at the frame, nothing changes, and no message shows.
   - It has no default key. The manual names no key for it.
   - vidcut: the Out frame is in the copy, as in the other edits (D16). Resolve leaves it out ([gotchas](gotchas.md#resolves-edits)).
-  - vidcut: until that measurement, the copy has Zoom 2.0 and the usual picture.
+  - vidcut: the face model of `motion.find` looks at the first frame of the copy ([deviations X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+    - With no face, the copy has Zoom 2.0 at the middle.
+    - With faces, it has the `zoom` of the request, usual 1.3. Why: 1.3 is the middle of the measured values.
+    - The middle of the box around the faces goes to the middle of the frame, up to the limits of Pan and Tilt.
+    - When that box, 1.1 times as large, does not fit at that zoom, the copy has Zoom 1.0 at the middle. Why: three faces across the frame gave 1.0.
+    - A face with a score under 0.7 does not count. A face that the edge of the picture cuts does not count. Why: a face cut by the edge did not move the measured framing.
   - vidcut: these cases are not measured:
     - **A range past the end of the clip:** it stops at the end of the clip.
     - **A clip with its own Zoom, Position, effects or grade:** the copy has the usual picture, with no effects and no grade.

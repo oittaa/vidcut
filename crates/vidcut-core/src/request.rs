@@ -1083,20 +1083,33 @@ pub enum Request {
         use_marks: bool,
     },
 
-    /// Close Up: a copy of the top clip at a frame, in sync, at 2x zoom and
-    /// with no sound, on the first video track above every clip in its span
-    /// (made if needed, with one new audio track for each new video track).
-    /// The frame is the timeline In, else the Out, else `at`. It runs from
-    /// the In, else the clip's start, to the Out, else the clip's end. With
-    /// no marks it runs 5 seconds from `at`. It stays in the clip. Clears
-    /// the timeline marks. Returns the clip, its track, the `reference` clip
-    /// and the `playhead` after the edit, at its end. With no clip at the
-    /// frame, nothing changes and it returns no clip.
+    /// Close Up: a copy of the top clip at a frame, in sync and with no
+    /// sound, on the first video track above every clip in its span (made
+    /// if needed, with one new audio track for each new video track). The
+    /// frame is the timeline In, else the Out, else `at`. It runs from the
+    /// In, else the clip's start, to the Out, else the clip's end. With no
+    /// marks it runs 5 seconds from `at`. It stays in the clip. The face
+    /// model looks at the first frame of the copy. With no face, the copy
+    /// has zoom 2 at the middle. With faces, it has `zoom`, and the middle
+    /// of the box around the faces goes as near to the middle of the frame
+    /// as the picture lets while it fills the frame. When that box, a
+    /// tenth larger, does not fit at `zoom`, the copy has zoom 1. Clears
+    /// the timeline marks. Returns the clip, its track, the `reference`
+    /// clip and the `playhead` after the edit, at its end. With no clip at
+    /// the frame, nothing changes and it returns no clip.
     #[serde(rename = "edit.close_up")]
     EditCloseUp {
         /// The playhead.
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// The zoom of a copy that shows faces, from 1 to 100. Usual: 1.3.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zoom: Option<f64>,
+        /// Download the face model when it is not on this computer, checked
+        /// against its SHA-256 (233 kB). Without it, a missing model is an
+        /// error that tells its size.
+        #[serde(default)]
+        download: bool,
     },
 
     /// Source Overwrite: in sync by timecode with a clip on the timeline, on
