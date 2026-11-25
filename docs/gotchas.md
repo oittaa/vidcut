@@ -799,6 +799,14 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
   - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
   - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+- **A title with only the family name Bahnschrift draws a narrow face of the font.**
+  - Bahnschrift is a variable font. At weight 300, 350 and 400, the title draws Bahnschrift SemiLight SemiCondensed. At weight 200, it draws Bahnschrift Light SemiCondensed.
+  - The Inspector does the same. The family Bahnschrift with the face Normal draws SemiLight SemiCondensed, the same in every pixel.
+  - The other faces of that family, such as Bold and Light, cannot be picked. A click on one keeps Normal.
+  - At size 96, the ink of "Bahnschrift HHH" is 601 pixels wide. The faces Light, SemiLight and SemiBold give 704 pixels.
+  - At weight 600 and 700, the title draws a false bold of a SemiCondensed face, 628 pixels wide.
+  - Windows gives the Regular face for the family name "Bahnschrift" at weight 300 to 400.
+  - vidcut does not copy this fault. It draws the Regular face, as Windows does. The ink of "Bahnschrift HHH" is then 704 pixels wide.
 - **Arial picked in a Scroll draws Arial Black.**
   - The Inspector shows the face Regular. Its other faces, such as Bold and Black, cannot be picked.
   - The file writes the font `Arial,8.25,-1,5,127,0,0,0,0,0,Regular`.

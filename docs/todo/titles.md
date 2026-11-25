@@ -26,7 +26,10 @@
 - **Scroll letters:** in run T5, the letters of a Scroll have an em of 4/3 of its size. vidcut draws an em of the size.
   - The font of that Scroll was picked in the Inspector. Its file gives the font in points: `Arial,8.25,-1,…`.
   - vidcut writes the font in pixels: `Arial,-1,58,…`. Measure the letters of a Scroll from each kind of file.
-- **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
+- **Faces of a variable font:** vidcut does not find a face by its own family name, for example "Bahnschrift Light" or "Bahnschrift SemiCondensed".
+  - Windows lists these faces as families. Resolve lists 12 families of Bahnschrift, one for each named face, and draws them.
+  - Resolve's file writes the family of the face, with a `font-weight` of 200 for Light and 504 for SemiBold.
+  - vidcut draws another font for each of these names. At size 96, the ink of "Bahnschrift HHH" is then 685 pixels wide in each face.
 - **Fallback font:** a letter that the font does not have comes from another font.
   - In Arial at size 192, `Ⅷ` moves the words down by 35 pixels in vidcut and 9 pixels in Resolve. `Ⓐ` moves them 33 pixels in vidcut and 0 in Resolve.
   - The two programs draw these letters in different fonts. Find which font Resolve takes.
