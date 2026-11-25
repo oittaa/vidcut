@@ -5138,6 +5138,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
+  - A key works at one level: the application, or a panel (pp. 123–124). The keys of the panel that has the focus go first. A key with no action there does its application action.
+  - The Media Pool has its own level. A click in the Media tab gives it the focus, and a click in another place takes the focus away. While it has the focus, a line in the accent color is at the top of the tab.
+  - In the Media Pool, Delete and Backspace remove the selected media, after a question. Ctrl+A and Ctrl+Shift+A select all or no media.
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
   - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - On the other pages, these five keys keep the actions of the table.

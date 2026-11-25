@@ -18,8 +18,7 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **Key sets and panels:**
 
-- Keys per panel. One key does different things in different panels (pp. 123–124).
-  - Only the Transcription window has its own level.
+- The Keyframes tab and the keyframe tray take Copy, Cut, Paste and Delete while they have the focus, through the application actions. A level of their own would let the user give them other keys (pp. 123–124).
 
 **Keys that move the clip selection:**
 

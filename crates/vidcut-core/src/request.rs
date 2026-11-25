@@ -4137,8 +4137,8 @@ pub enum Request {
     /// The keyboard shortcuts in force, one action each, with a few plain
     /// words where the action's name doesn't say what it does (spec §11).
     /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
-    /// key of an action works: `app`, `transcription`, `effects` or
-    /// `color`.
+    /// key of an action works: `app`, `media_pool`, `transcription`,
+    /// `effects` or `color`.
     #[serde(rename = "keys.list")]
     KeysList {
         /// Only the actions of this key, like `Ctrl+B`, at each level.
