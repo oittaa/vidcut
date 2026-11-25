@@ -3058,6 +3058,10 @@ The transform of the foreground (pp. 2213, 2218):
 - Flip Horizontal mirrors the foreground left to right. Flip Vertical mirrors it top to bottom. Both are off.
 - The order is the flip, Size, Angle and then the move to Center. Each acts about the middle of the foreground.
 - Invert Transform: off. On, the Merge uses the inverse of its transform (p. 2218).
+  - On, a point q of the foreground goes to F × R⁻¹ × (q − c) / s of the background. Thus the flip acts last.
+  - q, c and the result are in pixels from the middle of the frame, with y up. The foreground has the size of the frame.
+  - c is the Center, s is the Size, R turns by the Angle and F is the flip.
+  - Example: Center (0.7, 0.6), Size 0.5 and Angle 30 at 1920 × 1080. The point (96, 54) goes to pixel (407.17, 345.53), with y down.
 - Filter Method: Linear. The foreground is read with a bilinear filter.
 - Edges: Canvas. It sets what is around the foreground (p. 2218):
   - Canvas: clear.
@@ -3094,7 +3098,7 @@ The controls of the sums (pp. 2213–2217):
 - Apply Mode: Normal. It is one of 27 modes. The manual lists 26 of them. It does not list Hard Mix, which is in the menu (pp. 2213–2215).
 - Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
-- Blend mixes the background with the result (p. 2217).
+- Blend mixes the background with the result (p. 2217): BG × (1 − Blend) + result × Blend.
 - Clamp Coverage: on. The manual does not describe it. Only Normal and Screen use it.
   - On, fa counts as 1 where it is above 1. Thus a foreground with an alpha above 1 does not take more than the whole background away.
   - Off, the sums use fa as it is. Then 1 − fa is below 0.
@@ -3156,7 +3160,9 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
 - On FG and BG:
   - Hypotenuse: √(FG² + BG²).
   - Geometric: 2 × FG × BG / (FG + BG), and 0 where FG + BG is 0.
-- Dissolve: the same as Normal with Over.
+- Dissolve: the same as Normal with Over. The manual calls it an average of the two pictures (p. 2213).
+  - At a Blend below 1, Dissolve mixes the colors with Blend. It does not take pixels at random.
+  - Example: a background of (1, 0, 0, 1) and a foreground of (0, 1, 0, 0.5) give (0.875, 0.25, 0, 1) at Blend 0.25.
 
 YIQ: Y = 0.299 R + 0.587 G + 0.114 B. I = 0.596 R − 0.274 G − 0.322 B. Q = 0.212 R − 0.523 G + 0.311 B.
 
