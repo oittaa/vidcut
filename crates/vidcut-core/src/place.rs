@@ -5,9 +5,9 @@ use crate::model::{
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
     FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
     GradientType, Mask, MaskChannel, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, Pattern, Picture, PivotType, ReferenceTime, Scaling, ShadingElement, Sharpen,
-    TextPlus, Tool, Tracker, TrackerMerge, TrackerOperation, VideoInfo, Vignette, VignetteMode,
-    VignetteShape,
+    NoiseColoring, PaintMode, Pattern, Picture, PivotType, ReferenceTime, Scaling, ShadingElement,
+    Sharpen, TextPlus, Tool, Tracker, TrackerMerge, TrackerOperation, VideoInfo, Vignette,
+    VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -257,6 +257,7 @@ pub struct Shaping {
     pub invert: bool,
     pub soft: Option<Softening>,
     pub beyond: bool,
+    pub paint: PaintMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -369,6 +370,7 @@ impl Shaping {
             invert: m.invert,
             soft,
             beyond: m.clipping() == BlurClipping::None,
+            paint: m.paint(),
         }
     }
 

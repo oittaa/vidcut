@@ -1518,9 +1518,24 @@ struct Joining {
 fn fs_mask_join(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let s = textureLoad(blur_source, px + vec2<i32>(joining.at.xy), 0).r;
-    let shape = select(s, 1.0 - s, joining.how.y > 0.5);
-    let a = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
-    return vec4<f32>(joining.how.x * shape + a * (1.0 - shape));
+    let c = select(s, 1.0 - s, joining.how.y > 0.5);
+    let n = joining.how.x * c;
+    let i = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
+    var m = n + i * (1.0 - c);
+    switch i32(joining.how.w + 0.5) {
+        case 1: { m = min(i + n, 1.0); }
+        case 2: { m = max(i - n, 0.0); }
+        case 3: { m = min(i, n); }
+        case 4: { m = max(i, n); }
+        case 5: { m = (i + n) * 0.5; }
+        case 6: { m = i * n; }
+        case 7: { m = select(i, n, n > 0.0); }
+        case 8: { m = i + n - 2.0 * i * n; }
+        case 9: { m = n; }
+        case 10: { m = i; }
+        default: {}
+    }
+    return vec4<f32>(m);
 }
 
 struct Picking {

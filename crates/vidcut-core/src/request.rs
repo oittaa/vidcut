@@ -13,8 +13,8 @@ use crate::model::{
     EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType,
-    Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
+    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PictureTool, PictureTransition,
+    PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
     SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
     TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
@@ -3237,7 +3237,8 @@ pub enum Request {
     /// A new keyframe holds the values that the picture gets on its frame,
     /// with the `start` and `end` of the project's `dynamics_profile`. A
     /// keyframe already on that frame takes the `kind`. Returns the `frame`
-    /// and the `nodes` that have the keyframe.
+    /// and the `nodes` that have the keyframe. With `edl`, returns the
+    /// `frames` of the marks.
     #[serde(rename = "grade.keys.add")]
     GradeKeysAdd {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3255,6 +3256,12 @@ pub enum Request {
         /// Usual: `dynamic`.
         #[serde(default)]
         kind: GradeKeyKind,
+        /// With `timeline`, in place of `at` and `kind`: Add EDL Marks on
+        /// Tracks. A Static keyframe goes on each frame where a clip starts
+        /// or ends on a video track, after the first frame and before the
+        /// end. A node that has a keyframe on that frame keeps it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edl: bool,
     },
     /// Change the kind, the `start` or the `end` of keyframes of the grade
     /// of a clip, or with `timeline` of the timeline grade: those on the
@@ -3332,6 +3339,10 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<OneOrMany<TimeSpec>>,
+        /// In place of `frames` and `at`: Delete EDL Marks on Tracks. Only
+        /// the marks of `grade.keys.add` with `edl` go.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edl: bool,
     },
     /// Add a window at its usual values to a corrector of the grade of a
     /// clip, or with `timeline` of the timeline grade. It goes last in the
@@ -4388,6 +4399,10 @@ pub enum Request {
         vectorscope: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<crate::preferences::ScopeScale>,
+        /// Video Level Scopes: black at code 64 and white at code 940.
+        /// `false` is Data Level Scopes, the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_levels: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -5018,6 +5033,10 @@ pub struct GradeNodeChange {
     /// Key Output of a corrector, and the kind and mode of a mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<bool>,
+    /// Auto-Keyframe of a corrector or a key mixer. On, a change on a frame
+    /// where the node has no keyframe first adds a Dynamic keyframe there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_key: Option<bool>,
 }
 
 /// A palette of a corrector on the Color page.
@@ -6682,6 +6701,9 @@ pub struct NodeChange {
     /// How far a mask's edge moves out, from -1 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How a mask joins its own mask with the masks on its effect mask input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// Off, a mask is only a band about its edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<bool>,
