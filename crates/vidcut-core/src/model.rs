@@ -5622,15 +5622,18 @@ pub struct Merge {
     pub operator: Option<MergeOperator>,
     /// From 0 to 1. At 0, the colors of the foreground are multiplied by
     /// its alpha first: a foreground with straight colors. At 1, they are
-    /// used as they are: premultiplied colors. Usual: 1.
+    /// used as they are: premultiplied colors. Only a `normal` merge uses
+    /// it. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// What the alpha of the foreground is multiplied by, from 0 to 1. At
-    /// 0, the foreground is added to the background. Usual: 1.
+    /// 0, a `normal` foreground is added to the background. The other apply
+    /// modes multiply the colors of the foreground too. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha_gain: Option<f64>,
     /// How much less the alpha of the foreground covers the background,
-    /// from 0 to 1. The foreground is still added in full. Usual: 0.
+    /// from 0 to 1. The foreground is still added in full. Only a `normal`
+    /// merge uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
     /// The width that the center is shown in: its x shows as x × this

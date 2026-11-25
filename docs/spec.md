@@ -3084,11 +3084,18 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
 
 YIQ: Y = 0.299 R + 0.587 G + 0.114 B. I = 0.596 R − 0.274 G − 0.322 B. Q = 0.212 R − 0.523 G + 0.311 B.
 
-vidcut, with a mode other than Normal:
+The rows of the sliders change with the mode (measured in Resolve Studio 21.2):
 
-- Alpha Gain multiplies fa first.
-- Subtractive/Additive then multiplies F by s + (1 − s) × fa.
-- Burn In multiplies fa by 1 − u in the cover of the background.
+- Normal with Over: Subtractive/Additive, Alpha Gain, Burn In and Blend. Normal with another Operator: the same rows without Burn In.
+- Screen and the 25 other modes: Gain and Blend.
+- Gain is Alpha Gain with another name. It keeps its value when the mode changes.
+- Resolve also shows Clamp Coverage under Blend with Normal and with Screen.
+
+With a mode other than Normal (measured in Resolve Studio 21.2):
+
+- Subtractive/Additive and Burn In do not act. A value set under Normal changes nothing.
+- Gain multiplies F and fa. Then the sum of the mode follows. With Normal, Alpha Gain multiplies only fa.
+- vidcut: a Burn In set under Over also acts with another Operator of Normal. This case is not measured.
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
