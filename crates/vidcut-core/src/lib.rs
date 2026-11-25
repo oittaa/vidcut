@@ -21,6 +21,7 @@ pub mod generators;
 pub mod grade;
 pub mod grade_keys;
 mod history;
+pub mod key_sets;
 pub mod keyframes;
 pub mod leveler;
 pub mod looks;

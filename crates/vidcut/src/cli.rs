@@ -10,6 +10,11 @@ use vidcut_core::{Envelope, Error, Request, Result};
 pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("keys.set", &["action", "keys"]),
     ("keys.reset", &["action"]),
+    ("keys.use", &["set"]),
+    ("keys.save", &["name"]),
+    ("keys.delete", &["name"]),
+    ("keys.export", &["set", "path"]),
+    ("keys.import", &["path"]),
     ("probe", &["path"]),
     ("schema", &["method"]),
     ("project.create", &["path"]),
@@ -71,6 +76,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("keyframes.remove", &["clips"]),
     ("keyframes.copy", &["clip"]),
     ("keyframes.cut", &["clip"]),
+    ("keyframes.reverse", &["clip"]),
     ("keyframes.paste", &["clips"]),
     ("markers.move", &["marker"]),
     ("markers.remove", &["marker"]),
@@ -395,7 +401,8 @@ const EXAMPLES: &[(&str, &str)] = &[
         "viewer.scopes",
         "vidcut viewer scopes\n  \
          vidcut viewer scopes --waveform true --vectorscope true\n  \
-         vidcut viewer scopes --scale percent\n  \
+         vidcut viewer scopes --scale percent --video-levels true\n  \
+         vidcut viewer scopes --waveform-mode rgb --waveform-blue false --parade-mode yrgb\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),
@@ -704,6 +711,16 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "keys.reset",
         "vidcut keys reset mark_in\n  vidcut keys reset   # every action",
+    ),
+    ("keys.use", "vidcut keys use \"My Keys\"\n  vidcut keys use vidcut"),
+    (
+        "keys.save",
+        "vidcut keys save \"My Keys\"\n  vidcut keys save \"My Keys\" --overwrite",
+    ),
+    ("keys.export", "vidcut keys export \"My Keys\" my-keys.toml"),
+    (
+        "keys.import",
+        "vidcut keys import my-keys.toml\n  vidcut keys import my-keys.toml --name Laptop",
     ),
     ("mixer.preview", "vidcut mixer preview A1 -12"),
     ("mcp", "claude mcp add vidcut -- vidcut mcp -p talk.vidcut"),

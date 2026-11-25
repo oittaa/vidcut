@@ -90,6 +90,13 @@ fn compound_cycle<'a>(
 
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
+    let layers = &p.settings.node_stack_layers;
+    let most = crate::ops::grade::NODE_STACK_LAYERS;
+    if layers.is_empty() || layers.len() > most || layers.iter().any(|n| n.trim().is_empty()) {
+        v.push(format!(
+            "the project needs 1 to {most} named node stack layers"
+        ));
+    }
     let pool = p.pool();
     let mut ids = HashSet::new();
     for m in &p.media {
@@ -454,6 +461,12 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         }
         if let Some(Err(e)) = t.grade.as_ref().map(crate::ops::grade::checked) {
             v.push(format!("timeline {}: {}", t.id, e.message));
+        }
+        if (t.grade.as_ref()).is_some_and(|g| !g.layers.is_empty() || !g.kept_layers.is_empty()) {
+            v.push(format!(
+                "the grade of timeline {} has node stack layers",
+                t.id
+            ));
         }
         if let Some(o) = t.own {
             if o.drop_frame && !o.fps.has_drop_frame() {

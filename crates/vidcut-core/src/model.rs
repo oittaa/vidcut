@@ -475,6 +475,14 @@ pub struct Settings {
     /// out at 1 and 1.
     #[serde(default, skip_serializing_if = "DynamicsProfile::is_usual")]
     pub dynamics_profile: DynamicsProfile,
+    /// The names of the node stack layers of each clip grade, layer 1
+    /// first: 1 to 8 names. Their number is the number of layers. Left out
+    /// at one layer named `L1`.
+    #[serde(
+        default = "Settings::one_layer",
+        skip_serializing_if = "Settings::has_one_layer"
+    )]
+    pub node_stack_layers: Vec<String>,
 }
 
 impl Default for Settings {
@@ -501,6 +509,7 @@ impl Default for Settings {
             color_viewer_lut: MonitorLut::VideoMonitor,
             scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
+            node_stack_layers: Self::one_layer(),
         }
     }
 }
@@ -570,6 +579,18 @@ impl Format {
 }
 
 impl Settings {
+    pub fn one_layer() -> Vec<String> {
+        vec![Self::layer_name(1)]
+    }
+
+    pub fn layer_name(n: usize) -> String {
+        format!("L{n}")
+    }
+
+    fn has_one_layer(names: &[String]) -> bool {
+        names == Self::one_layer()
+    }
+
     pub const MOST_CHANNELS: u16 = 24;
 
     pub fn viewer_lut_file(&self) -> Option<&Path> {
@@ -3645,20 +3666,21 @@ impl Title {
         ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 
-    pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
-        match self.kind {
-            TitleKind::Scroll => {
-                (heights[0] + heights[1]) * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
-            }
-            TitleKind::Text | TitleKind::LowerThird => {
-                let size = (text / zoom / pixel).round();
-                let line: f64 = heights
-                    .iter()
-                    .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
-                    .sum();
-                line.ceil() * zoom * pixel
-            }
-        }
+    pub fn line_gap(heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
+        let size = (text / zoom / pixel).round();
+        let line: f64 = heights
+            .iter()
+            .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
+            .sum();
+        line.ceil() * zoom * pixel
+    }
+
+    pub fn scroll_em(text: f64, pixel: f64) -> u32 {
+        (text / pixel * Self::SCROLL_LINE).round().max(1.0) as u32
+    }
+
+    pub fn scroll_gap(screen: u32, pixel: f64) -> f64 {
+        (f64::from(screen) + Self::SCROLL_LEAD) * pixel
     }
 
     pub fn ink(&self) -> [u8; 3] {
@@ -4221,8 +4243,9 @@ impl Stabilization {
 /// A grade: the nodes of the color page. The picture comes in, goes through
 /// the nodes that the inputs join, and goes out from the link `output`.
 /// A node's number is its place in `nodes`, from 1. The number 0 is the
-/// picture that comes into the grade. While a node has an empty input, or
-/// its picture goes nowhere, or nothing goes out, the grade does nothing.
+/// picture that comes into the grade. While a corrector or a splitter has
+/// an empty input, a parallel mixer, a layer mixer or a combiner has no
+/// input with a link, or nothing goes out, the grade does nothing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Grade {
     /// The nodes, in the order of their numbers.
@@ -4230,6 +4253,17 @@ pub struct Grade {
     /// What goes out. Left out when nothing goes out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<GradeLink>,
+    /// The grades of node stack layers 2 and up of a clip grade, in order.
+    /// This grade is layer 1. Each layer takes the picture that the layer
+    /// before it gives. A layer that is not here has one corrector at its
+    /// usual values. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<Grade>,
+    /// The grades of the layers above the project's `node_stack_layers`
+    /// count, in order. They do not act. A higher count gives them back.
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_layers: Vec<Grade>,
 }
 
 /// A link into an input: the node that it leaves and the output of that
@@ -4252,11 +4286,15 @@ pub struct GradeLink {
     /// out at 0.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub made: u32,
+    /// The RGB output of a splitter that the link leaves: 0 red, 1 green,
+    /// 2 blue. Left out at 0, the one RGB output of the other nodes.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub output: u8,
 }
 
 impl PartialEq for GradeLink {
     fn eq(&self, other: &Self) -> bool {
-        (self.node, self.key) == (other.node, other.key)
+        (self.node, self.key, self.output) == (other.node, other.key, other.output)
     }
 }
 
@@ -4264,7 +4302,12 @@ impl Eq for GradeLink {}
 
 impl GradeLink {
     pub fn new(node: u32, key: bool) -> Self {
-        Self { node, key, made: 0 }
+        Self {
+            node,
+            key,
+            made: 0,
+            output: 0,
+        }
     }
 
     pub fn picture(node: u32) -> Self {
@@ -4274,6 +4317,21 @@ impl GradeLink {
     pub fn key(node: u32) -> Self {
         Self::new(node, true)
     }
+
+    pub fn split(node: u32, output: u8) -> Self {
+        Self {
+            output,
+            ..Self::new(node, false)
+        }
+    }
+
+    pub fn leaves_picture_of(&self, node: u32) -> bool {
+        self.node == node && !self.key
+    }
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
 }
 
 fn is_zero_u32(n: &u32) -> bool {
@@ -4286,11 +4344,123 @@ impl Grade {
         Self {
             nodes: vec![GradeNode::corrector(source, [0.0, 0.0], frame)],
             output: Some(GradeLink::picture(1)),
+            layers: Vec::new(),
+            kept_layers: Vec::new(),
         }
     }
 
     pub fn is_usual(&self, frame: [f64; 2]) -> bool {
         *self == Self::usual(frame)
+    }
+
+    pub fn layer(&self, n: usize, frame: [f64; 2]) -> Grade {
+        match n {
+            0 | 1 => self.own(),
+            _ => (self.layers.get(n - 2).cloned()).unwrap_or_else(|| Self::usual(frame)),
+        }
+    }
+
+    fn own(&self) -> Grade {
+        Grade {
+            nodes: self.nodes.clone(),
+            output: self.output,
+            layers: Vec::new(),
+            kept_layers: Vec::new(),
+        }
+    }
+
+    pub fn with_layer(&self, n: usize, grade: Grade, frame: [f64; 2]) -> Grade {
+        let mut whole = self.padded(n, frame);
+        match n {
+            0 | 1 => (whole.nodes, whole.output) = (grade.nodes, grade.output),
+            _ => whole.layers[n - 2] = grade,
+        }
+        whole.trim(frame);
+        whole
+    }
+
+    pub fn padded(&self, n: usize, frame: [f64; 2]) -> Grade {
+        let mut whole = self.clone();
+        if whole.layers.len() + 1 < n {
+            whole.layers.resize_with(n - 1, || Self::usual(frame));
+        }
+        whole
+    }
+
+    pub fn below(&self, n: usize, top: Grade, frame: [f64; 2]) -> Grade {
+        let mut whole = self.padded(n, frame);
+        whole.layers.truncate(n.saturating_sub(1));
+        whole.kept_layers.clear();
+        match n {
+            0 | 1 => (whole.nodes, whole.output) = (top.nodes, top.output),
+            _ => whole.layers[n - 2] = top,
+        }
+        whole
+    }
+
+    fn trim(&mut self, frame: [f64; 2]) {
+        while self.kept_layers.last().is_some_and(|l| l.is_usual(frame)) {
+            self.kept_layers.pop();
+        }
+        if self.kept_layers.is_empty() {
+            while self.layers.last().is_some_and(|l| l.is_usual(frame)) {
+                self.layers.pop();
+            }
+        }
+    }
+
+    pub fn counted(&mut self, count: usize, frame: [f64; 2]) {
+        let mut all = std::mem::take(&mut self.layers);
+        all.append(&mut self.kept_layers);
+        let shown = count.saturating_sub(1);
+        if all.len() > shown {
+            self.kept_layers = all.split_off(shown);
+        }
+        self.layers = all;
+        self.trim(frame);
+    }
+
+    pub fn reset_layers(&mut self, frame: [f64; 2]) {
+        let shown = self.layers.len();
+        *self = Grade {
+            layers: vec![Self::usual(frame); shown],
+            kept_layers: std::mem::take(&mut self.kept_layers),
+            ..Self::usual(frame)
+        };
+        self.trim(frame);
+    }
+
+    pub fn layer_start(&self, n: usize) -> u32 {
+        match n {
+            0 | 1 => 0,
+            _ => (0..n - 2).fold(self.last(), |at, i| {
+                at + self.layers.get(i).map_or(1, Grade::last)
+            }),
+        }
+    }
+
+    pub fn stacked(&self) -> Cow<'_, Grade> {
+        if self.layers.is_empty() {
+            return Cow::Borrowed(self);
+        }
+        let mut whole = self.own();
+        for layer in &self.layers {
+            let (start, below) = (whole.last(), whole.output);
+            let moved = |l: GradeLink| match l.node {
+                0 => below,
+                n => Some(GradeLink {
+                    node: n + start,
+                    ..l
+                }),
+            };
+            whole.nodes.extend(layer.nodes.iter().map(|d| GradeNode {
+                inputs: d.inputs.iter().map(|l| l.and_then(moved)).collect(),
+                key_from: d.key_from.and_then(moved),
+                ..d.clone()
+            }));
+            whole.output = layer.output.and_then(moved);
+        }
+        Cow::Owned(whole)
     }
 
     pub fn node(&self, number: u32) -> Option<&GradeNode> {
@@ -4319,8 +4489,9 @@ pub struct GradeNode {
     #[serde(flatten)]
     pub tool: GradeTool,
     /// What comes into each input, in order, or null for nothing. A
-    /// corrector has one input, its RGB input. A mixer has one or more.
-    /// The inputs of a key mixer are key inputs.
+    /// corrector and a splitter have one input, an RGB input. A combiner
+    /// has three: red, green and blue. A mixer has one or more. The inputs
+    /// of a key mixer are key inputs.
     pub inputs: Vec<Option<GradeLink>>,
     /// Off, a corrector passes on the picture that comes into it, and a
     /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
@@ -4363,6 +4534,12 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// Auto-Keyframe of a corrector or a key mixer: a change to the node
+    /// on a frame where it has no keyframe first adds a Dynamic keyframe
+    /// there. That keyframe holds the values that the picture has on its
+    /// frame. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_key: bool,
     /// The windows of a corrector, in the order of the window list. They
     /// make the key of the corrector. A corrector has a linear, a circle, a
     /// polygon and a gradient window first, off at first, which stay. The
@@ -4386,6 +4563,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: GradeWindow::fixed(frame),
         }
     }
@@ -4403,6 +4581,7 @@ impl GradeNode {
             key_from: None,
             key_input: KeyInput::default(),
             locked: false,
+            auto_key: false,
             windows: Vec::new(),
         }
     }
@@ -4795,6 +4974,11 @@ pub struct GradeKey {
     /// mixer leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// A mark of Add EDL Marks on Tracks, on an edit of the timeline.
+    /// Delete EDL Marks on Tracks removes only these marks. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edl: bool,
 }
 
 /// What a keyframe does up to the next keyframe.
@@ -4857,13 +5041,40 @@ pub enum GradeTool {
         /// order.
         mix: Vec<KeyMix>,
     },
+    /// It splits the picture on its one input into its channels. RGB
+    /// output 0 gives red, 1 green and 2 blue, each as a gray picture: R, G
+    /// and B are that channel. It has no key input and no key output.
+    Splitter,
+    /// It joins three pictures into one: red from input 0, green from
+    /// input 1 and blue from input 2. The alpha comes from the first input
+    /// that has a link. An input with no link gives 0 to its channel. At
+    /// least one input needs a link. It has no key input or key output.
+    Combiner,
 }
 
 impl GradeTool {
     pub fn is_mixer(&self) -> bool {
         !matches!(self, Self::Corrector(_))
     }
+
+    pub fn takes_inputs(&self) -> bool {
+        matches!(
+            self,
+            Self::ParallelMixer | Self::LayerMixer { .. } | Self::KeyMixer { .. }
+        )
+    }
+
+    pub fn outputs(&self) -> u8 {
+        match self {
+            Self::Splitter => SPLIT_OUTPUTS,
+            _ => 1,
+        }
+    }
 }
+
+pub const SPLIT_OUTPUTS: u8 = 3;
+
+pub const COMBINER_INPUTS: usize = 3;
 
 /// A primary correction: the numbers of the Primaries palette. Each value
 /// keeps its own channel order, `[red, green, blue]`, with the master
@@ -5421,15 +5632,18 @@ pub struct Merge {
     pub operator: Option<MergeOperator>,
     /// From 0 to 1. At 0, the colors of the foreground are multiplied by
     /// its alpha first: a foreground with straight colors. At 1, they are
-    /// used as they are: premultiplied colors. Usual: 1.
+    /// used as they are: premultiplied colors. Only a `normal` merge uses
+    /// it. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// What the alpha of the foreground is multiplied by, from 0 to 1. At
-    /// 0, the foreground is added to the background. Usual: 1.
+    /// 0, a `normal` foreground is added to the background. The other apply
+    /// modes multiply the colors of the foreground too. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha_gain: Option<f64>,
     /// How much less the alpha of the foreground covers the background,
-    /// from 0 to 1. The foreground is still added in full. Usual: 0.
+    /// from 0 to 1. The foreground is still added in full. Only a `normal`
+    /// merge uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
     /// The width that the center is shown in: its x shows as x × this
@@ -6137,6 +6351,10 @@ pub struct Mask {
     /// of the picture. Below 0, the edge moves in. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How its own mask joins the masks on its effect mask input. With
+    /// nothing on that input, the mask is its own mask. Usual: `merge`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// On, the mask is the part outside its shape. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
@@ -6184,6 +6402,11 @@ pub struct Mask {
     /// Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
+    /// How the sharp corners of a `rectangle` are drawn where its edge moves
+    /// out: `sharp` keeps a square corner, `rounded` gives an arc and
+    /// `beveled` cuts the corner straight. Usual: `sharp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,
@@ -6199,6 +6422,37 @@ pub struct Mask {
     /// covers nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<[f64; 2]>,
+}
+
+/// How a mask joins its own mask n with the masks i on its effect mask
+/// input. n is its shape after `invert` and `level`. c is its shape before
+/// `level`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaintMode {
+    /// n + i × (1 − c).
+    #[default]
+    Merge,
+    /// i + n, at most 1.
+    Add,
+    /// i − n, at least 0.
+    Subtract,
+    /// The smaller of i and n.
+    Minimum,
+    /// The larger of i and n.
+    Maximum,
+    /// (i + n) / 2.
+    Average,
+    /// i × n.
+    Multiply,
+    /// n where n is above 0, else i.
+    Replace,
+    /// i + n − 2 × i × n: n turns i over.
+    Invert,
+    /// n.
+    Copy,
+    /// i.
+    Ignore,
 }
 
 /// Which parts a polygon whose sides cross covers.
@@ -7717,6 +7971,14 @@ impl Ease {
 
     pub fn is_linear(&self) -> bool {
         *self == Self::Linear
+    }
+
+    pub fn backward(self) -> Self {
+        match self {
+            Self::EaseIn => Self::EaseOut,
+            Self::EaseOut => Self::EaseIn,
+            other => other,
+        }
     }
 
     pub fn of(self, t: f64) -> f64 {

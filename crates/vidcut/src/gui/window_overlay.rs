@@ -23,6 +23,20 @@ const GRADIENT_REACH: f64 = 1.0 / 6.0;
 const ROUND: usize = 96;
 const FAR: f64 = 1e5;
 const SPLIT_STEPS: usize = 64;
+const DASH: f32 = 4.0;
+const DASH_GAP: f32 = 3.0;
+const BOUND_GRIP: f32 = 3.5;
+const BOUND_REACH: f32 = 6.0;
+const BOUND_AT: [[f64; 2]; 8] = [
+    [0.0, 0.0],
+    [0.5, 0.0],
+    [1.0, 0.0],
+    [1.0, 0.5],
+    [1.0, 1.0],
+    [0.5, 1.0],
+    [0.0, 1.0],
+    [0.0, 0.5],
+];
 const SELECTED: Color32 = Color32::WHITE;
 const RIM: Color32 = Color32::from_rgb(60, 130, 235);
 const SOFTNESS: Color32 = Color32::from_rgb(235, 60, 225);
@@ -109,6 +123,9 @@ enum Grip {
     Tangent(usize, usize, bool),
     Pull(usize),
     Arrow,
+    Band,
+    Picked,
+    Bound(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -120,11 +137,13 @@ enum Look {
     Arrow,
 }
 
+type Placed = (Grip, Look, [f64; 2]);
+
 struct Drawn {
     outline: Vec<[f64; 2]>,
     closed: bool,
     guides: Vec<Vec<[f64; 2]>>,
-    grips: Vec<(Grip, Look, [f64; 2])>,
+    grips: Vec<Placed>,
 }
 
 pub(super) struct Drawing {
@@ -140,6 +159,166 @@ pub(super) struct WindowGrab {
     grip: Grip,
     grade: Grade,
     from: [f64; 2],
+}
+
+pub(super) struct PointPick {
+    of: GradeOf,
+    node: u32,
+    index: usize,
+    points: Vec<usize>,
+    bound: Option<[[f64; 2]; 2]>,
+    held: Option<[[f64; 2]; 2]>,
+}
+
+fn ordered([a, b]: [[f64; 2]; 2]) -> [[f64; 2]; 2] {
+    [
+        [a[0].min(b[0]), a[1].min(b[1])],
+        [a[0].max(b[0]), a[1].max(b[1])],
+    ]
+}
+
+fn bound_point([lo, hi]: [[f64; 2]; 2], a: [f64; 2]) -> [f64; 2] {
+    [
+        lo[0] + (hi[0] - lo[0]) * a[0],
+        lo[1] + (hi[1] - lo[1]) * a[1],
+    ]
+}
+
+fn bound_map(
+    grip: Grip,
+    b: [[f64; 2]; 2],
+    (from, to): ([f64; 2], [f64; 2]),
+) -> impl Fn([f64; 2]) -> [f64; 2] {
+    let by = [to[0] - from[0], to[1] - from[1]];
+    let (anchor, k, shift) = match grip {
+        Grip::Bound(h) => {
+            let a = BOUND_AT[h % BOUND_AT.len()];
+            let anchor = bound_point(b, [1.0 - a[0], 1.0 - a[1]]);
+            let handle = bound_point(b, a);
+            let ratio: [f64; 2] = std::array::from_fn(|j| {
+                let long = handle[j] - anchor[j];
+                match a[j] == 0.5 || long.abs() < 1e-9 {
+                    true => 1.0,
+                    false => (long + by[j]) / long,
+                }
+            });
+            let even = (ratio.into_iter())
+                .min_by(|x, y| x.abs().total_cmp(&y.abs()))
+                .unwrap_or(1.0);
+            let k = match a[0] == 0.5 || a[1] == 0.5 {
+                true => ratio,
+                false => [even; 2],
+            };
+            (anchor, k, [0.0, 0.0])
+        }
+        _ => ([0.0, 0.0], [1.0, 1.0], by),
+    };
+    move |q: [f64; 2]| {
+        [
+            anchor[0] + (q[0] - anchor[0]) * k[0] + shift[0],
+            anchor[1] + (q[1] - anchor[1]) * k[1] + shift[1],
+        ]
+    }
+}
+
+fn picks_moved(
+    w: &GradeWindow,
+    picks: &[usize],
+    grip: Grip,
+    moved: ([f64; 2], [f64; 2]),
+    (frame, held): ([f64; 2], [[f64; 2]; 2]),
+) -> GradeWindow {
+    let s = shaped(w, frame);
+    let mut n = w.clone();
+    let (Outline::Curve { controls, .. }, WindowShape::Curve { points, .. }) =
+        (&s.outline, &mut n.shape)
+    else {
+        return n;
+    };
+    let map = bound_map(grip, held, moved);
+    for &i in picks {
+        if let (Some(c), Some(t)) = (controls.get(i), points.get_mut(i)) {
+            *t = c.map(|q| model_point(w, &s, frame, map(q)));
+        }
+    }
+    n
+}
+
+fn picked_in(controls: &[CurvePoint], framing: &Framing, band: egui::Rect) -> Vec<usize> {
+    (controls.iter().enumerate())
+        .filter(|(_, c)| band.contains(framing.screen(c[1])))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+fn dashed(painter: &egui::Painter, corners: [Pos2; 4], color: Color32) {
+    let ring = [corners[0], corners[1], corners[2], corners[3], corners[0]];
+    painter.extend(Shape::dashed_line(
+        &ring,
+        Stroke::new(1.0, color),
+        DASH,
+        DASH_GAP,
+    ));
+}
+
+fn paint_picks(
+    painter: &egui::Painter,
+    framing: &Framing,
+    (controls, grips): (&[CurvePoint], &[Placed]),
+    (picks, bound): (&[usize], Option<[[f64; 2]; 2]>),
+) {
+    for (g, _, q) in grips {
+        if let Grip::Spread(i, _) = g
+            && picks.contains(i)
+        {
+            painter.circle_filled(framing.screen(*q), HANDLE, RIM);
+        }
+    }
+    for c in picks.iter().filter_map(|i| controls.get(*i)) {
+        painter.circle(
+            framing.screen(c[1]),
+            HANDLE,
+            RIM,
+            Stroke::new(1.5, SELECTED),
+        );
+    }
+    let Some(b) = bound else {
+        return;
+    };
+    let corner = |a: [f64; 2]| framing.screen(bound_point(b, a));
+    let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]].map(corner);
+    dashed(painter, corners, SELECTED);
+    for a in BOUND_AT {
+        let at = corner(a);
+        let square = egui::Rect::from_center_size(at, Vec2::splat(2.0 * BOUND_GRIP));
+        painter.rect(
+            square,
+            0.0,
+            SELECTED,
+            Stroke::new(1.0, RIM),
+            egui::StrokeKind::Middle,
+        );
+    }
+}
+
+fn bound_hit(
+    framing: &Framing,
+    controls: &[CurvePoint],
+    (picks, bound): (&[usize], Option<[[f64; 2]; 2]>),
+    p: Pos2,
+) -> Option<Grip> {
+    if let Some(b) = bound {
+        let near = (BOUND_AT.iter().enumerate())
+            .map(|(h, a)| (h, framing.screen(bound_point(b, *a)).distance(p)))
+            .filter(|(_, d)| *d <= BOUND_REACH)
+            .min_by(|x, y| x.1.total_cmp(&y.1));
+        if let Some((h, _)) = near {
+            return Some(Grip::Bound(h));
+        }
+    }
+    (picks.iter().filter_map(|i| controls.get(*i)))
+        .any(|c| framing.screen(c[1]).distance(p) <= GRIP)
+        .then_some(Grip::Picked)
 }
 
 fn mid(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
@@ -813,6 +992,7 @@ impl Workspace {
             || self.effects_page.palette != GradePalette::Window
         {
             self.effects_page.window_drawing = None;
+            self.effects_page.window_points = None;
             return false;
         }
         let Some((of, _, stored)) = self.grade_shown() else {
@@ -868,15 +1048,62 @@ impl Workspace {
         for s in &seen {
             paint(&painter, &framing, s, s.index == current);
         }
+        let controls: Vec<CurvePoint> = match seen.iter().find(|s| s.index == current) {
+            Some(Seen {
+                shaped:
+                    Shaped {
+                        outline: Outline::Curve { controls, .. },
+                        ..
+                    },
+                ..
+            }) if !adding => controls.clone(),
+            _ => Vec::new(),
+        };
+        if self.effects_page.window_points.is_some()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.effects_page.window_points = None;
+        }
+        let (picks, bound): (Vec<usize>, _) = (self.effects_page.window_points.as_ref())
+            .filter(|k| k.of == of && k.node == n && k.index == current)
+            .map(|k| {
+                let kept = k.points.iter().copied().filter(|i| *i < controls.len());
+                (kept.collect(), k.bound)
+            })
+            .unwrap_or_default();
+        if picks.is_empty() {
+            self.effects_page.window_points = None;
+        }
+        let grips = (seen.iter().find(|s| s.index == current))
+            .map(|s| s.drawn.grips.as_slice())
+            .unwrap_or_default();
+        paint_picks(&painter, &framing, (&controls, grips), (&picks, bound));
         let own = |p: Pos2| grips_at(seen.iter().filter(|s| s.index == current), &framing, p);
         let hover = ui
             .input(|i| i.pointer.hover_pos())
             .filter(|p| resp.rect.contains(*p));
+        if let Some(g) = &self.effects_page.window_grab
+            && g.grip == Grip::Band
+            && let Some(p) = hover
+        {
+            let band = egui::Rect::from_two_pos(framing.screen(g.from), p);
+            let corners = [
+                band.left_top(),
+                band.right_top(),
+                band.right_bottom(),
+                band.left_bottom(),
+            ];
+            dashed(&painter, corners, SELECTED);
+        }
         let grabbed = self.effects_page.window_grab.is_some();
+        let on_picks = |p: Pos2| bound_hit(&framing, &controls, (&picks, bound), p);
         let hovered = match adding {
             true => hover.map(|p| own(p).map(|(_, g)| g)),
             false => hover
-                .and_then(|p| target(&seen, current, &framing, p))
+                .and_then(|p| {
+                    (on_picks(p).map(|g| (current, g)))
+                        .or_else(|| target(&seen, current, &framing, p))
+                })
                 .map(|(_, g)| Some(g)),
         };
         if let Some(grip) = hovered {
@@ -887,12 +1114,37 @@ impl Workspace {
                 (Some(_), false) => CursorIcon::Grab,
             });
         }
-        let alt = ui.input(|i| i.modifiers.alt);
+        let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
         let press = ui.input(|i| i.pointer.press_origin());
         let pointer = ui.input(|i| i.pointer.interact_pos());
+        let started =
+            (press.filter(|_| resp.drag_started_by(PointerButton::Primary))).and_then(|p| {
+                let band = shift && !controls.is_empty();
+                (on_picks(p).or(band.then_some(Grip::Band))).map(|g| (p, g))
+            });
+        if let Some((p, grip)) = started {
+            match grip {
+                Grip::Band => self.effects_page.window_points = None,
+                _ => {
+                    if let Some(k) = self.effects_page.window_points.as_mut() {
+                        k.held = k.bound;
+                    }
+                }
+            }
+            self.effects_page.window_grab = (!locked).then(|| WindowGrab {
+                of: of.clone(),
+                node: n,
+                index: current,
+                grip,
+                grade: grade.clone(),
+                from: framing.window(p),
+            });
+        }
         if resp.drag_started_by(PointerButton::Primary)
+            && started.is_none()
             && let Some(p) = press
         {
+            self.effects_page.window_points = None;
             let hit = match adding {
                 true => own(p),
                 false => target(&seen, current, &framing, p),
@@ -954,16 +1206,48 @@ impl Workspace {
             && let Some(start) =
                 (g.grade.node(n)).and_then(|d| d.windows_changed_at(keyed).get(g.index))
         {
-            let next_window = dragged(start, g.grip, (g.from, framing.window(to)), frame);
-            let next = with_window(&g.grade, n, (keyed, g.index), |w| *w = next_window);
-            self.hold_grade(&of, n, next);
+            let moved = (g.from, framing.window(to));
+            let held = (self.effects_page.window_points.as_ref()).and_then(|k| k.held);
+            let next_window = match g.grip {
+                Grip::Band => None,
+                Grip::Picked | Grip::Bound(_) => {
+                    if let (Some(held), Some(k)) = (held, self.effects_page.window_points.as_mut())
+                    {
+                        let map = bound_map(g.grip, held, moved);
+                        k.bound = Some(ordered([map(held[0]), map(held[1])]));
+                    }
+                    let held = held.unwrap_or_default();
+                    Some(picks_moved(start, &picks, g.grip, moved, (frame, held)))
+                }
+                grip => Some(dragged(start, grip, moved, frame)),
+            };
+            let band = (g.grip == Grip::Band)
+                .then(|| egui::Rect::from_two_pos(framing.screen(g.from), to));
+            let next =
+                next_window.map(|next| with_window(&g.grade, n, (keyed, g.index), |w| *w = next));
+            if let Some(next) = next {
+                self.hold_grade(&of, n, next);
+            }
+            if let Some(band) = band {
+                let bound = ordered([framing.window(band.min), framing.window(band.max)]);
+                self.effects_page.window_points = Some(PointPick {
+                    of: of.clone(),
+                    node: n,
+                    index: current,
+                    points: picked_in(&controls, &framing, band),
+                    bound: Some(bound),
+                    held: Some(bound),
+                });
+            }
         }
         if resp.drag_stopped() {
             self.effects_page.window_grab = None;
         }
-        if resp.clicked_by(PointerButton::Primary)
-            && let Some(p) = pointer
-        {
+        let clicked = pointer.filter(|_| resp.clicked_by(PointerButton::Primary));
+        if clicked.is_some_and(|p| on_picks(p).is_none()) {
+            self.effects_page.window_points = None;
+        }
+        if let Some(p) = clicked.filter(|p| on_picks(*p).is_none()) {
             match adding {
                 true => self.curve_click(&of, n, (&grade, current), (own(p), p, &framing)),
                 false => self.window_click(&of, n, (&grade, current, locked), (&seen, p, &framing)),
@@ -971,6 +1255,21 @@ impl Workspace {
             if adding && self.effects_page.window_drawing.is_none() {
                 ui.ctx().request_repaint();
             }
+        }
+        if !adding
+            && !controls.is_empty()
+            && let Some(p) = clicked.filter(|p| on_picks(*p).is_none())
+            && let Some((index, Grip::Point(i))) = target(&seen, current, &framing, p)
+            && index == current
+        {
+            self.effects_page.window_points = Some(PointPick {
+                of: of.clone(),
+                node: n,
+                index,
+                points: vec![i],
+                bound: None,
+                held: None,
+            });
         }
         if resp.double_clicked()
             && alt
@@ -1016,6 +1315,7 @@ impl Workspace {
             });
             if removed {
                 self.effects_page.window = index;
+                self.effects_page.window_points = None;
                 self.hold_grade(&of, n, next);
             }
         }
@@ -1026,6 +1326,58 @@ impl Workspace {
             }
         }
         true
+    }
+
+    pub(super) fn delete_window_points(&mut self) -> bool {
+        if self.effects_page.palette != GradePalette::Window {
+            return false;
+        }
+        let Some(pick) = self.effects_page.window_points.take() else {
+            return false;
+        };
+        let Some((of, _, stored)) = self.grade_shown() else {
+            return false;
+        };
+        let n = pick.node;
+        if pick.of != of || self.current_grade_node(&stored) != Some(n) {
+            return false;
+        }
+        let grade = self.held_grade(&of, n).cloned().unwrap_or(stored);
+        let Some(node) = grade.node(n) else {
+            return false;
+        };
+        if node.locked {
+            return true;
+        }
+        let keyed = self.grade_frame(&of);
+        let mut gone = pick.points;
+        gone.sort_unstable_by(|a, b| b.cmp(a));
+        gone.dedup();
+        let mut removed = false;
+        let next = with_window(&grade, n, (keyed, pick.index), |w| {
+            if let WindowShape::Curve {
+                points,
+                inner,
+                outer,
+                ..
+            } = &mut w.shape
+            {
+                let had = points.len();
+                for &i in gone.iter().filter(|i| **i < had) {
+                    points.remove(i);
+                    for moves in [&mut *inner, &mut *outer].into_iter().flatten() {
+                        if i < moves.len() {
+                            moves.remove(i);
+                        }
+                    }
+                    removed = true;
+                }
+            }
+        });
+        if removed {
+            self.hold_grade(&of, n, next);
+        }
+        removed
     }
 
     fn curve_click(

@@ -490,7 +490,8 @@ impl Env for AvEnv {
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
                 let input = vidcut_av::decode::Input::of_media(media);
-                vidcut_av::subjects::find(&input, subject, look, decoder.as_ref(), &dir)
+                let gpu = (decoder.as_ref(), crate::preferences::gpu_acceleration());
+                vidcut_av::subjects::find(&input, subject, look, gpu, &dir)
             },
             Detections::to_bytes,
             Detections::from_bytes,
@@ -522,7 +523,13 @@ impl Env for AvEnv {
             analysis_file(media, &key),
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
-                vidcut_av::stabilize::measure(plan, &look, decoder.as_ref(), &media.path)
+                vidcut_av::stabilize::measure(
+                    plan,
+                    &look,
+                    decoder.as_ref(),
+                    &media.path,
+                    crate::preferences::gpu_acceleration(),
+                )
             },
             Shake::to_bytes,
             Shake::from_bytes,

@@ -73,7 +73,7 @@ fn user_preset_path(name: &str) -> PathBuf {
     let plain = name.is_ascii()
         && name.len() <= 64
         && name == name.to_ascii_lowercase()
-        && checked_name(name).is_ok_and(|n| n == name);
+        && checked_name("preset", name).is_ok_and(|n| n == name);
     let stem = if plain {
         name.to_string()
     } else {
