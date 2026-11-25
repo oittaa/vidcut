@@ -37,7 +37,7 @@ const LIST_COLUMNS: [&str; 9] = [
 const LIST_GAP: Vec2 = Vec2::new(12.0, 4.0);
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
-const EDIT_ICONS: f32 = 10.0;
+const EDIT_ICONS: f32 = 11.0;
 const EDIT_ICON: f32 = 16.0;
 const EDIT_ICON_GAP: f32 = 4.0;
 const CARD_HEIGHT: f32 = 96.0;
@@ -2462,12 +2462,17 @@ impl Workspace {
                     "Ripple Overwrite",
                     "edit.ripple_overwrite",
                 ),
-                (icon::PLACE_ON_TOP, "Place On Top", "edit.place_on_top"),
             ];
             for (glyph, name, method) in buttons {
                 if edit_icon(ui, glyph, name) {
                     self.edit_function(method);
                 }
+            }
+            if edit_icon(ui, icon::CLOSE_UP, "Close Up") {
+                self.close_up();
+            }
+            if edit_icon(ui, icon::PLACE_ON_TOP, "Place On Top") {
+                self.edit_function("edit.place_on_top");
             }
             if edit_icon(ui, icon::SOURCE_OVERWRITE, "Source Overwrite") {
                 if self.left == LeftTab::SyncBin && self.snap.viewer == ViewerMode::SourceClip {
@@ -2527,7 +2532,8 @@ mod icon {
     pub use egui_phosphor::regular::{
         ARROW_LINE_DOWN as SMART_INSERT, ARROW_LINE_RIGHT as APPEND,
         ARROWS_LEFT_RIGHT as RIPPLE_OVERWRITE, CLOCK as SOURCE_OVERWRITE, INTERSECT as DISSOLVE,
-        LINE_VERTICAL as CUT, STACK as PLACE_ON_TOP, WAVE_SINE as SMOOTH_CUT,
+        LINE_VERTICAL as CUT, MAGNIFYING_GLASS_PLUS as CLOSE_UP, STACK as PLACE_ON_TOP,
+        WAVE_SINE as SMOOTH_CUT,
     };
 }
 
