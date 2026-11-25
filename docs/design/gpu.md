@@ -132,7 +132,7 @@ The draw:
       - After a loss, the next play, seek or step of a player clears its error. It also drops the pictures that a GPU held (`Store::forget_held`). The lost device cannot give them back.
       - Why: the cause can be gone, for example another program that used much of the GPU.
       - After `RETRIES` losses in one minute, vidcut makes no new device until that minute ends. Why: Windows stops the computer after more than five resets in one minute ([gotchas](../gotchas.md#wgpu-and-egui)).
-  - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
+  - The viewer's frame render, the AI upscalers, the frame interpolation and the stabilization analysis use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
     - The viewer's device opens with the largest texture, buffer and storage binding of the GPU. Its other limits are the defaults of wgpu.
