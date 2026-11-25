@@ -286,3 +286,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
      - Without a source, the limit is not recorded (`Source::Unrecorded`).
   4. Run `vidcut models check MODEL --download`, then the commit gate.
   5. The pull request lists each changed field: the old value, the new value and the source.
+
+- **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` from scratch.
+  - Datasets (both CC BY 4.0): SimpleCube++ (`train`, 1,772 scenes, Zenodo record 4153431) and video frames from YouTube UGC and `tests/media-manifest.toml`.
+  - Extract 6 to 12 evenly spaced PNG frames per training clip (`tos-720p-mov`, `stab-*` and YouTube UGC) and exclude test clips.
+  - Run `python scripts/auto-color-train.py --simplecube DIR/SimpleCube++ --frames DIR/frames --exclude-dir DIR/holdout --out crates/vidcut-av/src/auto_color.safetensors`.

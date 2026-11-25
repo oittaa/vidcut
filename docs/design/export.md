@@ -914,7 +914,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
   - In neural mode, the corrector is at its usual values in that frame. In legacy mode, only its Lift and Gain reset.
   - `Env::auto_balance` renders that frame in float (`still::floats_sized`). `BALANCES` keeps recent results keyed by mode and plan.
-  - Neural mode runs `auto_color::balance` in `vidcut-av` (GPU via `compute::ops` or CPU) to give six `exposure` and three `white` values (`AutoResult::Neural`).
+  - Neural mode runs `auto_color::balance` in `vidcut-av` to give six `exposure` and three `white` values (`AutoResult::Neural`). With `gpu.acceleration` on, it runs in `compute::ops` and a GPU failure returns an error that names `gpu.acceleration`. With it off, the CPU runs the model.
   - Legacy mode runs `auto_color::balance` in `vidcut-core` to give Lift and Gain (`AutoResult::Legacy`).
   - `ops::grade::auto_color` writes the `AutoColor` tool in neural mode, or Lift and Gain in legacy mode.
 - The Auto Color tool (`Corrector::auto_color`) holds `exposure` and `white` numbers (`grade_auto`).

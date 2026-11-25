@@ -27,7 +27,7 @@
 4. **No media in git.**
    - Test media, generated fixtures and the manual are in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
    - Test outputs go to temp dirs.
-   - `scripts/check.sh` refuses any binary file. Thus `.gitignore` lists no file types.
+   - `scripts/check.sh` refuses any binary file except `crates/vidcut-av/src/auto_color.safetensors`. Thus `.gitignore` lists no file types.
    - `tests/media-manifest.toml` lists the real-world clips (URL, license, sha256). `scripts/fetch-test-media.sh` gets them.
 5. **No ffmpeg or ffprobe subprocesses.** Use `vidcut-av`, which links the FFmpeg libraries.
 6. **License:** MIT.

@@ -6,6 +6,7 @@ use vidcut_core::auto_color::Neural;
 
 use crate::compute::ops::{self, Act, Conv, Kernels, Ops, Res, Shape, View};
 use crate::compute::{self, Gpu};
+use crate::error::{Error, Result};
 
 const SIZE: usize = 128;
 const OUT_CH: usize = 160;
@@ -199,8 +200,8 @@ fn gpu_conv(gpu: &Gpu, c: &ConvWeights) -> Conv {
 }
 
 impl GpuNet {
-    fn start(m: &Model) -> Option<Self> {
-        let gpu = Gpu::start("Auto Color", ops::SHARED).ok()?;
+    fn start(m: &Model) -> Result<Self> {
+        let gpu = Gpu::start("Auto Color", ops::SHARED).map_err(Error::Invalid)?;
         let (kernels, (_bufs, views), stem, stages) =
             compute::checked(&gpu.device, gpu.what, || {
                 let kernels = Kernels::new(&gpu);
@@ -217,7 +218,7 @@ impl GpuNet {
                     h4: c.view(1, 4, 4, OUT_CH as u32),
                     r4: c.view(1, 4, 4, OUT_CH as u32),
                 })
-                .map_err(|e| crate::error::Error::Invalid(e.to_string()))?;
+                .map_err(|e| Error::Invalid(e.to_string()))?;
                 let stem = gpu_conv(&gpu, &m.stem);
                 let stages = std::array::from_fn(|i| {
                     (
@@ -226,10 +227,9 @@ impl GpuNet {
                     )
                 });
                 Ok((kernels, (bufs, views), stem, stages))
-            })
-            .ok()?;
+            })?;
         let staging = gpu.staging((OUT_LEN * 4) as u64);
-        Some(Self {
+        Ok(Self {
             gpu,
             kernels,
             _bufs,
@@ -240,9 +240,9 @@ impl GpuNet {
         })
     }
 
-    fn forward(&self, nhwc: &[f32]) -> Option<Vec<f32>> {
+    fn forward(&self, nhwc: &[f32]) -> Result<Vec<f32>> {
         let gpu = &self.gpu;
-        let out = compute::checked(&gpu.device, gpu.what, || {
+        compute::checked(&gpu.device, gpu.what, || {
             gpu.queue
                 .write_buffer(&self.views.input.buf, 0, &compute::bytes(nhwc));
             let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -275,49 +275,82 @@ impl GpuNet {
             gpu.flush();
             gpu.queue.submit([enc.finish()]);
             Ok(())
-        });
-        out.ok()?;
-        let raw = gpu.fetch(&self.staging, (OUT_LEN * 4) as u64, None).ok()?;
-        Some(compute::floats(&raw))
+        })?;
+        let raw = gpu.fetch(&self.staging, (OUT_LEN * 4) as u64, None)?;
+        Ok(compute::floats(&raw))
     }
 }
 
-fn gpu_forward(m: &Model, nhwc: &[f32]) -> Option<Vec<f32>> {
-    static RUNNER: OnceLock<Option<Mutex<GpuNet>>> = OnceLock::new();
-    let slot = RUNNER.get_or_init(|| GpuNet::start(m).map(Mutex::new));
-    slot.as_ref()?
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .forward(nhwc)
+fn with_gpu_note(why: Error) -> Error {
+    Error::Invalid(format!(
+        "{why}; with gpu.acceleration off, the CPU balances the color"
+    ))
+}
+
+fn gpu_forward(m: &Model, nhwc: &[f32]) -> Result<Vec<f32>> {
+    static RUNNER: Mutex<Option<GpuNet>> = Mutex::new(None);
+    let mut guard = RUNNER.lock().unwrap_or_else(PoisonError::into_inner);
+    if guard.is_none() {
+        *guard = Some(GpuNet::start(m).map_err(with_gpu_note)?);
+    }
+    let res = guard.as_ref().expect("initialized").forward(nhwc);
+    if res.is_err() {
+        *guard = None;
+    }
+    res.map_err(with_gpu_note)
 }
 
 fn clamp01(v: f32) -> f32 {
     if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) }
 }
 
+fn axis_sample(src_len: usize, dst_idx: usize, read: impl Fn(usize) -> [f32; 3]) -> [f32; 3] {
+    if src_len > SIZE {
+        let scale = src_len as f32 / SIZE as f32;
+        let start = dst_idx as f32 * scale;
+        let end = (dst_idx + 1) as f32 * scale;
+        let lo = start.floor() as usize;
+        let hi = (end.ceil() as usize).min(src_len);
+        let mut acc = [0.0f32; 3];
+        for s in lo..hi {
+            let overlap = (end.min((s + 1) as f32) - start.max(s as f32)).max(0.0);
+            let px = read(s);
+            for c in 0..3 {
+                acc[c] += px[c] * overlap;
+            }
+        }
+        let inv = 1.0 / (end - start);
+        return [acc[0] * inv, acc[1] * inv, acc[2] * inv];
+    }
+    let f = (((dst_idx as f32 + 0.5) * src_len as f32 / SIZE as f32) - 0.5)
+        .clamp(0.0, (src_len - 1) as f32);
+    let i0 = f.floor() as usize;
+    let i1 = (i0 + 1).min(src_len - 1);
+    let w = f - i0 as f32;
+    let a = read(i0);
+    let b = read(i1);
+    [
+        a[0] * (1.0 - w) + b[0] * w,
+        a[1] * (1.0 - w) + b[1] * w,
+        a[2] * (1.0 - w) + b[2] * w,
+    ]
+}
+
 fn resize_nhwc_128(width: u32, height: u32, pixels: &[[f32; 3]]) -> Vec<f32> {
     let (w, h) = (width as usize, height as usize);
+    let mut horiz = vec![[0.0f32; 3]; h * SIZE];
+    for y in 0..h {
+        let row = &pixels[y * w..(y + 1) * w];
+        for x in 0..SIZE {
+            horiz[y * SIZE + x] = axis_sample(w, x, |sx| row[sx].map(clamp01));
+        }
+    }
     let mut out = vec![0.0f32; SIZE * SIZE * 3];
     for y in 0..SIZE {
-        let fy = (((y as f32 + 0.5) * h as f32 / SIZE as f32) - 0.5).clamp(0.0, (h - 1) as f32);
-        let y0 = fy.floor() as usize;
-        let y1 = (y0 + 1).min(h - 1);
-        let wy = fy - y0 as f32;
         for x in 0..SIZE {
-            let fx = (((x as f32 + 0.5) * w as f32 / SIZE as f32) - 0.5).clamp(0.0, (w - 1) as f32);
-            let x0 = fx.floor() as usize;
-            let x1 = (x0 + 1).min(w - 1);
-            let wx = fx - x0 as f32;
-            let p00 = pixels[y0 * w + x0];
-            let p01 = pixels[y0 * w + x1];
-            let p10 = pixels[y1 * w + x0];
-            let p11 = pixels[y1 * w + x1];
+            let px = axis_sample(h, y, |sy| horiz[sy * SIZE + x]);
             let dst = (y * SIZE + x) * 3;
-            for c in 0..3 {
-                let top = clamp01(p00[c]) * (1.0 - wx) + clamp01(p01[c]) * wx;
-                let bot = clamp01(p10[c]) * (1.0 - wx) + clamp01(p11[c]) * wx;
-                out[dst + c] = top * (1.0 - wy) + bot * wy;
-            }
+            out[dst..dst + 3].copy_from_slice(&px);
         }
     }
     out
@@ -488,23 +521,26 @@ fn pool_head(m: &Model, nhwc_out: &[f32], stats: &[f32; STATS_LEN]) -> [f64; 8] 
     std::array::from_fn(|i| f64::from(x[i]))
 }
 
-pub fn balance(width: u32, height: u32, pixels: &[[f32; 3]], gpu: bool) -> Neural {
-    if width == 0 || height == 0 || pixels.len() != width as usize * height as usize {
-        return Neural {
-            exposure: [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
-            white: [1.0; 3],
-        };
+pub fn balance(width: u32, height: u32, pixels: &[[f32; 3]], gpu: bool) -> Result<Neural> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| Error::Invalid("Auto Color dimensions overflow".into()))?;
+    if width == 0 || height == 0 || pixels.len() != expected {
+        return Err(Error::Invalid(format!(
+            "Auto Color expected {width}x{height} ({expected}) pixels, got {}",
+            pixels.len()
+        )));
     }
     let m = model();
     let nhwc = resize_nhwc_128(width, height, pixels);
     let stats = color_stats(&nhwc);
     let feat_map = if gpu {
-        gpu_forward(m, &nhwc).unwrap_or_else(|| cpu_forward(m, &nhwc))
+        gpu_forward(m, &nhwc)?
     } else {
         cpu_forward(m, &nhwc)
     };
     let z = pool_head(m, &feat_map, &stats);
-    Neural {
+    Ok(Neural {
         exposure: [
             (0.70 * z[0].tanh()).exp(),
             0.25 * z[1].tanh(),
@@ -514,5 +550,5 @@ pub fn balance(width: u32, height: u32, pixels: &[[f32; 3]], gpu: bool) -> Neura
             0.45 * z[5].tanh(),
         ],
         white: [(1.40 * z[6].tanh()).exp(), 1.0, (1.40 * z[7].tanh()).exp()],
-    }
+    })
 }

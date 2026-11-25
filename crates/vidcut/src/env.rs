@@ -439,7 +439,9 @@ impl Env for AvEnv {
             true => AutoResult::Legacy(vidcut_core::auto_color::balance(pixels)),
             false => {
                 let gpu = crate::preferences::gpu_acceleration();
-                AutoResult::Neural(vidcut_av::auto_color::balance(w, h, &pixels, gpu))
+                AutoResult::Neural(
+                    vidcut_av::auto_color::balance(w, h, &pixels, gpu).map_err(av_error)?,
+                )
             }
         };
         lock().insert(key, result);
