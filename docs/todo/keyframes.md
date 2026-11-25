@@ -20,7 +20,6 @@ This file lists what vidcut does not have yet. The page numbers are those of the
 
 In order of value:
 
-- **Select All and Deselect All.** Ctrl+A in the Keyframes tab or the keyframe tray selects all the keyframes of the shown item (p. 1262). Ctrl+Shift+A clears that selection. Now both keys act on the clips of the timeline.
 - **The motion path.** With the Transform handles on, the viewer shows the path of the Position keyframes (pp. 1252–1254). It has a point on each keyframe and a dot on each frame. A drag on a point changes its keyframe. Its right-click menu has Delete Keyframe.
   - Thus the user sees the motion in the picture.
 - **Stretch to Fit in Change Clip Speed.** The window gets Maintain Timing and Stretch to Fit (p. 1217). Stretch keeps each Transform, Crop and Composite keyframe on its source frame ([gotchas](../gotchas.md#resolves-otio-files)). Now a speed change always maintains the timing.
