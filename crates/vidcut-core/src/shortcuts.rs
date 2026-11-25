@@ -621,6 +621,10 @@ impl Bindings {
         })
     }
 
+    pub fn with(&self, custom: &Custom) -> Result<Self> {
+        Self::in_set(self.set_name.clone(), &self.set_custom, custom)
+    }
+
     pub fn keys(&self, action: Action) -> &[Combo] {
         self.keys.get(&action).map_or(&[], Vec::as_slice)
     }

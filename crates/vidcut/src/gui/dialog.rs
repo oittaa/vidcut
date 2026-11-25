@@ -66,9 +66,21 @@ pub(super) fn separate_window<R>(
     open: &mut bool,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> Option<R> {
+    held_window(ctx, tool, owner, spec, open, false, add).0
+}
+
+pub(super) fn held_window<R>(
+    ctx: &egui::Context,
+    tool: &mut Tool,
+    owner: Option<RawWindowHandle>,
+    spec: &Separate,
+    open: &mut bool,
+    hold: bool,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> (Option<R>, bool) {
     if !*open {
         tool.close();
-        return None;
+        return (None, false);
     }
     let builder = tool.builder(ctx, spec);
     let mut add = Some(add);
@@ -91,14 +103,18 @@ pub(super) fn separate_window<R>(
                 forward_keys(ui.ctx());
             }
             let close = separate && ui.input(|i| i.viewport().close_requested());
+            if close && hold {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
             (inner, close)
         },
     );
-    if close {
+    if close && !hold {
         *open = false;
         tool.close();
     }
-    inner
+    (inner, close && hold)
 }
 
 #[derive(Clone, Default)]
