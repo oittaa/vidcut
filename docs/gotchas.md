@@ -825,6 +825,12 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
   - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **The crop of a file with a rotation cuts other sides of the picture.**
+  - The files have a rotation of 90, 180 or 270 in the `tkhd` matrix. The timeline shows them upright.
+  - At 90, Crop Left cuts the right side, and Crop Right cuts the left side. Crop Top and Crop Bottom cut their own sides.
+  - At 270, Crop Top cuts the bottom, and Crop Bottom cuts the top. Crop Left and Crop Right cut their own sides.
+  - At 180, each crop cuts the opposite side.
+  - vidcut does not copy this fault. Each crop cuts the side that it names, on the upright picture ([spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
 
 ## Resolve's key files
 

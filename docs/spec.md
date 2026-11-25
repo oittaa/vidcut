@@ -4935,7 +4935,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - On a downhill clip with a large correction, Cropping Ratio 0.75 gives a mean zoom of 1.40.
   - The smoothing follows a fast pan. The crowd clip has pans of more than one picture width in less than 0.5 s. At Smooth 0.25, its zoom stays 1.32.
   - The smoothing is local in time. The first 150 frames of the crowd clip get the same correction as the first 299 frames, except near the end.
-  - The record is section R14 of `fixtures/program/NOTES.md` in the test data.
+  - The order is the correction, then the crop, then the transform. This is measured by script at 1920 x 1080 and 1280 x 720.
+    - A stabilized clip with Zoom, Position and Rotation shows the transform of the stabilized picture, to 0.03 px. The other order is off by 32 px or more.
+    - A crop after Stabilize does not change the correction. The crop edges stay at the same place in each frame.
+    - The zoom of the stabilization does not scale the crop. The transform moves the crop with the picture.
+  - A speed change after Stabilize keeps the correction of each source frame. At 50%, timeline frame 2k shows the stabilized source frame k.
+  - Stabilize after a speed change of 50% moves the picture the same way, with a smaller zoom. On the rally clip, the zoom is 1.155, against 1.204.
+  - The records are sections R14 and M6 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.stabilize` analyzes the clip and stores the correction on the clip, with the values that it used.
     - It reads each frame of the file from the In to the Out of the clip.
@@ -4951,13 +4957,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Video tab of the Inspector has the Stabilization section: the switch, Reset, Mode, Camera Lock, Zoom, Cropping Ratio, Smooth, Strength and Stabilize.
     - Stabilize is grey while the correction has the values that the section shows. It is grey while a stabilization runs too.
     - Camera Lock greys out Cropping Ratio, Smooth and Strength.
-  - The correction moves the cropped picture, before its transform. Thus it works in the coordinates of the source, as on p. 295.
+  - The correction comes first, then the crop, then the transform, as measured.
+    - The correction moves the source under the crop. The crop keeps its place, and the zoom of the correction does not scale it.
+    - A trim, a split, a slip or a speed change keeps the correction of each frame of the file.
   - With Zoom on, one zoom for the whole clip keeps the black edges out of each frame.
   - Camera Lock holds the view of the first frame of the clip.
   - Only a clip of a video file takes a stabilization.
   - The viewer Tools have no Stabilization tool. The Color page has no Tracker palette.
   - An OpenTimelineIO file of vidcut keeps the stabilization in the vidcut metadata of the picture. Other editors read nothing of it.
-  - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
+  - Not measured: the section on a generator, a title or a still.
   - [design](design/analysis.md#stabilization) gives the method.
 
 ### 8.28 Qualifier (pp. 3238–3256, 3263, 3436; measured in Resolve Studio 21.2)
@@ -5494,18 +5502,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With a custom size, the picture fits into the rounded size with one draw.
     - Measured in Resolve Studio 21.2 with H.264 and H.265 on the CPU: each odd side goes up by one. This is so on a timeline and as a custom size.
     - 1279 x 719 gives 1280 x 720, and 853 x 481 gives 854 x 482. 1001 x 1001 gives 1002 x 1002, and 257 x 257 gives 258 x 258.
-    - Measured with 7 sizes in H.264 and H.265: the frame of an odd timeline fits into the even size with one factor. The frame stays centered.
-    - Measured: the factor is the smaller of the two ratios of the sides, even size to timeline size. This is so at Fill and at Fit.
-    - Measured: with an odd width only, or an odd height only, the factor is 1. A bar of half a pixel shows on each odd side.
-    - Measured: with both sides odd, the width fills. Bars show at the top and the bottom: 0.22 of a pixel at 1279 x 719, and 0.1 at 2001 x 1601.
-    - Measured: on a 1280 x 720 timeline, a custom size of 1279 x 720, 1280 x 719 or 1279 x 719 gives a full picture. No bar shows.
-    - Measured: an EXR keeps the odd size. The picture fits into that size, centered.
+    - Measured in Resolve Studio 21.2 in H.264 and H.265 at 7 sizes, from 853 x 481 to 2001 x 1601.
+    - Each edge is within 0.23 px of these rules, at Fill and at Fit:
+      - The factor for a timeline is the smaller of file width / timeline width and file height / timeline height. The picture stays centered.
+      - With one odd side, the factor is 1. The picture moves by half a pixel, and the edge rows or columns of that axis read 0.5 of their value.
+      - With two odd sides, the width fills in each measured size. The top and bottom rows read 0.78 at 1279 x 719, and 0.9 at 2001 x 1601.
+      - A custom size fits the timeline picture into the file size with one draw.
+      - On a 1280 x 720 timeline, a custom 1279 x 720, 1280 x 719 or 1279 x 719 gives the full picture, with no bar.
+      - A custom 2001 x 1600 of a 1280 x 720 timeline gives a picture of 2002 x 1126.13 in a file of 2002 x 1600.
+      - An OpenEXR file keeps the odd size. The picture fits into that size, centered.
     - One earlier run, with the barcode clip at 1279 x 719, showed a part-dark bottom row and no top bar. Its cause is not known.
     - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
     - Resolve Studio 21.1.2 does this with these four. Its DNxHR 444 keeps 1281 x 721.
-  - ProRes, DNxHR 444, VP9 and AV1 on the CPU keep an odd side.
+  - ProRes, DNxHR 444, VP9, AV1 on the CPU and OpenEXR keep an odd side. Resolve Studio 21.2 keeps it in OpenEXR too (measured).
   - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
   - A side of a custom size is from 256 to 32768.
     - Measured with the render settings of the scripting API in Resolve Studio 21.1.2. The Deliver page was not seen.
@@ -7453,7 +7464,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - On a 3840 x 2160 picture, Crop Left 1.5 is 4.5 source pixels. It cuts 4, so the edge is at x = 1.333.
       - On a 1000 x 562 picture, Crop Top 1 is 0.78 of a source pixel, and it cuts nothing.
       - The rule is the same with Zoom, Rotation and Softness.
-      - A crop with keyframes, pixels that are not square and a rotation in the file were not measured. vidcut uses the same rule, in the pixels of the upright file.
+      - Pixels that are not square and a rotation in the file, measured in Resolve Studio 21.2 at 1280 x 720 and 1920 x 1080:
+        - The cut is floor(crop / f) source pixels. f is the factor of the fit, without the pixel aspect ratio.
+        - A 1000 x 800 file with pixels of 9:8 has f = 0.9 in 1280 x 720. Crop Left 3.0 cuts 3 source pixels, 3.0375 timeline pixels wide.
+        - The same file has f = 1.35 in 1920 x 1080. Crop Left 3.0 cuts 2 source pixels.
+        - A 1280 x 720 file with a rotation of 90 has f = 0.5625 in 1280 x 720. Crop Left 1.5 cuts 2 source pixels.
+        - On a file with a rotation, some crops cut another side of the upright picture ([gotchas](gotchas.md#resolves-renders)).
+      - vidcut uses the rule in the pixels of the upright file. It cuts the side that each crop names, on the upright picture.
+        - It divides the crop by the size of the fitted picture, with the pixel aspect ratio. Thus Crop Left 3.0 on the 9:8 file in 1280 x 720 cuts 2 source pixels ([todo](todo/picture-fit.md)).
+      - A crop with keyframes was not measured.
       - The crop of a compound clip (measured in Resolve Studio 21.2, in timelines 1280, 1920 and 3840 wide):
         - It can hold one clip with no change of place, size or crop. Then its crop is a crop of that clip, in that clip's source pixels.
         - A 960 x 720 picture in a 1280 x 720 timeline starts at x = 160. Crop Left 10 on the compound clip moves that edge to x = 167. Crop Left 40 moves it to x = 190.
@@ -7833,7 +7852,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D79. The In and Out fields against other cues** (§8.12; deviation X43).
   - Measured in Resolve Studio 21.1.2: an In typed inside the cue before, or an Out typed inside the cue after, changes nothing. Both cues stay.
   - vidcut does the same. Its field shows the stored time at once, and Resolve's field shows it when the cue is selected again. The result is the same.
-  - `subtitles.set` does not refuse such a value. A script in Resolve is not measured.
+  - `subtitles.set` does not refuse such a value.
+  - Measured in Resolve Studio 21.2: the scripting API cannot set the In or the Out of a cue. A script move of a cue overwrites the other cues (X43).
   - A new In or Out overwrites only the part that it newly covers (X43).
   - Measured in Resolve Studio 21.1.2: a track has no overlaps, so a field cannot put a cue inside a longer cue.
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
@@ -8398,8 +8418,13 @@ These facts are measured in Resolve Studio 21.1.2, in a default project that sca
   - 1000 x 562: the factor is 1.28 and the height is 719.36. Each bar is 0.32 of a pixel, and the top and bottom rows read 0.68 of their value.
   - 999 x 800: the factor is 0.9 and the width is 899.1. Each bar is 190.45 pixels, and the edge columns read 0.55 of their value.
 - 1920 x 1080 in a timeline of 1921 x 1081 has the factor 1921 / 1920 and a bar of 0.21875 of a pixel. The edge rows read a part of their value.
-- A picture with pixels that are not square, or with a rotation in its file, was not measured.
-  - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels.
+- Pixels that are not square and a rotation in the file, measured in Resolve Studio 21.2 at 1280 x 720 and 1920 x 1080:
+  - The fit uses the display size. 1000 x 800 with pixels of 9:8 shows as 1125 x 800. In 1280 x 720 the factor is 0.9, and the picture is 1012.5 x 720.
+  - Its edge columns read 0.25 of their value. Thus the fit rounds no size and no place, as for square pixels.
+  - Files with pixels of 4:3 and 2:1 that show as 1280 x 720 fill the frame. Each part of the picture is at its place in the display size.
+  - A rotation of 90, 180 or 270 in the `tkhd` matrix of the file turns the picture clockwise by that angle. The fit uses the upright size.
+  - 1280 x 720 with a rotation of 90 is 405 x 720 in 1280 x 720, with edge columns of 0.5. In 1920 x 1080, it is 607.5 x 1080.
+  - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels ([todo](todo/picture-fit.md)).
 
 ### Input scaling (pp. 292–293)
 
@@ -8450,10 +8475,21 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - Position 0.15 across and down: the distance is 0.212, and the bars show.
   - A Zoom that leaves bars of 0.17 and 0.0956: the distance is 0.195, and no bar shows.
   - A Zoom that leaves bars of 0.18 and 0.10125: the distance is 0.2065, and the bars show.
-  - Rotation 0.016: no bar. Rotation 0.02: the bars show. The rule gives the change at 0.0179. That value was not measured.
+  - Rotation 0.016: no bar. Rotation 0.02: the bars show.
   - A part of the picture past the frame does not count. A left bar of 0.15 on an enlarged picture shows no bar.
-  - The rounding of an odd frame size for an encoder does not use the limit. At 2001 x 1601 in H.264 and H.265, bars of 0.1 show.
-- These cases were not measured:
-  - Softness: vidcut does not use the limit on a picture with Softness.
-  - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
-  - A compound clip: vidcut uses the rule on each level by itself.
+- These facts are measured in Resolve Studio 21.2:
+  - The rule gives the change of Rotation at 0.0179 in 1280 x 720. Rotation 0.0179 shows no bar, and 0.0181 shows the bars at their exact widths.
+  - The rule gives the change at 0.01194 in 1920 x 1080. Rotation 0.0119 shows no bar, and 0.0120 shows the bars.
+  - Crop Softness alone does not stop the limit. In 1280 x 720, Rotation 0.016 with Crop Softness 0.5 shows no bar.
+  - A crop stops the limit, also a crop that cuts no pixel. Rotation 0.016 with Crop Left 0.5 shows bars of 0.1787 and 0.1003.
+  - The limit does not act on Pitch and Yaw. In 1280 x 720, Pitch 0.0009 gives the two top corner pixels 0.925 of their value. That is a gap of about 0.075 px.
+  - The fit into the even size of an encoder does not use the limit. A timeline of 2001 x 1601 gives bars of 0.1 at the top and the bottom of its file.
+  - A compound clip, in 9 cases with Zoom X on the clip inside and on the compound clip:
+    - The clip inside keeps the limit for its own bars.
+    - With Zoom X 1 inside, the compound clip keeps the limit too.
+    - With another Zoom X inside, the compound clip shows its bar at its exact width. The 9 cases give no general rule.
+- vidcut:
+  - It does not use the limit on a picture with Softness. A crop that cuts no pixel does not stop the limit ([todo](todo/picture-fit.md)).
+  - It uses the same rule on the corners of a leaned picture ([todo](todo/picture-fit.md)).
+  - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
+  - It does not use the limit in the fit for an encoder.
