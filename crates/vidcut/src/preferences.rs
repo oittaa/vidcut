@@ -451,12 +451,14 @@ pub fn keys_import(
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = load()?;
     let before = bindings_of(&p)?;
-    let (set, path) = key_sets::import(&key_sets::dir(), from, name, overwrite, dry_run)?;
+    let (set, path, read) = key_sets::import(&key_sets::dir(), from, name, overwrite, dry_run)?;
     p.keys = set.keys;
     p.key_set = named_set(&set.name);
     let mut out = keys_changed(&p, &before, dry_run)?;
     out["imported"] = json!(set.name);
     out["path"] = json!(path);
+    out["unknown_commands"] = json!(read.unknown);
+    out["unusable_keys"] = json!(read.unusable);
     Ok(out)
 }
 
