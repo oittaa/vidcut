@@ -677,11 +677,27 @@ pub fn print(method: &str, r: &Response, json: bool) {
             r.result["exported"].as_str().unwrap_or_default(),
             r.result["path"].as_str().unwrap_or_default()
         ),
-        "keys.import" => println!(
-            "added key set {} and put it in force ({})",
-            r.result["imported"].as_str().unwrap_or_default(),
-            r.result["path"].as_str().unwrap_or_default()
-        ),
+        "keys.import" => {
+            println!(
+                "added key set {} and put it in force ({})",
+                r.result["imported"].as_str().unwrap_or_default(),
+                r.result["path"].as_str().unwrap_or_default()
+            );
+            let listed = |key: &str| {
+                r.result[key]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+                    .unwrap_or_default()
+            };
+            match listed("unknown_commands").len() {
+                0 => {}
+                1 => println!("left out 1 command that vidcut does not have"),
+                n => println!("left out {n} commands that vidcut does not have"),
+            }
+            for key in listed("unusable_keys") {
+                println!("left out a key that vidcut can't use: {key}");
+            }
+        }
         "preferences.get" | "preferences.set" | "preferences.reset" => {
             let mut lines = Vec::new();
             flatten("", &r.result["preferences"], &mut lines);

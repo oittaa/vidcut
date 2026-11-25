@@ -722,10 +722,10 @@ const EXAMPLES: &[(&str, &str)] = &[
         "keys.save",
         "vidcut keys save \"My Keys\"\n  vidcut keys save \"My Keys\" --overwrite",
     ),
-    ("keys.export", "vidcut keys export \"My Keys\" my-keys.toml"),
+    ("keys.export", "vidcut keys export \"My Keys\" \"My Keys.txt\""),
     (
         "keys.import",
-        "vidcut keys import my-keys.toml\n  vidcut keys import my-keys.toml --name Laptop",
+        "vidcut keys import \"My Keys.txt\"\n  vidcut keys import \"My Keys.txt\" --name Laptop",
     ),
     ("mixer.preview", "vidcut mixer preview A1 -12"),
     ("mcp", "claude mcp add vidcut -- vidcut mcp -p talk.vidcut"),

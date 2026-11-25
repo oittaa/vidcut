@@ -5736,8 +5736,27 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Save puts the keys of the window in force. With changed keys of a user's set, it writes them into that set first (measured).
   - Save without changed keys puts the picked set in force (measured). After Save, the window stays open. Not measured (case 26 of shortcuts-resolve-runs.md).
   - On a changed built-in set, Save asks for a name, as Save As New Set… does. A built-in set does not change (measured).
-  - Export Set (`keys.export`) writes a set to a file ([todo](todo/shortcuts.md)). The file name that it offers is the name of the set and " Keys" (measured).
-  - Import Set… (`keys.import`) adds the set of such a file, with the name of the file. The imported set is then in force (measured).
+  - Export Set (`keys.export`) writes a set to a key file. The file name that it offers is the name of the set and " Keys.txt" (measured).
+  - Import Set… (`keys.import`) adds the set of a key file, with the name of the file. The imported set is then in force (measured).
+  - A key file is a text file (measured):
+    - The first line is `import "DaVinci Resolve"`. It names the built-in set that the file changes.
+    - Then each command whose keys differ from that set has a line like `editUndo := Ctrl+Z`. The names are the command names of Resolve.
+    - `editUndo :=` gives the command no key.
+    - A line that starts with `#` is a comment.
+    - Del, PgUp, PgDown and Return are Delete, Page Up, Page Down and Enter. "Copy", "Cut" and "Paste" are Ctrl+C, Ctrl+X and Ctrl+V.
+    - On macOS, Ctrl is Command and Meta is Control.
+  - vidcut writes a line for each changed action that has a command of Resolve.
+    - Split has two commands: Ctrl+B is `editBladeRazor` and Ctrl+\ is `editM2SplitClip`. Delete has `editDelete` (Shift+Backspace and Delete) and `editBackspace` (Backspace). Another key goes to the first command.
+    - vidcut writes Esc for Escape and Ins for Insert. Whether Resolve reads these names is not measured (case 27 of shortcuts-resolve-runs.md).
+  - vidcut: an action that has no command of Resolve gets a comment line, like `#vidcut ducking := Alt+D`. Thus vidcut reads its own files back with all their keys.
+    - Its keys have the same names as in the command lines, for example `#vidcut lift := Alt+Del`.
+  - An import starts from the set that the import line names.
+    - An action that gets the keys of the table, in any order, keeps the table.
+  - A file without an import line lists all commands. A command that it leaves out has no key, as in a built-in preset (measured, case 25 of shortcuts-resolve-runs.md). Whether an import does the same is not measured (case 27).
+  - An import leaves out these lines and keys. `keys.import` names them in its answer.
+    - The commands that vidcut does not have.
+    - The keypad keys, which vidcut can't tell apart ([todo](todo/egui-keypad-keys.md)).
+    - Meta outside macOS, where vidcut has no such modifier.
   - An import drops the draft without a question. Not measured (case 26 of shortcuts-resolve-runs.md).
   - A delete of the set in force puts vidcut's own set in force, with its keys (measured).
   - Reset puts back the keys of the set in force.
