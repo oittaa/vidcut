@@ -1,0 +1,2 @@
+[env]
+VIDCUT_CHECKOUT = { value = ".", relative = true }

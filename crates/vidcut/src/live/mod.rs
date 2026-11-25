@@ -96,11 +96,13 @@ pub enum GuiChange {
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
+    Layer(usize),
     Palette(GradePalette),
     Primaries(PrimariesView),
     Window(usize),
     QueueJobs(Vec<String>),
     JobDetails(bool),
+    EditJob(Option<String>),
     Nodes(Vec<String>, bool),
     Element(u8),
     GradeNodes(Vec<u32>, Option<u32>),
@@ -174,6 +176,7 @@ pub struct TimelineState {
 pub struct GuiState {
     pub page: Page,
     pub grade: GradeLevel,
+    pub layer: usize,
     pub palette: GradePalette,
     pub primaries: PrimariesView,
     pub window: usize,
@@ -195,6 +198,7 @@ pub struct GuiState {
     pub windows: Vec<GuiPanel>,
     pub jobs: Vec<String>,
     pub job_details: bool,
+    pub edit_job: Option<String>,
 }
 
 pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
@@ -1903,11 +1907,13 @@ impl Live {
                 Err(Error::invalid(format!("{busy} renders now; stop it first"))),
             );
         }
-        if let Request::RenderAdd(params) = &envelope.request
+        if let Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } =
+            &envelope.request
             && let Some(open) = &self.project
         {
             let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
-            let files = match crate::queue::existing(open.project(), params, &proxies) {
+            let updated = crate::queue::updated(&envelope.request);
+            let files = match crate::queue::existing(open.project(), updated, params, &proxies) {
                 Ok(f) => f,
                 Err(e) => return self.finish(job, Err(e)),
             };
@@ -2256,6 +2262,7 @@ impl Live {
     fn rendering(&self, request: &Request) -> Option<String> {
         let gone = match request {
             Request::RenderRemove { jobs } => jobs.to_vec(),
+            Request::RenderUpdate { job, .. } => vec![job.clone()],
             Request::RenderClear { all } => {
                 let p = self.project.as_ref()?.project();
                 (p.queue.iter())
@@ -3079,6 +3086,11 @@ impl Live {
                 vectorscope,
                 scale,
                 video_levels,
+                waveform_mode,
+                waveform_red,
+                waveform_green,
+                waveform_blue,
+                parade_mode,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
@@ -3086,6 +3098,11 @@ impl Live {
                     vectorscope,
                     scale,
                     video_levels,
+                    waveform_mode,
+                    waveform_red,
+                    waveform_green,
+                    waveform_blue,
+                    parade_mode,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {
@@ -3562,13 +3579,16 @@ impl Live {
             Request::GuiPage {
                 page,
                 grade,
+                layer,
                 palette,
                 primaries,
                 window,
                 jobs,
                 job_details,
+                edit_job,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
+                    .chain(layer.map(GuiChange::Layer))
                     .chain(palette.map(GuiChange::Palette))
                     .chain(primaries.map(GuiChange::Primaries))
                     .chain(window.map(GuiChange::Window))
@@ -3576,6 +3596,9 @@ impl Live {
                     .chain(job_details.map(GuiChange::JobDetails))
                     .collect();
                 changes.push(GuiChange::Page(page));
+                if let Some(job) = edit_job {
+                    changes.push(GuiChange::EditJob(Some(job).filter(|j| !j.is_empty())));
+                }
                 self.gui_change(changes, |s| json!(s))
             }
             Request::GuiNodes {

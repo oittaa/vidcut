@@ -5,6 +5,8 @@
 - The build is the commit and the date of the commit. `-dirty` at the end tells that the build had changes that no commit holds.
 - `vidcut --version`, the status bar, `vidcut doctor`, the report of an export and the MCP server give it.
 - `crates/vidcut/build.rs` reads the commit from git (`VIDCUT_BUILD`). A build without git gives the version alone.
+- `.cargo/config.toml` sets `VIDCUT_CHECKOUT` to the folder of the checkout. The build script runs again when this value changes.
+  - Why: worktrees that share one `CARGO_TARGET_DIR` share one output of the build script. Without the value, a build can keep the commit of another worktree.
 
 **Fixtures:** this command makes a fixture, caches it and prints its path:
 
@@ -263,7 +265,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
   - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
   - `content.npy`: the width and the height of the picture content, in pixels of the model input.
-  - With the slow face model, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+  - With a model on the GPU, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+    - The models on the GPU are the slow face model, and YOLOX-S with `gpu.acceleration` on.
   - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
   - A check against an ONNX runtime reads them.
 - `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.

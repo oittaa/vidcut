@@ -447,6 +447,10 @@ The bar and the Jobs button:
 - `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([spec §8.15](../spec.md#815-transform-and-crop-pp-766768)).
   - The handles work about the anchor point (`Shown::pivot`, from `place::anchored`).
   - A move snaps the middle of the picture as drawn, not its `position`.
+  - With Transform, `Shown::path` gives the motion path (`MotionPath`): the anchor point of each frame between the first and the last Position keyframe.
+  - A drag on a keyframe of the path (`Hold::Path`) changes that keyframe in the dragged picture. It ends in one `keyframes.set` (`Workspace::land_path`).
+  - The dragged picture of a path goes to the core as it is, not through `Picture::preview` (`Workspace::path_wanted`). Thus the picture follows the changed curve.
+  - A right-click puts the keyframe under the pointer in `path_menu`. Then the menu of the viewer shows only Delete Keyframe (`Workspace::path_menu`).
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.
 - The dragged picture goes to the core with `Handle::preview_pictures`. After it, the sent picture goes there until the project has it (`tools::landing`).
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
@@ -479,6 +483,8 @@ The bar and the Jobs button:
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
   - A key mixer has a key input for each input, and a key output.
+  - A splitter has an RGB input and three RGB outputs. A combiner has three RGB inputs and an RGB output.
+  - The green and blue outputs of a splitter have the outlet slots after the key slot (`outlet_slot`, `output_of`).
   - The key ports are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
   - Each link has its own line (`Wire::line`). On the Color page, a link from a key output is blue. On the Effects page, a link into a mask input is blue.
   - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
@@ -508,9 +514,11 @@ The bar and the Jobs button:
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
+  - A splitter and a combiner are never the current node. A click selects them, and the current node stays (`leads`). After Alt+Y, the corrector of blue is the current node.
   - On a key mixer, the keys add only an appended node. Its menu adds a serial node after it or before it (`Workspace::grade_add_sent`).
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
   - A drag from any output to any input links them. A link from a key output sends `key`. The key input of a corrector is input 1 (`KEY_PORT`).
+  - A link from the green or the blue output of a splitter sends `output`.
   - A drop of an output on a node links the input of the same kind (`grade_links`). A drop of a key output on a key mixer adds an input.
   - A node can drop only into a link with `Wire::drops`: a link from an RGB output to an RGB input.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
@@ -527,6 +535,11 @@ The bar and the Jobs button:
   - After a delete, the last corrector becomes the current node.
 - A Clip and Timeline switch at the top right selects the grade (`GradeLevel`). In Timeline mode, the palette shows the timeline grade.
   - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
+  - With two or more node stack layers, the switch is a menu with one item for each layer (`grade_switch`, `GradeChoice`). It sends `layer` too.
+  - `EffectsPage::layer` is the shown layer. `Workspace::grade_shown` gives that layer of the clip grade (`Grade::layer`), as `GradeOf::Clip` with the layer number.
+  - The dots at the bottom of the Node Editor (`layer_dots`) and Switch to Node Layer of the Nodes submenu (`layer_menu`) send the same `gui.page`.
+  - A dragged layer goes into the whole clip grade before the preview (`Grade::with_layer`).
+  - A thumbnail of a layer reads the tap with its number in the joined tree (`ShotPlace`, `Grade::layer_start`). A layer with no grade shows the output of the layers under it.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
   - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
 - When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and `at`. Thus a drag is one undo step.
@@ -658,7 +671,9 @@ The bar and the Jobs button:
   - A dragged number keeps its value in `Drag` until the release. Thus one drag is one undo step.
   - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
   - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
-- With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
+- `section` draws the Keyframe buttons of the Transform, Crop and Composite headers. `group_values` names the values of each section, and `group_mark` lights the buttons.
+  - The button and its ease menu send a request for each value (`Workspace::key_group`). Previous and Next seek (`Workspace::step_group`).
+- With several clips, `number`, `section`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
 - `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.
 
 **The Keyframes tab** (`keyframe_editor::Editor`, `Workspace::keyframe_panel`).
@@ -700,8 +715,11 @@ The bar and the Jobs button:
   - Why: a speed keyframe is a cut between two sections. Its frame and its value come from the sections.
 - A press in the tab or the tray gives them the keys. A press in another place takes the keys away (`Workspace::key_focus`, `Editor::focused`).
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
+- Reverse Keyframes sends `keyframes.reverse` with the selected keyframes. The selection moves to their new frames at once (`reverse_editor_keys`).
+  - `ops::keyframes::reverse` copies the keyframes, removes them and pastes them back in the opposite order, with each handle on the other side.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
 - Without the keys, Ctrl+V pastes no keyframes.
+- With the keys, Select All and Select Nothing change the selected marks, not the clips (`Workspace::select_editor_keys`).
 - `clip.paste_attributes` without `from` and `copied` takes the first clip of the clipboard. The live core fills it in (`edit_at`).
   - Each copy of clips gives `Snapshot::copied_clip`: its name, the boxes to check and a count of the copies.
   - `Workspace::attributes_window` keeps the last choices for the same copy (`PasteChoice`).
@@ -891,7 +909,7 @@ Fonts:
 Keys:
 
 - The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
-- `Bindings` joins the table and `Preferences.keys`. It gives the keys of an action and the owner of a key (`Combo`).
+- `Bindings` joins the table, `Preferences.keys` and the key set in force. It gives the keys of an action and the owner of a key (`Combo`).
 - `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
 - Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.
 
@@ -921,6 +939,7 @@ The Keyboard Customization window:
 - `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
 - `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
 - The window sends `keys.set` and `keys.reset`, as the CLI does.
+- `key_sets::bar` draws the dropdown of the key sets, the Option menu and the trash button at the top. `Workspace::key_sets` sends their requests with `Ask` and reads `keys.sets` again after each one.
 
 ## From a key press to a frame
 

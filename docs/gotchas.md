@@ -238,6 +238,12 @@ This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut
   - If the handle stays open, it keeps the memory after `vkFreeMemory`.
   - `hw::vulkan` exports each memory object of FFmpeg once. It closes the handle when FFmpeg frees the frames context.
   - FFmpeg's own copy of a frame to CUDA exports the same handle, and closes it with the frame.
+- **NVIDIA's JPEG decoder gives the picture before on a stream that does not wait for the default stream** (Windows driver 621.24, RTX 4080 SUPER).
+  - FFmpeg 9.0.1 maps each NVDEC picture on the stream of its CUDA device (`output_stream` of `cuvidMapVideoFrame`).
+  - On a stream made with `CU_STREAM_NON_BLOCKING`, 15 to 33 of 46 JPEG pictures hold the picture before. The frames change from run to run.
+  - Image sequences and MJPEG files fail the same way. H.264 on the same stream is correct.
+  - On a stream made with `CU_STREAM_DEFAULT`, each JPEG picture is correct, in 8 runs of 4 clips. So is each picture on the default stream itself.
+  - Thus the streams of `GpuDecoder::own` wait for the default stream (`cuda::share::Waits`). The player's decoder uses the default stream.
 - **FFmpeg's Vulkan ProRes decoder crashes on AMD's Windows driver** (9.0.2, Radeon iGPU, on one thread too).
   - vidcut decodes on Vulkan only on NVIDIA's GPUs (`GpuDecoder::why_not`).
   - A crash cannot be caught. Thus each other vendor needs its own check first.
@@ -498,7 +504,8 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
     - Thus a key on source frame 239 of a clip that shows 388 first is at `149`.
     - The time of the file runs against the source. Thus `InBez` and `OutBez` change places.
   - A speed change that stretches the keyframes keeps each key on its source frame.
-    - On a clip that plays backward, the stretch moves each key by one source frame.
+    - On a clip that plays backward, the stretch moves each key by one source frame. This is a bug in Resolve.
+    - vidcut keeps each key on its source frame, also on a clip that plays backward.
   - A speed change that does not stretch keeps the numbers in the file. Thus each key stays on its frame of the clip, over another source frame.
   - Resolve reads a file as written. Times, values and eases come back in its Inspector and in its next export.
 - **X and Y have keyframes of their own** (Resolve Studio 21.1.1).
@@ -684,6 +691,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Use Legacy Auto Color is on. Two clicks on the A button of the Primaries palette, then one Ctrl+Z, take back both results.
   - Ctrl+Shift+Z then gives nothing back. The Edit menu shows Redo.
   - vidcut: each run of Auto Color is one undo step, and Redo gives it back.
+- **Undo does not take back Reset All Node Stack Layers.**
+  - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
+  - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
+  - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
 
 - **Close Up leaves the Out frame out.**
   - With a timeline Out at frame 200 alone, the copy ends before frame 200.
@@ -694,6 +705,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
   - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+- **While jobs render, the pencils of the other jobs look active.**
+  - On the Deliver page, the pencil of the job that renders is dim. The pencils of the other jobs stay white.
+  - A click on a white pencil does nothing.
+  - vidcut greys all pencils while jobs render ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 - **Delete removes only one of the selected points of a curve window.**
   - The manual says that a Shift drag box selects points to delete them all at once (p. 3274).
   - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.

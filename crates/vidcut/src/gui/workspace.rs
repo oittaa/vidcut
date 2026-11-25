@@ -363,6 +363,7 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
+                live::GuiChange::Layer(layer) => self.set_layer(layer)?,
                 live::GuiChange::Palette(palette) => {
                     self.effects_page.palette = palette;
                     self.effects_page.window_name = None;
@@ -371,6 +372,7 @@ impl Workspace {
                 live::GuiChange::Window(w) => self.effects_page.window = w,
                 live::GuiChange::QueueJobs(jobs) => self.select_queue_jobs(jobs)?,
                 live::GuiChange::JobDetails(on) => self.export.job_details = on,
+                live::GuiChange::EditJob(job) => self.set_edit_job(job)?,
                 live::GuiChange::Nodes(nodes, active) => self.pick_nodes(nodes, active)?,
                 live::GuiChange::Element(e) => self.effects_page.element = e,
                 live::GuiChange::GradeNodes(nodes, current) => {
@@ -501,6 +503,7 @@ impl Workspace {
         live::GuiState {
             page,
             grade: self.effects_page.grading,
+            layer: self.shown_layer(),
             palette: self.effects_page.palette,
             primaries: self.effects_page.primaries,
             window: self.effects_page.window,
@@ -538,6 +541,7 @@ impl Workspace {
                 .collect(),
             jobs: self.export.selected.clone(),
             job_details: self.export.job_details,
+            edit_job: self.export.editing.clone(),
         }
     }
 
@@ -1902,6 +1906,10 @@ impl Workspace {
         }
         let all = fired.pressed(Action::SelectAll);
         let nothing = fired.pressed(Action::SelectNothing);
+        let (all, nothing) = match (all || nothing) && self.select_editor_keys(all) {
+            true => (false, false),
+            false => (all, nothing),
+        };
         if (all || nothing) && self.pool_focus {
             let media: Vec<String> = match self.project() {
                 Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)

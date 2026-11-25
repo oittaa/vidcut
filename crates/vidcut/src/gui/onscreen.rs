@@ -36,12 +36,14 @@ pub struct Grab {
     selected: Option<String>,
     held: Option<Held>,
     typing: Option<Typing>,
+    typed_shown: Option<Shown>,
     landing: Option<(String, Title, std::time::Instant, Title)>,
     sent: Option<(String, Title)>,
     boxes: Lru<(Title, (u32, u32)), [f32; 5], KEPT>,
     letters: Lru<(Title, (u32, u32)), Vec<vidcut_av::burn::Letters>, KEPT>,
 }
 
+#[derive(Debug, Clone)]
 struct Shown {
     clip: String,
     title: Title,
@@ -423,6 +425,7 @@ impl Workspace {
         if resp.double_clicked()
             && let Some(p) = pointer
             && let Some(id) = shapes.iter().find(|s| s.inside(p)).map(|s| s.clip.clone())
+            && Some(&id) != typed.as_ref()
         {
             self.show_title(&id, false);
             self.timeline.title_grab.typing = Some(Typing::new(&id, Some(p)));
@@ -475,30 +478,49 @@ impl Workspace {
             .as_ref()
             .filter(|d| d.clip() == clip)
             .map(|d| d.text().to_string());
-        let shown = shapes.iter().find(|s| s.clip == clip);
-        let (Some(s), Some(text)) = (shown, text) else {
-            self.timeline.title_grab.typing = None;
+        let s = text
+            .as_deref()
+            .and_then(|t| self.typed_shape(shapes, &clip, t));
+        let (Some(s), Some(text)) = (s, text) else {
+            self.stop_title_text();
             return None;
         };
-        let laid = self.typed_laid(s, picture);
+        let laid = self.typed_laid(&s, picture);
         let mut typing = self.timeline.title_grab.typing.take()?;
         let (changed, done) = typing.frame(ui, &text, &laid, s.corners);
-        let fresh = changed.is_some();
+        let fresh = changed.clone();
         if let Some(t) = changed {
             self.retype_title(t);
         }
         if done {
+            self.timeline.title_grab.typed_shown = None;
+            self.commit_title_form();
             return None;
         }
         self.timeline.title_grab.typing = Some(typing);
-        if !fresh {
+        let Some(text) = fresh else {
             return Some((laid, s.corners, None));
-        }
+        };
         let shapes = self.title_shapes(picture);
-        let s = shapes.iter().find(|s| s.clip == clip)?;
-        let laid = self.typed_laid(s, picture);
-        let outline = s.corners;
-        Some((laid, outline, Some(shapes)))
+        let s = self.typed_shape(&shapes, &clip, &text)?;
+        let laid = self.typed_laid(&s, picture);
+        Some((laid, s.corners, Some(shapes)))
+    }
+
+    fn typed_shape(&mut self, shapes: &[Shown], clip: &str, text: &str) -> Option<Shown> {
+        let g = &mut self.timeline.title_grab;
+        match shapes.iter().find(|s| s.clip == clip) {
+            Some(s) => {
+                g.typed_shown = Some(s.clone());
+                Some(s.clone())
+            }
+            None if vidcut_core::rich::plain(text).trim().is_empty() => {
+                let mut s = g.typed_shown.clone().filter(|s| s.clip == clip)?;
+                s.title.text = text.to_string();
+                Some(s)
+            }
+            None => None,
+        }
     }
 
     fn typed_laid(&mut self, s: &Shown, picture: Rect) -> Laid {
@@ -555,7 +577,11 @@ impl Workspace {
     }
 
     pub(super) fn stop_title_text(&mut self) {
-        self.timeline.title_grab.typing = None;
+        let g = &mut self.timeline.title_grab;
+        g.typed_shown = None;
+        if g.typing.take().is_some() {
+            self.commit_title_form();
+        }
     }
 
     pub(super) fn typing_title_text(&self) -> bool {
