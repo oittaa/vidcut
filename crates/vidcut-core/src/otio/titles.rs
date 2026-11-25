@@ -431,7 +431,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         .as_deref()
         .or(drawn.family.as_deref())
         .unwrap_or(USUAL_FAMILY);
-    let size = t.text_fraction();
+    let size = t.text_fraction(height);
     let points = size * f64::from(height);
     let color = hex(t.ink());
     let line = size * Title::LINE;
@@ -593,7 +593,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                     TitleKind::Text => y - h * down,
                     TitleKind::Scroll => y - h / 2.0,
                     TitleKind::LowerThird => {
-                        y + (1.0 - down) * t.lower_line() + Title::PADDING * size - h
+                        y + (1.0 - down) * t.lower_line(height) + Title::PADDING * size - h
                     }
                 };
                 let middle = if t.kind == TitleKind::Text {

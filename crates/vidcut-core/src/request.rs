@@ -4280,9 +4280,16 @@ pub enum Request {
     PreferencesReset {},
     /// The keyboard shortcuts in force, one action each, with a few plain
     /// words where the action's name doesn't say what it does (spec §11).
-    /// Ctrl and Alt are Cmd and Option on macOS.
+    /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
+    /// key of an action works: `app`, `transcription`, `effects` or
+    /// `color`.
     #[serde(rename = "keys.list")]
-    KeysList {},
+    KeysList {
+        /// Only the actions of this key, like `Ctrl+B`, at each level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<String>")]
+        key: Option<crate::shortcuts::Combo>,
+    },
     /// Give an action other keys in place of the ones it has (spec §11). A
     /// key belongs to one action: a key that another action has is refused,
     /// and the refusal names that action. A running GUI follows at once.
@@ -4601,6 +4608,9 @@ pub enum Request {
         /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parade_mode: Option<crate::preferences::ParadeMode>,
+        /// The Vectorscope shows a line at the skin tone angle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_tone: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -4893,6 +4903,14 @@ pub enum Request {
         /// and frame rate, and the audio and the length. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_details: Option<bool>,
+        /// The Thumbnail timeline of the `export` page: a picture of each
+        /// clip of the video tracks, over the timeline. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<bool>,
+        /// The text under each picture of the Thumbnail timeline. Left out,
+        /// it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip_label: Option<ClipLabel>,
         /// The job of the render queue that the Render Settings edit, as its
         /// pencil does: they get the job's settings, and the timeline gets
         /// its range. Update Job then changes the job. `""` stops, and the
@@ -5346,6 +5364,17 @@ pub enum PrinterColor {
     Yellow,
     /// Red, green and blue.
     Master,
+}
+
+/// The text under each picture of the Thumbnail timeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipLabel {
+    /// The codec of the clip's video. A clip with no media shows its name.
+    #[default]
+    Codec,
+    /// The name of the clip.
+    Name,
 }
 
 /// What to export and how.
@@ -8208,7 +8237,7 @@ impl Request {
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
-                | Self::KeysList {}
+                | Self::KeysList { .. }
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
                 | Self::KeysSets {}
@@ -8310,7 +8339,7 @@ impl Request {
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
-                    | Self::KeysList {}
+                    | Self::KeysList { .. }
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
                     | Self::KeysSets {}

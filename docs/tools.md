@@ -5,6 +5,8 @@
 - The build is the commit and the date of the commit. `-dirty` at the end tells that the build had changes that no commit holds.
 - `vidcut --version`, the status bar, `vidcut doctor`, the report of an export and the MCP server give it.
 - `crates/vidcut/build.rs` reads the commit from git (`VIDCUT_BUILD`). A build without git gives the version alone.
+- `.cargo/config.toml` sets `VIDCUT_CHECKOUT` to the folder of the checkout. The build script runs again when this value changes.
+  - Why: worktrees that share one `CARGO_TARGET_DIR` share one output of the build script. Without the value, a build can keep the commit of another worktree.
 
 **Fixtures:** this command makes a fixture, caches it and prints its path:
 

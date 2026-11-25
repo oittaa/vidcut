@@ -57,6 +57,7 @@ pub(super) struct PreferencesUi {
     pub(super) keys_open: bool,
     keys_window: super::window::Tool,
     pub(super) key_sets: super::key_sets::KeySetsUi,
+    keyboard: super::keyboard::KeyboardUi,
 }
 
 impl PreferencesUi {
@@ -297,6 +298,7 @@ fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, in_force: &Bindings) 
     let bindings = &state.key_sets.shown(in_force).clone();
     ui.spacing_mut().item_spacing.y = 8.0;
     super::key_sets::bar(ui, &mut state.key_sets, in_force);
+    state.keyboard.show(ui, bindings);
     ui.add(
         egui::TextEdit::singleline(&mut state.key_search)
             .hint_text("Find an Action or a Key")
