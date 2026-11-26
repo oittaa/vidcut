@@ -1,10 +1,10 @@
 # Smart Reframe cases
 
-**When:** Resolve batch SR3. Its steps and scripts are ready in the test data (SR3 in `fixtures/program/NOTES.md`).
+**When:** the window steps of Resolve batch SR3 (W1 to W3). Its script steps ran (SR3 in `fixtures/program/NOTES.md`).
 
 Smart Reframe is complex behavior. Its move depends on the content and on the settings. One measurement records only what Resolve did for that input. A rule needs several files that differ in content, subject count, aspect, frame rate and resolution.
 
-The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on the shots of SR1 and SR2: nine files, crops made from them, and 9:16, 16:9 and 1:1 timelines. Each item below names a line that rests on one clip or on no measurement, and the cases that test it.
+The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on SR1, SR2 and the script steps of SR3. These use nine files, crops made from them, and 9:16, 16:9 and 1:1 timelines. Each item below names a line that rests on one clip or on no measurement, and the cases that test it.
 
 ## One clip or one file
 
@@ -26,11 +26,6 @@ The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-95
     - Two people who move apart.
 - **Speed ramps.** Now: 50 % and 200 % on four clips. vidcut smooths on the time of the source.
   - Test (SR3 step W2): a speed ramp and a freeze frame, on files at 24, 25, 30 and 59.94 fps.
-- **Dynamic Zoom boxes.** Now: the usual boxes, with each ease, on four clips. The SR2 clips with other boxes got other files at the import of their timeline.
-  - Test (SR3 timeline sr3-k-v): a box that pans and zooms in, and a box that zooms out, on four files. It also has Pan keyframes before Reframe, on four files.
-- **Crop and Fit in other timelines.** Now: Crop and Fit in 1080×1920 timelines only.
-  - Test (SR3 timeline sr3-cf-q): Crop and Fit with 1280×534, 1920×1080 and 3840×2160 media in a 1:1 timeline.
-  - Test (SR3 timeline sr3-cf-h): Crop and Fit with 9:16 and 4:3 media in a 16:9 timeline.
 - **Pan Only and Tilt Only with a rotation.** Now: no case. vidcut frees the axis of the picture, and the move turns with the picture.
   - Test (SR3 step W1): Pan Only and Tilt Only with rotations of 10° and 90°, on four files each.
 

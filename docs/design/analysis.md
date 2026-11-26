@@ -346,7 +346,8 @@ flowchart TD
     - It first finds the offset of the picture with no rotation. Then `place::turned` turns that offset by the rotation.
     - A box of the Dynamic Zoom acts as a zoom of one over its size, about its middle.
   - `reframe::axes` gives the axes that move, by the `ReframeMode`. Auto places both axes. Pan and Tilt keep the other axis at the point that the frame shows now.
-  - `kept` keeps the first and the last frame of each shot. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
+  - `moved` splits the frames into runs at each shot change where the move jumps by more than `tolerance` pixels. `kept` keeps the first and the last frame of each run. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
+    - Why runs, not shots: on a picture with no room, each shot change gave two keyframes at the same place.
     - The pixels are those of a frame whose long side is `LONG` pixels. Why: Resolve gives the same keyframes at two sizes of each shape of the frame.
     - Why the long side: in 9:16 and 16:9 timelines, the two sides give the same keyframes. In a 1:1 timeline, only the long side gives as many keyframes as Resolve.
 - `ops::picture::reframed` puts the keyframes in `Picture.position_keys` and `Picture.position_y`.

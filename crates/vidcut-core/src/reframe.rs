@@ -279,14 +279,18 @@ pub fn moved(frames: &[Frame], shape: &Shape, rules: &Rules) -> Moved {
         ..Moved::default()
     };
     let unit = LONG / shape.pixels[0].max(shape.pixels[1]).max(1.0);
-    for shot in shots(frames.iter().map(|f| f.cut)) {
-        let points: Vec<(i64, [f64; 2])> = shot
-            .clone()
-            .map(|t| {
-                let pixels = [0, 1].map(|i| places[t][i] * shape.pixels[i] * unit);
-                (frames[t].key, pixels)
-            })
-            .collect();
+    let pixels: Vec<[f64; 2]> = places
+        .iter()
+        .map(|p| [0, 1].map(|i| p[i] * shape.pixels[i] * unit))
+        .collect();
+    let jumps = (0..frames.len()).map(|t| {
+        t > 0
+            && frames[t].cut
+            && (0..2).any(|i| (pixels[t][i] - pixels[t - 1][i]).abs() > rules.tolerance)
+    });
+    for shot in shots(jumps) {
+        let points: Vec<(i64, [f64; 2])> =
+            shot.clone().map(|t| (frames[t].key, pixels[t])).collect();
         let keep = kept(&points, rules.tolerance);
         for (t, _) in shot.zip(keep).filter(|(_, k)| *k) {
             out.keys.push(Keyframe {

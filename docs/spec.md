@@ -5078,13 +5078,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - 9:16, 4:3 and 1:1 clips in a 16:9 timeline move up and down only (9 shots).
     - Tilt Only on four 16:9 clips in a 9:16 timeline gives keyframes at 0. Pan Only on four 9:16 clips in a 16:9 timeline gives keyframes at 0.
     - On two 3840×2160 clips at Crop in a 1080×1920 timeline, the picture moves across and up and down. On one of them, it stays 120 pixels down, at the top of the picture.
-    - On three clips at Fit in a 1080×1920 timeline, the picture is not larger than the frame. Their keyframes are all 0.
+    - At Crop in 1:1 and 16:9 timelines, the picture moves on each axis where it is larger than the frame (6 files).
+    - With no room on either axis, Reframe sets three keyframes at 0 (12 clips). They are on the first frame, near the middle and on the last frame.
+    - These are clips at Fit in 9:16, 1:1 and 16:9 timelines, and 4:3 clips at Crop in a 16:9 timeline (9 files).
   - Pan Only and Tilt Only keep the other axis at its start value, also when that axis has room (4 clips each).
   - The keyframes are at the frames where the move bends, not on a fixed grid. A clip of about 120 frames gets 3 to 41 keyframes.
   - The same shot gives the same keyframes at two sizes of the timeline, as fractions of the picture (134 clips).
     - The sizes are 1080×1920 and 2160×3840, 1920×1080 and 3840×2160, and 1080×1080 and 2160×2160.
     - At Crop, the room changes with the size of the timeline. Thus one clip at Crop gets other keyframes.
   - Reframe replaces the Position keyframes that were on the clip.
+    - With Pan keyframes from −0.1 to 0.1 before Reframe, the move is the same as on the plain clip (4 files).
   - A start Pan of 100 or −150, or a start Tilt of 50, does not change the move. This is so on four files in a 9:16 timeline and four in a 16:9 timeline.
   - Auto gives keyframes at 0 on an axis with no room, also from Pan 100 or Tilt 50 (12 clips).
   - With a zoom of 1.5, the move across is 1.5 times as large, on 13 shots. With a zoom of 2, it is 2 times as large, on 8 shots.
@@ -5093,6 +5096,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - With a rotation of 10° or −30°, the move is that of the clip with no rotation, turned by the angle (4 clips each). Pan is that move × cos θ, and Tilt gets the part × sin θ.
   - With a rotation of 90°, 16:9 clips in a 9:16 timeline move across and up and down (4 clips).
   - The four eases of Dynamic Zoom give the same keyframes (4 clips). Resolve plays each ease as a straight line ([gotchas](gotchas.md#resolves-edits)).
+  - A Dynamic Zoom box that pans and zooms in, or that zooms out, changes the move (8 clips of 4 files). The change is a median of 224 to 378 pixels.
     - The move at each frame is that of a zoom of one over the size of the box at that frame.
   - At 200 % speed, the move follows the source frames that show (4 clips). There are about twice as many keyframes as at 100 %.
   - At 50 % speed, the move follows the source frames on two of four clips. On two crowd clips, it is a median of 86 and 214 pixels from the move at 100 %.
@@ -5109,7 +5113,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On seven more clips with a shot change, of three other files, no move jumps at the cut either. On two clips of the press conference, the picture pans across the cut over about 30 and 45 frames.
   - On one clip of the film, Reframe set no keyframes.
   - One undo removes all the keyframes of a Reframe. The name of the undo step is "Smart Reframe".
-  - The record is sections R2, R8, R10, R12, SR1 and SR2 of `fixtures/program/NOTES.md` in the test data.
+  - The record is sections R2, R8, R10, R12, SR1, SR2 and SR3 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
     - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame (X176).
@@ -5131,10 +5135,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Then the picture covers the frame on each axis where it is larger than the frame.
   - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
     - Why: a pan across the cut shows the wrong part of each shot ([gotchas](gotchas.md#resolves-edits)).
+    - Where the move does not jump at a shot change, the keyframes go on across it. A jump is a step of more than `tolerance`.
+    - Why: on a picture with no room, each shot change gave two keyframes at the same place.
   - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes. The usual value is 7 pixels.
     - The pixels are those of a frame 1920 pixels on its long side. Thus a frame of another size and the same shape gets the same keyframes, as in Resolve.
     - Why 7 and the long side: on 135 clips of SR2, they give as many keyframes as Resolve, in 9:16, 16:9 and 1:1 timelines. A tolerance of 2 pixels gives the same move.
     - With the short side, a 1:1 timeline gets a fifth fewer keyframes than in Resolve.
+    - A picture with no room gets keyframes at the first and the last frame. Resolve also sets one near the middle. It does not change the picture.
   - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point, the rotation, the flips and the Dynamic Zoom of each frame, and they stay.
     - With a rotation, the picture moves on its own axes, and the move turns with it. On each axis of the picture, the room is what the turned frame leaves.
     - Thus with a rotation of 90°, a 16:9 clip in a 9:16 timeline moves across too. With a small rotation, the move is that of the picture with no rotation, turned by the angle.
