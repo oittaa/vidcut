@@ -39,11 +39,23 @@ The pages are of the DaVinci Resolve 21.1 manual.
 - Live Preview shows the grade of a still on the current node while the pointer is on the still (p. 3335).
   - Hover Scrub Preview sets whether the thumbnail and the viewer scrub the clip (pp. 3335–3336).
 - Measured in Resolve Studio 21.2 (`fixtures/color/NOTES.md` of the test data). Each item gives the input, the output and the number of cases. It is not a rule.
-  - The ID of a still of the third clip of V1 started with 1.3. The ID of a still of the first clip of V2 started with 2.1. One case each.
-  - Four stills of one clip, all of grade version 1, in one album, exported as 1.1.1 to 1.1.4.
-  - After one more grab of that clip, the new still showed 1.1.1 and the others 1.1.2 to 1.1.5. After its delete, they showed 1.1.1 to 1.1.4.
+  - One still of each clip of three timelines [21]: the ID started with the video track and the place of the clip on it.
+    - A grab on a covered clip gave a still of the clip on top, with the ID of that clip.
+    - The DRX file held the first two numbers as `<Label>`.
+  - A clip put before a clip of V2, on one timeline [2]: the older stills of the later clip kept 2.1. New stills of it showed 2.2.
+  - In each case below, the third number was the place of the still among the stills with the same album, timeline and first two numbers.
+    - The order was the record timecode, then the time of the grab [38 stills].
+    - Grabs of two clips in turn, on two timelines [2]: 1.1.2, 1.4.2, 1.1.3, 1.4.3.
+    - Two albums [1]: each album counted its own stills.
+    - The delete of the middle one of three stills [1]: the last still then showed 1.1.2.
+    - Four stills of one clip exported as 1.1.1 to 1.1.4. A fifth still showed 1.1.1, and the others 1.1.2 to 1.1.5 [1].
+      - After the delete of the fifth still, the others showed 1.1.1 to 1.1.4.
+    - Local versions [1]: a still on a second version showed 1.5.2. A still on version 1 after it showed 1.5.3.
+    - p. 3337 says that the third number is the version of the grade. In these cases it was not.
+  - An export of one album wrote one file name for each ID. Stills of four timelines with the same ID wrote over each other [1].
   - A still grabbed in the Timeline mode showed 1.3.1.T. A still grabbed in the Group Pre Clip mode showed 1.1.1.PRE. One case each.
-  - The new stills of the run had no label. The picture had the size of the timeline, at 1920x1080 and at 588x260.
+  - The new stills of the runs had no label. The picture had the size of the timeline, at 1920x1080 and at 588x260 [2].
+  - Six stills of three timelines had the size of the timeline: 1080x1920, 3840x2160 and 1920x1080, also from 1280x720 media [6].
   - Undo of Grab Still and of Delete Selected: one case each ([gotchas](../gotchas.md#resolves-edits)).
   - The menu of the empty Gallery also had the Copy Grade items and Copy Grade From Current Project Still.
 
@@ -123,9 +135,19 @@ The pages are of the DaVinci Resolve 21.1 manual.
   - Then Ctrl+Z with 04 current took back the apply on 04.
   - No Keyframes was ticked in this project. It is not known if it is the default of a new project.
   - No Keyframes, one grade: Dynamic keyframes at 20 (Saturation 0.5) and at 40 (Saturation 0), and other values at the start.
-    - Grabs at 25, 30, 35 and 39 gave the values of the keyframe at 20. Grabs at 40 and 50 gave those of 40. A grab at 10 gave the start.
+    - Grabs at 25, 30, 35 and 39 gave the values of the keyframe at 20. Grabs at 40 and 50 gave those of 40. A grab at 10 gave the start [8].
+    - Grabs at 0, 10, 20, 25, 30, 39, 40 and 50, each on four clips of four timelines [32]. They gave the same values as above.
+    - In each of these cases, the target got the values of the last keyframe at or before the grab frame.
+    - Each of these targets got one node and no keyframes.
     - The blend at 30 is Saturation 0.25. The apply gave 0.5. A window apply of the grab at 30 gave the same values.
-    - p. 3340 says that No Keyframes gives the grade at the frame of the still. These eight applies of one grade did not.
+    - p. 3340 says that No Keyframes gives the grade at the frame of the still. These applies of one grade did not.
+  - Keyframes Aligning Start Frames, the same grade, with keyframes at frames 20 and 40 of a clip from frame 0 of its file [4]:
+    - Four clips on three timelines got keyframes at their frames 20 and 40. Two clips of the same file started at file frames 10 and 300. Two clips were of other files.
+    - The source clip started at frame 0 of its file. Thus these cases do not tell the start of the clip from the start of the file.
+  - Keyframes Aligning Source Timecode, the same grade [5]:
+    - Two clips of the same file from frames 10 and 30 got keyframes on file frames 20 and 40. A clip of another file at 25 fps did too.
+    - A clip of the same file from frame 300 got keyframes at its frames 20 and 40, as Start Frames gives.
+    - A clip of another file that starts after both keyframes got no keyframes, and the values of the keyframe at 40.
   - Preserve number of nodes 1, a source of 2 nodes and a target of 2 nodes: node 1 of the target stayed. Node 2 came from the still.
   - Preserve number of nodes 3, the same source and target: both target nodes stayed. One case each.
   - Append Node Graph of a 1-node still with keyframes onto a 2-node clip: the node of the still came after node 2. One case.
@@ -229,8 +251,9 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 The Gallery panel, Grab Still, Delete Selected, the selection of stills and Apply Grade of a still with no keyframes are built. These items are still to do:
 
-- The ID of a still is Track.Shot.Version. The version is 1, because vidcut has no versions ([versions.md](versions.md)).
-  - The Rules run tests the IDs before this item.
+- The ID of a still, as measured: the track and the place of the clip at the grab, then the place of the still.
+  - Local versions did not change the ID in the measured cases. Thus vidcut needs no versions for it ([versions.md](versions.md)).
+  - The Rules run tests a clip put before the first clip of a track, Change Label and a move to another album first.
 - Change Label, or a double-click under the ID, gives a still a label. The request is `gallery.set`.
   - The Labels run tests the dialog and its undo.
 - Apply Grades Using sets the keyframes that Apply Grade gives. With it, a still whose grade has keyframes applies.
@@ -351,9 +374,9 @@ These cases use at least three timelines that differ in size, frame rate, media 
   - Current clip: playback, arrow keys and three tracks after a click on a covered clip.
   - Thumbnail selection: a click in the clip at the playhead, a Ctrl+Shift-click, a move of the playhead with the red tint, and a filter.
   - The default of Apply Grades Using in a new project. This is a default value, so one check is enough.
-  - Still IDs: ties, a clip put in before, two clips in turn, two albums, a delete in the middle and grade version 2.
-  - No Keyframes: Static keys, a grab on a key, two nodes with other keys, window and sizing keys, and an eased key.
-  - The other keyframe modes: a target that covers one key, a speed change, and a target shorter than the keys.
+  - Still IDs: a clip put before the first clip of a track on a second timeline, Change Label and a move to another album.
+  - No Keyframes: Static keys, two nodes with other keys, window and sizing keys, and an eased key.
+  - The other keyframe modes: a source clip from a later frame, a speed change, and more clips of other files with no overlap.
   - Align Keyframes: stills grabbed at other frames, and keys that go before the start of the clip or after its end.
   - Preserve number of nodes: 1 to 3 and 10 against targets of 1 to 4 nodes, parallel nodes, two layers and keyframes.
   - Append Node Graph: a target on another source range, parallel nodes, and each keyframe mode.
