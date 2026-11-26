@@ -203,6 +203,15 @@ impl VideoCodec {
             _ => 63,
         }
     }
+
+    pub fn fixed_profile(self) -> Option<&'static str> {
+        match self {
+            VideoCodec::Prores | VideoCodec::Dnxhr => Some("hq"),
+            VideoCodec::Tiff => Some("rgb16"),
+            VideoCodec::Exr => Some("half"),
+            VideoCodec::H264 | VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9 => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -500,6 +509,12 @@ impl VideoSettings {
             bypass_reencode: false,
             use_proxy_media: false,
         }
+    }
+
+    pub fn named_profile(&self) -> &str {
+        (self.profile.as_deref())
+            .or(self.codec.fixed_profile())
+            .unwrap_or_default()
     }
 
     pub fn dwa(&self) -> bool {

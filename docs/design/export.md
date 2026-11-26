@@ -240,6 +240,7 @@ Notes:
   - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.
 - `prepare` puts the additional outputs in `Output::more`, as `export::More`.
   - `more_outputs` refuses `per_clip`, `video.bypass_reencode` and two runs of the encoder. Why: these cases are not measured.
+  - `more_refused` holds these rules. The Export page uses it too, and shows its own short text for each `MoreRefused`.
   - Two runs are two passes (`passes` 2, or a bitrate with no `passes`) with encoder `cpu` and H.264, H.265 or VP9.
   - With encoder `auto`, `encode` refuses two runs when the chosen encoder makes them. NVENC makes its two passes in one run.
 - `choose_once` and `measure_outputs` choose the colors and the metadata of each additional output, as for output 1.
@@ -542,6 +543,8 @@ Voice Isolation:
 - The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
   - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
   - `Render::more` holds the additional outputs, and `Render::output_tab` the open tab. `more_tab` draws the rows of an additional output.
+  - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
+  - The default type of ProRes, DNxHR, TIFF and OpenEXR comes from `VideoCodec::fixed_profile`, not from the plan. Why: the label stays the same while a plan runs or fails. The encoders use the same default (`VideoSettings::named_profile`).
   - Before Add or Update Job, `start_render` checks the paths with `written_twice`. Two equal paths show the prompt `ask_duplicate_paths`, and nothing is sent.
   - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.

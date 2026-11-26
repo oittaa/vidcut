@@ -844,6 +844,48 @@ pub fn refuse_written_twice(params: &ExportParams) -> Result<()> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoreRefused {
+    PerClip,
+    NoVideo,
+    Bypass,
+    TwoRuns,
+}
+
+impl MoreRefused {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::PerClip => "vidcut does not combine more_outputs with per_clip yet",
+            Self::NoVideo => "more_outputs need the video of output",
+            Self::Bypass => "vidcut does not combine more_outputs with video.bypass_reencode yet",
+            Self::TwoRuns => "more_outputs need one run of the encoder: set video.passes to 1",
+        }
+    }
+}
+
+pub fn more_refused(per_clip: bool, settings: &ExportSettings) -> Option<MoreRefused> {
+    use vidcut_core::export::{EncoderChoice, VideoCodec};
+    if per_clip {
+        return Some(MoreRefused::PerClip);
+    }
+    let Some(v) = &settings.video else {
+        return Some(MoreRefused::NoVideo);
+    };
+    if v.bypass_reencode {
+        return Some(MoreRefused::Bypass);
+    }
+    let two = match v.passes {
+        Some(n) => n == 2,
+        None => v.bitrate.is_some(),
+    };
+    let runs_twice = v.encoder == EncoderChoice::Cpu
+        && matches!(
+            v.codec,
+            VideoCodec::H264 | VideoCodec::Hevc | VideoCodec::Vp9
+        );
+    (two && runs_twice).then_some(MoreRefused::TwoRuns)
+}
+
 fn more_outputs(
     params: &ExportParams,
     settings: &ExportSettings,
@@ -852,34 +894,8 @@ fn more_outputs(
     if params.more_outputs.is_empty() {
         return Ok(Vec::new());
     }
-    if params.per_clip {
-        return Err(Error::usage(
-            "vidcut does not combine more_outputs with per_clip yet",
-        ));
-    }
-    let Some(v) = &settings.video else {
-        return Err(Error::usage("more_outputs need the video of output"));
-    };
-    if v.bypass_reencode {
-        return Err(Error::usage(
-            "vidcut does not combine more_outputs with video.bypass_reencode yet",
-        ));
-    }
-    let two = match v.passes {
-        Some(n) => n == 2,
-        None => v.bitrate.is_some(),
-    };
-    let runs_twice = v.encoder == vidcut_core::export::EncoderChoice::Cpu
-        && matches!(
-            v.codec,
-            vidcut_core::export::VideoCodec::H264
-                | vidcut_core::export::VideoCodec::Hevc
-                | vidcut_core::export::VideoCodec::Vp9
-        );
-    if two && runs_twice {
-        return Err(Error::usage(
-            "more_outputs need one run of the encoder: set video.passes to 1",
-        ));
+    if let Some(why) = more_refused(params.per_clip, settings) {
+        return Err(Error::usage(why.message()));
     }
     let streams = params.subtitles_as == Some(SubtitlesAs::Stream);
     let mut out = Vec::new();

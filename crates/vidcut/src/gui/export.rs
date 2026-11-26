@@ -441,10 +441,24 @@ fn profiles(c: VideoCodec) -> &'static [&'static str] {
 }
 
 fn fixed_format(c: VideoCodec) -> bool {
-    matches!(
-        c,
-        VideoCodec::Prores | VideoCodec::Dnxhr | VideoCodec::Tiff | VideoCodec::Exr
-    )
+    c.fixed_profile().is_some()
+}
+
+fn more_refused(why: crate::export::MoreRefused) -> &'static str {
+    use crate::export::MoreRefused;
+    match why {
+        MoreRefused::PerClip => "Additional outputs need Single Clip",
+        MoreRefused::NoVideo => "Additional outputs need Export Video on",
+        MoreRefused::Bypass => "Additional outputs need Bypass Re-encode off",
+        MoreRefused::TwoRuns => "Additional outputs need Passes set to 1",
+    }
+}
+
+fn usual_profile(c: VideoCodec, planned: &Value) -> String {
+    match c.fixed_profile().or(planned["profile"].as_str()) {
+        Some(p) => format!("default ({p})"),
+        None => "default".to_string(),
+    }
 }
 
 pub(super) fn name<T: serde::Serialize>(v: &T) -> String {
@@ -1308,6 +1322,10 @@ impl Workspace {
             Err("Choose a location".to_string())
         } else if !d.per_clip && d.name.trim().is_empty() {
             Err("Name the file".to_string())
+        } else if let Some(why) =
+            crate::export::more_refused(d.per_clip, &d.settings).filter(|_| !d.more.is_empty())
+        {
+            Err(more_refused(why).to_string())
         } else {
             validate(&d.settings).map_err(|e| e.message)
         };
@@ -2507,20 +2525,27 @@ fn plan_view(ui: &mut egui::Ui, d: &Render) -> Option<Vec<String>> {
             if let Some(line) = metadata_line(&outputs) {
                 ui.label(dim(line.0));
             }
+            let files: Vec<(&Value, &Value)> = (outputs.iter())
+                .flat_map(|o| {
+                    let more = o["more"].as_array().into_iter().flatten();
+                    std::iter::once(o).chain(more).map(|f| (f, &o["frames"]))
+                })
+                .collect();
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
-            ui.label(format!("{} file(s), {frames} frames", outputs.len()));
+            ui.label(format!("{} file(s), {frames} frames", files.len()));
             if let Some(line) = bypass_line(&outputs) {
                 ui.label(dim(line));
             }
-            for o in outputs.iter().take(4) {
-                ui.label(dim(format!(
-                    "{}  ({} frames)",
-                    o["path"].as_str().unwrap_or_default(),
-                    o["frames"]
-                )));
+            for (f, frames) in files.iter().take(4) {
+                let path = f["path"].as_str().unwrap_or_default();
+                ui.label(dim(format!("{path}  ({frames} frames)")));
+                if let Some(e) = f["video_encoder"]["error"].as_str() {
+                    let line = format!("video encoder unavailable: {e}");
+                    ui.label(RichText::new(line).color(theme::colors().error));
+                }
             }
-            if outputs.len() > 4 {
-                ui.label(dim(format!("… and {} more", outputs.len() - 4)));
+            if files.len() > 4 {
+                ui.label(dim(format!("… and {} more", files.len() - 4)));
             }
             for note in plan["notes"].as_array().into_iter().flatten() {
                 if note["code"] == "subtitles_cut_off" {
@@ -2949,10 +2974,7 @@ pub(super) fn more_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value) {
         });
         if fixed_format(m.codec) {
             super::dialog::row(ui, "Type", |ui| {
-                let usual = match planned["profile"].as_str() {
-                    Some(p) => format!("default ({p})"),
-                    None => "default".to_string(),
-                };
+                let usual = usual_profile(m.codec, &planned);
                 egui::ComboBox::from_id_salt("export-more-profile")
                     .selected_text(m.profile.clone().unwrap_or(usual.clone()))
                     .show_ui(ui, |ui| {
@@ -3143,10 +3165,7 @@ pub(super) fn video_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value, size: (u
         let options = profiles(v.codec);
         if !options.is_empty() {
             super::dialog::row(ui, "Profile", |ui| {
-                let usual = match planned["profile"].as_str() {
-                    Some(p) => format!("default ({p})"),
-                    None => "default".to_string(),
-                };
+                let usual = usual_profile(v.codec, &planned);
                 egui::ComboBox::from_id_salt("export-profile")
                     .selected_text(v.profile.clone().unwrap_or(usual.clone()))
                     .show_ui(ui, |ui| {
