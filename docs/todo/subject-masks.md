@@ -133,6 +133,10 @@ Each step is one pull request.
 - **Palette:** the Magic Mask palette, the click tools, the Click list, Mask Overlay and Quality.
 - **Tracking:** the video memory, the track buttons, `grade.mask.track` and the timeline of the Click list.
   - The viewer makes a missing map again, as the export does.
+- **A change before the node:** the name of a map is a digest of the input picture at the time of the click.
+  - An export makes a missing map from the picture of now, under the old name (`editor::mask_remakes`).
+  - Thus, after a change before the node and a lost map, the export can show another mask than the viewer showed.
+  - Run R3 shows what Resolve does. vidcut then makes the mask again, or keeps it, as Resolve does.
 - **Alpha Output:** the Alpha Output of the Node Editor. The mask then makes the clip transparent over the tracks below.
 - **Smart Refine and Consistency.**
 - **Matte Finesse:** one set of controls for the qualifier and the Magic Mask ([Color page](color-page.md)).
@@ -169,6 +173,7 @@ The Resolve runs are approved. They wait for a free slot on Resolve. They are in
 - **R1, palette:** the controls of version 2 in Resolve 21.2, their ranges, their usual values and the options menu.
 - **R2, the key:** float renders of a Magic Mask with a circle window, and with a qualifier, in one node. Also the Key palette.
 - **R3, the input:** does a change of an earlier node change the mask, and does it clear the tracking?
+  - Also on a tracked mask: the mask of the tracked frames after a change before the Magic Mask node.
 - **R4, the edge:** the values of the mask at its edge, for Faster and Better, and the effect of Smart Refine.
 - **R5, the clicks:** the place of each click on tracked frames, and the mask on a frame with no tracking.
 - **R6, many subjects:** one click on each of two people, then a negative click on one of them.
