@@ -323,6 +323,7 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
   - With more clicks, the first output when it is stable, else the best one.
   - With a negative object score, no mask.
 - `mask::NET` keeps the loaded model for the next frame.
+- The model needs a GPU. It runs on the GPU also with `gpu.acceleration` off, as the AI upscalers do. With no GPU, the request fails.
 
 **The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
 
@@ -330,6 +331,7 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - The disk cache limit can remove a map. Before an export, `editor::mask_remakes` lists the maps that the store does not have. The export makes them again.
   - It makes one plan for each frame, with all the missing subjects of that frame.
   - It skips a clip that is off, a frame outside the clip and a node with no input. Such a map does not show.
+  - It also reads each compound clip that the export plays, opened alone in a copy of the project (`ops::compound::open_alone`).
 - A split gives each part all the clicks and maps. A frame outside a part gets no new map (`mask_maps`).
 - `grade_masks::checked` lets a map name be only a digest. Thus a name from a project file stays in the `masks` folder.
 

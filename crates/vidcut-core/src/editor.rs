@@ -8717,6 +8717,11 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
                 negative: *negative,
             };
             if let Some(v) = invert {
+                if mask.clicks.is_empty() {
+                    return Err(Error::invalid(format!(
+                        "the Magic Mask of node {n} has no click: click first"
+                    )));
+                }
                 mask.invert = *v;
             }
             let touched = match click {
@@ -8819,7 +8824,33 @@ pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
     Ok(())
 }
 
+fn played_compounds(p: &Project) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut sheets: Vec<&[crate::model::Track]> = vec![&p.tracks];
+    while let Some(tracks) = sheets.pop() {
+        let clips = tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
+        for k in clips.filter_map(|c| p.clip_compound(c)) {
+            if !found.contains(&k.id) {
+                found.push(k.id.clone());
+                sheets.push(p.compound_tracks(k));
+            }
+        }
+    }
+    found
+}
+
 pub fn mask_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
+    let mut needs = sheet_remakes(p, download);
+    for id in played_compounds(p) {
+        let mut inside = p.clone();
+        if ops::compound::open_alone(&mut inside, &id).is_ok() {
+            needs.extend(sheet_remakes(&inside, download));
+        }
+    }
+    needs
+}
+
+fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
     let mut needs = Vec::new();
     let clips = p.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
     for c in clips {

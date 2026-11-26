@@ -3658,6 +3658,8 @@ pub enum Request {
         /// The place of the click, `[x, y]`, from 0 to 1 across and down the
         /// frame.
         place: [f64; 2],
+        /// A negative click: it takes the part under it away from its
+        /// subject. Left out: a positive click, which adds the part.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         negative: bool,
         /// The subject of the click, from 1, in place of the subject under
