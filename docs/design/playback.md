@@ -275,7 +275,7 @@ The audio device:
     - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
       - It does not open it for a crop on any side, or for a Crop Softness below 0. Then each bar shows at its exact width.
-    - The Inspector counts a crop and Anchor Point X in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
+    - The Inspector counts a crop in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
     - `Placing::new` turns a picture with pixels that are not square as the measured turn of those pixels ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
       - It takes the shape of one source pixel from the `Extent` and the fitted size. Thus the viewer and an export turn the picture in the same way.
       - The turn is about the anchor point, and that point stays in its place.

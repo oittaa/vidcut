@@ -7472,10 +7472,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
         - Zoom X 1.5 and Zoom Y 1 at Rotation 30 act in the picture's own axes, before the turn. This fits within 0.5 px on the square, 4:3 and 2:1 files.
       - vidcut turns the picture in this way, with the Zoom and the Stretch scaling.
         - Its Stretch fills the frame, also on pixels that are not square ([input scaling](#input-scaling-pp-292293)). Thus its p at Stretch has no pixel aspect ratio in it.
-      - The anchor point on these files, measured in Resolve Studio 21.2 on the square, 4:3 and 2:1 files with f = 1:
-        - Anchor Point X counts in source pixels × f, as the crop. Thus X 200 is 400 frame pixels on the 2:1 file. Anchor Point Y counts in frame pixels.
-        - In a Rotation, the anchor point moves on a file with pixels that are not square ([gotchas](gotchas.md#resolves-renders)).
-      - vidcut keeps the anchor point in its place in each turn. The Inspector and the keyframe editor count Anchor Point X in source pixels × f.
+      - The anchor point on these files is not settled. These cases are measured in Resolve Studio 21.2, in 1280 x 720 at Fit, with f = 1:
+        - A script set the anchor with `SetProperty`. That interface converts some values, and an anchor set in the Inspector was not measured.
+        - `SetProperty("AnchorPointX", 200)` puts the anchor 400 frame pixels right of the middle on the 2:1 file. `GetProperty` then gives 400.
+        - On the 4:3 file, the same value gives 266.67 frame pixels and 266.67 from `GetProperty`. On the square file, both are 200.
+        - `AnchorPointY` 100 puts the anchor 100 frame pixels above the middle on each file.
+        - With that anchor and Rotation 30, the point at the anchor moves on the 2:1 file by 63.3 px right and 40.5 px up.
+        - On the 4:3 file it also moves. On the square file it stays. The 15 cases are in section PG of `fixtures/program/NOTES.md` in the test data.
+      - vidcut keeps the anchor point in its place in each turn. The Inspector counts the anchor point in pixels of the fitted picture.
       - Not measured: Pitch, Yaw and a flip with a Rotation on these files, and a file with pixels that are not square and a rotation.
     - The crop cuts the source picture, and what is left stays where it was.
     - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
@@ -8472,6 +8476,7 @@ These facts are measured in Resolve Studio 21.1.2, in a default project that sca
   - Stretch: the scale is W / sw across and H / sh down.
   - On pixels that are not square, Stretch also applies the pixel aspect ratio. The picture is W × PAR wide and H high ([gotchas](gotchas.md#resolves-renders)).
     - This is measured on files with pixels of 4:3, 2:1 and 10:9. The 4:3 file is 1706.67 px wide in a frame of 1280 x 720 or 1280 x 960.
+    - The marks of the 2:1 file are 2 times as far apart across as at Fit. The 10:9 file is 1422.4 px wide in 1280 x 960, and W × PAR is 1422.2.
   - Zoom multiplies the scale of the map on each axis.
   - Position X moves the picture by X × (mapped width / W). Position Y moves it by Y × (mapped height / H).
   - The mapped size is the size before the zoom.

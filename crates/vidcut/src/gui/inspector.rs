@@ -1002,8 +1002,8 @@ impl Field {
             Field::X => (x - 0.5) * w,
             Field::Y => (0.5 - y) * h,
             Field::Rotation => p.turn(),
-            Field::AnchorX => (ax - 0.5) * cw,
-            Field::AnchorY => (0.5 - ay) * ch,
+            Field::AnchorX => (ax - 0.5) * fw,
+            Field::AnchorY => (0.5 - ay) * fh,
             Field::Pitch => p.pitch(),
             Field::Yaw => p.yaw(),
             Field::Left => c.left * cw,
@@ -1057,8 +1057,8 @@ impl Field {
             Field::X => -reach * w..=reach * w,
             Field::Y => -reach * h..=reach * h,
             Field::Rotation => -turns..=turns,
-            Field::AnchorX => -reach * s.crop[0]..=reach * s.crop[0],
-            Field::AnchorY => -reach * s.crop[1]..=reach * s.crop[1],
+            Field::AnchorX => -reach * fw..=reach * fw,
+            Field::AnchorY => -reach * fh..=reach * fh,
             Field::Pitch | Field::Yaw => -lean..=lean,
             Field::Left | Field::Right => 0.0..=s.crop[0],
             Field::Top | Field::Bottom => 0.0..=s.crop[1],
@@ -1106,8 +1106,8 @@ impl Field {
             Field::X => out.position = Some([at(0.5 + v / w), y]),
             Field::Y => out.position = Some([x, at(0.5 - v / h)]),
             Field::Rotation => out.rotation = Some(v),
-            Field::AnchorX => out.anchor = Some([at(0.5 + v / s.crop[0]), ay]),
-            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / s.crop[1])]),
+            Field::AnchorX => out.anchor = Some([at(0.5 + v / fw), ay]),
+            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / fh)]),
             Field::Pitch => out.pitch = Some(v),
             Field::Yaw => out.yaw = Some(v),
             Field::Left => out.crop.left = v / s.crop[0],
@@ -7112,21 +7112,5 @@ impl Workspace {
         }
         self.settle_tint(&chosen, ui.input(|i| i.pointer.any_down()));
         self.sync_picture_preview();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn anchor_x_200_on_pixels_of_2_to_1_is_400_frame_pixels() {
-        let shape = Shape {
-            frame: [1280.0, 720.0],
-            mapped: [1280.0, 720.0],
-            crop: [640.0, 720.0],
-        };
-        let placed = Field::AnchorX.put_at(&Picture::default(), &shape, 200.0, None);
-        assert_eq!(placed.anchor, Some([0.8125, 0.5]));
     }
 }
