@@ -58,10 +58,12 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `--runs N` prints the median of N runs. `--seconds S` uses only the first S seconds of each clip. `--json FILE` writes each result.
 - The projects and their cache go to a temporary folder.
 
-**Smart Reframe fit:** `python3 scripts/reframe-fit.py [--size WxH] [--fps F] [--scaling S] [--smooth S,S] [--tolerance T,T] [--json FILE] TIMELINE.otio` (release build).
+**Smart Reframe fit:** `python3 scripts/reframe-fit.py [--size WxH] [--fps F] [--scaling S] [--subject S] [--smooth S,S] [--tolerance T,T] [--json FILE] TIMELINE.otio` (release build).
 
 - TIMELINE.otio holds clips with Position keyframes. They are the reference move of each clip.
-- The script makes a project from the file, with the frame size, the frame rate and the scaling given. The defaults are 1080x1920, 24 fps and `fill`.
+- The script makes a project with the frame size, the frame rate and the scaling given. The defaults are 1080x1920, 24 fps and `fill`.
+- Then it imports the file. Thus the import changes the Pan and Tilt of the file into the pixel moves of that scaling.
+- `--subject` follows that subject. Without it, the move follows what stands out.
 - For each smooth value and each tolerance, it runs `picture.reframe` on all the clips.
 - At each frame from the first to the last reference keyframe, it measures the distance between the two positions, in pixels of the frame.
 - Between two keyframes, each position is a straight line. The handles of the keyframes are not used.

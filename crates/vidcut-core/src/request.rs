@@ -2985,9 +2985,9 @@ pub enum Request {
         /// thing, from 0 to 10. At 0 it follows each frame. Usual: 0.5.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         smooth: Option<f64>,
-        /// How far the keyframes may stray from the move, in pixels of the
-        /// frame, from 0.01 to 100. A larger value gives fewer keyframes.
-        /// Usual: 4.
+        /// How far the keyframes may stray from the move, in pixels of a
+        /// frame 1080 pixels on its short side, from 0.01 to 100. A larger
+        /// value gives fewer keyframes. Usual: 4.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tolerance: Option<f64>,
         /// Download the model when it is not on this computer, checked

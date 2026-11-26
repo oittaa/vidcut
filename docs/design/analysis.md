@@ -299,7 +299,7 @@ flowchart TD
 - `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
 - `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
   - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
-    - It also gives the zoom, the anchor point and the position of each frame.
+    - It also gives the zoom, the anchor point, the rotation, the box of the Dynamic Zoom (`DynamicZoom::at`) and the position of each frame.
   - `reframe_shape` gives the size of the picture in the frame, by the scaling of the clip (`place::mapped`), and the flips.
 - Without `reference` and `subject`, `Env::salience` finds the point that stands out most on each frame ([saliency](#saliency)). `reframe::salient` takes the point of each frame.
   - The shot changes come from the scene scores of the `Detections` (`Detections::cut`).
@@ -314,10 +314,13 @@ flowchart TD
   - A frame with no box takes the goal of the nearest frame with one in the shot. A shot with no box takes the point that the frame shows now (`Shape::view`).
   - `stabilize::fitted` smooths the goals of each shot: a straight line through the near frames, with Gaussian weights. Its sigma is `smooth` seconds.
     - Why a line: at the ends of a shot, the near frames are on one side only. Their mean lags behind a move.
-  - `Shape::held` then keeps the picture over the frame on each axis.
-  - `Shape::place` turns the point into the position of the picture, with the zoom and the anchor point of the frame.
-  - `reframe::axes` gives the axes that move, by the `ReframeMode`.
+  - `Shape::held` then keeps the picture over the frame on each axis. On an axis with no room, it gives the point that a position of 0 shows (`Shape::middle`).
+  - `Shape::place` turns the point into the position of the picture, as `place::level` draws it. It uses the zoom, the anchor point, the rotation and the box of the Dynamic Zoom of the frame.
+    - It first finds the offset of the picture with no rotation. Then `place::turned` turns that offset by the rotation.
+    - A box of the Dynamic Zoom acts as a zoom of one over its size, about its middle.
+  - `reframe::axes` gives the axes that move, by the `ReframeMode`. Auto places both axes. Pan and Tilt keep the other axis at the point that the frame shows now.
   - `kept` keeps the first and the last frame of each shot. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
+    - The pixels are those of a frame 1080 pixels on its short side. Why: Resolve gives the same keyframes in 1080×1920 and in 2160×3840.
 - `ops::picture::reframed` puts the keyframes in `Picture.position_keys` and `Picture.position_y`.
 - In a GUI, `Live::measuring` measures first, as a job of kind `reframe`. Headless, `work_first` measures on `vidcut-subjects`.
 

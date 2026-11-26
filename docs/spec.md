@@ -4571,30 +4571,40 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A 3840×2160 clip at Crop in a 1080×1920 timeline moves across, and down by 120 pixels.
     - A clip at Fit in a 1080×1920 timeline is not larger than the frame. Its keyframes are all 0.
   - The keyframes are at the frames where the move bends, not on a fixed grid. A 119-frame clip gets 5 to 23 keyframes.
-  - The same shot gives nearly the same move in 1080×1920 and in 2160×3840, as fractions of the picture.
+  - The same shot gives the same keyframes in 1080×1920 and in 2160×3840, as fractions of the picture.
+  - Reframe replaces the Position keyframes that were on the clip. A start position that is not 0 does not change the move.
+  - Auto gives keyframes at 0 on an axis with no room.
+  - With a zoom of 1.5, the move across is 1.5 times as large. Tilt holds the top limit for the first 60 frames.
+  - With a rotation of 10°, the move is that of the clip with no rotation, turned by 10°. Pan is that move × cos 10°, and Tilt gets the part × sin 10°.
+  - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of the box at that frame.
+  - With a speed change, the move follows the source frames that show.
   - Shots with no face move too. On a shot of a logo, the picture moves by up to 0.06 of its width.
   - With Reference Point and the box moved to the right, the move follows the box.
-  - One clip has a shot change at frame 32. Its keyframes move the picture from frame 21 to frame 44.
+  - No clip with a shot change jumps at the cut. On four of seven clips, the picture pans across the cut over 22 to 45 frames ([gotchas](gotchas.md#resolves-edits)).
   - One undo removes all the keyframes of a Reframe. The name of the undo step is "Smart Reframe".
-  - The record is sections R2, R8, R10 and R12 of `fixtures/program/NOTES.md` in the test data.
+  - The record is sections R2, R8, R10, R12 and SR1 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
     - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame. The point is the mean place of the map, weighted by the share of the looks at each place.
     - With `subject`, it follows the main thing of that subject in each shot. That is the thing that shows largest for the longest time. The finders of `motion.find` find the things, with the same rules for their paths.
     - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
   - `mode` selects the axes:
-    - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip.
+    - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip. On an axis with no room, the picture goes to the middle.
     - `pan` and `tilt` move only their own axis. On an axis with no room, the picture goes to the middle.
-    - The axis that does not move keeps its value at each frame.
+    - With `pan` or `tilt`, the axis that does not move keeps its value at each frame.
   - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
     - Why: the head of a person is at the top of the box.
   - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
   - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds. The usual value is 0.5 s.
   - Then the picture covers the frame on each axis where it is larger than the frame.
   - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
-  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes, in pixels of the frame. The usual value is 4 pixels.
+    - Why: a pan across the cut shows the wrong part of each shot ([gotchas](gotchas.md#resolves-edits)).
+  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes. The usual value is 4 pixels.
+    - The pixels are those of a frame 1080 pixels on its short side. Thus a frame of another size gets the same keyframes, as in Resolve.
     - Why 4: on 16 shots that Resolve reframed, 4 pixels moves the picture as 1 pixel does. Its keyframe count is near that of Resolve.
-  - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point and the flips of each frame, and they stay.
+  - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point, the rotation, the flips and the Dynamic Zoom of each frame, and they stay.
+    - With a rotation, the move is that of the picture with no rotation, turned by the angle of the rotation.
+    - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of its box at that frame.
   - Each `picture.reframe` is one undo step, "Smart Reframe".
   - The Video tab of the Inspector has the Smart Reframe section, below Transform: Object of Interest, Mode, Subject, Smooth and Reframe.
     - Object of Interest is Auto or Reference Point. With more than one clip selected, it is grey at Auto.
@@ -4609,7 +4619,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The Tools row of the viewer has Smart Reframe too. `gui.show` with `smart_reframe` shows the box.
     - The first box is at the middle of the frame. It has a quarter of the width of the frame and half of its height.
   - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
-  - Not measured: a clip with Position keyframes, a zoom, a rotation or a Dynamic Zoom before Reframe; a clip with a speed change; more clips with a shot change; the first box in the viewer.
+  - Not measured: Pan Only and Tilt Only from a position that is not 0; a reference box whose thing leaves the frame; the first box in the viewer.
   - [design](design/analysis.md#smart-reframe) gives the method.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)

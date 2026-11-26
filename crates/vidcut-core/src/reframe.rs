@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::analysis::{Detections, Tracked};
-use crate::model::{Keyframe, MotionPath, Picture};
+use crate::model::{Keyframe, MotionPath, Picture, ZoomBox};
 use crate::motion::FoundPath;
 use crate::request::ReframeMode;
 
@@ -11,6 +11,7 @@ pub const USUAL_SMOOTH: f64 = 0.5;
 pub const TOLERANCE: (f64, f64) = (0.01, 100.0);
 pub const USUAL_TOLERANCE: f64 = 4.0;
 const ROOM: f64 = 1e-6;
+const LINES: f64 = 1080.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Seen {
@@ -25,6 +26,8 @@ pub struct Frame {
     pub cut: bool,
     pub zoom: [f64; 2],
     pub anchor: [f64; 2],
+    pub turn: f64,
+    pub zoomed: ZoomBox,
     pub now: [f64; 2],
 }
 
@@ -52,8 +55,12 @@ pub struct Moved {
 }
 
 impl Shape {
+    fn grown(&self, f: &Frame, i: usize) -> f64 {
+        f.zoom[i] * self.size[i]
+    }
+
     fn scale(&self, f: &Frame, i: usize) -> f64 {
-        (f.zoom[i] * self.size[i]).max(ROOM)
+        (self.grown(f, i) / f.zoomed.size.max(ROOM)).max(ROOM)
     }
 
     fn half(&self, f: &Frame, i: usize) -> f64 {
@@ -64,15 +71,33 @@ impl Shape {
         if self.flip[i] { 1.0 - v } else { v }
     }
 
-    fn view(&self, f: &Frame, i: usize) -> f64 {
-        let (a, s) = (f.anchor[i], self.size[i]);
-        a + (0.5 - f.now[i] - (a - 0.5) * s) / self.scale(f, i)
+    fn lean(&self, f: &Frame, i: usize) -> f64 {
+        (f.anchor[i] - 0.5) * self.size[i]
     }
 
-    fn place(&self, f: &Frame, i: usize, v: f64) -> f64 {
-        let (a, s) = (f.anchor[i], self.size[i]);
-        let at = 0.5 - (a - 0.5) * s - self.scale(f, i) * (v - a);
-        at.clamp(0.5 - Picture::REACH, 0.5 + Picture::REACH)
+    fn at(&self, f: &Frame, spot: [f64; 2]) -> [f64; 2] {
+        let off = [0, 1].map(|i| (spot[i] - f.now[i] - self.lean(f, i)) * self.pixels[i]);
+        let off = crate::place::turned(off, -f.turn);
+        [0, 1].map(|i| {
+            let e = off[i] / self.pixels[i] + self.grown(f, i) * (f.anchor[i] - 0.5);
+            f.zoomed.center[i] + e / self.scale(f, i)
+        })
+    }
+
+    fn view(&self, f: &Frame) -> [f64; 2] {
+        self.at(f, Picture::MIDDLE)
+    }
+
+    fn place(&self, f: &Frame, v: [f64; 2]) -> [f64; 2] {
+        let off = [0, 1].map(|i| {
+            let e = self.scale(f, i) * (v[i] - f.zoomed.center[i]);
+            (e - self.grown(f, i) * (f.anchor[i] - 0.5)) * self.pixels[i]
+        });
+        let off = crate::place::turned(off, f.turn);
+        [0, 1].map(|i| {
+            let at = 0.5 - self.lean(f, i) - off[i] / self.pixels[i];
+            at.clamp(0.5 - Picture::REACH, 0.5 + Picture::REACH)
+        })
     }
 
     fn goal(&self, f: &Frame, i: usize) -> Option<f64> {
@@ -84,23 +109,24 @@ impl Shape {
         })
     }
 
+    fn middle(&self, f: &Frame, i: usize) -> f64 {
+        let e = (self.grown(f, i) - self.size[i]) * (f.anchor[i] - 0.5);
+        f.zoomed.center[i] + e / self.scale(f, i)
+    }
+
     fn held(&self, f: &Frame, i: usize, v: f64) -> f64 {
         let half = self.half(f, i);
         if half >= 0.5 {
-            0.5
+            self.middle(f, i)
         } else {
             v.clamp(half, 1.0 - half)
         }
     }
 
     pub fn picked(&self, f: &Frame, area: Seen) -> Seen {
-        let at = |i: usize| {
-            let (a, s) = (f.anchor[i], self.size[i]);
-            let v = a + (area.center[i] - f.now[i] - (a - 0.5) * s) / self.scale(f, i);
-            self.shown(i, v)
-        };
+        let v = self.at(f, area.center);
         Seen {
-            center: [at(0), at(1)],
+            center: [0, 1].map(|i| self.shown(i, v[i])),
             size: [0, 1].map(|i| area.size[i] / self.scale(f, i)),
         }
     }
@@ -149,7 +175,7 @@ fn views(frames: &[Frame], shape: &Shape, sigma: f64) -> Vec<[f64; 2]> {
         let path: Vec<[f64; 2]> = (0..part.len())
             .map(|t| match any {
                 true => nearest(&goals, t).unwrap_or([0.5; 2]),
-                false => [0, 1].map(|i| shape.view(&part[t], i)),
+                false => shape.view(&part[t]),
             })
             .collect();
         let smooth = match sigma < 0.5 {
@@ -202,14 +228,16 @@ fn rounded(v: f64) -> f64 {
 pub fn moved(frames: &[Frame], shape: &Shape, rules: &Rules) -> Moved {
     let axes = axes(rules.mode, frames, shape);
     let views = views(frames, shape, rules.smooth * shape.fps);
+    let free = match rules.mode {
+        ReframeMode::Auto => [true; 2],
+        _ => axes,
+    };
     let places: Vec<[f64; 2]> = frames
         .iter()
         .zip(&views)
         .map(|(f, v)| {
-            [0, 1].map(|i| match axes[i] {
-                true => shape.place(f, i, v[i]),
-                false => f.now[i],
-            })
+            let now = shape.view(f);
+            shape.place(f, [0, 1].map(|i| if free[i] { v[i] } else { now[i] }))
         })
         .collect();
     let mut out = Moved {
@@ -217,11 +245,12 @@ pub fn moved(frames: &[Frame], shape: &Shape, rules: &Rules) -> Moved {
         seen: frames.iter().filter(|f| f.seen.is_some()).count(),
         ..Moved::default()
     };
+    let unit = LINES / shape.pixels[0].min(shape.pixels[1]).max(1.0);
     for shot in shots(frames.iter().map(|f| f.cut)) {
         let points: Vec<(i64, [f64; 2])> = shot
             .clone()
             .map(|t| {
-                let pixels = [0, 1].map(|i| places[t][i] * shape.pixels[i]);
+                let pixels = [0, 1].map(|i| places[t][i] * shape.pixels[i] * unit);
                 (frames[t].key, pixels)
             })
             .collect();

@@ -6,7 +6,7 @@ keyframes, and runs `picture reframe` on all its clips with each smooth
 value and each tolerance. For each run it prints the distance between the
 two positions at each frame, in pixels of the frame, and the keyframe counts.
 
-    python3 scripts/reframe-fit.py [--size WxH] [--fps F] [--scaling S] [--smooth S,S] [--tolerance T,T] [--json FILE] TIMELINE.otio
+    python3 scripts/reframe-fit.py [--size WxH] [--fps F] [--scaling S] [--subject S] [--smooth S,S] [--tolerance T,T] [--json FILE] TIMELINE.otio
 
 Needs a release build (`cargo build --release -p vidcut`). The project goes
 to a temporary folder. The analysis stays in the cache of vidcut, so a
@@ -72,6 +72,7 @@ def main():
     ask.add_argument("--size", default="1080x1920")
     ask.add_argument("--fps", default="24")
     ask.add_argument("--scaling", default="fill")
+    ask.add_argument("--subject")
     ask.add_argument("--smooth", default="0.25,0.5,0.75,1,1.5")
     ask.add_argument("--tolerance", default="4")
     ask.add_argument("--json", type=Path)
@@ -82,9 +83,9 @@ def main():
     rows = []
     with tempfile.TemporaryDirectory() as folder:
         path = str(Path(folder) / "fit.vidcut")
-        made = ["project", "create", path, "--from", str(a.timeline), "--fps", a.fps]
-        result([*made, "--width", str(width), "--height", str(height)])
+        result(["project", "create", path, "--fps", a.fps, "--width", str(width), "--height", str(height)])
         result(["-p", path, "project", "set", "--scaling", a.scaling])
+        result(["-p", path, "timeline", "import", str(a.timeline)])
         theirs = keys(path)
         clips = sorted(theirs, key=lambda c: int(c.lstrip("c")))
         print(f"vidcut: {VIDCUT}")
@@ -93,6 +94,7 @@ def main():
         for smooth in a.smooth.split(","):
             for tolerance in a.tolerance.split(","):
                 go = ["-p", path, "picture", "reframe", ",".join(clips), "--smooth", smooth]
+                go += ["--subject", a.subject] if a.subject else []
                 result([*go, "--tolerance", tolerance, "--download"])
                 ours = keys(path)
                 each = {c: distances(ours[c], theirs[c], (width, height)) for c in clips}

@@ -8754,16 +8754,23 @@ fn reframe_frames(p: &Project, c: &Clip) -> (Vec<i64>, Vec<crate::reframe::Frame
     let picture = c.picture.clone().unwrap_or_default();
     let mut files = Vec::new();
     let mut frames = Vec::new();
+    let whole = crate::model::ZoomBox {
+        center: crate::model::Picture::MIDDLE,
+        size: 1.0,
+    };
     for t in c.start..c.end() {
         let key = c.key_at(t as f64).round() as i64;
         let at = key as f64;
+        let share = (t - c.start) as f64 / c.duration.max(1) as f64;
         files.push(f.file(f.at(t)));
         frames.push(crate::reframe::Frame {
             key,
             seen: None,
             cut: false,
-            zoom: picture.channel_at(crate::keyframes::PictureValue::Zoom, at),
-            anchor: picture.channel_at(crate::keyframes::PictureValue::Anchor, at),
+            zoom: picture.scale_at(at),
+            anchor: picture.pivot_at(at),
+            turn: picture.turn_at(at).to_radians(),
+            zoomed: picture.dynamic_zoom.map_or(whole, |z| z.at(share)),
             now: picture.place_at(at),
         });
     }
