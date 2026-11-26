@@ -1963,9 +1963,30 @@ pub struct VideoFrames {
     graded_from: i64,
     frame_size: Option<(u32, u32)>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
+    kept: crate::hdr::Dynamic,
+    more: Vec<MoreOut>,
+    more_kept: Vec<crate::hdr::Dynamic>,
+    made_more: Vec<frame::Video>,
 }
 
 const INPUT_LUTS_KEPT: usize = 4;
+
+pub(crate) struct MoreOut {
+    pub(crate) pixel: format::Pixel,
+    pub(crate) target: Option<Hdr>,
+    pub(crate) written: Option<(u32, u32)>,
+    pub(crate) alpha: Option<AlphaOut>,
+    pub(crate) handoff: Option<Handoff>,
+    pub(crate) dynamic: crate::hdr::Dynamic,
+}
+
+struct DrawnMore {
+    pixel: format::Pixel,
+    target: Option<Hdr>,
+    encoder: Option<Handoff>,
+    writing: crate::screen::Writing,
+    through_memory: Option<String>,
+}
 
 pub(crate) enum Handoff {
     Cuda(crate::cuda::CudaDevice, crate::cuda::CudaFrames),
@@ -1995,6 +2016,7 @@ pub(crate) struct Drawer {
     encoder: Option<Handoff>,
     through_memory: Option<String>,
     spent: (Duration, Duration),
+    more: Vec<DrawnMore>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -2013,7 +2035,21 @@ impl Drawer {
             encoder,
             through_memory: None,
             spent: Default::default(),
+            more: Vec::new(),
         })
+    }
+
+    fn also(&mut self, more: Vec<MoreOut>) {
+        self.more = more
+            .into_iter()
+            .map(|m| DrawnMore {
+                pixel: m.pixel,
+                target: m.target,
+                encoder: m.handoff,
+                writing: crate::screen::Writing::new(m.alpha, m.written),
+                through_memory: None,
+            })
+            .collect();
     }
 
     pub(crate) fn keeps(&self) -> crate::hw::GpuPictures {
@@ -2057,27 +2093,77 @@ impl Drawer {
         pixel: format::Pixel,
         colors: (Option<Hdr>, Option<Hdr>),
     ) -> Result<frame::Video> {
+        let to = Planes {
+            writing: None,
+            encoder: self.encoder.as_ref(),
+            through_memory: &mut self.through_memory,
+        };
+        to.made(&self.on.gpu, &mut self.screen, pixel, colors)
+    }
+
+    pub(crate) fn more_frames(&mut self, timeline: Option<Hdr>) -> Result<Vec<frame::Video>> {
+        let clock = Instant::now();
         let (gpu, screen) = (&self.on.gpu, &mut self.screen);
-        let handed =
-            match (&self.encoder, &self.through_memory) {
-                (Some(Handoff::Cuda(device, frames)), None) => Some(screen.encoded(
+        let out = (self.more.iter_mut())
+            .map(|m| {
+                let to = Planes {
+                    writing: Some(&mut m.writing),
+                    encoder: m.encoder.as_ref(),
+                    through_memory: &mut m.through_memory,
+                };
+                to.made(gpu, screen, m.pixel, (timeline, m.target))
+            })
+            .collect();
+        self.spent.1 += clock.elapsed();
+        out
+    }
+
+    pub(crate) fn more_through_memory(&self) -> Vec<Option<String>> {
+        self.more.iter().map(|m| m.through_memory.clone()).collect()
+    }
+}
+
+struct Planes<'a> {
+    writing: Option<&'a mut crate::screen::Writing>,
+    encoder: Option<&'a Handoff>,
+    through_memory: &'a mut Option<String>,
+}
+
+impl Planes<'_> {
+    fn made(
+        mut self,
+        gpu: &crate::screen::Gpu,
+        screen: &mut crate::screen::Screen,
+        pixel: format::Pixel,
+        colors: (Option<Hdr>, Option<Hdr>),
+    ) -> Result<frame::Video> {
+        let handed = match (self.encoder, &self.through_memory) {
+            (Some(Handoff::Cuda(device, frames)), None) => Some(screen.encoded_in(
+                self.writing.as_deref_mut(),
+                gpu,
+                pixel,
+                colors,
+                crate::screen::Sink::Cuda(device, frames),
+            )),
+            (Some(Handoff::Surfaces(frames)), None) => Some(frames.fresh().and_then(|f| {
+                screen.encoded_in(
+                    self.writing.as_deref_mut(),
                     gpu,
                     pixel,
                     colors,
-                    crate::screen::Sink::Cuda(device, frames),
-                )),
-                (Some(Handoff::Surfaces(frames)), None) => Some(frames.fresh().and_then(|f| {
-                    screen.encoded(gpu, pixel, colors, crate::screen::Sink::Surface(f))
-                })),
-                _ => None,
-            };
+                    crate::screen::Sink::Surface(f),
+                )
+            })),
+            _ => None,
+        };
         match handed {
             Some(Ok(out)) => return Ok(out),
-            Some(Err(e)) => self.through_memory = Some(e.to_string()),
+            Some(Err(e)) => *self.through_memory = Some(e.to_string()),
             None => {}
         }
-        let out = screen.encoded(gpu, pixel, colors, crate::screen::Sink::Memory)?;
-        match &self.encoder {
+        let memory = crate::screen::Sink::Memory;
+        let out = screen.encoded_in(self.writing, gpu, pixel, colors, memory)?;
+        match self.encoder {
             Some(Handoff::Cuda(_, frames)) => {
                 let mut up = frames.upload(&out)?;
                 crate::color::tag_frame(&mut up, colors.1);
@@ -2308,12 +2394,35 @@ impl VideoFrames {
             graded_from: 0,
             frame_size: None,
             input_luts: Default::default(),
+            kept: Default::default(),
+            more: Vec::new(),
+            more_kept: Vec::new(),
+            made_more: Vec::new(),
         }
     }
 
     pub(crate) fn encode_on(mut self, encoder: Option<Handoff>) -> Self {
         self.encoder = encoder;
         self
+    }
+
+    pub(crate) fn also(mut self, more: Vec<MoreOut>) -> Self {
+        for m in &more {
+            self.dynamic.hdr10plus |= m.dynamic.hdr10plus;
+            self.dynamic.dolby_vision |= m.dynamic.dolby_vision;
+        }
+        self.more_kept = more.iter().map(|m| m.dynamic).collect();
+        self.more = more;
+        self
+    }
+
+    pub(crate) fn take_more(&mut self) -> Vec<frame::Video> {
+        std::mem::take(&mut self.made_more)
+    }
+
+    pub(crate) fn more_through_memory(&self) -> Vec<Option<String>> {
+        let drawer = self.drawer.as_ref();
+        drawer.map_or_else(Vec::new, Drawer::more_through_memory)
     }
 
     pub(crate) fn written_at(mut self, size: (u32, u32)) -> Self {
@@ -2447,6 +2556,7 @@ impl VideoFrames {
 
     pub fn with_dynamic(mut self, dynamic: crate::hdr::Dynamic) -> Self {
         self.dynamic = dynamic;
+        self.kept = dynamic;
         self
     }
 
@@ -2488,6 +2598,7 @@ impl VideoFrames {
     fn start_drawing(&mut self) -> Result<()> {
         if self.drawer.is_none() {
             let mut drawer = Drawer::new(self.encoder.take())?;
+            drawer.also(std::mem::take(&mut self.more));
             drawer.screen.keep_alpha(self.alpha);
             drawer
                 .screen
@@ -2597,24 +2708,41 @@ impl VideoFrames {
             (w, h),
             (self.out.0, (self.timeline, self.out.1)),
         )?;
+        let mut more = drawer.more_frames(self.timeline)?;
         self.gpu_made += 1;
-        if self.dynamic.dolby_vision {
+        let (like, light) = (like.as_ref(), light.as_ref());
+        self.dress(&mut out, self.kept, like, light)?;
+        for (f, &dynamic) in more.iter_mut().zip(&self.more_kept) {
+            self.dress(f, dynamic, like, light)?;
+        }
+        self.made_more = more;
+        Ok(Some(out))
+    }
+
+    fn dress(
+        &self,
+        out: &mut frame::Video,
+        dynamic: crate::hdr::Dynamic,
+        like: Option<&frame::Video>,
+        light: Option<&crate::hdr::Hdr10Plus>,
+    ) -> Result<()> {
+        if dynamic.dolby_vision {
             let dv = crate::hdr::Dynamic {
                 hdr10plus: false,
                 dolby_vision: true,
             };
-            let from = like.as_ref().unwrap_or(&self.last_dolby_vision);
-            crate::hdr::copy_dynamic(from, &mut out, dv)?;
+            let from = like.unwrap_or(&self.last_dolby_vision);
+            crate::hdr::copy_dynamic(from, out, dv)?;
         }
-        if self.dynamic.hdr10plus {
+        if dynamic.hdr10plus {
             match light {
-                Some(light) => light.attach(&mut out)?,
+                Some(light) => light.attach(out)?,
                 None => crate::light::FrameLight::default()
                     .hdr10plus()
-                    .attach(&mut out)?,
+                    .attach(out)?,
             }
         }
-        Ok(Some(out))
+        Ok(())
     }
 
     pub(crate) fn next_layers(&mut self) -> Result<Option<Vec<Layer>>> {

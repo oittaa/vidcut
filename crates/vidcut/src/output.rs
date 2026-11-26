@@ -474,6 +474,25 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 print_rounded(o);
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
+                for m in o["more"].as_array().into_iter().flatten() {
+                    let encoder = &m["video_encoder"];
+                    println!(
+                        "  and {}  video {}  audio {}",
+                        m["path"].as_str().unwrap_or_default(),
+                        match encoder["error"].as_str() {
+                            Some(e) => format!("unavailable: {e}"),
+                            None => format!(
+                                "{} ({})",
+                                encoder["name"].as_str().unwrap_or_default(),
+                                encoder["pixel"].as_str().unwrap_or_default()
+                            ),
+                        },
+                        m["settings"]["audio"]["codec"].as_str().unwrap_or("none")
+                    );
+                    print_rounded(m);
+                    print_color(&m["color"]);
+                    print_metadata(&m["metadata"]);
+                }
             }
             print_notes(&r.result["notes"]);
         }

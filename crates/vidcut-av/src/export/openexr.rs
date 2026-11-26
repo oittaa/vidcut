@@ -39,8 +39,7 @@ pub(super) fn chosen(profile: &str, level: Option<u32>) -> (bool, Compression) {
 
 impl Writer {
     pub(super) fn new(v: &VideoSettings, (width, height): (u32, u32), fps: Rational) -> Self {
-        let (half, compression) =
-            chosen(v.profile.as_deref().unwrap_or("half"), v.compression_level);
+        let (half, compression) = chosen(v.named_profile(), v.compression_level);
         let rate = ffmpeg_rate(fps);
         Self {
             half,

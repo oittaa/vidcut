@@ -5598,6 +5598,11 @@ pub struct ExportParams {
     /// what would be downloaded.
     #[serde(default)]
     pub download: bool,
+    /// More files that the same render writes, each in a format of its own.
+    /// The first output is `output`. Not with `per_clip`,
+    /// `video.bypass_reencode` or two passes of a CPU encoder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more_outputs: Vec<crate::export::MoreOutput>,
 }
 
 /// How the speech to transcribe is found.

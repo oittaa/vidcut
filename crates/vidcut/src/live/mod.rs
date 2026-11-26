@@ -368,7 +368,7 @@ pub(crate) enum Msg {
     },
     JobPlanned {
         id: String,
-        outputs: Vec<(PathBuf, i64)>,
+        outputs: Vec<JobOutput>,
     },
     JobProgress {
         id: String,
@@ -2564,7 +2564,7 @@ impl Live {
         }
     }
 
-    fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
+    fn job_planned(&mut self, id: String, outputs: Vec<JobOutput>) {
         if let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
             .find(|j| j.id == id)

@@ -223,6 +223,44 @@ Notes:
   - The error does not say that the size is the cause. Why: the error code does not tell the cause, and the FFmpeg codec data holds no size limits.
 - [live](live.md#jobs) tells how a job collects the notes.
 
+## Additional outputs
+
+[Spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
+
+- `MoreOutput::path` gives the file: the name of `output` with the extension of its container, in the folder of `output` or in its `folder`.
+- `MoreOutput::settings` makes the `ExportSettings` of an additional output from those of output 1. It is the one place that decides them.
+  - The frame size, the use of proxies, the HDR metadata, the alpha and the frame numbers come from output 1.
+  - The HDR mode comes from output 1 when the codec carries HDR, or when output 1 is SDR. Else it is Auto.
+  - The audio of output 1 goes in when the container takes that codec (`Container::takes_audio`). Else the file has no audio.
+  - The `quality` of output 1 goes in. The encoder of the additional output applies it.
+  - With a `bitrate` on output 1, the quality and the bitrate are not set. Thus the codec gives its default quality.
+  - Why: the measurements show the audio and the quality of output 1 in each output. An output 1 with a bitrate is not measured.
+- `written_twice` finds two outputs with the same path. It compares the paths part by part, in lowercase. Why: Windows and macOS do not see the case of a name, and Windows takes both / and \ between folders.
+  - `refuse_written_twice` refuses them in `render.add` and `render.update` (`queue::existing`), and in `export.start` (`session::export_media`).
+  - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.
+- `prepare` puts the additional outputs in `Output::more`, as `export::More`.
+  - `more_outputs` refuses `per_clip`, `video.bypass_reencode` and two runs of the encoder. Why: these cases are not measured.
+  - `more_refused` holds these rules. The Export page uses it too, and shows its own short text for each `MoreRefused`.
+  - Two runs are two passes (`passes` 2, or a bitrate with no `passes`) with encoder `cpu` and H.264, H.265 or VP9.
+  - With encoder `auto`, `encode` refuses two runs when the chosen encoder makes them. NVENC makes its two passes in one run.
+- `choose_once` and `measure_outputs` choose the colors and the metadata of each additional output, as for output 1.
+- `Output::taken` and `Output::named` check the files of all outputs. Thus "Replace Existing File?", the `existing` of a dry run and `render.start` cover each file.
+
+One render writes all outputs:
+
+- `run_decoding_on` takes the additional outputs as `vidcut_av::export::More`. Each gets its own hidden file (`temp::file`), which is renamed on success.
+- `encode` opens output 1. Then `open_more` opens each additional output: its muxer, its video encoder, its audio encoder, its subtitle streams and its header.
+  - Each has its own hardware frames (`Handoff`). Why: two encoders cannot share one frames pool.
+  - An additional output encodes in one pass. `encode` refuses additional outputs when output 1 encodes two runs.
+- `VideoFrames::also` gives the `MoreOut` of each additional output to the `Drawer`. The picture is drawn once.
+- `Drawer::more_frames` then calls `Screen::encoded_in` once for each additional output, with its pixel format, its HDR target, its written size and its sink.
+  - Each output has its own `Writing`: the alpha layout, the written size, the scaled picture and the `Encoded` buffers.
+  - Why: the buffers of one output are not made again for each frame of another output.
+- `VideoFrames` keeps the dynamic metadata of all outputs. `dress` gives each frame only the HDR10+ and Dolby Vision of its own output.
+- Each output has its own `Writer` on its own `vidcut-encode` thread. The export thread sends each picture to each writer, and the samples to each writer with audio.
+- `encode` returns a `Report` for each file. `export::run` puts them all in the report of the export.
+- The job gives the files of the additional outputs in `JobOutput::more`. The job details show a Writes row for each. The other notes and details are those of output 1.
+
 ## Bypass re-encode
 
 [Spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109) gives the rule. `VideoSettings::bypass_reencode` turns it on.
@@ -518,6 +556,10 @@ Voice Isolation:
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
 - The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
   - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
+  - `Render::more` holds the additional outputs, and `Render::output_tab` the open tab. `more_tab` draws the rows of an additional output.
+  - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
+  - The default type of ProRes, DNxHR, TIFF and OpenEXR comes from `VideoCodec::fixed_profile`, not from the plan. Why: the label stays the same while a plan runs or fails. The encoders use the same default (`VideoSettings::named_profile`).
+  - Before Add or Update Job, `start_render` checks the paths with `written_twice`. Two equal paths show the prompt `ask_duplicate_paths`, and nothing is sent.
   - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.

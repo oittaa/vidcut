@@ -5739,6 +5739,30 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Show Job Details adds the frame size, the format and the frame rate, then the audio channels, the sample rate and the duration (p. 4131).
   - Stop shows "Job Cancelled" in red (measured).
   - The project keeps the queue. A cancelled job stays after a reopen. A page switch keeps the jobs and their status (measured).
+- **Additional outputs** (pp. 4126–4128):
+  - A job can write more outputs, each with its own video format, codec and data burn-in (p. 4127).
+  - Each output can render into a subfolder of the location. A subfolder that is not there is made (p. 4126).
+  - Create Additional Output adds an output. A row of numbers under the file name and the location opens each output (p. 4128).
+  - The Delete button at the bottom removes the open output (p. 4128).
+  - Measured: the "..." menu of the Render Settings has Create Additional Video Output.
+  - Measured: with additional outputs, the tab row "1 2 3 …" is under Location.
+  - Measured: tab 1 shows the full panel. Its Export Video switch is greyed and stays on.
+  - Measured: each other tab shows Create Additional Output, Video Format, Codec, Encoder, File Subfolder, a Data burn-in row and Delete Output.
+  - Measured: with ProRes, Type takes the place of Encoder. Type is the ProRes profile.
+  - Measured: a new additional output is H.264, with Encoder Auto and no subfolder. Its format was MP4 in one run and QuickTime in another.
+  - Measured: Create Additional Output on any tab adds a tab at the end. The open tab does not change.
+  - Measured: Delete Output removes the output at once, with no prompt. Then the tab before it shows.
+  - Measured: when the last additional output goes, the tab row goes, and Export Video is free again. Tab 1 has no Delete Output.
+  - Measured: an additional output has the file name of output 1 and the extension of its own format.
+  - Measured: all outputs have the frame size, the frame rate and the range of output 1.
+  - Measured: each output has the audio of output 1, with its codec and its bit rate. A QuickTime output also has the AAC of an MP4 output 1.
+  - Measured: each output has the Quality of output 1, and its own encoder applies it. In the run, Auto used NVIDIA (High profile), and output 1 used Native (Main profile).
+  - Measured: with Best, output 1 had 118 kb/s and the others 332 kb/s each. With Least, output 1 had 104 kb/s and the others 88 kb/s each.
+  - Measured: two outputs with the same path stop Add. The prompt is "Duplicate Render Paths", with one button, OK. No job is added.
+  - Measured: its text is "Please enter unique sub-folder names for each additional output in the render settings".
+  - Measured: the queue has one job, and one render writes all outputs. The row of the job shows the path and the details of output 1.
+  - Measured: "Replace Existing File?" and the prompt before a render look at the files of all outputs.
+  - Measured: after a render, the panel shows output 1.
 - **In vidcut:**
   - The Export page is `gui.page` with `export`. The Export button of the bar opens it.
   - On the page, the viewer shows the timeline. When another page opens, the viewer gets its earlier mode again.
@@ -5796,6 +5820,19 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Render Speed limits the export to that number of frames in each second. Maximum gives no limit. The menu has the measured numbers.
   - `render_speed` of the settings takes each number from 1. Left out, it is Maximum.
   - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
+  - `more_outputs` of `render.add`, `render.update`, `export.start` and `export.plan` holds the additional outputs. Each has `container`, `codec`, `encoder`, `profile` and `folder`.
+  - The Render Settings have the measured menu item, tabs and rows. The pencil of a job loads its additional outputs.
+  - An additional output has no Data burn-in row, because vidcut has no data burn-in ([gaps](todo/gaps.md)).
+  - Type shows for each format with fixed profiles: ProRes, DNxHR, TIFF and OpenEXR. Only ProRes is measured.
+  - With additional outputs, the Format menu of tab 1 has only the formats that hold video. The Preset menu greys the presets with no video.
+  - An additional output gets the audio of output 1 when its format takes that codec, else no audio.
+  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, its codec gives its default quality. That case is not measured.
+  - An additional output gets the subtitle streams of output 1. Burned-in subtitles are in the picture of each output.
+  - `render.add`, `render.update` and `export.start` refuse two outputs with the same path. `export.plan` gives the note `written_twice`.
+  - The text of the prompt has no "Please", because GUI text has 12 words at most.
+  - Additional outputs refuse Individual clips, two runs of the encoder and `video.bypass_reencode`, because these cases are not measured.
+    - The CPU encoders of H.264, H.265 and VP9 make two passes in two runs. NVENC makes two passes in one run, and it works with additional outputs.
+  - The job details show a Writes row for each file. The report of the export has an entry for each file.
   - The Thumbnail timeline is over the timeline of the page. Clips in the toolbar of the timeline hides or shows it. `gui.page` with `clips` does the same.
   - It has a picture of each clip of the video tracks that are on, in the order of their first frames. Generators, titles and adjustment clips are not in it.
   - Of clips that start together, the clip that ends first goes first. Of clips that also end together, the clip of the lower track goes first.

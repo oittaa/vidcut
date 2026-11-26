@@ -22,7 +22,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - The keyframe tracks inside a corrector track (pp. 3458–3459)
 - The keyframes of a grade that Apply Grade or a still of the Gallery takes. vidcut has neither (p. 3464)
 - Post Group Node Stack Layer, and Copy Active Layer and the node stack layers of a still of the Gallery. vidcut has no groups and no Gallery (pp. 3400–3401)
-- On the Export page: Estimated File Size, additional outputs, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
+- On the Export page: Estimated File Size, the Data burn-in of an additional output, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
 - On the Export page: the clip filter, and All Filtered Clips in the Render menu (pp. 3114–3115, 4099, 4128)
 - In the Thumbnail timeline: a frame picked by a drag, Update All Thumbnails, and the versions (pp. 3109–3111, 4129)
 - The codec names of the media pool and the Thumbnail timeline with the profile and the level, like "H.264 High L4.0" ([§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))

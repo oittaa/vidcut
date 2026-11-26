@@ -36,7 +36,7 @@ mod vulkan;
 pub use gate::Gate;
 pub use lut::{Lut, load as load_lut};
 pub use out::Sink;
-pub(crate) use out::filled;
+pub(crate) use out::{Writing, filled};
 pub use shots::{ShotsOf, ShotsShown, ShotsWanted};
 
 pub struct Gpu {
@@ -1068,10 +1068,7 @@ pub struct Screen {
     imports_before: u64,
     exported: bool,
     alpha: bool,
-    premultiplied: bool,
-    written: Option<(u32, u32)>,
-    whole: Option<Wide>,
-    encoded: out::Encoded,
+    writing: out::Writing,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
     adj: Option<blur::Texture>,

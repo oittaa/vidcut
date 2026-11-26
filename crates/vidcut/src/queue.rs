@@ -94,6 +94,7 @@ pub fn existing(
     params: &ExportParams,
     proxies: &Path,
 ) -> Result<Vec<PathBuf>> {
+    crate::export::refuse_written_twice(params)?;
     let mut changed = p.clone();
     match job {
         Some(job) => render::update(&mut changed, job, params.clone())?,
@@ -129,7 +130,7 @@ fn taken(p: &Project, params: &ExportParams, proxies: &Path) -> Result<Vec<PathB
         ..params.clone()
     };
     let prepared = crate::export::prepare(p, &probe, None, proxies)?;
-    let mut files: Vec<PathBuf> = prepared.outputs.iter().filter_map(|o| o.taken()).collect();
+    let mut files: Vec<PathBuf> = prepared.outputs.iter().flat_map(|o| o.taken()).collect();
     let beside = crate::export::subtitles_beside(p, &prepared, &probe)?;
     files.extend(
         beside
