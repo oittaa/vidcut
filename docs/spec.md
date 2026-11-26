@@ -5689,11 +5689,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
   - Measured: of the clips at the playhead, the clip of the top track has the outline. Its text is white, and the text of the others is grey.
   - A Command-click or a Shift-click selects more clips. The selected clips are red (p. 3364).
-  - Measured in Resolve Studio 21.2 on the Color and Deliver pages: a click also selects that clip alone.
-  - Measured: a Ctrl-click adds a clip to the selection or takes it out. The playhead and the outline stay.
-  - Measured: a Shift-click selects the clips from the last clicked clip to this clip, in the order of the strip. The playhead and the outline stay.
-  - Measured: the Color page and the Deliver page share the selection. The timeline of the Edit page has its own selection.
-  - Measured: a click on a clip under a clip of a higher track gives it the outline. The Color page then grades that clip.
+  - Measured in Resolve Studio 21.2, one sequence of clicks on four clips (01 to 04; 03 on V2 over 02). Each item is one case.
+    - A click on 04 selected 04 alone and moved the playhead to its first frame. A click on 02 did the same.
+    - A Ctrl-click on 01 with 04 selected gave 01 and 04. A Ctrl-click on 03 with 02, 03 and 04 selected gave 02 and 04.
+    - A Ctrl-click and a Shift-click did not move the playhead or the outline.
+    - A Ctrl-click on the current clip 02 took away its red color. The scripting API still listed 02 as selected.
+    - A Shift-click on 03, after a Ctrl-click on 01 with 04 selected, gave 01, 02, 03 and 04. Thus 04 stayed outside the range.
+    - A Shift-click on 04, after a click on 02 alone, gave 02, 03 and 04.
+    - On the Deliver page, the scripting API listed no selected clips. Clicks there changed the selection that the Color page then had.
+    - An Edit page selection of 04 with the playhead on 03 gave 03 and 04 on the Color page. With the playhead on 01, it gave 01 alone.
+    - A click on 02, under 03 of V2, gave 02 the outline. The Color page then graded 02.
   - The clips of a disabled track are not in the Thumbnail timeline (p. 3107; measured).
   - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
   - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
@@ -5878,6 +5883,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Color page and the Deliver page share this selection. The timeline of the Cut and Edit pages has its own selection.
   - `thumbnails` of `selection.set` sets the selection, and `selection.get` gives it. A change of the open timeline clears it.
   - The outline stays on the clip of the top track at the playhead, also after a click on a clip under it ([todo](todo/color-gallery.md)).
+  - The Resolve cases above do not settle these rules. The next Resolve run tests them ([todo](todo/color-gallery.md#resolve-runs)).
   - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.
