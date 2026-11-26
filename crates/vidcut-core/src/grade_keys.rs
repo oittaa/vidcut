@@ -915,11 +915,22 @@ impl Grade {
         self.nodes.iter().any(|d| !d.keys.is_empty()) || self.layers.iter().any(Grade::is_keyed)
     }
 
+    pub fn is_masked(&self) -> bool {
+        self.nodes.iter().any(|d| d.magic_mask.is_some())
+            || self.layers.iter().any(Grade::is_masked)
+    }
+
     pub fn at(&self, frame: f64) -> Cow<'_, Grade> {
-        if !self.is_keyed() {
+        if !self.is_keyed() && !self.is_masked() {
             return Cow::Borrowed(self);
         }
         let mut g = self.clone();
+        let whole = frame.floor() as i64;
+        for d in &mut g.nodes {
+            if let Some(m) = &mut d.magic_mask {
+                m.maps.retain(|v| v.frame == whole);
+            }
+        }
         for (d, from) in g.nodes.iter_mut().zip(&self.nodes) {
             if let (GradeTool::Corrector(c), Some(now)) = (&mut d.tool, from.corrector_at(frame)) {
                 **c = now.into_owned();

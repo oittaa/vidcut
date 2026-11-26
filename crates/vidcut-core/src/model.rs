@@ -4665,6 +4665,9 @@ pub struct GradeNode {
     /// none, and leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// The Magic Mask of a corrector. Left out when it has no clicks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magic_mask: Option<MagicMask>,
 }
 
 impl GradeNode {
@@ -4684,6 +4687,7 @@ impl GradeNode {
             locked: false,
             auto_key: false,
             windows: GradeWindow::fixed(frame),
+            magic_mask: None,
         }
     }
 
@@ -4703,6 +4707,7 @@ impl GradeNode {
             locked: false,
             auto_key: false,
             windows: Vec::new(),
+            magic_mask: None,
         }
     }
 
@@ -4971,6 +4976,58 @@ impl KeyOutput {
 fn scaled_key((gain, offset, invert): (f64, f64, bool), key: f64) -> f64 {
     let v = gain * key + offset;
     if invert { 1.0 - v } else { v }
+}
+
+/// The Magic Mask of a corrector. Clicks on a person or a thing make a
+/// mask of that subject on the frame of the clicks. The mask, the windows
+/// and the qualifier of the corrector make its key together: the key is
+/// where all of them are. On a frame with no map, the mask is empty.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MagicMask {
+    /// The clicks, in the order that they came.
+    pub clicks: Vec<MaskClick>,
+    /// Invert Mask: the mask is where the subjects are not. Left out when
+    /// off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+    /// One map for each subject on each frame that has clicks of it that
+    /// are on. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub maps: Vec<MaskMap>,
+}
+
+/// A click of the Magic Mask.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MaskClick {
+    /// The source frame of the click, counted as the `frame` of a
+    /// `GradeKey` is.
+    pub frame: i64,
+    /// The place of the click, `[x, y]`, from 0 to 1 across and down the
+    /// frame.
+    pub at: [f64; 2],
+    /// A negative click takes the part under it away from its subject.
+    /// Left out for a positive click.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub negative: bool,
+    /// The subject of the click, from 1. The mask is all the subjects
+    /// together.
+    pub subject: u32,
+    /// Off, the click does not act. Left out when on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub on: bool,
+}
+
+/// The map of one subject on one frame. The model gives 256 by 256 values
+/// over the frame. The mask is where these values, scaled to the frame
+/// size, are above 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MaskMap {
+    /// The source frame of the map.
+    pub frame: i64,
+    /// The subject of the map.
+    pub subject: u32,
+    /// The name of the map in the mask store of the cache folder.
+    pub name: String,
 }
 
 /// How the key input of a corrector takes the key that comes in. The key

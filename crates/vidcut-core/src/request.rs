@@ -3634,6 +3634,102 @@ pub enum Request {
         /// The number of the window in the window list, from 0.
         window: usize,
     },
+    /// Magic Mask: click on a person or a thing in the frame, to add it to
+    /// the mask of a corrector of the grade of a clip. A negative click
+    /// takes the part under it away. The model reads the picture that comes
+    /// into the corrector on that frame. A positive click outside the mask
+    /// starts a new subject. A click on the mask of a subject changes that
+    /// subject. A negative click outside the mask changes the last subject
+    /// of the frame. Returns the `subject` and the number of the `click`.
+    #[serde(rename = "grade.mask.click")]
+    GradeMaskClick {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame of the click. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The place of the click, `[x, y]`, from 0 to 1 across and down the
+        /// frame.
+        place: [f64; 2],
+        /// A negative click: it takes the part under it away from its
+        /// subject. Left out: a positive click, which adds the part.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        negative: bool,
+        /// The subject of the click, from 1, in place of the subject under
+        /// it. One more than the last subject starts a new subject.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<u32>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256. Without it, a missing
+        /// model is an error that tells its size.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Change the Magic Mask of a corrector of the grade of a clip: Invert
+    /// Mask, or one click. The masks of the changed click's subject come
+    /// again from its clicks.
+    #[serde(rename = "grade.mask.set")]
+    GradeMaskSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// Invert Mask: the mask is where the subjects are not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invert: Option<bool>,
+        /// The number of the click that changes, from 1, in the order of the
+        /// clicks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click: Option<usize>,
+        /// With `click`: the click on or off.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+        /// With `click`: the new place of the click, `[x, y]`, from 0 to 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        place: Option<[f64; 2]>,
+        /// With `click`: a negative or a positive click.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        negative: Option<bool>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Delete one click of the Magic Mask of a corrector of the grade of a
+    /// clip, or with no `click` all the clicks. The clicks after it move up.
+    /// The mask of its subject comes again from the clicks that stay.
+    #[serde(rename = "grade.mask.clear")]
+    GradeMaskClear {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The number of the click to delete, from 1. Left out: all the
+        /// clicks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click: Option<usize>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256.
+        #[serde(default)]
+        download: bool,
+    },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences, compound clips and adjustment clips.
     /// A generator takes no effects. The effects work in their order, on the

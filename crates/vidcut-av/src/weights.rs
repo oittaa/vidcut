@@ -360,6 +360,21 @@ fn unpickle(data: &[u8]) -> std::result::Result<Value, String> {
     }
 }
 
+fn named(prefix: &str, entries: Vec<(Value, Value)>, found: &mut HashMap<String, Tensor>) {
+    for (k, v) in entries {
+        let Value::Str(k) = k else {
+            continue;
+        };
+        match v {
+            Value::Tensor(t) => {
+                found.insert(format!("{prefix}{k}"), t);
+            }
+            Value::Dict(inner) => named(&format!("{prefix}{k}."), inner, found),
+            _ => {}
+        }
+    }
+}
+
 pub(crate) struct Torch {
     path: PathBuf,
     title: &'static str,
@@ -386,13 +401,11 @@ impl Torch {
         let value = unpickle(&data).map_err(|e| bad(&e))?;
         let tensors: HashMap<String, Tensor> = match value {
             Value::Tensor(t) => [(String::new(), t)].into(),
-            Value::Dict(entries) => entries
-                .into_iter()
-                .filter_map(|(k, v)| match (k, v) {
-                    (Value::Str(k), Value::Tensor(t)) => Some((k, t)),
-                    _ => None,
-                })
-                .collect(),
+            Value::Dict(entries) => {
+                let mut found = HashMap::new();
+                named("", entries, &mut found);
+                found
+            }
             _ => return Err(bad(&"no tensors")),
         };
         let mut storages = HashMap::new();

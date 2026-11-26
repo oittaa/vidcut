@@ -292,6 +292,57 @@ flowchart TD
   - A made frame of a Retime Process keeps its placement. Thus its `Id` holds the keyframe position when the clip is stabilized (`placed_now`, [playback](playback.md)).
 - In a GUI, `Live::measuring` measures first (`editor::stabilize_looks`), as a job of kind `stabilize`. Headless, `work_first` measures on `vidcut-stabilize`.
 
+## Subject masks
+
+The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297)) has three parts:
+
+- The project keeps the clicks, Invert Mask and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
+- `vidcut_core::masks` keeps the maps. Each map holds the logits of one subject on one frame.
+- The key stage scales each map to the frame on the GPU, and cuts it at 0.
+
+**A request.** `grade.mask.click`, `grade.mask.set` and `grade.mask.clear` go through `editor::mask_edit`:
+
+- `ops::grade_masks` changes the clicks. `clicked` chooses the subject of a new click with `subject_at`, which reads the maps of its frame.
+- `editor::mask_maps` makes the needs of the subjects that the request changed (`MaskNeed`).
+  - `mask_plan` gives the picture that comes into the corrector: the plan of `solo_plan`, with the input of the node as the output of the grade.
+  - The plan leaves out the Magic Mask of the node itself. Thus a click does not change the picture that the next click reads.
+  - The name of a map is a digest of the model, the plan and the clicks of its subject (`masks::name`).
+  - A need lists only the names that the store does not have.
+- `editor::mask_made` runs `Env::subject_masks` for each need and puts the maps into the store.
+- In a GUI, `Live::measuring` makes the maps first (`editor::mask_looks`). The edit then finds them in the store.
+
+**The model.** `AvEnv::subject_masks` renders the frame of the plan in float with `floats_sized`. Then `mask::find` in vidcut-av runs SAM 2.1:
+
+- `net::Net` runs the image encoder, the prompt encoder and the mask decoder in vidcut's own GPU kernels (`compute`).
+  - `weights::Torch` reads Meta's checkpoint. `mask::kernels` adds windowed attention, the window partition and the scale to the input square.
+- The input is the picture clamped to 0..1, scaled to the square with the bicubic filter of `bicubic::taps`, and normalized.
+  - Meta's video code rounds the scaled picture to 8 bits. vidcut keeps it in float ([AGENTS.md](../../AGENTS.md), rule 1).
+- One encode serves all the subjects of the frame. Each subject gets one decode with its clicks.
+- The choice of the output is the choice of SAM 2.1 (`chosen`):
+  - With one click, the output with the best predicted overlap.
+  - With more clicks, the first output when it is stable, else the best one.
+  - With a negative object score, no mask.
+- `mask::NET` keeps the loaded model for the next frame.
+- The model needs a GPU. It runs on the GPU also with `gpu.acceleration` off, as the AI upscalers do. With no GPU, the request fails.
+
+**The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
+
+- `masks::get` reads the memory cache first, then the disk. The memory cache is a `lru::ByBytes` with the limit `MAPS_BYTES`.
+- The disk cache limit can remove a map. Before an export, `editor::mask_remakes` lists the maps that the store does not have. The export makes them again.
+  - It makes one plan for each frame, with all the missing subjects of that frame.
+  - It skips a clip that is off, a frame outside the clip and a node with no input. Such a map does not show.
+  - It also reads each compound clip that the export plays, opened alone in a copy of the project (`ops::compound::open_alone`).
+- A split gives each part all the clicks and maps. A frame outside a part gets no new map (`mask_maps`).
+- `grade_masks::checked` lets a map name be only a digest. Thus a name from a project file stays in the `masks` folder.
+
+**The key.** `Grade::at` keeps only the maps of its frame. `key_steps` adds `KeySource::Mask` after the windows and the qualifier.
+
+- `Pass::Mask` names the maps of the frame (`Masking`). `mask_into` in the screen puts them into one storage buffer.
+- `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above 0.
+- A `Pass::KeyFold` then applies Invert Mask and folds the mask into the key of the corrector.
+
+**Checks.** The scripts and results are in the sam2 folder of the test data. On the first frames of DAVIS 2017 val, vidcut and Meta's network agree on the same input to 0.9999 mean overlap.
+
 ## In a GUI
 
 - `Live::measuring` lists the media (and audio streams) of the clips that the two edits name.
@@ -560,6 +611,7 @@ flowchart TD
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | the boxes of the faces of a range | `analysis` (`AvEnv`) | origin, the model and its sizes, the `Look` |
 | the motion of the camera in a clip (`Shake`) | `analysis` (`AvEnv`) | origin, the digest of the plan, the mode, the frames |
+| the maps of the Magic Mask | `masks` (`masks::put`) | the digest of the model, the plan and the clicks |
 | sound matches of two files | `analysis` (`AvEnv`) | both origins |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
@@ -588,7 +640,7 @@ flowchart TD
 
 `disk_cache` keeps what vidcut can make again under one limit:
 
-- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render-cache`
+- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render-cache`, `masks`
 - the proxies (`.mkv` files) and the render cache in the folder of playback files, when it is in the cache dir (`Policy`)
 
 These stay, and do not count: transcripts (`words` files in `analysis`, `Kind::keeps`), the `.keys` files of the render cache, `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json`.
@@ -651,6 +703,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`
 - `crates/vidcut-av/src/stabilize.rs`, `crates/vidcut-core/src/stabilize.rs`
+- `crates/vidcut-av/src/mask.rs`, `crates/vidcut-av/src/mask/net.rs`, `crates/vidcut-av/src/mask/kernels.rs`, `crates/vidcut-core/src/masks.rs`, `crates/vidcut-core/src/ops/grade_masks.rs`
 - `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-av/src/subjects/retinaface.rs`, `crates/vidcut-av/src/subjects/yolox.rs`, `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/waveform.rs`, `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`, `crates/vidcut/src/paths.rs`, `crates/vidcut/src/preferences.rs`, `crates/vidcut/src/services.rs`

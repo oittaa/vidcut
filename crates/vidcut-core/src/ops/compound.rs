@@ -1270,6 +1270,16 @@ pub fn open_clip(p: &mut Project, id: &str) -> Result<Value> {
     )
 }
 
+pub(crate) fn open_alone(p: &mut Project, id: &str) -> Result<Value> {
+    if !p.compound_path.is_empty() {
+        close_all(p)?;
+    }
+    let target = CompoundTarget::Pooled {
+        compound: id.to_string(),
+    };
+    push_open(p, id.to_string(), target, id)
+}
+
 pub fn open_pooled(p: &mut Project, query: &str) -> Result<Value> {
     let id = pooled_id(p, query)?;
     let found = (

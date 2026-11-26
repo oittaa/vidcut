@@ -766,6 +766,12 @@ pub fn export_media(
         params.download,
     )
     .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
+    if prepared.settings.video.is_some() {
+        let env = AvEnv::for_project(path);
+        for need in vidcut_core::editor::mask_remakes(p, params.download) {
+            vidcut_core::editor::mask_made(&env, &need)?;
+        }
+    }
     if prepared.settings.audio.is_some() {
         let env = AvEnv::for_project(path);
         for o in &mut prepared.outputs {

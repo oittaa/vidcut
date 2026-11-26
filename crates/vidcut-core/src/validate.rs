@@ -462,6 +462,9 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         if let Some(Err(e)) = t.grade.as_ref().map(crate::ops::grade::checked) {
             v.push(format!("timeline {}: {}", t.id, e.message));
         }
+        if (t.grade.as_ref()).is_some_and(crate::model::Grade::is_masked) {
+            v.push(format!("the grade of timeline {} has a Magic Mask", t.id));
+        }
         if (t.grade.as_ref()).is_some_and(|g| !g.layers.is_empty() || !g.kept_layers.is_empty()) {
             v.push(format!(
                 "the grade of timeline {} has node stack layers",

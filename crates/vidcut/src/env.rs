@@ -547,6 +547,50 @@ impl Env for AvEnv {
         )
     }
 
+    fn subject_masks(
+        &self,
+        plan: &RenderPlan,
+        subjects: &[Vec<vidcut_core::masks::Point>],
+        download: bool,
+    ) -> Result<Vec<Arc<[f32]>>> {
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the picture changed while the Magic Mask read it; click again",
+            ));
+        }
+        let dir = paths::models_dir();
+        let size = vidcut_av::mask::Size::Tiny;
+        vidcut_av::mask::get_ready(&dir, size, download).map_err(av_error)?;
+        let piece = plan
+            .video
+            .first()
+            .ok_or_else(|| Error::invalid("there is no picture at the playhead"))?;
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let colors = (plan.colors, None, None);
+        let (w, h, pixels) = vidcut_av::export::still::floats_sized(
+            piece,
+            plan.fps,
+            (plan.width, plan.height),
+            colors,
+            decoder.as_ref(),
+        )
+        .map_err(av_error)?;
+        let clicks: Vec<Vec<vidcut_av::mask::Click>> = subjects
+            .iter()
+            .map(|points| {
+                (points.iter())
+                    .map(|p| vidcut_av::mask::Click {
+                        at: p.at,
+                        positive: !p.negative,
+                    })
+                    .collect()
+            })
+            .collect();
+        let found =
+            vidcut_av::mask::find(&dir, size, (w, h, &pixels), &clicks).map_err(av_error)?;
+        Ok(found.into_iter().map(|f| f.logits.into()).collect())
+    }
+
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         let lock = || LOUD.lock().unwrap_or_else(PoisonError::into_inner);
         let key = loud_key(plan);

@@ -14,7 +14,7 @@ A subject mask is the Magic Mask palette of the Color page. Clicks on a person o
 The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 
 - **Versions:**
-  - Version 2 is the usual palette. Only Resolve Studio has it (p. 3281).
+  - Version 2 replaces version 1 (p. 3288). Only Resolve Studio has version 2 (p. 3281).
   - Version 1 stays for older projects, under Legacy Object Mask in the options menu (pp. 3287–3288).
   - vidcut builds version 2 only ([AGENTS.md](../../AGENTS.md), rule 13).
   - Version 2 has no Person mode and no Object mode. One tool masks people and things (p. 3281).
@@ -26,7 +26,7 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
   - The timeline of the Click list shows the tracked frames and a mark at the reference frame (p. 3286).
 - **Tracking:**
   - The track buttons track all clicks at once. Each click follows the picture around it (p. 3283).
-  - The mask of each frame comes from the clicks on that frame. A change of a click changes the mask at once (p. 3283).
+  - After a track of the clicks, each frame of the shot gets its mask. A change of a click changes the mask at once (p. 3283).
   - The buttons are Go To Reference Frame, the first and the last tracked frame, and one frame back or forward (p. 3285).
   - Track Reverse, Track Forward, Track Forward and Reverse, and Stop Tracking track the rest of the clip (p. 3285).
   - The tracking bar shows the tracked frames in blue (p. 3283).
@@ -42,7 +42,7 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 - **Consistency** smooths the edges of the mask over time. It is 0 at first. It needs clicks of a few tracked frames (p. 3287).
 - **Render in Place Magic Mask** writes the mask frames to a folder that the user selects. It adds an external matte node with them (pp. 3287–3288).
 - **The key of the node:**
-  - In one node, the Magic Mask, a qualifier key and the windows give their intersection (p. 3289, version 1 text).
+  - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289, version 1 text).
   - The manual shows no Magic Mask row in the Key palette (p. 3436).
 - **Use Fast Tracking** in the options menu tracks faster and less exactly (p. 3303, version 1 text).
 - **Alpha Output:** a key on the Alpha Output of the Node Editor makes the clip transparent (pp. 3390, 3427, 3446–3447).
@@ -54,9 +54,12 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 - A corrector has windows, a qualifier and a key input. `key_steps` folds them on the GPU in 32-bit float (`crates/vidcut-core/src/grade.rs`).
 - The Color page has no palette that tracks. It has no Tracker palette ([motion tracking](motion-tracking.md)).
 - `motion.track` follows a box with VitTrack, in tract on the CPU. `motion.find` finds people with YOLOX-S.
-- The analysis cache keeps boxes on disk under one limit (`disk_cache::Kind::Analysis`). No store keeps a picture for each frame.
+- A corrector has a Magic Mask with clicks on one frame, Invert Mask and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
+  - SAM 2.1 tiny makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set` and `grade.mask.clear`.
+  - The mask store keeps the maps in memory and in the disk cache (`disk_cache::Kind::Masks`). An export makes a missing map again.
+  - The viewer shows no mask on a frame whose map is missing.
 - The catalog downloads each model on first use, after an ask, and checks its SHA-256 (`catalog.rs`, `models.rs`).
-- RetinaFace, NanoVSR and FlashVSR run in vidcut's own GPU kernels. The other ONNX models run in tract on the CPU.
+- RetinaFace, NanoVSR, FlashVSR and SAM 2.1 run in vidcut's own GPU kernels. The other ONNX models run in tract on the CPU.
 - The Node Editor has no Alpha Output. A clip with its own alpha composites over the tracks below.
 
 ## The models
@@ -127,11 +130,13 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
 
 Each step is one pull request.
 
-- **Still mask:** the tiny model in vidcut's kernels, in picture mode.
-  - The Magic Mask of a corrector, with clicks on one frame, Invert and the key in the node.
-  - The requests, undo, and the catalog entries of the three models with their SHA-256.
 - **Palette:** the Magic Mask palette, the click tools, the Click list, Mask Overlay and Quality.
-- **Tracking:** the video memory, the track buttons, the mask store and the timeline of the Click list.
+- **Tracking:** the video memory, the track buttons, `grade.mask.track` and the timeline of the Click list.
+  - The viewer makes a missing map again, as the export does.
+- **A change before the node:** the name of a map is a digest of the input picture at the time of the click.
+  - An export makes a missing map from the picture of now, under the old name (`editor::mask_remakes`).
+  - Thus, after a change before the node and a lost map, the export can show another mask than the viewer showed.
+  - Run R3 shows what Resolve does. vidcut then makes the mask again, or keeps it, as Resolve does.
 - **Alpha Output:** the Alpha Output of the Node Editor. The mask then makes the clip transparent over the tracks below.
 - **Smart Refine and Consistency.**
 - **Matte Finesse:** one set of controls for the qualifier and the Magic Mask ([Color page](color-page.md)).
@@ -142,7 +147,7 @@ Each step is one pull request.
 
 ## Measurements
 
-vidcut's runs need downloads. They wait for the owner's OK of the downloads.
+The owner approved the downloads of vidcut's runs.
 
 - The files go to `sam2` in the test data folder, never into git.
 - DAVIS 2017 states no license. Its pages ask for a citation. The set is only for these runs.
@@ -154,6 +159,9 @@ These are vidcut's runs:
   - The same clicks go on the first frame of each video, for each of the three models.
   - The overlap of vidcut's mask with the official mask on each frame: the mean and the worst. Higher is better. The aim is 0.99.
   - J&F of both against the true masks of DAVIS.
+  - The official J&F with one click on the first frame: tiny 68.0, base+ 68.7, large 76.7.
+  - The first frames are done for tiny. On the same input, vidcut and the official network overlap 0.9999 on average, and 0.9993 at worst.
+  - The tracked frames wait for the Tracking step.
 - **M2, cost:** 10 s each of tos-720p-mov, pedestrian-area, stab-crowd-4k, stab-dashcam and stab-rally.
   - One click, a track forward, each model, GPU decoding on.
   - Seconds per minute of video, CPU time, GPU use and peak GPU memory.
@@ -165,6 +173,7 @@ The Resolve runs are approved. They wait for a free slot on Resolve. They are in
 - **R1, palette:** the controls of version 2 in Resolve 21.2, their ranges, their usual values and the options menu.
 - **R2, the key:** float renders of a Magic Mask with a circle window, and with a qualifier, in one node. Also the Key palette.
 - **R3, the input:** does a change of an earlier node change the mask, and does it clear the tracking?
+  - Also on a tracked mask: the mask of the tracked frames after a change before the Magic Mask node.
 - **R4, the edge:** the values of the mask at its edge, for Faster and Better, and the effect of Smart Refine.
 - **R5, the clicks:** the place of each click on tracked frames, and the mask on a frame with no tracking.
 - **R6, many subjects:** one click on each of two people, then a negative click on one of them.

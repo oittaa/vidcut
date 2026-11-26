@@ -29,6 +29,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - Auto Color, with neural network by default and Use Legacy Auto Color preference (§8.25)
+- the Magic Mask of a corrector: a mask of a person or a thing from clicks on one frame (§8.29)
 - stabilization of a clip of a video file (§8.27)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
@@ -5012,6 +5013,36 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Reset in the Qualifier palette resets the HSL values. Reset in the Key palette also resets the Qualifier row.
   - The node shows a Qualifier badge when the HSL values are not at their usual values. The Qualifier row counts for the Key badge.
   - The 3D, RGB and Luma modes, the pickers and Matte Finesse come later ([todo](todo/color-page.md)).
+
+### 8.29 Magic Mask (pp. 3281–3289, 3292, 3296–3297)
+
+- The manual:
+  - The Magic Mask palette makes a mask of a person, a thing or a part of a person. Only Resolve Studio has version 2 (p. 3281).
+  - Version 2 replaces version 1. Version 1 stays for older projects (p. 3288).
+  - A positive click adds the person or thing under it. A negative click takes a part away (p. 3282).
+  - A click on a part of a person gives that part, for example the face or the hair (p. 3281).
+  - After a track of the clicks, each frame of the shot gets its mask. A change of a click changes the mask at once (p. 3283).
+  - Invert Mask inverts the mask (p. 3286).
+  - The mask of a node is the union of its subjects (p. 3296).
+  - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
+  - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
+- vidcut:
+  - The Magic Mask is a part of a corrector of the grade of a clip. SAM 2.1 tiny makes the mask ([design](design/analysis.md#subject-masks)).
+  - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask or one click. `grade.mask.clear` deletes one click or all of them.
+  - The model reads the picture that comes into the corrector on the frame of the click.
+  - A positive click outside the mask starts a new subject. A click on the mask of a subject goes to that subject.
+  - A negative click outside the mask goes to the last subject of its frame.
+  - For each subject on each frame, the model gives 256 by 256 values over the frame. The values scale to the frame size, bilinear.
+  - The mask is 1 where the value of a subject is above 0, and 0 elsewhere.
+  - The mask of a frame comes from the clicks on that frame. On a frame with no clicks, the mask is empty. Tracking comes later ([todo](todo/subject-masks.md)).
+  - The mask folds into the key of the corrector after the windows and the qualifier, with Matte when a window or a qualifier is on.
+    - With a window and a qualifier, the key is the intersection of all three. The manual names two at a time ([todo](todo/subject-masks.md)).
+  - Invert Mask inverts the mask before the fold.
+  - A locked node keeps its Magic Mask. Undo takes back each request.
+  - `grade.clear` of a node, or of all nodes with `keep_nodes`, also deletes the Magic Mask.
+  - Only a corrector of the grade of a clip has a Magic Mask. Each click is from 0 to 1 across and down the frame.
+  - A click on a frame outside the clip, for example after a split, makes no mask. An export skips it.
+  - The palette, Quality, tracking, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
