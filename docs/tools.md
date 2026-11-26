@@ -287,8 +287,10 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   4. Run `vidcut models check MODEL --download`, then the commit gate.
   5. The pull request lists each changed field: the old value, the new value and the source.
 
-- **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` from scratch.
-  - Datasets: SimpleCube++ (`train`, Zenodo record 4153431, CC BY 4.0), YouTube UGC (`ugc-*`, CC BY 4.0) and `tests/media-manifest.toml` clips.
-  - Manifest clips used: `tos-720p-mov` (CC BY 3.0), `stab-night-market` and `stab-dashcam` (CC0), and `stab-road-4k`, `stab-moto`, `stab-rally` and `stab-crowd-4k` (CC BY 4.0).
-  - Extract evenly spaced PNG frames per clip, excluding test clips, and name files `<clip>_<frame>.png`.
-  - Run `python scripts/auto-color-train.py --simplecube DIR/SimpleCube++ --frames DIR/frames --exclude-dir DIR/holdout --out crates/vidcut-av/src/auto_color.safetensors`.
+- **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` deterministically.
+  - Run `python scripts/auto-color-train.py`.
+  - The script downloads and verifies three datasets into `$VIDCUT_TEST_DATA/auto-color/` when absent:
+    - SimpleCube++ `train` (`CC BY 4.0`, Zenodo record 4153431).
+    - `marcosv/rgb2raw` (`MIT`).
+    - Four `CommonCatalog CC-BY` shards (`CC BY 4.0`).
+  - Benchmark tables and DaVinci Resolve 21.2 baselines live in `tests/auto-color/summary.json`, `tests/auto-color/simplecube-test.tsv`, `tests/auto-color/intel-tau-225.tsv`, and `tests/auto-color/resolve-compare-100.tsv`.

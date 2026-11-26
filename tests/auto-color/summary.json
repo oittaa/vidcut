@@ -1,0 +1,727 @@
+{
+  "intel_tau_225": {
+    "clean": {
+      "cnn": {
+        "max_de": 23.695,
+        "mean_ang": 1.315,
+        "mean_ch": 3.598,
+        "mean_de": 6.98,
+        "median_de": 4.923,
+        "p95_de": 16.099
+      },
+      "cnn_beats_legacy": 71,
+      "cnn_beats_resolve": 63,
+      "legacy": {
+        "max_de": 28.617,
+        "mean_ang": 4.425,
+        "mean_ch": 13.789,
+        "mean_de": 14.267,
+        "median_de": 13.701,
+        "p95_de": 24.808
+      },
+      "n": 75,
+      "resolve": {
+        "max_de": 19.87,
+        "mean_ang": 2.44,
+        "mean_ch": 8.217,
+        "mean_de": 10.585,
+        "median_de": 10.106,
+        "p95_de": 16.943
+      },
+      "source": {
+        "max_de": 0.0,
+        "mean_ang": 0.007,
+        "mean_ch": 0.0,
+        "mean_de": 0.0,
+        "median_de": 0.0,
+        "p95_de": 0.0
+      }
+    },
+    "daylight": {
+      "cnn": {
+        "max_de": 24.662,
+        "mean_ang": 3.024,
+        "mean_ch": 7.139,
+        "mean_de": 8.583,
+        "median_de": 7.12,
+        "p95_de": 17.018
+      },
+      "cnn_beats_legacy": 69,
+      "cnn_beats_resolve": 63,
+      "legacy": {
+        "max_de": 29.321,
+        "mean_ang": 4.765,
+        "mean_ch": 15.677,
+        "mean_de": 14.757,
+        "median_de": 13.789,
+        "p95_de": 25.177
+      },
+      "n": 75,
+      "resolve": {
+        "max_de": 35.41,
+        "mean_ang": 6.177,
+        "mean_ch": 13.507,
+        "mean_de": 12.607,
+        "median_de": 11.697,
+        "p95_de": 20.358
+      },
+      "source": {
+        "max_de": 33.629,
+        "mean_ang": 6.075,
+        "mean_ch": 13.324,
+        "mean_de": 7.414,
+        "median_de": 4.274,
+        "p95_de": 20.023
+      }
+    },
+    "extreme_all": {
+      "cnn": {
+        "max_de": 28.27,
+        "mean_ang": 4.469,
+        "mean_ch": 12.54,
+        "mean_de": 11.752,
+        "median_de": 10.571,
+        "p95_de": 20.006
+      },
+      "cnn_beats_legacy": 74,
+      "cnn_beats_resolve": 75,
+      "legacy": {
+        "max_de": 45.874,
+        "mean_ang": 13.311,
+        "mean_ch": 40.837,
+        "mean_de": 23.535,
+        "median_de": 20.202,
+        "p95_de": 40.588
+      },
+      "n": 75,
+      "resolve": {
+        "max_de": 55.644,
+        "mean_ang": 23.847,
+        "mean_ch": 62.514,
+        "mean_de": 29.102,
+        "median_de": 26.932,
+        "p95_de": 46.157
+      },
+      "source": {
+        "max_de": 58.288,
+        "mean_ang": 28.522,
+        "mean_ch": 69.841,
+        "mean_de": 32.299,
+        "median_de": 31.987,
+        "p95_de": 53.358
+      }
+    },
+    "extreme_planckian": {
+      "cnn": {
+        "max_de": 22.078,
+        "mean_ang": 4.229,
+        "mean_ch": 11.56,
+        "mean_de": 10.649,
+        "median_de": 10.318,
+        "p95_de": 16.316
+      },
+      "cnn_beats_legacy": 50,
+      "cnn_beats_resolve": 51,
+      "legacy": {
+        "max_de": 40.396,
+        "mean_ang": 8.675,
+        "mean_ch": 27.823,
+        "mean_de": 18.729,
+        "median_de": 17.605,
+        "p95_de": 27.64
+      },
+      "n": 51,
+      "resolve": {
+        "max_de": 43.488,
+        "mean_ang": 20.128,
+        "mean_ch": 42.919,
+        "mean_de": 23.947,
+        "median_de": 21.769,
+        "p95_de": 36.523
+      },
+      "source": {
+        "max_de": 46.767,
+        "mean_ang": 25.036,
+        "mean_ch": 55.782,
+        "mean_de": 27.038,
+        "median_de": 26.637,
+        "p95_de": 40.933
+      }
+    },
+    "overall": {
+      "cnn": {
+        "max_de": 28.27,
+        "mean_ang": 2.936,
+        "mean_ch": 7.759,
+        "mean_de": 9.105,
+        "median_de": 8.83,
+        "p95_de": 17.902
+      },
+      "cnn_beats_legacy": 214,
+      "cnn_beats_resolve": 201,
+      "legacy": {
+        "max_de": 45.874,
+        "mean_ang": 7.5,
+        "mean_ch": 23.434,
+        "mean_de": 17.52,
+        "median_de": 15.623,
+        "p95_de": 35.543
+      },
+      "n": 225,
+      "resolve": {
+        "max_de": 55.644,
+        "mean_ang": 10.821,
+        "mean_ch": 28.079,
+        "mean_de": 17.431,
+        "median_de": 14.143,
+        "p95_de": 39.246
+      },
+      "source": {
+        "max_de": 58.288,
+        "mean_ang": 11.535,
+        "mean_ch": 27.722,
+        "mean_de": 13.238,
+        "median_de": 4.274,
+        "p95_de": 43.647
+      }
+    },
+    "per_camera": {
+      "Canon": {
+        "clean": {
+          "cnn": {
+            "max_de": 16.44,
+            "mean_ang": 0.916,
+            "mean_ch": 2.285,
+            "mean_de": 3.848,
+            "median_de": 3.699,
+            "p95_de": 6.144
+          },
+          "cnn_beats_legacy": 25,
+          "cnn_beats_resolve": 24,
+          "legacy": {
+            "max_de": 22.937,
+            "mean_ang": 3.947,
+            "mean_ch": 11.662,
+            "mean_de": 12.198,
+            "median_de": 11.033,
+            "p95_de": 18.586
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 16.526,
+            "mean_ang": 1.718,
+            "mean_ch": 7.253,
+            "mean_de": 9.314,
+            "median_de": 8.69,
+            "p95_de": 15.363
+          },
+          "source": {
+            "max_de": 0.0,
+            "mean_ang": 0.005,
+            "mean_ch": 0.0,
+            "mean_de": 0.0,
+            "median_de": 0.0,
+            "p95_de": 0.0
+          }
+        },
+        "daylight": {
+          "cnn": {
+            "max_de": 16.404,
+            "mean_ang": 2.338,
+            "mean_ch": 5.502,
+            "mean_de": 5.73,
+            "median_de": 5.075,
+            "p95_de": 11.209
+          },
+          "cnn_beats_legacy": 24,
+          "cnn_beats_resolve": 23,
+          "legacy": {
+            "max_de": 22.949,
+            "mean_ang": 3.975,
+            "mean_ch": 12.593,
+            "mean_de": 12.511,
+            "median_de": 11.034,
+            "p95_de": 18.128
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 18.662,
+            "mean_ang": 4.515,
+            "mean_ch": 10.434,
+            "mean_de": 10.784,
+            "median_de": 9.752,
+            "p95_de": 16.876
+          },
+          "source": {
+            "max_de": 19.456,
+            "mean_ang": 4.327,
+            "mean_ch": 8.862,
+            "mean_de": 5.295,
+            "median_de": 2.736,
+            "p95_de": 16.045
+          }
+        },
+        "extreme": {
+          "cnn": {
+            "max_de": 22.281,
+            "mean_ang": 4.916,
+            "mean_ch": 13.901,
+            "mean_de": 11.547,
+            "median_de": 9.958,
+            "p95_de": 21.274
+          },
+          "cnn_beats_legacy": 25,
+          "cnn_beats_resolve": 25,
+          "legacy": {
+            "max_de": 38.679,
+            "mean_ang": 10.61,
+            "mean_ch": 35.342,
+            "mean_de": 20.805,
+            "median_de": 18.315,
+            "p95_de": 31.247
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 48.037,
+            "mean_ang": 21.841,
+            "mean_ch": 56.171,
+            "mean_de": 28.373,
+            "median_de": 26.932,
+            "p95_de": 44.165
+          },
+          "source": {
+            "max_de": 42.628,
+            "mean_ang": 25.912,
+            "mean_ch": 62.096,
+            "mean_de": 30.938,
+            "median_de": 31.994,
+            "p95_de": 40.353
+          }
+        }
+      },
+      "Nikon": {
+        "clean": {
+          "cnn": {
+            "max_de": 23.695,
+            "mean_ang": 2.015,
+            "mean_ch": 4.945,
+            "mean_de": 9.071,
+            "median_de": 9.658,
+            "p95_de": 15.898
+          },
+          "cnn_beats_legacy": 22,
+          "cnn_beats_resolve": 20,
+          "legacy": {
+            "max_de": 28.617,
+            "mean_ang": 5.032,
+            "mean_ch": 16.226,
+            "mean_de": 15.727,
+            "median_de": 15.1,
+            "p95_de": 25.21
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 18.427,
+            "mean_ang": 3.112,
+            "mean_ch": 9.596,
+            "mean_de": 11.565,
+            "median_de": 11.014,
+            "p95_de": 17.147
+          },
+          "source": {
+            "max_de": 0.0,
+            "mean_ang": 0.005,
+            "mean_ch": 0.0,
+            "mean_de": 0.0,
+            "median_de": 0.0,
+            "p95_de": 0.0
+          }
+        },
+        "daylight": {
+          "cnn": {
+            "max_de": 24.662,
+            "mean_ang": 4.035,
+            "mean_ch": 9.012,
+            "mean_de": 10.412,
+            "median_de": 10.06,
+            "p95_de": 18.755
+          },
+          "cnn_beats_legacy": 22,
+          "cnn_beats_resolve": 19,
+          "legacy": {
+            "max_de": 29.321,
+            "mean_ang": 5.708,
+            "mean_ch": 18.898,
+            "mean_de": 16.387,
+            "median_de": 15.252,
+            "p95_de": 25.742
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 35.41,
+            "mean_ang": 6.962,
+            "mean_ch": 15.263,
+            "mean_de": 13.796,
+            "median_de": 13.578,
+            "p95_de": 21.138
+          },
+          "source": {
+            "max_de": 33.629,
+            "mean_ang": 7.175,
+            "mean_ch": 16.45,
+            "mean_de": 8.949,
+            "median_de": 3.841,
+            "p95_de": 24.115
+          }
+        },
+        "extreme": {
+          "cnn": {
+            "max_de": 28.27,
+            "mean_ang": 4.416,
+            "mean_ch": 11.712,
+            "mean_de": 12.526,
+            "median_de": 11.124,
+            "p95_de": 26.08
+          },
+          "cnn_beats_legacy": 24,
+          "cnn_beats_resolve": 25,
+          "legacy": {
+            "max_de": 45.874,
+            "mean_ang": 12.333,
+            "mean_ch": 41.114,
+            "mean_de": 24.065,
+            "median_de": 20.202,
+            "p95_de": 40.244
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 43.089,
+            "mean_ang": 22.043,
+            "mean_ch": 57.315,
+            "mean_de": 25.974,
+            "median_de": 25.834,
+            "p95_de": 41.081
+          },
+          "source": {
+            "max_de": 58.288,
+            "mean_ang": 27.875,
+            "mean_ch": 70.618,
+            "mean_de": 31.18,
+            "median_de": 31.987,
+            "p95_de": 52.131
+          }
+        }
+      },
+      "Sony": {
+        "clean": {
+          "cnn": {
+            "max_de": 18.183,
+            "mean_ang": 1.015,
+            "mean_ch": 3.566,
+            "mean_de": 8.021,
+            "median_de": 7.379,
+            "p95_de": 16.496
+          },
+          "cnn_beats_legacy": 24,
+          "cnn_beats_resolve": 19,
+          "legacy": {
+            "max_de": 28.578,
+            "mean_ang": 4.297,
+            "mean_ch": 13.48,
+            "mean_de": 14.875,
+            "median_de": 13.726,
+            "p95_de": 25.122
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 19.87,
+            "mean_ang": 2.489,
+            "mean_ch": 7.8,
+            "mean_de": 10.875,
+            "median_de": 10.199,
+            "p95_de": 16.735
+          },
+          "source": {
+            "max_de": 0.0,
+            "mean_ang": 0.01,
+            "mean_ch": 0.0,
+            "mean_de": 0.0,
+            "median_de": 0.0,
+            "p95_de": 0.0
+          }
+        },
+        "daylight": {
+          "cnn": {
+            "max_de": 20.01,
+            "mean_ang": 2.698,
+            "mean_ch": 6.902,
+            "mean_de": 9.608,
+            "median_de": 8.764,
+            "p95_de": 15.479
+          },
+          "cnn_beats_legacy": 23,
+          "cnn_beats_resolve": 21,
+          "legacy": {
+            "max_de": 28.373,
+            "mean_ang": 4.611,
+            "mean_ch": 15.54,
+            "mean_de": 15.373,
+            "median_de": 13.789,
+            "p95_de": 25.058
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 26.625,
+            "mean_ang": 7.055,
+            "mean_ch": 14.824,
+            "mean_de": 13.242,
+            "median_de": 12.968,
+            "p95_de": 24.06
+          },
+          "source": {
+            "max_de": 25.656,
+            "mean_ang": 6.724,
+            "mean_ch": 14.659,
+            "mean_de": 7.997,
+            "median_de": 5.848,
+            "p95_de": 20.678
+          }
+        },
+        "extreme": {
+          "cnn": {
+            "max_de": 18.035,
+            "mean_ang": 4.074,
+            "mean_ch": 12.008,
+            "mean_de": 11.181,
+            "median_de": 10.532,
+            "p95_de": 16.418
+          },
+          "cnn_beats_legacy": 25,
+          "cnn_beats_resolve": 25,
+          "legacy": {
+            "max_de": 44.902,
+            "mean_ang": 16.989,
+            "mean_ch": 46.055,
+            "mean_de": 25.736,
+            "median_de": 23.578,
+            "p95_de": 42.609
+          },
+          "n": 25,
+          "resolve": {
+            "max_de": 55.644,
+            "mean_ang": 27.658,
+            "mean_ch": 74.058,
+            "mean_de": 32.959,
+            "median_de": 31.221,
+            "p95_de": 52.901
+          },
+          "source": {
+            "max_de": 57.268,
+            "mean_ang": 31.778,
+            "mean_ch": 76.809,
+            "mean_de": 34.778,
+            "median_de": 30.882,
+            "p95_de": 55.813
+          }
+        }
+      }
+    }
+  },
+  "model_path": "crates/vidcut-av/src/auto_color.safetensors",
+  "model_sha256": "a3e50d080d4404c206229b316437b7496bdc0ee27cde21b7189c50b0e17c80c2",
+  "reference_editor": "DaVinci Resolve Studio 21.2",
+  "resolve_compare_100": {
+    "all": {
+      "cnn": {
+        "max_de": 24.962,
+        "mean_ch": 5.32,
+        "mean_de": 7.543,
+        "median_de": 6.01,
+        "p95_de": 18.201
+      },
+      "cnn_beats_legacy": 80,
+      "cnn_beats_resolve": 67,
+      "legacy": {
+        "max_de": 34.378,
+        "mean_ch": 10.6,
+        "mean_de": 12.919,
+        "median_de": 11.507,
+        "p95_de": 27.645
+      },
+      "n": 100,
+      "resolve": {
+        "max_de": 32.346,
+        "mean_ch": 8.987,
+        "mean_de": 8.53,
+        "median_de": 5.96,
+        "p95_de": 22.288
+      },
+      "source": {
+        "max_de": 31.262,
+        "mean_ch": 4.456,
+        "mean_de": 4.269,
+        "median_de": 0.0,
+        "p95_de": 18.729
+      }
+    },
+    "frames-cast": {
+      "cnn": {
+        "max_de": 20.506,
+        "mean_ch": 6.066,
+        "mean_de": 8.381,
+        "median_de": 7.937,
+        "p95_de": 19.529
+      },
+      "cnn_beats_legacy": 14,
+      "cnn_beats_resolve": 11,
+      "legacy": {
+        "max_de": 21.9,
+        "mean_ch": 7.933,
+        "mean_de": 9.539,
+        "median_de": 9.283,
+        "p95_de": 17.06
+      },
+      "n": 25,
+      "resolve": {
+        "max_de": 20.849,
+        "mean_ch": 6.206,
+        "mean_de": 7.035,
+        "median_de": 5.923,
+        "p95_de": 18.395
+      },
+      "source": {
+        "max_de": 28.633,
+        "mean_ch": 5.287,
+        "mean_de": 9.132,
+        "median_de": 6.679,
+        "p95_de": 24.945
+      }
+    },
+    "stills-true": {
+      "cnn": {
+        "max_de": 17.808,
+        "mean_ch": 6.662,
+        "mean_de": 10.571,
+        "median_de": 10.178,
+        "p95_de": 17.69
+      },
+      "cnn_beats_legacy": 24,
+      "cnn_beats_resolve": 21,
+      "legacy": {
+        "max_de": 34.378,
+        "mean_ch": 12.543,
+        "mean_de": 18.985,
+        "median_de": 18.106,
+        "p95_de": 32.622
+      },
+      "n": 25,
+      "resolve": {
+        "max_de": 32.346,
+        "mean_ch": 16.919,
+        "mean_de": 15.315,
+        "median_de": 15.371,
+        "p95_de": 30.058
+      },
+      "source": {
+        "max_de": 31.262,
+        "mean_ch": 12.535,
+        "mean_de": 7.946,
+        "median_de": 6.412,
+        "p95_de": 23.11
+      }
+    },
+    "untouched": {
+      "cnn": {
+        "max_de": 24.962,
+        "mean_ch": 4.277,
+        "mean_de": 5.61,
+        "median_de": 3.368,
+        "p95_de": 17.51
+      },
+      "cnn_beats_legacy": 42,
+      "cnn_beats_resolve": 35,
+      "legacy": {
+        "max_de": 28.241,
+        "mean_ch": 10.963,
+        "mean_de": 11.577,
+        "median_de": 10.332,
+        "p95_de": 24.987
+      },
+      "n": 50,
+      "resolve": {
+        "max_de": 24.596,
+        "mean_ch": 6.411,
+        "mean_de": 5.886,
+        "median_de": 4.438,
+        "p95_de": 12.931
+      },
+      "source": {
+        "max_de": 0.0,
+        "mean_ch": 0.0,
+        "mean_de": 0.0,
+        "median_de": 0.0,
+        "p95_de": 0.0
+      }
+    }
+  },
+  "resolve_passthrough_de2000": {
+    "intel_tau_225": 0.0536,
+    "simplecube_test_462": 0.0507
+  },
+  "simplecube_test_462": {
+    "cnn": {
+      "max_de": 33.193,
+      "mean_ang": 2.887,
+      "mean_ch": 7.063,
+      "mean_de": 10.291,
+      "median_de": 8.741,
+      "p95_de": 21.153
+    },
+    "cnn_beats_legacy": 425,
+    "cnn_beats_resolve": 362,
+    "legacy": {
+      "max_de": 34.052,
+      "mean_ang": 4.394,
+      "mean_ch": 14.305,
+      "mean_de": 14.804,
+      "median_de": 13.515,
+      "p95_de": 25.908
+    },
+    "n": 462,
+    "resolve": {
+      "max_de": 43.251,
+      "mean_ang": 5.235,
+      "mean_ch": 13.109,
+      "mean_de": 13.053,
+      "median_de": 11.82,
+      "p95_de": 24.703
+    },
+    "source": {
+      "max_de": 32.446,
+      "mean_ang": 7.103,
+      "mean_ch": 14.787,
+      "mean_de": 10.314,
+      "median_de": 8.416,
+      "p95_de": 22.589
+    }
+  },
+  "train_dataset_summary": "SimpleCube++ train (CC BY 4.0) + marcosv/rgb2raw (MIT) + CommonCatalog CC-BY (CC BY 4.0)",
+  "train_datasets": [
+    {
+      "archive_md5": "d3438223e5b4ca27be874db690bef822",
+      "license": "CC BY 4.0",
+      "name": "SimpleCube++ train",
+      "zenodo_record": 4153431
+    },
+    {
+      "archive_sha256": "eaf4d2d5dd60a9d04b96f59a8f85ac1f2e55c9d8639aa4f44c6548d9278fe354",
+      "license": "MIT",
+      "name": "marcosv/rgb2raw"
+    },
+    {
+      "license": "CC BY 4.0",
+      "name": "common-canvas/commoncatalog-cc-by (4 shards)"
+    }
+  ],
+  "train_script": "scripts/auto-color-train.py"
+}
