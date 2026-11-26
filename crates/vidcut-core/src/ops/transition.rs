@@ -7,10 +7,7 @@ use crate::model::{
     Clip, Handle, Keyframe, MAX_ANGLE, MAX_BORDER, MotionEase, PictureTransition, Project,
     TrackKind, Transition,
 };
-use crate::otio::{
-    self,
-    transitions::{self, Cuts},
-};
+use crate::otio::transitions::{self, Cuts};
 
 /// Where a dissolve goes about its edit (decision D50).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -474,9 +471,8 @@ pub fn dissolve_clips(
     kind: &PictureTransition,
 ) -> Result<Vec<Made>> {
     checked(kind)?;
-    let beside_picture = |c: &Clip| {
-        picture && sound && !c.video && otio::tied(p, &c.id).iter().any(|x| clips.contains(x))
-    };
+    let beside_picture =
+        |c: &Clip| picture && sound && !c.video && p.tied(&c.id).iter().any(|x| clips.contains(x));
     let mut points: Vec<(usize, bool, i64)> = p
         .tracks
         .iter()
@@ -531,7 +527,7 @@ fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> O
     let clips = &p.tracks[ti].clips;
     let range = |id: Option<&str>| {
         id.and_then(|id| clips.iter().find(|c| c.id == id))
-            .filter(|c| c.audio.is_some() || !c.video || !otio::tied(p, &c.id).is_empty())
+            .filter(|c| c.audio.is_some() || !c.video || !p.tied(&c.id).is_empty())
             .and_then(|c| span(c, true))
     };
     match (range(from), range(to), from, to) {

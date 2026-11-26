@@ -25,7 +25,7 @@ pub mod titles;
 mod tracks;
 mod transition;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 pub use close_up::close_up;
@@ -290,6 +290,7 @@ pub(crate) fn block_clip(
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
+        link: None,
     }
 }
 
@@ -398,6 +399,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
+        link: None,
     })
 }
 
@@ -1353,11 +1355,18 @@ pub fn move_clips(
         sent.is_empty() && p.find_clip(&parts.leads[0]).is_some_and(|(ti, _)| ti != d)
     });
     let dest = dest.map(|ti| p.tracks[ti].id.clone());
+    let from: HashMap<String, i64> = parts
+        .leads
+        .iter()
+        .filter_map(|id| Some((id.clone(), p.clip(id)?.start)))
+        .collect();
     let taken = linked::take(p, &parts.rest)?;
     move_leads(p, &parts.leads, to, mode, lead_track)?;
     for part in taken {
         let mut c = part.clip;
-        c.start = p.clip(&part.lead).map_or(c.start, |l| l.start);
+        if let (Some(l), Some(was)) = (p.clip(&part.lead), from.get(&part.lead)) {
+            c.start += l.start - was;
+        }
         match &dest {
             Some(d) if sent.contains(&c.id) => linked::put(p, d, c),
             _ if leaves => linked::put_free(p, &part.track, c),
@@ -1604,7 +1613,7 @@ pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
     );
     for part in taken {
         let mut c = part.clip;
-        c.start = a;
+        c.start += a - clip.start;
         linked::put(p, &part.track, c);
     }
     Ok(())
@@ -1674,11 +1683,12 @@ pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     if parts.rest.is_empty() {
         return trim_one(p, id, edge, delta, ripple);
     }
-    let (ti, _) = locate(p, lead)?;
+    let (ti, ci) = locate(p, lead)?;
+    let was = p.tracks[ti].clips[ci].start;
     let taken = linked::take(p, &parts.rest)?;
     trim_one(p, lead, edge, delta, ripple)?;
     let main = ti == main_index(p);
-    let start = p.clip(lead).map_or(0, |c| c.start);
+    let moved = p.clip(lead).map_or(0, |c| c.start - was);
     for part in taken {
         let mut c = part.clip;
         let (from, old_end) = (c.start, c.end());
@@ -1686,7 +1696,7 @@ pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
             Edge::Tail => c.duration += delta,
             Edge::Head => c.move_head(delta),
         }
-        c.start = start;
+        c.start = from + moved;
         check_source(p, &c)?;
         let own = p.track_index(&part.track).expect("tracks stay");
         if !main && ripples(p, own, from, ripple) {
@@ -3305,6 +3315,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
     clips.sort_by_key(|c| c.clip.start);
     let first = clips[0].clip.start;
     let mut ids = Vec::new();
+    let mut links = linked::Relink::new(p);
     for TrackClip { track, clip: c } in clips {
         let has_video = if c.is_block() {
             let (lo, hi) = c.shown();
@@ -3354,6 +3365,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         let mut clip = c;
         clip.id = p.alloc_clip_id();
         clip.start = start;
+        links.clip(&mut clip);
         let on_video = p.tracks[ti].kind == TrackKind::Video;
         let sound_block = clip.is_sound_block();
         clip.video = clip.video && has_video && on_video;

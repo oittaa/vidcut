@@ -877,7 +877,7 @@ flowchart LR
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../spec.md#817-generators-p-766)) |
-| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same kept link, start and length stay in one link group (`no_media_ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
+| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same link group, start and length get one `Link Group ID` (`tie_of`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -889,7 +889,7 @@ The metadata:
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
-| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`compound_links`) |
+| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`tie_of`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
 | `Resolve_OTIO` on markers | `Note` |
 
@@ -919,18 +919,24 @@ Import:
 - Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.
 - A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
-- `otio::tied` finds the other parts of a clip with no media or of a compound clip. It uses the rules of `no_media_tie` and `compound_links`. The model holds no link field, because the parts of a block are separate clips only while they have one place.
+- `Project::tied` finds the other parts of a clip: the clips with the same `Clip::link`, start and length.
+  - A link group joins the picture and the sound of a compound clip, and the parts of a clip with no media.
+  - The parts must also have one place. Why: an edit that writes on one track can move one part away. Then the parts are separate clips.
+  - `Project::free_link` gives a number that no clip of the timeline has.
+  - `linked::Relink` gives new numbers to the links of pasted, spread and imported clips. Thus they do not join a group of the timeline.
+  - An import keeps the link groups of the file for compound clips and clips with no media.
+  - `linked::link_blocks` links the picture and the sound of a compound clip from a file with no link groups. They need the same sequence, start, length, source start and speed.
 - `ops::linked` makes an edit act on each part ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `linked::parts` selects one part as the lead: the part on V1, else the part that the request names.
   - `linked::take` removes the other parts before the edit, so `follow::follow` does not move them.
-  - `linked::put` writes them back at the place of the lead.
+  - `linked::put` writes them back. Each part moves and changes by the same amount as the lead.
   - `linked::split_main` splits each part before an insert on V1, so that the sound keeps its place under the picture.
   - The GUI sends one lead for a selection that holds two parts (`linked::leads`, `edits::Plan::new`), because each part acts on the other parts.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
 - `ops::compound::nest` stores one `Compound` in `Project::compounds` and puts picture and sound blocks that refer to it by `Clip::compound`.
-  - `compound_links` ties those blocks on export. Every placement across timelines shares one canonical source of tracks, markers and format.
+  - `with_sound` and `build` give the two blocks one link group. Every placement across timelines shares one canonical source of tracks, markers and format.
   - `stack_for` builds and memoizes an OTIO `Stack` on export from `Project::compound_tracks`. It keeps foreign metadata or offline contents in `Compound::kept_otio`.
   - `Compound::tracks` holds all tracks together. `picture_tracks` takes video tracks, and `sound_tracks` takes sounds (`sound_part`) at each clip's sound length.
   - Each track keeps its dissolves. `render::expanded` conforms cross-rate compounds first and plays those tracks (`inner_layout`).
@@ -1004,7 +1010,7 @@ Kept data:
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound` in `Project::compounds`, referenced by `Clip::compound` id; `edit.decompose` breaks it up |
-| multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). Its `channels` and `link` stay in the reference (`keep_ties`). On an audio track, `Clip::is_sound_block` is true |
+| multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). It keeps its `channels` (`keep_channels`) and its `Clip::link`. On an audio track, `Clip::is_sound_block` is true |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |
 

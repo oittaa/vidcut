@@ -10,7 +10,6 @@ use crate::model::{EbuLevel, Generator, Gradient, Keyframe, hex};
 const COLOR: &str = "color";
 const BLACK: &str = "#000000";
 const CHANNELS: &str = "channels";
-const LINK: &str = "link";
 const CENTER_X: &str = "centerX";
 const CENTER_Y: &str = "centerY";
 const UPPER_LEFT: &str = "upperLeft";
@@ -68,11 +67,9 @@ pub fn adjustment_reference() -> Value {
     })
 }
 
-pub fn keep_ties(reference: &mut Value, editor: &Value) {
-    for (key, from) in [(CHANNELS, "Channels"), (LINK, "Link Group ID")] {
-        if !editor[from].is_null() {
-            reference["metadata"][VIDCUT][key] = editor[from].clone();
-        }
+pub fn keep_channels(reference: &mut Value, editor: &Value) {
+    if !editor["Channels"].is_null() {
+        reference["metadata"][VIDCUT][CHANNELS] = editor["Channels"].clone();
     }
 }
 
@@ -85,10 +82,6 @@ fn kept<'a>(g: &'a Generator, key: &str) -> Option<&'a Value> {
 
 pub fn kept_channels(g: &Generator) -> Option<&Vec<Value>> {
     kept(g, CHANNELS)?.as_array()
-}
-
-pub fn kept_link(g: &Generator) -> Option<i64> {
-    kept(g, LINK)?.as_i64()
 }
 
 fn made(kind: &str, shown: &str, effect: (&str, u32, u32), mut more: Vec<Value>) -> Value {
