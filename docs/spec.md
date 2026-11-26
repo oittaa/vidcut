@@ -5970,8 +5970,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The row of each such action has a warning mark (p. 125). Its tooltip names the other actions.
     - A click on the mark selects that key on the on-screen keyboard. The Active Key list then shows all its actions (p. 125).
     - `keys.list` gives these keys in `conflicts`.
-    - A press of such a key does the first of these actions in the table. Not measured (case 28 of shortcuts-resolve-runs.md).
-    - The manual tells of a warning dialog on such a press, with the key and the names of the actions (p. 126).
+    - A press of such a key does none of these actions (measured, case 28 of shortcuts-resolve-runs.md).
+    - The manual tells of a warning dialog on such a press (p. 126). Resolve Studio 21.2 opens no dialog (measured, case 28).
+    - At the application level, vidcut names the key and its actions in the status line.
+    - At a panel level, such a key does its application action, as a key with no action there does. Not measured.
+    - In one measured pair, Resolve does Add Marker and not Mark In. vidcut does neither. The rule is not known ([todo](todo/shortcuts.md)).
   - A key works at one level: the application, or a panel (pp. 123–124). The keys of the panel that has the focus go first. A key with no action there does its application action.
   - The Media Pool has no level of its own. Its Remove Clips command is the Delete command of the application, with the same keys (measured).
   - A click in the Media tab gives the Media Pool the focus, and a click in another place takes the focus away.
@@ -6051,8 +6054,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
   - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
   - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
-  - The file of the Avid Media Composer preset gives `V` to Insert and `v` to Select Nearest Edit Point. The set gives V only to Smart Insert.
-    - An import of that file keeps V on Smart Insert and on Nearest Cut. What Resolve shows is not measured (case 28 g, [todo](todo/shortcuts.md)).
+  - The Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point, with a warning mark on both (measured, case 28 g).
+    - Its file writes `v` for the second. Resolve shows it as V.
+    - The set gives V to Smart Insert and to Nearest Cut. Thus V does nothing in this set, as in Resolve (measured).
   - The actions that have no command of Resolve keep their keys from the table, as the next rule tells.
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
     - A set also lists each action that has a key of another listed action of its level. Thus both actions keep that key.
