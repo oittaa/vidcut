@@ -178,6 +178,7 @@ pub struct Selection {
     pub clips: Vec<String>,
     pub cues: Vec<String>,
     pub media: Vec<String>,
+    pub thumbnails: Vec<String>,
     pub first: Option<String>,
     #[serde(skip)]
     pub order: Vec<String>,

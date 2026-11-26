@@ -36,6 +36,13 @@ The pages are of the DaVinci Resolve 21.1 manual.
   - Apply Grades Using, Use labels on still export, Show All Stills and Show Current Timeline Only.
 - Live Preview shows the grade of a still on the current node while the pointer is on the still (p. 3335).
   - Hover Scrub Preview sets whether the thumbnail and the viewer scrub the clip (pp. 3335–3336).
+- Measured in Resolve Studio 21.2 (`fixtures/color/NOTES.md` of the test data, the run of 2026-11-26):
+  - The second number of the ID is the place of the clip on its own track. A clip on V2 gives 2.x.x.
+  - The third number counts the stills of that clip in the album, in album order. A grab or a delete counts them again.
+  - A still grabbed in the Timeline mode ends in ".T". A still grabbed in the Group Pre Clip mode ends in ".PRE".
+  - A new still has no label. The picture of a still has the size of the timeline.
+  - Grab Still and Delete Selected have no undo. Delete Selected asks nothing.
+  - The menu of the empty Gallery also has the Copy Grade items and Copy Grade From Current Project Still.
 
 ### Albums and Memories (pp. 3341–3343, 3347–3348, 3364–3365, 3401)
 
@@ -50,6 +57,10 @@ The pages are of the DaVinci Resolve 21.1 manual.
 - Save Memory A to H is Option-1 to Option-8. Load Memory A to H is Command-1 to Command-8 (pp. 3348, 3365).
 - A save into a full memory replaces its grade. Clear in the menu of a memory empties it (p. 3348).
 - A drag copies a still to a memory, and a memory to the Gallery (p. 3348).
+- Measured: Add Still Album adds "Stills 2" and opens it. A drag of a still onto an album moves the still.
+- Measured: the Memories menu shows no key for Load Memory, and Ctrl+1 opens the Media Pool. It has no Clear.
+- Measured: Load Memory fills only the shown node stack layer, from the layer of the same number in the memory.
+- Measured: Save Memory in the Timeline mode saves the clip grade.
 
 ### Wipes (pp. 3084–3090, 3336–3337)
 
@@ -84,6 +95,7 @@ The pages are of the DaVinci Resolve 21.1 manual.
 - Apply Grade from a clip puts the keyframes on the same source timecode (p. 3464).
 - The All, Color and Sizing mode of the Keyframe Editor selects what a grade gives: the grade, the Input Sizing or both (p. 3363).
 - Align Keyframes to Current Frame, in the Apply Grade submenu of the viewer, puts the first keyframe on the playhead (p. 3367).
+  - Measured: it puts the frame of the still on the playhead. The keyframes keep their distance from that frame.
 - Append Node Graph adds the nodes of the still after the nodes of the clip (p. 3366).
   - A drop of a still onto a link adds the nodes there.
 - Apply Grade From One Clip Prior (=) and Apply Grade From Two Clips Prior (-) copy the grade of an earlier clip (p. 3364).
@@ -94,6 +106,19 @@ The pages are of the DaVinci Resolve 21.1 manual.
   - Apply Color, Apply PTZR, Apply Source and Apply All copy parts of the grade.
 - Ripple Node Changes to Selected Clips gives a node change to the node of the same number in the selected clips (p. 3372).
 - Append Node to Selected Clips adds the current node at the end of the grade of each selected clip (p. 3373).
+- Measured:
+  - Apply Grade, from the menu or a middle-click, goes to all selected clips. A drag into the viewer changes only the current clip.
+  - Apply Grade copies all node stack layers. Apply Active Layer copies the layer of the shown number into that layer only.
+  - In the Timeline mode, Apply Grade replaces the timeline grade and leaves the clip grade.
+  - Ctrl+Z reverts the last grade change of the current clip only. Each clip has its own undo steps.
+  - No Keyframes is the default. It gives the values of the last keyframe at or before the frame of the still, not the blend.
+  - Thus No Keyframes does not do what p. 3340 says. The script path gives the same values.
+  - Preserve number of nodes 1 keeps node 1 of the target and takes the other nodes from the still.
+  - With fewer target nodes than the number, all target nodes stay.
+  - Append Node Graph adds the nodes after the last node. It keeps the keyframes of the still at their source frames, also with No Keyframes.
+  - The clips "prior" are earlier in the Thumbnail timeline, on any track. The menu shows the keys as Shift+= and Shift+-.
+  - Ctrl+V on a node replaces all settings of the node.
+  - Ripple Node Changes sets only the changed values, as values and not as offsets.
 
 ### Shared nodes (pp. 3373–3375)
 
@@ -126,6 +151,18 @@ The pages are of the DaVinci Resolve 21.1 manual.
 - The timeline filter Grouped has a submenu with each group (p. 3115).
 - Resolve makes a smart filter for the current group, under Grouped > Current Group (p. 3378).
 - A group can have versions (p. 3382).
+- Measured:
+  - The grades act in the order Pre-Clip, clip, Post-Clip, at 1920x1080 and at 588x260.
+  - A group belongs to the project. A clip of another timeline can join it.
+  - A Resolve OTIO file holds no group.
+  - The menu of the current thumbnail has Add into Current Group, Add into a New Group, Remove from Group and Groups.
+  - Groups has each group, with Assign to Group, Load, Rename, Delete and Versions.
+  - A grouped clip shows a link badge under its thumbnail.
+  - A still grabbed in the Group Pre Clip mode holds the Pre-Clip grade. Its picture is the full output.
+  - Apply Grade in the Group Post Clip mode replaces the Post-Clip grade of the group.
+  - Collapse Group Grades puts the nodes in layer 1 in the order Pre-Clip, clip, Post-Clip. The clip leaves the group.
+  - Remove from Group keeps only the clip grade. Delete asks first.
+  - Ctrl+Z does not revert a change of a group.
 
 ### Import and export (pp. 3343–3347, 3383)
 
@@ -140,8 +177,8 @@ The pages are of the DaVinci Resolve 21.1 manual.
 - `grade.copy` and `grade.paste` copy the settings of one corrector. A pasted keyframe keeps its distance from the start of the clip.
 - `clip.paste_attributes` with `grade` gives clips the whole grade of a copied clip ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
 - The Thumbnail timeline of the Color page (`thumbnail_timeline.rs`):
-  - A click on a clip moves the playhead.
-  - It has no selection of clips and no grade items in its menu.
+  - A click, a Ctrl-click and a Shift-click select clips ([spec](../spec.md)). The Color and Deliver pages share the selection.
+  - It has no grade items in its menu.
 - The clip filter greys Grouped (`ClipFilter`). Switch to Node Layer greys Group Pre Clip and Group Post Clip.
 - The viewer has no wipe and no split screen.
 - `Project.groups` holds the synced groups of the Media tab. Thus color groups need another name.
@@ -153,13 +190,6 @@ The steps are in order of value. Each step is one pull request.
 
 Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, also where Resolve has no undo.
 
-### Thumbnail selection
-
-- A click selects one clip and moves the playhead there. A Ctrl-click adds or removes a clip. A Shift-click selects a range.
-- The current clip has an orange outline. The other selected clips are red (p. 3364).
-- `selection.set` and `selection.get` give the selection.
-- The Gallery menus run tells whether the Edit page and the Color page share the selection.
-
 ### Stills and Apply Grade
 
 - A Gallery panel at the left of the viewer, with the stills of one album.
@@ -170,6 +200,9 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 - Apply Grade gives the selected clips the grade of a still: its menu, a middle-click, or a drag into the viewer.
   - It changes the grade of the mode of the Node Editor.
   - Apply Grades Using sets the keyframes, as measured.
+  - No Keyframes gives the grade at the frame of the still, as p. 3340 says. gotchas.md records what Resolve does.
+- A click on a clip under a clip of a higher track makes it the current clip, as measured. The Color page then grades it.
+- Grab Still and Delete Selected are undo steps. gotchas.md records that Resolve has no undo for them.
 - Delete Selected, Change Label and the selection of stills.
 - Requests: `gallery.grab`, `gallery.apply`, `gallery.set`, `gallery.remove` and `gallery.get`.
 - The project holds the stills. Each picture is a 32-bit float OpenEXR file in a folder next to the project file.
@@ -182,6 +215,7 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 - The album list: Add Still Album, rename, a drag of a still onto an album and Remove Current Album.
 - Memories A to H: Save Memory (Alt+1 to Alt+8), Load Memory (Ctrl+1 to Ctrl+8), Clear and the drags.
+- Album changes and memory changes are undo steps. gotchas.md records that Resolve has no undo for them.
 - Runs: the Gallery menus run.
 
 ### Copy options
@@ -201,7 +235,7 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 - A still and Apply Grade use the mode of the Node Editor, as measured.
 - Requests for groups, and `layer` or a group mode in each grade request.
 - OTIO: vidcut metadata keeps the group of each clip and the grades of its group. The groups run tells what a Resolve OTIO file holds.
-- vidcut keeps one undo history. The groups run measures the undo stacks of the modes. A difference goes to the owner.
+- vidcut keeps one undo history. Resolve has an undo for each clip and none for group changes. The owner decides before this step.
 - The versions of a group are in [versions.md](versions.md).
 - Runs: the groups run.
 
@@ -269,12 +303,13 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 Each run is in the project "vidcut measure". [Script] steps use the scripting API. [Window] steps need the windows of Resolve.
 
-- **Stills run** ([script], 20 min): the contents of a still and of its DRX file, and `ApplyGradeFromDRX` in its three keyframe modes.
-- **Gallery menus run** ([window], 25 min): the menus, the keys, the undo steps, Apply Grade to two clips, the selection, the albums and the Memories.
-- **Copy run** ([window], 20 min): Preserve number of nodes, Append Node Graph, = and -, Ctrl+C and Ctrl+V of a grade, and Preview Memory.
-- **Groups run** ([script] and [window], 30 min): the order of the group grades in renders at two sizes, and the Node Editor modes.
-  - It also measures Collapse Group Grades, the undo stacks and OTIO.
+The stills, Gallery menus, copy and groups runs are done. `fixtures/color/NOTES.md` of the test data has the results.
+
+- **Groups rest** ([script] and [window], 15 min): the place of the Pre-Clip grade against an effect of the Edit page, in a render.
+  - Also Post Group Node Stack Layer, Ripple Node Changes to Current Group and the Grouped filter.
+- **Labels** ([window], 5 min): the Change Label dialog and its undo. The dialog did not show in the run of 2026-11-26.
+- **Current clip** ([window], 5 min): what playback does to a current clip that is under a clip of a higher track.
 - **Wipes run** ([window], 15 min): the wipe styles, the drag, Invert Wipe and the picture of the still side.
 - **Timelines album run** ([window], 15 min): the Timelines album, Copy Active Layer and Display Node Graph.
 - **Shared nodes run** ([window], 15 min): the Shared node items and what a change of a Shared node does.
-- **Later run** ([window], 20 min): import, export, labels, sorts, PowerGrade albums and Live Preview.
+- **Later run** ([window], 20 min): import, export, sorts, PowerGrade albums and Live Preview.

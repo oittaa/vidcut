@@ -4817,16 +4817,17 @@ pub enum Request {
         #[serde(default)]
         search: Option<String>,
     },
-    /// The timeline clips, subtitle cues, pool media and edit points selected.
+    /// The timeline clips, subtitle cues, pool media and edit points selected,
+    /// and `thumbnails`, the clips selected in the Thumbnail timeline.
     /// `edits` lists every selected edit, left to right. `edit` is the one
     /// clicked last, which the Trim Editor shows. `first` is the clip or cue
     /// selected first, which the Keyframes tab and the keyframe tray show.
     /// When it leaves the selection, the next one selected takes its place.
     #[serde(rename = "selection.get")]
     SelectionGet {},
-    /// Select timeline clips, subtitle cues, pool media or an edit point
-    /// (omitted parts stay as they are). `,` and `.` and Dynamic Trim act
-    /// on every selected edit, Ctrl+T on `edit`.
+    /// Select timeline clips, subtitle cues, pool media, Thumbnail timeline
+    /// clips or an edit point (omitted parts stay as they are). `,` and `.`
+    /// and Dynamic Trim act on every selected edit, Ctrl+T on `edit`.
     #[serde(rename = "selection.set")]
     SelectionSet {
         #[serde(default)]
@@ -4837,6 +4838,11 @@ pub enum Request {
         cues: Option<OneOrMany<String>>,
         #[serde(default)]
         media: Option<OneOrMany<String>>,
+        /// The clips selected in the Thumbnail timeline of the Color and
+        /// Deliver pages. This selection is apart from `clips`, the
+        /// selection of the timeline.
+        #[serde(default)]
+        thumbnails: Option<OneOrMany<ClipRef>>,
         /// Select the edit point of `track` nearest this time, as V does
         /// at the playhead (`playhead`) and a click on an edit does.
         #[serde(default)]

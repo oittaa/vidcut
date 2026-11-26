@@ -5688,6 +5688,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: the codec is the Video Codec of the media pool, like "H.264 High L4.0" or "Apple ProRes 422". An EXR sequence shows "EXR", and a compound clip "Compound Clip".
   - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
   - Measured: of the clips at the playhead, the clip of the top track has the outline. Its text is white, and the text of the others is grey.
+  - A Command-click or a Shift-click selects more clips. The selected clips are red (p. 3364).
+  - Measured in Resolve Studio 21.2 on the Color and Deliver pages: a click also selects that clip alone.
+  - Measured: a Ctrl-click adds a clip to the selection or takes it out. The playhead and the outline stay.
+  - Measured: a Shift-click selects the clips from the last clicked clip to this clip, in the order of the strip. The playhead and the outline stay.
+  - Measured: the Color page and the Deliver page share the selection. The timeline of the Edit page has its own selection.
+  - Measured: a click on a clip under a clip of a higher track gives it the outline. The Color page then grades that clip.
   - The clips of a disabled track are not in the Thumbnail timeline (p. 3107; measured).
   - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
   - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
@@ -5866,7 +5872,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The codec is the one that the media pool shows. A compound clip shows "Compound Clip".
   - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
   - The text under the clip at the playhead is white. The text under the other clips is grey.
-  - A click on a picture moves the playhead to the first frame of the clip.
+  - A click on a picture moves the playhead to the first frame of the clip. It also selects that clip alone.
+  - A Ctrl-click adds a clip to the selection or takes it out. A Shift-click selects the clips from the last selected clip to this clip.
+  - A Ctrl-click and a Shift-click do not move the playhead. The selected clips other than the clip at the playhead have a red outline.
+  - The Color page and the Deliver page share this selection. The timeline of the Cut and Edit pages has its own selection.
+  - `thumbnails` of `selection.set` sets the selection, and `selection.get` gives it. A change of the open timeline clears it.
+  - The outline stays on the clip of the top track at the playhead, also after a click on a clip under it ([todo](todo/color-gallery.md)).
   - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.

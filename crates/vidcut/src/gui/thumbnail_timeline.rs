@@ -114,7 +114,7 @@ impl Workspace {
             .map(|t| t.number);
         let label = self.export.clip_label;
         let colors = theme::colors();
-        let selected = &self.snap.selection.clips;
+        let selected = &self.snap.selection.thumbnails;
         let mut picked = None;
         let mut action: Option<(Mark, i64, i64)> = None;
         let mut cycle = false;
@@ -204,11 +204,7 @@ impl Workspace {
             };
         }
         if let Some(p) = pick {
-            let params = match p.seek {
-                Some(_) => json!({ "clips": p.clips, "cues": [] }),
-                None => json!({ "clips": p.clips }),
-            };
-            self.send("selection.set", params);
+            self.send("selection.set", json!({ "thumbnails": p.clips }));
             if let Some(frame) = p.seek {
                 self.seek(PlayerId::Timeline, frame, false);
             }

@@ -675,6 +675,12 @@ pub fn describe_at(
         "selection.set" if !params["side"].is_null() => {
             format!("Select {}", edit_side(&params["side"]))
         }
+        "selection.set" if !params["thumbnails"].is_null() && params["clips"].is_null() => {
+            match d.list("thumbnails").is_empty() {
+                true => "Select no thumbnails".into(),
+                false => format!("Select thumbnails {}", d.clips("thumbnails")),
+            }
+        }
         "selection.set" => {
             let clips = d.list("clips");
             let cues = d.list("cues");
