@@ -3,6 +3,7 @@ mod attributes;
 mod bar;
 mod cache_manager;
 mod cells;
+mod clip_filter;
 mod clip_info;
 mod color_page;
 mod compound;

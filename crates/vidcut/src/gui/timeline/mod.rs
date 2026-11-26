@@ -509,11 +509,11 @@ mod icon {
     pub use egui_phosphor::regular::{
         ARROWS_IN_LINE_HORIZONTAL as DYNAMIC_TRIM, ARROWS_IN_LINE_VERTICAL as SHRINK,
         ARROWS_LEFT_RIGHT as RIPPLE, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
-        BOOKMARK_SIMPLE as MARKER, DIAMONDS_FOUR as KEYFRAMES, EYE as VIDEO_ON,
-        EYE_SLASH as VIDEO_OFF, FILM_STRIP as VIDEO_ONLY, LIST_PLUS as TIMELINE_ACTIONS,
-        LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED, MAGNET as SNAP,
-        MUSIC_NOTES as AUDIO_ONLY, PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT,
-        SLIDERS_HORIZONTAL as TIMELINE_OPTIONS, SPEAKER_HIGH as AUDIO_ON,
+        BOOKMARK_SIMPLE as MARKER, CARET_DOWN as CLIP_FILTER, DIAMONDS_FOUR as KEYFRAMES,
+        EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF, FILM_STRIP as VIDEO_ONLY,
+        LIST_PLUS as TIMELINE_ACTIONS, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
+        MAGNET as SNAP, MUSIC_NOTES as AUDIO_ONLY, PENCIL_SIMPLE as EDIT_ACTIONS,
+        SCISSORS as SPLIT, SLIDERS_HORIZONTAL as TIMELINE_OPTIONS, SPEAKER_HIGH as AUDIO_ON,
         SPEAKER_SLASH as AUDIO_OFF,
     };
 }
@@ -1460,18 +1460,22 @@ impl Workspace {
 
     fn timeline_toolbar(&mut self, ui: &mut egui::Ui, p: &Project) {
         use Toolbar as T;
-        let export = self.effects_page.page == vidcut_core::request::Page::Export;
+        let page = self.effects_page.page;
+        let filter = p
+            .timeline()
+            .map(|t| t.clip_filter.clone())
+            .unwrap_or_default();
         let row = crate::gui::row::Row {
-            left: if export {
-                &[T::Title, T::Render, T::Clips]
-            } else {
-                &[T::Title]
+            left: match page {
+                vidcut_core::request::Page::Export => &[T::Title, T::Render, T::Clips],
+                vidcut_core::request::Page::Color => &[T::Title, T::Clips, T::Filter],
+                _ => &[T::Title],
             },
             fill: None,
             right: &[T::Marks, T::ZoomOut, T::ZoomIn, T::Summary],
             leaving: &[T::Marks, T::Summary, T::ZoomOut, T::ZoomIn],
             group: |t| match t {
-                T::Title | T::Render | T::Clips => 0,
+                T::Title | T::Render | T::Clips | T::Filter => 0,
                 T::Marks | T::ZoomOut | T::ZoomIn => 1,
                 T::Summary => 2,
             },
@@ -1485,7 +1489,20 @@ impl Workspace {
                     if r.clicked() {
                         ws.export.hide_clips = !ws.export.hide_clips;
                     }
+                    if !filter.is_all() {
+                        crate::gui::clip_filter::underline(ui, &r);
+                    }
                     r
+                }
+                T::Filter => {
+                    let mut to = None;
+                    let r = ui.menu_button(icon::CLIP_FILTER, |ui| {
+                        to = crate::gui::clip_filter::menu(ui, &filter);
+                    });
+                    if let Some(f) = to {
+                        ws.send("timeline.set", json!({ "clip_filter": f }));
+                    }
+                    r.response
                 }
                 T::Summary => ui.label(dim(format!(
                     "{} clips, {}",
@@ -4461,6 +4478,7 @@ enum Toolbar {
     Title,
     Render,
     Clips,
+    Filter,
     Marks,
     ZoomOut,
     ZoomIn,

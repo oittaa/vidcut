@@ -6933,6 +6933,10 @@ pub struct TimelineSet {
     /// also clears its In and Out marks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::model::RenderRange>,
+    /// The clips that its Thumbnail timeline shows, e.g.
+    /// `{"kind": "clip_color", "color": "orange"}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_filter: Option<crate::model::ClipFilter>,
 }
 
 /// Settings of a timeline. The frame rate and drop-frame change only while

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use eframe::egui::{self, Rect, RichText, Sense, pos2, vec2};
 use serde_json::json;
 use vidcut_core::model::{Clip, Media, Project, RenderRange, TrackKind};
+use vidcut_core::ops::clip_filter;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::request::ClipLabel;
 use vidcut_core::time::format_timecode;
@@ -56,7 +57,9 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
     clips.sort_by_key(|(t, c)| (c.start, c.end(), t.number()));
     let source_rate = p.settings.fps;
     let settings = serde_json::to_vec(&p.settings).unwrap_or_default();
+    let filter = p.timeline().map(|t| &t.clip_filter);
     (clips.into_iter().enumerate())
+        .filter(|(_, (_, c))| filter.is_none_or(|f| clip_filter::admits(p, c, f)))
         .map(|(i, (t, c))| {
             let media = p.media(&c.media);
             let timecode = media.map_or_else(

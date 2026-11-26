@@ -202,6 +202,10 @@ pub struct Timeline {
     /// What the Export page renders of it. Left out when it is `entire`.
     #[serde(default)]
     pub render: RenderRange,
+    /// The clips that its Thumbnail timeline shows. Left out when it is
+    /// `all`.
+    #[serde(default)]
+    pub clip_filter: ClipFilter,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
     /// Timeline In/Out marks.
@@ -229,6 +233,51 @@ pub enum RenderRange {
 impl RenderRange {
     pub fn is_entire(&self) -> bool {
         *self == Self::Entire
+    }
+}
+
+/// The clips that the Thumbnail timeline shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ClipFilter {
+    /// Every clip.
+    #[default]
+    All,
+    /// The clips with a grade that is not the usual grade.
+    Graded,
+    /// The clips with the usual grade.
+    Ungraded,
+    /// The clips with a composition that has more nodes than its MediaIn
+    /// and its MediaOut.
+    Composition,
+    /// The clips with no clip color. A clip with no color of its own shows
+    /// the color of its media.
+    NoClipColor,
+    /// The clips with this clip color. Left out: any clip color.
+    ClipColor {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// The clips with no marker in the part of their media that they show.
+    NoMarker,
+    /// The clips with a marker of this color in the part of their media
+    /// that they show. Left out: a marker of any color.
+    Marked {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// The clips with effects on their picture.
+    Effects,
+    /// The clips whose media has a frame rate that is not the frame rate
+    /// of the timeline.
+    OtherRate,
+    /// The clips with a changed transform or crop.
+    Sizing,
+}
+
+impl ClipFilter {
+    pub fn is_all(&self) -> bool {
+        *self == Self::All
     }
 }
 
@@ -314,6 +363,8 @@ struct TimelineOut<'a> {
     grade: Option<&'a Grade>,
     #[serde(skip_serializing_if = "RenderRange::is_entire")]
     render: RenderRange,
+    #[serde(skip_serializing_if = "ClipFilter::is_all")]
+    clip_filter: &'a ClipFilter,
     tracks: &'a [Track],
     #[serde(skip_serializing_if = "Marks::is_empty")]
     marks: &'a Marks,
@@ -333,6 +384,7 @@ impl<'a> TimelineOut<'a> {
             own: t.own,
             grade: t.grade.as_ref(),
             render: t.render,
+            clip_filter: &t.clip_filter,
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
@@ -10402,6 +10454,7 @@ impl Project {
             own: None,
             grade: None,
             render: RenderRange::Entire,
+            clip_filter: ClipFilter::All,
             tracks: Self::fresh_tracks(),
             marks: Marks::default(),
             markers: Vec::new(),
