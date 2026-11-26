@@ -166,12 +166,15 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 - Grab Still (Ctrl+Alt+G, and the menu of the viewer) saves a still of the frame at the playhead.
   - The still holds all node stack layers of the clip grade, the timeline grade and their keyframes.
   - It also holds its ID, the clip, the timeline, the frame, the timecodes and the time of the grab.
+  - The version in the ID is 1, because vidcut has no versions ([versions.md](versions.md)).
 - Apply Grade gives the selected clips the grade of a still: its menu, a middle-click, or a drag into the viewer.
   - It changes the grade of the mode of the Node Editor.
   - Apply Grades Using sets the keyframes, as measured.
 - Delete Selected, Change Label and the selection of stills.
 - Requests: `gallery.grab`, `gallery.apply`, `gallery.set`, `gallery.remove` and `gallery.get`.
-- The project holds the stills. Each picture is a file in a folder next to the project file.
+- The project holds the stills. Each picture is a 32-bit float OpenEXR file in a folder next to the project file.
+  - This file is the storage of vidcut, as the project file is. Thus it keeps the values of the picture exactly.
+  - Export of stills writes the picture formats of Resolve ([Import and export](#import-and-export)).
 - It removes two lines from [gaps.md](gaps.md): the keyframes of a still, and the node stack layers of a still.
 - Runs: the stills run and the Gallery menus run.
 
@@ -199,6 +202,7 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 - Requests for groups, and `layer` or a group mode in each grade request.
 - OTIO: vidcut metadata keeps the group of each clip and the grades of its group. The groups run tells what a Resolve OTIO file holds.
 - vidcut keeps one undo history. The groups run measures the undo stacks of the modes. A difference goes to the owner.
+- The versions of a group are in [versions.md](versions.md).
 - Runs: the groups run.
 
 ### Group tools
@@ -235,7 +239,9 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 ### Import and export
 
-- Import and Export of stills: a picture file and a grade file.
+- Import and Export of stills read and write DRX files and the picture formats of Resolve. Thus grades go both ways.
+- vidcut has no grade file of its own.
+- The DRX file is Zstandard and protobuf. `fixtures/color/NOTES.md` of the test data has the decoded parts.
 - Runs: the later run.
 
 ### PowerGrade albums
@@ -258,12 +264,6 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 - The stills, the timelines and the PowerGrades of other project files.
 - Runs: the later run.
-
-## Questions for the owner
-
-- Versions (pp. 3351–3360, 3382) are in the ID of a still and in groups. vidcut has none. Put them in this file, or in a todo of their own?
-- The DRX file holds a grade of Resolve: Zstandard and protobuf, partly decoded. Read and write it, or keep a vidcut grade file only?
-- Resolve keeps each still as a DPX file. vidcut can keep a 32-bit float OpenEXR file. That keeps the values of the picture exactly.
 
 ## Resolve runs
 

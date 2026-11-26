@@ -114,7 +114,8 @@ impl Workspace {
             .map(|t| t.number);
         let label = self.export.clip_label;
         let colors = theme::colors();
-        let mut seek = None;
+        let selected = &self.snap.selection.clips;
+        let mut picked = None;
         let mut action: Option<(Mark, i64, i64)> = None;
         let mut cycle = false;
         egui::ScrollArea::horizontal()
@@ -122,7 +123,7 @@ impl Workspace {
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = CELL_GAP;
-                    for t in list {
+                    for (i, t) in list.iter().enumerate() {
                         let cell = ui.vertical(|ui| {
                             ui.set_width(PICTURE.x);
                             ui.horizontal(|ui| {
@@ -146,8 +147,12 @@ impl Workspace {
                                 let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                                 painter.image(texture, shown, uv, egui::Color32::WHITE);
                             }
-                            if current == Some(t.number) {
-                                let stroke = egui::Stroke::new(2.0, colors.accent);
+                            let outline = match current == Some(t.number) {
+                                true => Some(colors.accent),
+                                false => selected.contains(&t.clip).then_some(colors.error),
+                            };
+                            if let Some(color) = outline {
+                                let stroke = egui::Stroke::new(2.0, color);
                                 painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
                             }
                             let text = match (label, &t.codec) {
@@ -170,7 +175,7 @@ impl Workspace {
                         });
                         let picture = cell.inner;
                         if picture.clicked() {
-                            seek = Some(t.start);
+                            picked = Some((i, ui.input(|input| input.modifiers)));
                         }
                         picture.context_menu(|ui| {
                             if ui.button("Mark In").clicked() {
@@ -190,6 +195,7 @@ impl Workspace {
                     }
                 });
             });
+        let pick = picked.map(|(i, mods)| pick(list, selected, i, mods));
         self.export.strip = Some(strip);
         if cycle {
             self.export.clip_label = match label {
@@ -197,8 +203,15 @@ impl Workspace {
                 ClipLabel::Name => ClipLabel::Codec,
             };
         }
-        if let Some(frame) = seek {
-            self.seek(PlayerId::Timeline, frame, false);
+        if let Some(p) = pick {
+            let params = match p.seek {
+                Some(_) => json!({ "clips": p.clips, "cues": [] }),
+                None => json!({ "clips": p.clips }),
+            };
+            self.send("selection.set", params);
+            if let Some(frame) = p.seek {
+                self.seek(PlayerId::Timeline, frame, false);
+            }
         }
         match action {
             Some((Mark::In, a, _)) => self.mark_in_out("in", a),
@@ -243,6 +256,39 @@ impl Workspace {
             { "method": "timeline.set", "params": { "render": RenderRange::InOut } },
         ]);
         self.send("apply", json!({ "commands": commands }));
+    }
+}
+
+struct Pick {
+    clips: Vec<String>,
+    seek: Option<i64>,
+}
+
+fn pick(list: &[Thumb], selected: &[String], i: usize, mods: egui::Modifiers) -> Pick {
+    let t = &list[i];
+    if mods.command {
+        let mut clips = selected.to_vec();
+        match clips.iter().position(|c| *c == t.clip) {
+            Some(k) => {
+                clips.remove(k);
+            }
+            None => clips.push(t.clip.clone()),
+        }
+        return Pick { clips, seek: None };
+    }
+    let anchor = (selected.last()).and_then(|last| list.iter().position(|o| o.clip == *last));
+    if mods.shift
+        && let Some(from) = anchor
+    {
+        let clips = list[from.min(i)..=from.max(i)]
+            .iter()
+            .map(|o| o.clip.clone())
+            .collect();
+        return Pick { clips, seek: None };
+    }
+    Pick {
+        clips: vec![t.clip.clone()],
+        seek: Some(t.start),
     }
 }
 
