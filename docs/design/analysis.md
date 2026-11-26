@@ -341,7 +341,11 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above 0.
 - A `Pass::KeyFold` then applies Invert Mask and folds the mask into the key of the corrector.
 
-**Checks.** The scripts and results are in the sam2 folder of the test data. On the first frames of DAVIS 2017 val, vidcut and Meta's network agree on the same input to 0.9999 mean overlap.
+**Checks.** The scripts and results are in the sam2 folder of the test data.
+
+- On the same input, the masks of vidcut and Meta's network overlap 0.9999 on average, and 0.9993 at worst.
+- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click. The model is SAM 2.1 tiny.
+- Two or more clicks, negative clicks, base+ and large are not checked yet ([todo](../todo/subject-masks.md#measurements)).
 
 ## In a GUI
 
