@@ -5108,10 +5108,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Reset and Close are at the bottom of the window.
   - vidcut uses the measured processor with the typed values. The ranges are those of the window, and the defaults are the shown values.
   - vidcut: Mix goes in a straight line from the compressed sound at 0 to the input at 100, as the manual says.
-    - Two renders of one setting do not override the manual. More cases are to measure ([todo](todo/track-dynamics.md)).
-  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-dynamics.md)):
+    - Two renders of one setting do not override the manual. More cases are to measure ([todo](todo/audio-page.md#track-dynamics)).
+  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/audio-page.md#track-dynamics)):
     - Other sample rates also run the detector once in each 3 samples.
-  - vidcut has no presets and no Sidechain ([todo](todo/track-dynamics.md)).
+  - vidcut has no presets and no Sidechain ([todo](todo/audio-page.md#track-dynamics)).
   - vidcut: the Dynamics of a track work on the mix of its clips, after their ducking and with their fades.
   - vidcut: the Dynamics of a track that holds a compound clip also work on the sound of the compound clip.
   - vidcut: the fader of a track comes after its Dynamics and its equalizer. The meter of a track shows the sound after its fader.
@@ -5189,7 +5189,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut uses the measured filters and the measured rule from a Q to its step (`track::stepped`):
     - A request or a typed value keeps the Q of its step, (n − 10) / 15, at most 10.3.
     - Step 21 shows 0.7 ([gotchas](gotchas.md#resolves-edits)).
-  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/track-equalizer.md)):
+  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/audio-page.md#track-equalizer)):
     - The Low Pass of Fire at the slopes 6 and 18 adds a filter of the first order, as its High Pass does.
     - Other sample rates use the same rules.
   - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
