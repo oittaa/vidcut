@@ -2191,6 +2191,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The OTIO `Pan` is Position X divided by the timeline width. `Tilt` is Position Y divided by the timeline height.
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
+    - On pixels that are not square, `cropLeft` is the crop / (f × the source width). f is the factor of the fit, with no pixel aspect ratio in it.
+    - Measured in Resolve Studio 21.2: Crop Left 3.0 on a 2:1 file of 640 x 720 in 1280 x 720 is 3/640.
+    - Crop Left 3.0 on a 9:8 file of 1000 x 800 in 1280 x 720 is 3/900.
   - Zoom is a factor (1.000). Rotation is in degrees.
 
 ### 8.16 Effects (pp. 765, 3526, 3536)
@@ -7457,6 +7460,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Pitch and yaw work about the middle of the picture, in its own axes (D93).
     - The zoom works across and down in the picture's own axes, before the turn.
     - The rotation is counterclockwise.
+    - On pixels that are not square, the turn is not rigid. These facts are measured in Resolve Studio 21.2:
+      - The files have pixels of 4:3, 2:1, 9:8 and 10:9. The Rotations are 2, 10 and 30, and small values near the limit for a thin bar.
+      - With the pixel aspect ratio p and the Rotation θ, the picture turns by atan(tan θ / p).
+      - In its own axes, it scales by √(cos²θ + sin²θ / p²) across and by √(cos²θ + p² sin²θ) down. It stays rectangular.
+      - The marks fit this within 0.4 px over about 1000 px. At Rotation 2, the edge slopes are tan 2° / p.
+      - Thus a small Rotation on these files leaves corner gaps of W / 2 × θ / p and H / 2 × θ / p, with θ in radians.
+      - vidcut turns the shown picture by θ, with no change of shape ([todo](todo/picture-fit.md)).
+      - Not measured: Zoom, Pitch and Yaw with a Rotation on these files, and a file with pixels that are not square and a rotation.
     - The crop cuts the source picture, and what is left stays where it was.
     - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
       - The number of pixels that a side loses is its crop in source pixels, rounded down.
@@ -7464,17 +7475,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - On a 3840 x 2160 picture, Crop Left 1.5 is 4.5 source pixels. It cuts 4, so the edge is at x = 1.333.
       - On a 1000 x 562 picture, Crop Top 1 is 0.78 of a source pixel, and it cuts nothing.
       - The rule is the same with Zoom, Rotation and Softness.
-      - Pixels that are not square and a rotation in the file, measured in Resolve Studio 21.2 at 1280 x 720 and 1920 x 1080. f is the factor of the fit.
+      - Pixels that are not square and a rotation in the file, measured in Resolve Studio 21.2 at 1280 x 720 and 1920 x 1080:
+        - The cut is floor(crop / f) source pixels, as for square pixels. f is the factor of the fit, with no pixel aspect ratio in it.
+        - Files of 2:1 and 4:3 have f = 1 in 1280 x 720. Crop Left and Crop Right of 1.0, 2.0 and 3.0 cut 1, 2 and 3 source pixels.
+        - A source pixel of the 2:1 file is 2 timeline pixels wide. Thus its Crop Left 3.0 moves the edge by 6 timeline pixels.
+        - A 999 x 800 file with pixels of 10:9 has f = 1.35 in 1920 x 1080. Crop Left and Crop Right of 1.4 and 2.8 cut 1 and 2 source pixels.
+        - A 1000 x 800 file with pixels of 9:8 has f = 0.9 in 1280 x 720. Crop Left 3.0 cuts 3 source pixels. In 1920 x 1080, f = 1.35, and it cuts 2.
         - A 1280 x 720 file with a rotation of 90 has f = 0.5625 in 1280 x 720. Crop Left 0.5, 1.0, 1.5 and 3.0 cut 0, 1, 2 and 5 source pixels.
-        - The same file has f = 0.84375 in 1920 x 1080. Crop Left 1.5 and 3.0 cut 1 and 3 source pixels.
-        - These cuts are floor(crop / f), as for a file with no rotation.
         - On a file with a rotation, some crops cut another side of the upright picture ([gotchas](gotchas.md#resolves-renders)).
-        - A 1000 x 800 file with pixels of 9:8 has f = 0.9 in 1280 x 720. A source pixel is 1.0125 timeline pixels wide.
-          - Crop Left 1.5 cuts 1 source pixel, and Crop Left 3.0 cuts 3. Crop Top 1.5 cuts 1, and Crop Top 3.0 cuts 3.
-        - The same file has f = 1.35 in 1920 x 1080. Crop Left 3.0 cuts 2 source pixels.
-        - These cuts are floor(crop / f), with no pixel aspect ratio in f. No other file with pixels that are not square was measured with a crop.
       - vidcut uses the rule in the pixels of the upright file. It cuts the side that each crop names, on the upright picture.
-        - It divides the crop by the size of the fitted picture, with the pixel aspect ratio. Thus Crop Left 3.0 on the 9:8 file in 1280 x 720 cuts 2 source pixels ([todo](todo/picture-fit.md)).
+        - The Inspector and the keyframe editor count a crop in source pixels × f, with no pixel aspect ratio.
       - A crop with keyframes was not measured.
       - The crop of a compound clip (measured in Resolve Studio 21.2, in timelines 1280, 1920 and 3840 wide):
         - It can hold one clip with no change of place, size or crop. Then its crop is a crop of that clip, in that clip's source pixels.
@@ -8485,24 +8495,28 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
 - These facts are measured in Resolve Studio 21.2:
   - The rule gives the change of Rotation at 0.0179 in 1280 x 720. Rotation 0.0179 shows no bar, and 0.0181 shows the bars at their exact widths.
   - The rule gives the change at 0.01194 in 1920 x 1080. Rotation 0.0119 shows no bar, and 0.0120 shows the bars.
-  - These cases with a crop or Softness are on the square file in 1280 x 720:
-    - Rotation 0.016 with Crop Softness 0.5 shows no bar.
-    - Rotation 0.016 with Crop Left 0.5 shows the bars at their exact widths, 0.1787 and 0.1003. Crop Left 0.5 cuts no source pixel there.
-    - Rotation 0.010 with Crop Left 0.5 and Crop Softness 0.5 shows bars of 0.1116 and 0.0627.
+  - The Zoom on two axes fits the rule in 12 cases, in 1280 x 720 and 1920 x 1080. With bars bx and by, the distance is √(bx² + by²).
+    - Zoom X 0.9997 and Zoom Y 0.99985 in 1280 x 720 leave bars of 0.192 and 0.054. The distance is 0.1994, and no bar shows.
+    - Zoom X 0.9997 and Zoom Y 0.9998 leave bars of 0.192 and 0.072. The distance is 0.2051, and the bars show.
+  - A crop on any side stops the limit, also a crop that cuts no source pixel. Each bar then shows at its exact width.
+    - Measured with each of the four sides at 0.3 or 0.5, on the square and 4:3 files, in 1280 x 720 and 1920 x 1080.
+    - Rotation 0.016 with Crop Left 0.5 on the square file in 1280 x 720 shows bars of 0.1787 and 0.1003.
+  - Crop Softness of 0.5 and 2 does not stop the limit. Crop Softness of −0.5 stops it. This is measured on the square and the 4:3 files.
+  - A lean stops the limit. On the square file in 1280 x 720, Zoom X 0.9997 leaves bars of 0.192. With Pitch 0.0003 or Yaw 0.0003, they show.
   - Pitch and Yaw, on the square file. The values are those of the two corner pixels on the side that the lean moves away:
     - Pitch in 1280 x 720: 1 at 0.0005 and 0.0007, 0.925 at 0.0009, 0.797 at 0.0011, 0.669 at 0.0013 and 0.173 at 0.002.
     - Pitch in 1920 x 1080: 0.829 at 0.0007, 0.637 at 0.0009 and 0.404 at 0.0011. The top middle reads 0.907 at 0.0011.
-    - Yaw in 1280 x 720 gives the same values as Pitch, at the two right corners.
-    - Each moved edge is 0.5 px farther out than a projective lean about the middle. With that edge, gaps under 0.2 px show.
-  - The fit into the even size of an encoder, at Fill:
-    - A timeline of 2001 x 1601 gives bars of 0.1 at the top and the bottom of its file.
-    - The other measured sizes give no bar under 0.2.
+    - Yaw in 1280 x 720 gives the same values as Pitch, at the two right corners. A 2:1 file gives the same values as the square file.
+    - The top edge is at y = 3.064 at Pitch 0.01, and at y = 16.643 at Pitch 0.05. A projective lean about the middle gives 3.564 and 17.143.
+    - These cases fit one reading. The gap that a lean opens is 0.5 px less than the projective lean gives, and not less than 0.
+    - Other bars add to that gap. With Zoom X 0.9997 and Pitch 0.0003, the corners read 0.808, as the bars of the Zoom alone.
+  - The fit into the even size of an encoder does not use the limit. At Fill, timelines of 2001 x 1601, 3001 x 2001 and 4001 x 3001 give bars of 0.1, 0.167 and 0.125.
   - A compound clip, in 9 cases with Zoom X on the clip inside and on the compound clip:
     - The clip inside keeps the limit for its own bars.
     - With Zoom X 1 inside, the compound clip keeps the limit too.
     - With another Zoom X inside, the compound clip shows its bar at its exact width. The 9 cases give no general rule.
 - vidcut:
-  - It does not use the limit on a picture with Softness. A crop that cuts no pixel does not stop the limit ([todo](todo/picture-fit.md)).
-  - It uses the same rule on the corners of a leaned picture. Its leaned edges are 0.5 px farther in than those of the cases above ([todo](todo/picture-fit.md)).
+  - A crop on any side and Crop Softness below 0 stop the limit, as measured. A Softness below 0 that gives no fade was not measured.
+  - It uses the same rule on the corners of a leaned picture, with the gaps of the projective lean ([todo](todo/picture-fit.md)).
   - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
   - It does not use the limit in the fit for an encoder.

@@ -1,29 +1,22 @@
-# The crop, the thin-bar limit and the lean as measured
+# The lean, the turn of pixels that are not square, and compound clips as measured
 
-**When:** after batch PF of the measurements. The runbook is `picture-fit-pf-runbook.md` in the notes of the measurement session.
+**When:** next.
 
-**What:** the measurements in Resolve Studio 21.2 show these differences in the placement stage. Each rests on one file or on few cases. Thus vidcut keeps its code until more cases agree.
+**What:** the measurements in Resolve Studio 21.2 show these differences in the placement stage. Each difference is a fault in that stage (AGENTS.md rule 1).
 
-- **The crop of pixels that are not square** (spec D75):
-  - The one measured file is 1000 x 800 with pixels of 9:8.
-  - In 1280 x 720, f = 0.9. Crop Left 3.0 cuts 3 source pixels in Resolve and 2 in vidcut.
-  - In 1920 x 1080, f = 1.35. Crop Left 3.0 cuts 2 source pixels in Resolve and 1 in vidcut.
-  - Both cuts are floor(crop / f), with f the factor of the fit without the pixel aspect ratio.
-  - vidcut divides the crop by the fitted width, which has the pixel aspect ratio in it (`put_at` and `stored_value` in the GUI).
-  - If more files agree, the crop of a side across divides by f × the source width.
-- **The limit for a thin bar with a crop or Softness** ([spec](../spec.md#the-limit-for-a-thin-bar)):
-  - In 1280 x 720, Rotation 0.016 with Crop Softness 0.5 shows no bar. vidcut shows the bars, because `Soft::of` gives a ramp.
-  - Rotation 0.016 with Crop Left 0.5 shows the bars. vidcut shows no bar, because `whole_pixels` gives 0.
-  - Rotation 0.010 with Crop Left 0.5 and Crop Softness 0.5 shows the bars. vidcut shows them too.
-  - These cases are on one file, with one crop side and one value.
-  - The change for Softness needs the change for the crop. Without it, the third case breaks.
 - **The edge of a leaned picture** ([spec](../spec.md#the-limit-for-a-thin-bar)):
-  - All Pitch and Yaw cases fit one model. Each edge that a lean moves is 0.5 px farther out than the projective lean of vidcut.
-  - Pitch 0.0009 in 1280 x 720: vidcut puts the top edge 0.324 px down, and the top corners 0.576 px in. Resolve reads 0.925 at those corners.
-  - Pitch 0.0011 in 1920 x 1080: vidcut puts the top edge 0.593 px down. Resolve reads 0.9067 at the top middle, a gap of 0.093 px.
-  - With that model, gaps under 0.2 px show on a leaned picture. Thus the limit does not act there.
-  - vidcut uses `no_bars` on the corners of the leaned picture. Without the 0.5 px, a change of the limit alone makes small leans worse.
-  - Batch PF tells if the 0.5 px stays at Pitch 0.01 and 0.05.
+  - Resolve opens a gap 0.5 px less than the projective lean of vidcut, and not less than 0. Other bars add to that gap.
+  - Pitch 0.0009 in 1280 x 720: vidcut puts the top corners 0.576 px in. Resolve reads 0.925 there, a gap of 0.076 px.
+  - Pitch 0.01 and 0.05: vidcut puts the top edge at y = 3.564 and 17.143. Resolve puts it at 3.064 and 16.643.
+  - A lean also stops the limit: Zoom X 0.9997 with Pitch or Yaw 0.0003 shows bars of 0.192.
+  - The two changes go together. A change of the limit alone opens gaps under 0.5 px at small leans, where Resolve shows none.
+  - Not known: how the 0.5 px works with a Rotation or a crop. Find the cause before a change.
+- **The turn of pixels that are not square** ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
+  - Resolve turns the picture by atan(tan θ / p), and scales it in its own axes by √(cos²θ + sin²θ / p²) and √(cos²θ + p² sin²θ).
+  - vidcut turns the shown picture by θ, with no change of shape (`level`).
+  - On the 4:3 file at Rotation 30, two marks about 1000 px apart are 189 px from the place that Resolve gives.
+  - The limit also acts at other angles: Resolve keeps it up to Rotation 0.0235 on the 4:3 file, and vidcut up to 0.0179.
+  - Not measured: Zoom, Pitch and Yaw with a Rotation on these files, and a file with pixels that are not square and a rotation. Measure these first.
 - **A compound clip:** the outer level keeps the limit only when the clip inside has Zoom X 1. This is from 9 cases. Measure more cases for a general rule before a change.
 
-The record is section M10 of `fixtures/program/NOTES.md` in the test data.
+The records are sections M10 and PF of `fixtures/program/NOTES.md` in the test data.

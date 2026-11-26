@@ -395,7 +395,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
     - 2: fit.
     - 3: fill.
     - 4: stretch.
-  - Crop maps a source pixel to a frame pixel. Only square pixels were measured.
+  - Crop maps a source pixel to a frame pixel. On pixels that are not square, the value is the crop / (the fit factor × the source width) ([spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
   - A clip at 0 has no Retime and Scaling. The file does not hold the setting of the timeline.
   - Pan is in picture widths to the right, and Tilt in picture heights up.
   - The zoom is across and down the picture.

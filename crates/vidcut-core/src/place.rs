@@ -1,5 +1,6 @@
 use crate::composition::Corner;
 use crate::effect_keys::Keyed;
+use crate::keyframes::PictureValue;
 use crate::model::{
     ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
@@ -1985,8 +1986,12 @@ impl Placing {
         effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(own.area(), c));
-        if u0 < u1 && v0 < v1 && own.soft == Soft::default() && no_bars(quad, frame) {
+        let at = p.source as f64;
+        let plain = p.picture.crop_at(at).is_none()
+            && p.picture.channel_at(PictureValue::CropSoftness, at)[0] >= 0.0;
+        if plain && u0 < u1 && v0 < v1 && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
+            own.soft = Soft::default();
         }
         let composed = p
             .picture
@@ -2309,6 +2314,17 @@ pub fn upright_fit(
     }
 }
 
+pub fn crop_unit([fw, fh]: [f64; 2], sar: (i32, i32), rotation: u16) -> [f64; 2] {
+    let across = match sar.0 > 0 && sar.1 > 0 {
+        true => f64::from(sar.0) / f64::from(sar.1),
+        false => 1.0,
+    };
+    match rotation % 180 == 90 {
+        true => [fw, fh / across],
+        false => [fw / across, fh],
+    }
+}
+
 pub fn upright_pixels((w, h): (u32, u32), rotation: u16) -> (f64, f64) {
     let (w, h) = (f64::from(w), f64::from(h));
     if rotation % 180 == 90 { (h, w) } else { (w, h) }
@@ -2549,6 +2565,67 @@ mod tests {
             adjustment: false,
         };
         assert_eq!(detail(&[placed]), 0.4);
+    }
+
+    fn turned_level(picture: Picture) -> Level {
+        let placed = Placed {
+            clip: "c1".into(),
+            picture: Picture {
+                rotation: Some(0.016),
+                ..picture
+            },
+            mapped: None,
+            run: None,
+            source: 0,
+            frame: 0,
+            start: 0,
+            ready: true,
+            ramp: None,
+            crossing: false,
+            moving: None,
+            clock: Default::default(),
+            adjustment: false,
+        };
+        Placing::whole(&[placed], (1280.0, 720.0)).level
+    }
+
+    #[test]
+    fn a_turn_under_the_limit_shows_no_bar() {
+        let level = turned_level(Picture::default());
+        assert_eq!(level.edge, [-1.0, -1.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn a_crop_that_cuts_no_pixel_stops_the_limit() {
+        let mut picture = Picture::default();
+        picture.crop.right = 0.5 / 1280.0;
+        assert_eq!(turned_level(picture).edge, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn softness_above_zero_keeps_the_limit() {
+        let level = turned_level(Picture {
+            crop_softness: Some(2.0),
+            ..Picture::default()
+        });
+        assert_eq!(
+            (level.edge, level.soft),
+            ([-1.0, -1.0, 2.0, 2.0], Soft::default())
+        );
+    }
+
+    #[test]
+    fn softness_below_zero_stops_the_limit() {
+        let level = turned_level(Picture {
+            crop_softness: Some(-0.5),
+            ..Picture::default()
+        });
+        assert_eq!(level.edge, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn the_crop_unit_of_pixels_of_9_to_8_has_no_aspect_ratio() {
+        assert_eq!(crop_unit([1012.5, 720.0], (9, 8), 0), [900.0, 720.0]);
     }
 
     #[test]
