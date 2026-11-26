@@ -199,9 +199,10 @@ flowchart TD
   - The model keeps a hidden state from picture to picture (a convolutional GRU). It has five states, and picture n uses state n mod 5 (`unisal::FRAMES`).
     - Why: the model learned on each fifth frame of DHF1K, and the code of the authors runs so.
   - `unisal::Model::maps` runs five pictures in one pass, and gives the five maps.
-  - `unisal::centroid` gives the point: the mean of the places of the map, weighted by the softmax of the map. Its `Found` has that point as its center, a size of 0 and the highest value of the map as its score.
-    - Why the softmax: the model learned the map as the log of the share of the looks at each place. The point is then the mean place of the looks.
-    - Why not the highest place: on 16 shots of two files that Resolve reframed, the mean place comes nearer to the move of Resolve.
+  - `unisal::centroid` gives the point: the mean of the places of the map, weighted by the softmax of `SHARP` times the map. Its `Found` has that point as its center, a size of 0 and the highest value of the map as its score.
+    - The model learned the map as the log of the share of the looks at each place. Thus each weight is that share to the power `SHARP`.
+    - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them, on neither thing.
+    - Why not the highest place: when two peaks are near in height, the highest place jumps from one to the other. The power moves the point between them smoothly.
 - `weights::Torch` reads the weights from the PyTorch file of the authors, also in the legacy form of that file. `unisal::Model::load` then puts each batch norm into its convolution.
 - `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights and the rules (`salience::name`) and the `Look`.
 - The model file is `catalog::UNISAL_WEIGHTS`, at one commit of the repository of the authors. `salience::get_ready` fetches it when the request has `download`.
@@ -321,6 +322,7 @@ flowchart TD
 - `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
 - `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
   - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
+    - It also gives the time of the source of each frame (`Pace::exact`).
     - It also gives the zoom, the anchor point, the rotation, the box of the Dynamic Zoom (`DynamicZoom::at`) and the position of each frame.
   - `reframe_shape` gives the size of the picture in the frame, by the scaling of the clip (`place::mapped`), and the flips.
 - Without `reference` and `subject`, `Env::salience` finds the point that stands out most on each frame ([saliency](#saliency)). `reframe::salient` takes the point of each frame.
@@ -334,15 +336,19 @@ flowchart TD
 - `reframe::moved` decides:
   - On each axis, the goal is the point of the picture to show at the middle of the frame (`Shape::goal`).
   - A frame with no box takes the goal of the nearest frame with one in the shot. A shot with no box takes the point that the frame shows now (`Shape::view`).
-  - `stabilize::fitted` smooths the goals of each shot: a straight line through the near frames, with Gaussian weights. Its sigma is `smooth` seconds.
+  - `reframe::evened` smooths the goals of each shot: a straight line through the near frames, with Gaussian weights on the times of their source. Its sigma is `smooth` seconds of the source.
     - Why a line: at the ends of a shot, the near frames are on one side only. Their mean lags behind a move.
+    - Why the source: Resolve gives about twice the keyframes at 200 % speed, and about half at 50 %. Thus its move follows the source, not the timeline.
   - `Shape::held` then keeps the picture over the frame on each axis. On an axis with no room, it gives the point that a position of 0 shows (`Shape::middle`).
+    - The room is on the axes of the picture. On each axis, the frame takes its extent along that axis after the rotation (`Shape::half`).
+    - Why: with a rotation of 90°, Resolve moves a 16:9 picture across a 9:16 frame too. With 10° and −30°, the turned frame is taller than the picture. There, Resolve gives only the turned move.
   - `Shape::place` turns the point into the position of the picture, as `place::level` draws it. It uses the zoom, the anchor point, the rotation and the box of the Dynamic Zoom of the frame.
     - It first finds the offset of the picture with no rotation. Then `place::turned` turns that offset by the rotation.
     - A box of the Dynamic Zoom acts as a zoom of one over its size, about its middle.
   - `reframe::axes` gives the axes that move, by the `ReframeMode`. Auto places both axes. Pan and Tilt keep the other axis at the point that the frame shows now.
   - `kept` keeps the first and the last frame of each shot. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
-    - The pixels are those of a frame 1080 pixels on its short side. Why: Resolve gives the same keyframes in 1080×1920 and in 2160×3840.
+    - The pixels are those of a frame whose long side is `LONG` pixels. Why: Resolve gives the same keyframes at two sizes of each shape of the frame.
+    - Why the long side: in 9:16 and 16:9 timelines, the two sides give the same keyframes. In a 1:1 timeline, only the long side gives as many keyframes as Resolve.
 - `ops::picture::reframed` puts the keyframes in `Picture.position_keys` and `Picture.position_y`.
 - In a GUI, `Live::measuring` measures first, as a job of kind `reframe`. Headless, `work_first` measures on `vidcut-subjects`.
 

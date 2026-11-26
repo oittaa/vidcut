@@ -4,50 +4,27 @@
 
 Smart Reframe is complex behavior. Its move depends on the content and on the settings. One measurement records only what Resolve did for that input. A rule needs several files that differ in content, subject count, aspect, frame rate and resolution.
 
-The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on shots of two files. Some lines rest on one clip or one file. Each item below names what a line rests on now, and the cases that test it.
-
-- **Files for each case:** the press conference (59.94 fps, 3840×2160), the film (24 fps, 1280×534), and at least two more files. Use one file at 25 or 30 fps and one with two or more people. Use one 4:3 file.
-- **Frame shapes:** 9:16 and 16:9 timelines, and one 1:1 timeline.
-- **Prepared:** section SR2 of `fixtures/program/NOTES.md` in the test data gives the files, the timelines and the steps. The scripts are `sr2_render.py`, `sr2_make.py` and `sr2_script.py`. The batch takes about 60 minutes of Resolve.
+The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on the shots of SR1 and SR2: nine files, crops made from them, and 9:16, 16:9 and 1:1 timelines. Each item below names a line that rests on one clip or on no measurement, and the cases that test it.
 
 ## One clip or one file
 
-- **No room, from a start that is not 0.** Now: Auto from Tilt 50 (one clip), Tilt Only from Tilt 50 (one clip), Pan Only from Pan 100 (one clip). vidcut puts that axis at the middle.
-  - Test: Auto, Pan Only and Tilt Only from Pan 100, Pan −150 and Tilt 50, on four files, in 9:16 and 16:9 timelines.
-- **The axis that Pan Only or Tilt Only does not move.** Now: no case with a start that is not 0. vidcut keeps its value at each frame.
-  - Test: Tilt Only from Pan 100, and Pan Only from Tilt 50 with a zoom of 1.5 (room on both axes), on four files.
-- **A start that is not 0, on an axis with room.** Now: Pan 100 on one clip.
-  - Test: Pan 100, Pan −150, and Position keyframes before Reframe, on four files.
-- **Crop and Fit.** Now: one 3840×2160 clip at Crop, one 1280×534 clip at Fit.
-  - Test: Crop and Fit with 1280×720, 1920×1080 and 3840×2160 media, in 9:16 and 16:9 timelines.
-- **The head near the top with a zoom.** Now: four shots of the press conference.
-  - Test: a zoom of 1.5 and 2 on shots of one person, of two people and of a wide scene, on four files.
-- **Rotation.** Now: 10° on one clip.
-  - Test: −30°, 10° and 90°, on four files.
-- **Dynamic Zoom.** Now: the usual boxes on one clip.
-  - Test: a box that pans and zooms in, a box that zooms out, and each ease, on four files.
-- **Speed.** Now: 50 % and 200 % on one clip of the film.
-  - Test: 50 %, 200 % and a speed ramp, on files at 24, 30 and 59.94 fps.
-- **Reference Point.** Now: one clip with the box moved to the right, and one walk-out clip with a large box.
-  - On the walk-out clip, the tracker of vidcut follows the background in the large box. After the man leaves, the track moves to another thing. Resolve follows the man and then holds.
-  - This is a fault of vidcut, not a deviation (the owner's decision). Fix the tracker when the test shows the fault on more clips.
-  - Test: a tight box and a large box on subjects that walk out, on four files. Use a box on two people, a box on a thing that is not a person, and boxes on the first, middle and last frame.
-- **Shot changes.** Now: seven clips of the film. The pan of Resolve across a cut is a bug of Resolve (the owner's decision, [gotchas](../gotchas.md#resolves-edits)). vidcut keeps its move at the cut.
-  - Test: clips with a cut from the press conference (camera changes) and from two more files, at different frame rates.
-- **The size of the tolerance.** Now: the same keyframes at 1080×1920 and 2160×3840, on 9:16 timelines only. vidcut uses a frame 1080 pixels on its short side.
-  - Test: 9:16 clips that move, at 1920×1080 and 3840×2160, and one shot at 1080×1080. That shows if the tolerance follows the short side, the long side or the width.
-- **The first box.** Now: one 9:16 timeline.
-  - Test: the first box on a 16:9 and a 1:1 timeline.
+- **Reference Point.** Now: SR1 and SR2 step W5, 18 boxes on seven files.
+  - With a loose box, the tracker of vidcut follows the background, on four of four files. Resolve follows the person on three of them.
+  - With a tight box, vidcut follows the person on the walk-out clip of the film (a median of 92 pixels from Resolve). On the crowd clips, it is 189 to 1108 pixels from Resolve.
+  - Boxes on two people and on a cyclist give a move within 7 to 49 pixels of Resolve.
+  - This is a fault of vidcut, not a deviation (the owner's decision). SR2 shows it on more clips. Thus the tracker is the next fix.
+  - Test after the fix: the W5 boxes again, and boxes on the middle frame of a clip.
+- **Speed ramps.** Now: 50 % and 200 % on four clips. vidcut smooths on the time of the source.
+  - Test: a speed ramp and a freeze frame, on files at 24, 30 and 59.94 fps.
+- **Dynamic Zoom boxes.** Now: the usual boxes, with each ease, on four clips.
+  - Test: a box that pans and zooms in, and a box that zooms out, on four files.
+- **Crop and Fit in other timelines.** Now: Crop and Fit in 1080×1920 timelines only.
+  - Test: Crop and Fit with 1280×720, 1920×1080 and 3840×2160 media, in 16:9 and 1:1 timelines.
+- **Pan Only and Tilt Only with a rotation.** Now: no case. vidcut frees the axis of the picture, and the move turns with the picture.
+  - Test: Pan Only and Tilt Only with rotations of 10° and 90°, on four files.
 
 ## Not measured
 
 - **A short gap in the path of the main subject.** With `subject`, a frame where the main path has no box takes the box of the next path of the shot (`reframe::found`). Thus a short gap moves the view to another thing and back. Resolve has no case of this yet.
   - Test: shots where the main person is hidden for a few frames, or leaves and comes back, with other people in the frame. Use four files.
   - The crowd shots of SR2 (P 0, P 250, M 1200, M 2200, C 400) have such gaps. Compare the Auto move of Resolve with `subject` `person` of vidcut.
-
-## Two files
-
-- **The defaults** `smooth` 0.5 s, `tolerance` 4 pixels, and the mean place of the saliency map. Now: a fit on 16 shots of two files, all in 9:16 timelines at 24 fps.
-  - Test: a fit on shots of four or more files, in 9:16 and 16:9 timelines, with one and several people.
-- **The point at the middle of the frame with a zoom.** Now: 14 shots of two files at a zoom of 1.5.
-  - Test: zooms of 1.5 and 2 on four files.

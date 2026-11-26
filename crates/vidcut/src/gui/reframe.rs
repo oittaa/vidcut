@@ -103,21 +103,15 @@ fn moved(h: &Held, now: [f64; 2]) -> ReframeBox {
             }),
             size: b.size,
         },
-        Hold::Corner(k) => {
-            let all = corners(&b);
-            let (held, fixed) = (all[k], all[(k + 2) % 4]);
-            let edge = [0, 1].map(|i| {
-                let to = now[i].clamp(0.0, 1.0);
-                match held[i] > fixed[i] {
-                    true => to.max(fixed[i] + LEAST),
-                    false => to.min(fixed[i] - LEAST),
-                }
-            });
-            ReframeBox {
-                center: [0, 1].map(|i| (edge[i] + fixed[i]) / 2.0),
-                size: [0, 1].map(|i| (edge[i] - fixed[i]).abs()),
-            }
-        }
+        Hold::Corner(_) => ReframeBox {
+            center: b.center,
+            size: [0, 1].map(|i| {
+                let room = b.center[i].min(1.0 - b.center[i]);
+                (2.0 * (now[i] - b.center[i]).abs())
+                    .min(2.0 * room)
+                    .max(LEAST)
+            }),
+        },
     }
 }
 

@@ -26,6 +26,7 @@ const STEM: u32 = 32;
 const LAST: u32 = 1280;
 const PRIORS: u32 = 16;
 const PRIOR: f64 = 6.0;
+const SHARP: f64 = 8.0;
 const HIDDEN: u32 = 256;
 const TWO: u32 = 128;
 const FOUR: u32 = 64;
@@ -120,7 +121,7 @@ pub(super) fn centroid(map: &[f32], (w, h): (u32, u32)) -> Found {
     let top = map.iter().copied().fold(f32::MIN, f32::max);
     let (mut sum, mut sx, mut sy) = (0f64, 0f64, 0f64);
     for (i, &v) in map.iter().enumerate() {
-        let e = f64::from(v - top).exp();
+        let e = (SHARP * f64::from(v - top)).exp();
         sum += e;
         sx += e * (f64::from(i as u32 % w) + 0.5);
         sy += e * (f64::from(i as u32 / w) + 0.5);

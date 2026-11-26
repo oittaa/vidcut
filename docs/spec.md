@@ -5065,39 +5065,57 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Target icon is grey with Auto. With Reference Point and the viewer control on, the viewer shows a box with four corner handles and a center dot.
   - The first box is at the middle of the frame. It has 0.3 of the width of the frame and 0.75 of its height. Then the box stays where the user left it, also on other clips and timelines.
   - With two clips selected, Object of Interest is grey at Auto. Reframe reframes each clip.
-  - Reframe of a 5 s clip takes less than 1 s. No progress window shows.
-  - The shots of the rules below come from two files: a 3840×2160 press conference at 59.94 fps, and a 1280×534 film at 24 fps.
-    - A rule rests on several shots of both files. A line that names one clip or one file records only that measurement.
-    - [todo](todo/smart-reframe-cases.md) lists the cases that test each line on more files.
+  - Reframe of one 5 s clip takes less than 1 s. No progress window shows.
+  - Reframe of many clips shows a window: "Analyzing N of N clips", the speed, the time left and Cancel.
+  - The shots of the rules below come from nine files, and from eight 9:16 and 4:3 clips made from them.
+    - The files have one person or many people. Their frame rates are from 24 to 59.94 fps, and their sizes from 1280×534 to 3840×2160.
+    - The timelines are 1080×1920, 1920×1080 and 1080×1080, and each of them at twice that size.
+    - A line that names one clip or one file records only that measurement.
+    - [todo](todo/smart-reframe-cases.md) lists the cases that need more files.
   - Reframe sets Position keyframes. The zoom stays, with no keyframes.
   - The picture moves only on an axis where it is larger than the frame. It always covers the frame on that axis.
-    - 16:9 and 2.39:1 clips in a 9:16 timeline move across only.
-    - On two clips of the film, Tilt Only gives keyframes at 0. One of them starts at Tilt 50.
-    - Two 9:16 clips in a 16:9 timeline move up and down only. On one of them, Pan Only from Pan 100 gives keyframes at 0.
-    - On one 3840×2160 clip at Crop in a 1080×1920 timeline, the picture moves across, and down by 120 pixels.
-    - On one clip at Fit in a 1080×1920 timeline, the picture is not larger than the frame. Its keyframes are all 0.
-  - The keyframes are at the frames where the move bends, not on a fixed grid. A 119-frame clip gets 5 to 23 keyframes.
-  - In 9:16 timelines, the same shot gives the same keyframes at 1080×1920 and at 2160×3840, as fractions of the picture. Other shapes of the frame are not measured.
+    - 16:9 and 2.39:1 clips in 9:16 and 1:1 timelines move across only (34 shots).
+    - 9:16, 4:3 and 1:1 clips in a 16:9 timeline move up and down only (9 shots).
+    - Tilt Only on four 16:9 clips in a 9:16 timeline gives keyframes at 0. Pan Only on four 9:16 clips in a 16:9 timeline gives keyframes at 0.
+    - On two 3840×2160 clips at Crop in a 1080×1920 timeline, the picture moves across and up and down. On one of them, it stays 120 pixels down, at the top of the picture.
+    - On three clips at Fit in a 1080×1920 timeline, the picture is not larger than the frame. Their keyframes are all 0.
+  - Pan Only and Tilt Only keep the other axis at its start value, also when that axis has room (4 clips each).
+  - The keyframes are at the frames where the move bends, not on a fixed grid. A clip of about 120 frames gets 3 to 41 keyframes.
+  - The same shot gives the same keyframes at two sizes of the timeline, as fractions of the picture (134 clips).
+    - The sizes are 1080×1920 and 2160×3840, 1920×1080 and 3840×2160, and 1080×1080 and 2160×2160.
+    - At Crop, the room changes with the size of the timeline. Thus one clip at Crop gets other keyframes.
   - Reframe replaces the Position keyframes that were on the clip.
-  - On one clip of the film, a start Pan of 100 does not change the move.
-  - Auto gives keyframes at 0 on an axis with no room. On one clip of the film, this is also so from Tilt 50.
-  - With a zoom of 1.5, the move across is 1.5 times as large, on 13 shots.
+  - A start Pan of 100 or −150, or a start Tilt of 50, does not change the move. This is so on four files in a 9:16 timeline and four in a 16:9 timeline.
+  - Auto gives keyframes at 0 on an axis with no room, also from Pan 100 or Tilt 50 (12 clips).
+  - With a zoom of 1.5, the move across is 1.5 times as large, on 13 shots. With a zoom of 2, it is 2 times as large, on 8 shots.
   - With a zoom of 1.5, Tilt moves with the subject too, from the top limit to 0.22 of the picture's height down. On 7 of 15 shots, Tilt is at the top limit for some frames.
     - On four shots of the press conference, the head of the person stays near the top of the frame.
-  - On one clip with a rotation of 10°, the move is that of the clip with no rotation, turned by 10°. Pan is that move × cos 10°, and Tilt gets the part × sin 10°.
-  - One clip has the usual Dynamic Zoom. Its move at each frame is that of a zoom of one over the size of the box at that frame.
-  - On one clip at 50 % and at 200 % speed, the move follows the source frames that show.
+  - With a rotation of 10° or −30°, the move is that of the clip with no rotation, turned by the angle (4 clips each). Pan is that move × cos θ, and Tilt gets the part × sin θ.
+  - With a rotation of 90°, 16:9 clips in a 9:16 timeline move across and up and down (4 clips).
+  - The four eases of Dynamic Zoom give the same keyframes (4 clips). Resolve plays each ease as a straight line ([gotchas](gotchas.md#resolves-edits)).
+    - The move at each frame is that of a zoom of one over the size of the box at that frame.
+  - At 200 % speed, the move follows the source frames that show (4 clips). There are about twice as many keyframes as at 100 %.
+  - At 50 % speed, the move follows the source frames on two of four clips. On two crowd clips, it is a median of 86 and 214 pixels from the move at 100 %.
+    - There are a quarter to a half as many keyframes as at 100 %.
   - Shots with no face move too. On one shot of a logo, the picture moves by up to 0.06 of its width.
   - On one clip, with Reference Point and the box moved to the right, the move follows the box.
   - On one clip, with Reference Point and a box on a man who walks out of the frame, the move follows the man. After he leaves, the move holds its last place.
     - The box had 0.8 of the width of the frame and 0.93 of its height. Most of it showed the background.
     - The middle of the box stayed at the same distance from the man, 0.15 of the width of the picture.
+  - On four files, a tight box and a loose box were set on the same person. The loose box held much of the background.
+    - On three files, the two moves are a median of 155 to 309 pixels apart. On a crowd clip, they are 1519 pixels apart.
+  - A drag of a corner of the box changes its size, and its center stays.
   - On seven clips of the film with a shot change, no move jumps at the cut. On four of them, the picture pans across the cut over 22 to 45 frames ([gotchas](gotchas.md#resolves-edits)).
+  - On seven more clips with a shot change, of three other files, no move jumps at the cut either. On two clips of the press conference, the picture pans across the cut over about 30 and 45 frames.
+  - On one clip of the film, Reframe set no keyframes.
   - One undo removes all the keyframes of a Reframe. The name of the undo step is "Smart Reframe".
-  - The record is sections R2, R8, R10, R12 and SR1 of `fixtures/program/NOTES.md` in the test data.
+  - The record is sections R2, R8, R10, R12, SR1 and SR2 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
-    - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame (X176). The point is the mean place of the map, weighted by the share of the looks at each place.
+    - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame (X176).
+      - The point is the mean place of the map, weighted by the share of the looks at each place to the power 8.
+      - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them.
+      - Why 8: on 145 runs of SR2, the plain mean is a median of 231 pixels from the move of Resolve. The power 8 gives 88 pixels. Powers from 4 to 32 give 88 to 97 pixels.
     - With `subject`, it follows the main thing of that subject in each shot. That is the thing that shows largest for the longest time. The finders of `motion.find` find the things, with the same rules for their paths.
     - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
   - `mode` selects the axes:
@@ -5106,17 +5124,20 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With `pan` or `tilt`, the axis that does not move keeps its value at each frame.
   - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
     - Why: the head of a person is at the top of the box.
-    - The point that stands out goes to the middle of the frame too. Why: on 14 shots of two files at a zoom of 1.5, a higher view does not come nearer to the Tilt of Resolve.
+    - The point that stands out goes to the middle of the frame too. Why: on 37 runs with room up and down, a higher view does not come nearer to the Tilt of Resolve.
   - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
-  - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds. The usual value is 0.5 s.
+  - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds of the source. The usual value is 0.5 s.
+    - Why the source: at 200 % speed, Resolve gives about twice as many keyframes as at 100 %. At 50 %, it gives fewer.
   - Then the picture covers the frame on each axis where it is larger than the frame.
   - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
     - Why: a pan across the cut shows the wrong part of each shot ([gotchas](gotchas.md#resolves-edits)).
-  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes. The usual value is 4 pixels.
-    - The pixels are those of a frame 1080 pixels on its short side. Thus a frame of another size and the same shape gets the same keyframes, as in Resolve.
-    - Why 4: on 16 shots of two files that Resolve reframed, 4 pixels moves the picture as 1 pixel does. Its keyframe count is near that of Resolve.
+  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes. The usual value is 7 pixels.
+    - The pixels are those of a frame 1920 pixels on its long side. Thus a frame of another size and the same shape gets the same keyframes, as in Resolve.
+    - Why 7 and the long side: on 135 clips of SR2, they give as many keyframes as Resolve, in 9:16, 16:9 and 1:1 timelines. A tolerance of 2 pixels gives the same move.
+    - With the short side, a 1:1 timeline gets a fifth fewer keyframes than in Resolve.
   - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point, the rotation, the flips and the Dynamic Zoom of each frame, and they stay.
-    - With a rotation, the move is that of the picture with no rotation, turned by the angle of the rotation.
+    - With a rotation, the picture moves on its own axes, and the move turns with it. On each axis of the picture, the room is what the turned frame leaves.
+    - Thus with a rotation of 90°, a 16:9 clip in a 9:16 timeline moves across too. With a small rotation, the move is that of the picture with no rotation, turned by the angle.
     - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of its box at that frame.
   - Each `picture.reframe` is one undo step, "Smart Reframe".
   - The Video tab of the Inspector has the Smart Reframe section, below Transform: Object of Interest, Mode, Subject, Smooth and Reframe.
@@ -5126,7 +5147,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Reframe asks to download the saliency model, the model of the subject, or the tracker, when it is not on this computer.
     - Reframe is grey while a Smart Reframe runs.
   - The viewer's Smart Reframe box has four corner handles and a center dot.
-    - A drag inside the box moves it. A drag of a corner changes its size, and the opposite corner stays.
+    - A drag inside the box moves it. A drag of a corner changes its size, and its center stays.
     - The box stays inside the frame.
     - With Reference Point, Reframe sends the box as `reference`, with the frame at the playhead as `at`.
     - The Tools row of the viewer has Smart Reframe too. `gui.show` with `smart_reframe` shows the box.

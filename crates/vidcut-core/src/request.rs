@@ -3022,13 +3022,14 @@ pub enum Request {
         /// than its source.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<u32>,
-        /// The seconds over which the move evens out the motion of the
-        /// thing, from 0 to 10. At 0 it follows each frame. Usual: 0.5.
+        /// The seconds of the source over which the move evens out the
+        /// motion of the thing, from 0 to 10. At 0 it follows each frame.
+        /// Usual: 0.5.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         smooth: Option<f64>,
         /// How far the keyframes may stray from the move, in pixels of a
-        /// frame 1080 pixels on its short side, from 0.01 to 100. A larger
-        /// value gives fewer keyframes. Usual: 4.
+        /// frame 1920 pixels on its long side, from 0.01 to 100. A larger
+        /// value gives fewer keyframes. Usual: 7.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tolerance: Option<f64>,
         /// Download the model when it is not on this computer, checked

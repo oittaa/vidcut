@@ -9165,6 +9165,7 @@ fn reframe_rules(request: &Request) -> Result<crate::reframe::Rules> {
 
 fn reframe_frames(p: &Project, c: &Clip) -> (Vec<i64>, Vec<crate::reframe::Frame>) {
     let f = crate::composition::Frames::of(p, c);
+    let (fps, pace) = (p.fps().as_f64(), c.pace());
     let picture = c.picture.clone().unwrap_or_default();
     let mut files = Vec::new();
     let mut frames = Vec::new();
@@ -9179,6 +9180,7 @@ fn reframe_frames(p: &Project, c: &Clip) -> (Vec<i64>, Vec<crate::reframe::Frame
         files.push(f.file(f.at(t)));
         frames.push(crate::reframe::Frame {
             key,
+            source: (c.source_in as f64 + c.phase + pace.exact(t - c.start)) / fps,
             seen: None,
             cut: false,
             zoom: picture.scale_at(at),

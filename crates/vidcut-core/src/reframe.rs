@@ -9,9 +9,9 @@ use crate::request::ReframeMode;
 pub const SMOOTH: (f64, f64) = (0.0, 10.0);
 pub const USUAL_SMOOTH: f64 = 0.5;
 pub const TOLERANCE: (f64, f64) = (0.01, 100.0);
-pub const USUAL_TOLERANCE: f64 = 4.0;
+pub const USUAL_TOLERANCE: f64 = 7.0;
 const ROOM: f64 = 1e-6;
-const LINES: f64 = 1080.0;
+const LONG: f64 = 1920.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Seen {
@@ -22,6 +22,7 @@ pub struct Seen {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frame {
     pub key: i64,
+    pub source: f64,
     pub seen: Option<Seen>,
     pub cut: bool,
     pub zoom: [f64; 2],
@@ -64,7 +65,13 @@ impl Shape {
     }
 
     fn half(&self, f: &Frame, i: usize) -> f64 {
-        0.5 / self.scale(f, i)
+        let (s, c) = f.turn.sin_cos();
+        let [w, h] = self.pixels;
+        let across = match i {
+            0 => w * c.abs() + h * s.abs(),
+            _ => w * s.abs() + h * c.abs(),
+        };
+        0.5 * across / self.pixels[i] / self.scale(f, i)
     }
 
     fn shown(&self, i: usize, v: f64) -> f64 {
@@ -163,6 +170,34 @@ fn nearest(goals: &[Option<[f64; 2]>], t: usize) -> Option<[f64; 2]> {
     goals[near]
 }
 
+fn evened(path: &[[f64; 2]], times: &[f64], sigma: f64) -> Vec<[f64; 2]> {
+    let reach = 3.0 * sigma;
+    let n = path.len();
+    (0..n)
+        .map(|t| {
+            let near = |k: &usize| (times[*k] - times[t]).abs() <= reach;
+            let lo = (0..t).rev().take_while(near).last().unwrap_or(t);
+            let hi = (t + 1..n).take_while(near).last().unwrap_or(t);
+            let (mut level, mut slope) = ([0.0; 2], [0.0; 2]);
+            let (mut s0, mut s1, mut s2) = (0.0, 0.0, 0.0);
+            for k in lo..=hi {
+                let d = times[k] - times[t];
+                let w = (-d * d / (2.0 * sigma * sigma)).exp();
+                for i in 0..2 {
+                    level[i] += w * path[k][i];
+                    slope[i] += w * d * path[k][i];
+                }
+                (s0, s1, s2) = (s0 + w, s1 + w * d, s2 + w * d * d);
+            }
+            let det = s0 * s2 - s1 * s1;
+            [0, 1].map(|i| match det > ROOM * s0 * s0 * sigma * sigma {
+                true => (s2 * level[i] - s1 * slope[i]) / det,
+                false => level[i] / s0,
+            })
+        })
+        .collect()
+}
+
 fn views(frames: &[Frame], shape: &Shape, sigma: f64) -> Vec<[f64; 2]> {
     let mut out = Vec::with_capacity(frames.len());
     for shot in shots(frames.iter().map(|f| f.cut)) {
@@ -178,12 +213,10 @@ fn views(frames: &[Frame], shape: &Shape, sigma: f64) -> Vec<[f64; 2]> {
                 false => shape.view(&part[t]),
             })
             .collect();
-        let smooth = match sigma < 0.5 {
+        let times: Vec<f64> = part.iter().map(|f| f.source).collect();
+        let smooth = match sigma * shape.fps < 0.5 {
             true => path,
-            false => crate::stabilize::fitted(&path, sigma, |_, _, _| 1.0)
-                .into_iter()
-                .map(|(goal, _)| goal)
-                .collect(),
+            false => evened(&path, &times, sigma),
         };
         let held = part.iter().zip(smooth);
         out.extend(held.map(|(f, v)| [0, 1].map(|i| shape.held(f, i, v[i]))));
@@ -227,7 +260,7 @@ fn rounded(v: f64) -> f64 {
 
 pub fn moved(frames: &[Frame], shape: &Shape, rules: &Rules) -> Moved {
     let axes = axes(rules.mode, frames, shape);
-    let views = views(frames, shape, rules.smooth * shape.fps);
+    let views = views(frames, shape, rules.smooth);
     let free = match rules.mode {
         ReframeMode::Auto => [true; 2],
         _ => axes,
@@ -245,7 +278,7 @@ pub fn moved(frames: &[Frame], shape: &Shape, rules: &Rules) -> Moved {
         seen: frames.iter().filter(|f| f.seen.is_some()).count(),
         ..Moved::default()
     };
-    let unit = LINES / shape.pixels[0].min(shape.pixels[1]).max(1.0);
+    let unit = LONG / shape.pixels[0].max(shape.pixels[1]).max(1.0);
     for shot in shots(frames.iter().map(|f| f.cut)) {
         let points: Vec<(i64, [f64; 2])> = shot
             .clone()
