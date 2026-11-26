@@ -40,6 +40,7 @@ pub mod progress;
 pub mod proxy;
 pub mod render_cache;
 pub mod route;
+pub mod salience;
 pub mod screen;
 pub mod speech_api;
 pub mod stabilize;

@@ -167,6 +167,25 @@ flowchart TD
 - The model files are `catalog::YUNET_ONNX`, `catalog::RETINAFACE_ONNX`, `catalog::PPOCR_DET_ONNX` and `catalog::YOLOX_ONNX`. `subjects::get_ready` fetches the file of the subject and its model when the request has `download`.
 - `models.check` finds the subject and the model of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
 
+## Saliency
+
+- `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- It reads the frames as `subjects::find` does. `subjects::looked` decodes, seeks and measures the scene scores and the `SEED` pictures for both.
+  - The `Looker` trait is the part that is different. `Looking` finds boxes. `Seeing` makes saliency maps.
+- The model is UNISAL (`unisal`), with its weights for DHF1K, on the GPU (`compute::ops`).
+  - Its picture has from 100 to 120 cells of 32 pixels. Of these sizes, it has the one with the aspect nearest to the source (`unisal::sized`). Why: the code of the authors selects its size so.
+  - `Seeing::picture` scales with a Lanczos filter. `unisal::input` then normalizes red, green and blue by the mean and the spread of ImageNet.
+  - The model keeps a hidden state from picture to picture (a convolutional GRU). It has five states, and picture n uses state n mod 5 (`unisal::FRAMES`).
+    - Why: the model learned on each fifth frame of DHF1K, and the code of the authors runs so.
+  - `unisal::Model::maps` runs five pictures in one pass, and reads back the five maps.
+  - `unisal::centroid` gives the point: the mean of the places of the map, weighted by the softmax of the map. Its `Found` has that point as its center, a size of 0 and the highest value of the map as its score.
+    - Why the softmax: the model learned the map as the log of the share of the looks at each place. The point is then the mean place of the looks.
+    - Why not the highest place: on 16 shots that Resolve reframed, the mean place comes nearer to the move of Resolve.
+- `weights::Torch` reads the weights from the PyTorch file of the authors, also in the legacy form of that file. `unisal::Model::load` then puts each batch norm into its convolution.
+- `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights and the rules (`salience::name`) and the `Look`.
+- The model file is `catalog::UNISAL_WEIGHTS`, at one commit of the repository of the authors. `salience::get_ready` fetches it when the request has `download`.
+- `VIDCUT_SALIENCY_DUMP` and `scripts/saliency-check.py` compare the maps with the code of the authors ([tools](../tools.md)).
+
 ## Tracks
 
 - `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
@@ -277,12 +296,14 @@ flowchart TD
 
 ## Smart Reframe
 
-- `picture.reframe` finds the thing to follow on each frame, and the core decides the move ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
 - `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
   - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
     - It also gives the zoom, the anchor point and the position of each frame.
   - `reframe_shape` gives the size of the picture in the frame, by the scaling of the clip (`place::mapped`), and the flips.
-- Without `reference`, `Env::subjects` finds the things on each frame of the file, as for `motion.find`. `motion::joined` makes their paths, by the `Join` of the subject.
+- Without `reference` and `subject`, `Env::salience` finds the point that stands out most on each frame ([saliency](#saliency)). `reframe::salient` takes the point of each frame.
+  - The shot changes come from the scene scores of the `Detections` (`Detections::cut`).
+- With `subject`, `Env::subjects` finds the things on each frame of the file, as for `motion.find`. `motion::joined` makes their paths, by the `Join` of the subject.
   - `reframe::found` takes the main path of each shot: the largest sum of the box areas over the frames of the shot. A frame where that path has no box takes the next path in that order.
   - The shot changes come from the scene scores of the `Detections` (`Detections::cut`).
   - Why the sum of the areas: the main thing shows large and long. A person far behind it shows small.

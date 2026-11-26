@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::export::Progress;
 use crate::export::video::VideoFrames;
 use crate::ffmpeg::{format, frame};
-use crate::models::{self, Fetch, Need};
+use crate::models::{self, Need};
 
 pub use vidcut_core::catalog::VITTRACK_ONNX as FILE;
 
@@ -31,32 +31,11 @@ pub fn name() -> String {
 }
 
 pub fn needed(dir: &Path) -> Vec<Need> {
-    if models::present(dir, &FILE) {
-        return Vec::new();
-    }
-    vec![Need {
-        title: FILE.title.into(),
-        bytes: Some(FILE.bytes),
-        system: false,
-    }]
+    models::needs(dir, &FILE)
 }
 
 pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
-    if models::present(dir, &FILE) {
-        return Ok(());
-    }
-    if !download {
-        return Err(Error::Missing(format!(
-            "{} ({}) isn't on this computer yet: pass download (--download) to download it into \
-             {}, checked against its SHA-256",
-            FILE.title,
-            models::size(FILE.bytes),
-            dir.display()
-        )));
-    }
-    models::network();
-    models::fetch(&Fetch::of(&FILE), dir)?;
-    Ok(())
+    models::ready(dir, &FILE, download)
 }
 
 pub fn inspect(dir: &Path, download: bool) -> Result<()> {

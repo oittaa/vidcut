@@ -3062,13 +3062,14 @@ impl Workspace {
             self.inspector.stopping = Some(true);
         }
         if !tracks.is_empty() {
-            self.ask(tracks, None);
+            self.ask(tracks, Wanted::Tracker);
             if let Some(at) = stepped {
                 self.page_ask(json!({ "at": at }));
             }
         }
         if let Some(found) = asked.filter(|_| extra.is_some()) {
-            self.ask(vec![found], Some((subject, model.for_subject(subject))));
+            let model = model.for_subject(subject);
+            self.ask(vec![found], Wanted::Finder(subject, model));
         }
     }
 
@@ -3374,7 +3375,14 @@ struct Chosen {
 #[derive(Debug, Clone)]
 struct Finding {
     asks: Vec<(&'static str, Value)>,
-    subject: Option<(Subject, FindModel)>,
+    wanted: Wanted,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Wanted {
+    Finder(Subject, FindModel),
+    Tracker,
+    Salience,
 }
 
 #[derive(Debug, Clone)]
@@ -5096,11 +5104,12 @@ fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'stati
     Some(("apply", json!({ "commands": commands, "label": label })))
 }
 
-fn model_needs(subject: Option<(Subject, FindModel)>) -> Vec<vidcut_av::models::Need> {
+fn model_needs(wanted: Wanted) -> Vec<vidcut_av::models::Need> {
     let dir = crate::paths::models_dir();
-    match subject {
-        Some((subject, model)) => vidcut_av::subjects::needed(&dir, subject, model),
-        None => vidcut_av::tracking::needed(&dir),
+    match wanted {
+        Wanted::Finder(subject, model) => vidcut_av::subjects::needed(&dir, subject, model),
+        Wanted::Tracker => vidcut_av::tracking::needed(&dir),
+        Wanted::Salience => vidcut_av::salience::needed(&dir),
     }
 }
 
@@ -6231,17 +6240,13 @@ impl Workspace {
         }
     }
 
-    pub(super) fn ask(
-        &mut self,
-        asks: Vec<(&'static str, Value)>,
-        subject: Option<(Subject, FindModel)>,
-    ) {
-        if model_needs(subject).is_empty() {
+    pub(super) fn ask(&mut self, asks: Vec<(&'static str, Value)>, wanted: Wanted) {
+        if model_needs(wanted).is_empty() {
             for (method, params) in asks {
                 self.send(method, params);
             }
         } else {
-            self.inspector.finding = Some(Finding { asks, subject });
+            self.inspector.finding = Some(Finding { asks, wanted });
         }
     }
 
@@ -6249,7 +6254,7 @@ impl Workspace {
         let Some(finding) = self.inspector.finding.clone() else {
             return;
         };
-        let needs = model_needs(finding.subject);
+        let needs = model_needs(finding.wanted);
         let download = match needs.is_empty() {
             true => Some(false),
             false => {

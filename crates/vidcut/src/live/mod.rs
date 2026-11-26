@@ -2156,6 +2156,9 @@ impl Live {
                         ReframeLook::Subject((media, subject, span, download)) => {
                             env.subjects(media, *subject, *span, *download)?;
                         }
+                        ReframeLook::Salient((media, span, download)) => {
+                            env.salience(media, *span, *download)?;
+                        }
                         ReframeLook::Track(t) => {
                             let (media, plan, follow, download) = t.as_ref();
                             handed.push(env.track(media, plan, *follow, *download)?);

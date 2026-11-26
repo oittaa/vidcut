@@ -56,6 +56,35 @@ pub fn present(dir: &Path, f: &File) -> bool {
     f.present(dir)
 }
 
+pub fn needs(dir: &Path, f: &File) -> Vec<Need> {
+    if present(dir, f) {
+        return Vec::new();
+    }
+    vec![Need {
+        title: f.title.into(),
+        bytes: Some(f.bytes),
+        system: false,
+    }]
+}
+
+pub(crate) fn ready(dir: &Path, f: &File, download: bool) -> Result<()> {
+    if present(dir, f) {
+        return Ok(());
+    }
+    if !download {
+        return Err(Error::Missing(format!(
+            "{} ({}) isn't on this computer yet: pass download (--download) to download it into \
+             {}, checked against its SHA-256",
+            f.title,
+            size(f.bytes),
+            dir.display()
+        )));
+    }
+    network();
+    fetch(&Fetch::of(f), dir)?;
+    Ok(())
+}
+
 pub fn sha256_of(path: &Path) -> Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hash = Sha256::new();
@@ -104,6 +133,13 @@ pub fn inspect(
         return Ok(Inspected {
             found,
             loaded: Some(loaded),
+        });
+    }
+    if model.id == vidcut_core::catalog::UNISAL.id {
+        crate::salience::inspect(dir, download)?;
+        return Ok(Inspected {
+            found,
+            loaded: Some("vidcut, on the GPU"),
         });
     }
     if model.id == vidcut_core::catalog::VITTRACK.id {

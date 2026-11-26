@@ -5,16 +5,17 @@ use vidcut_core::reframe::{SMOOTH, USUAL_SMOOTH};
 use vidcut_core::request::{ReframeBox, ReframeMode};
 
 use super::dialog;
-use super::inspector::{label, switched_group};
+use super::inspector::{Wanted, label, switched_group};
 use super::theme;
 use super::workspace::Workspace;
 
 const NAME: &str = "Smart Reframe";
-const SUBJECTS: [(Subject, &str); 4] = [
-    (Subject::Person, "Person"),
-    (Subject::Face, "Face"),
-    (Subject::Vehicle, "Vehicle"),
-    (Subject::Text, "Text"),
+const SUBJECTS: [(Option<Subject>, &str); 5] = [
+    (None, "Auto"),
+    (Some(Subject::Person), "Person"),
+    (Some(Subject::Face), "Face"),
+    (Some(Subject::Vehicle), "Vehicle"),
+    (Some(Subject::Text), "Text"),
 ];
 const AREA: ReframeBox = ReframeBox {
     center: [0.5, 0.5],
@@ -39,7 +40,7 @@ struct Held {
 #[derive(Debug, Clone, Copy)]
 pub struct Reframing {
     mode: ReframeMode,
-    subject: Subject,
+    subject: Option<Subject>,
     smooth: f64,
     point: bool,
     area: ReframeBox,
@@ -50,7 +51,7 @@ impl Default for Reframing {
     fn default() -> Self {
         Self {
             mode: ReframeMode::Auto,
-            subject: Subject::Person,
+            subject: None,
             smooth: USUAL_SMOOTH,
             point: false,
             area: AREA,
@@ -68,8 +69,8 @@ impl Reframing {
         if self.pointed(clips.len()) {
             params["reference"] = json!(self.area);
             params["at"] = json!(at);
-        } else if self.subject != Subject::Person {
-            params["subject"] = json!(self.subject);
+        } else if let Some(subject) = self.subject {
+            params["subject"] = json!(subject);
         }
         if self.smooth != USUAL_SMOOTH {
             params["smooth"] = json!(self.smooth);
@@ -155,7 +156,7 @@ fn rows(ui: &mut egui::Ui, r: &mut Reframing, clips: usize) -> bool {
     });
     ui.end_row();
     if !r.pointed(clips) {
-        label(ui, "Subject", r.subject != Subject::Person);
+        label(ui, "Subject", r.subject.is_some());
         let shown = SUBJECTS.iter().find(|(s, _)| *s == r.subject);
         egui::ComboBox::from_id_salt("reframe-subject")
             .selected_text(shown.map_or("", |(_, l)| *l))
@@ -208,10 +209,12 @@ impl Workspace {
         if go {
             let at = self.snap.timeline.position;
             let ask = ("picture.reframe", r.params(&clips, at));
-            match r.pointed(clips.len()) {
-                true => self.ask(vec![ask], None),
-                false => self.ask(vec![ask], Some((r.subject, FindModel::Fast))),
-            }
+            let wanted = match (r.pointed(clips.len()), r.subject) {
+                (true, _) => Wanted::Tracker,
+                (false, Some(subject)) => Wanted::Finder(subject, FindModel::Fast),
+                (false, None) => Wanted::Salience,
+            };
+            self.ask(vec![ask], wanted);
         }
     }
 

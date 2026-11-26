@@ -4579,8 +4579,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The record is sections R2, R8, R10 and R12 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
-    - Without `reference`, it follows the main thing of the `subject` in each shot. That is the thing that shows largest for the longest time. The usual subject is `person`.
-    - The finders of `motion.find` find the things, with the same rules for their paths.
+    - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame. The point is the mean place of the map, weighted by the share of the looks at each place.
+    - With `subject`, it follows the main thing of that subject in each shot. That is the thing that shows largest for the longest time. The finders of `motion.find` find the things, with the same rules for their paths.
     - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
   - `mode` selects the axes:
     - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip.
@@ -4597,8 +4597,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Each `picture.reframe` is one undo step, "Smart Reframe".
   - The Video tab of the Inspector has the Smart Reframe section, below Transform: Object of Interest, Mode, Subject, Smooth and Reframe.
     - Object of Interest is Auto or Reference Point. With more than one clip selected, it is grey at Auto.
+    - Subject has Auto first, then Person, Face, Vehicle and Text. Auto follows what stands out most.
     - With Reference Point, Subject does not show. The Target button sets the viewer to its Smart Reframe box.
-    - Reframe asks to download the model of the subject, or of the tracker, when it is not on this computer.
+    - Reframe asks to download the saliency model, the model of the subject, or the tracker, when it is not on this computer.
     - Reframe is grey while a Smart Reframe runs.
   - The viewer's Smart Reframe box has four corner handles and a center dot.
     - A drag inside the box moves it. A drag of a corner changes its size, and the opposite corner stays.

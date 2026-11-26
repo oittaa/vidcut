@@ -754,6 +754,25 @@ pub static VITTRACK: Model = Model {
     price: None,
 };
 
+pub const UNISAL_WEIGHTS: File = File {
+    name: "unisal/weights_best.pth",
+    title: "UNISAL saliency",
+    url: "https://raw.githubusercontent.com/rdroste/unisal/7f8ca1a7ecb3dbc1bf7fca837cb6186a85ac27d9/training_runs/pretrained_unisal/weights_best.pth",
+    bytes: 15_368_928,
+    sha256: "4a9157411f1741d588b15670d15295e998805648b8b6348599fe447298338481",
+};
+
+pub static UNISAL: Model = Model {
+    id: "unisal",
+    times: None,
+    title: "UNISAL saliency",
+    files: &[UNISAL_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
 pub const NANOVSR_SCALE: u32 = 4;
 pub const NANOVSR_FRAMES: usize = 15;
 
@@ -880,7 +899,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 18] = [
+pub static ALL: [&Model; 19] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -895,6 +914,7 @@ pub static ALL: [&Model; 18] = [
     &PPOCR_DET,
     &YOLOX,
     &VITTRACK,
+    &UNISAL,
     &NANOVSR,
     &FLASHVSR,
     &RIFE,

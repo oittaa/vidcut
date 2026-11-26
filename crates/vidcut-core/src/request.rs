@@ -2934,8 +2934,8 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         strength: Option<f64>,
     },
-    /// Keep a person, or the thing in a box, inside the frame of clips of
-    /// footage (`c3`, or `V2@15s`), and store the move as Position
+    /// Keep what stands out, or the thing in a box, inside the frame of
+    /// clips of footage (`c3`, or `V2@15s`), and store the move as Position
     /// keyframes. The picture moves on an axis only where it is larger than
     /// the frame, for example a wide picture that fills a tall frame, and
     /// always covers the frame there. The zoom stays. The new keyframes
@@ -2951,8 +2951,8 @@ pub enum Request {
         /// The box around the thing to follow, on the frame `at`, as
         /// fractions of the frame from its top left. The thing is followed
         /// through the clip from there. One clip only. Left out, the move
-        /// follows the main `subject` of each shot: the one that shows
-        /// largest for the longest time.
+        /// follows the part of each frame that stands out most, or the main
+        /// `subject` of each shot.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reference: Option<ReframeBox>,
         /// The frame of `reference`, inside the clip. Left out, the
@@ -2964,17 +2964,21 @@ pub enum Request {
         #[serde(default)]
         mode: ReframeMode,
         /// The kind of thing to follow without `reference`: `person`,
-        /// `face`, `text` or `vehicle`. Usual: `person`.
+        /// `face`, `text` or `vehicle`. The move follows the main one of
+        /// each shot: the one that shows largest for the longest time. Left
+        /// out, the move follows the part of each frame that stands out
+        /// most.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<Subject>,
-        /// The neural network that finds the subject: `fast`, or `slow` for
-        /// `face`. Usual: `fast`.
+        /// The neural network that finds the `subject`: `fast`, or `slow`
+        /// for `face`. Usual: `fast`.
         #[serde(default)]
         model: FindModel,
-        /// The longer side, in pixels, of the picture that the model sees,
-        /// from 320 to 3840. Left out, it is 640 for `face`, `person` and
-        /// `vehicle`, and 960 for `text`. A larger size finds smaller things
-        /// and takes more time. The picture is never larger than its source.
+        /// The longer side, in pixels, of the picture that the model of the
+        /// `subject` sees, from 320 to 3840. Left out, it is 640 for `face`,
+        /// `person` and `vehicle`, and 960 for `text`. A larger size finds
+        /// smaller things and takes more time. The picture is never larger
+        /// than its source.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<u32>,
         /// The seconds over which the move evens out the motion of the
@@ -2988,8 +2992,9 @@ pub enum Request {
         tolerance: Option<f64>,
         /// Download the model when it is not on this computer, checked
         /// against its SHA-256: with `reference` the tracking model (715
-        /// kB); else the model of the subject, as `motion.find` tells.
-        /// Without it, a missing model is an error that tells its size.
+        /// kB); with `subject` the model of the subject, as `motion.find`
+        /// tells; else the saliency model (15 MB). Without it, a missing
+        /// model is an error that tells its size.
         #[serde(default)]
         download: bool,
     },

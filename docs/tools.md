@@ -94,6 +94,17 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It needs what the face speed script needs, and numpy, onnx and onnxruntime. `uv run` gets these packages, and a Python version that onnxruntime supports.
 - `RANGE=A..B` checks another part of the clip. `VIDCUT_GPU_CONV` selects the convolution kernels.
 
+**Saliency check:** `uv run scripts/saliency-check.py` (release build).
+
+- It compares the saliency maps of vidcut with the official UNISAL code.
+- It runs `picture.reframe` with `VIDCUT_SALIENCY_DUMP` on 2 s of the clip `tos-720p-mov`, in a frame of 1080x1920.
+- It gets the UNISAL code at the commit of the weights in the catalog. It gives the same pictures to that code, with PyTorch on the CPU, in the same order of the five hidden states.
+- For each picture, it prints the largest difference of the map as a share of its range.
+- It also prints the distance between the point of vidcut and the point of the official map, in pixels of the map.
+- A share of more than 0.01 is far off.
+- It needs the model on this computer: `vidcut models check unisal --download`. `uv run` gets numpy and torch.
+- `RANGE=A..B` checks another part of the clip.
+
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).
 
 - It opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart.
@@ -275,6 +286,11 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - With the slow face model, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
   - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
   - A check against an ONNX runtime reads them.
+- `VIDCUT_SALIENCY_DUMP=DIR` makes `picture.reframe` write what the saliency model gets and makes as `.npy` files into `DIR`.
+  - `NNNNN.npy`: each picture as the model gets it, `[H, W, 3]`: red, green and blue after the normalization.
+  - `map-NNNNN.npy`: the map of each picture before the softmax, `[H, W]`.
+  - `points.npy`: the point of each picture, `[N, 2]`, as fractions of the picture.
+  - `scripts/saliency-check.py` reads them.
 - `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.
   - `direct`: no Winograd convolutions (`WINO_GEMM`).
   - `plain`: no Winograd convolutions and no `CONV4`. Each convolution uses `CONV`.

@@ -10,7 +10,7 @@ use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::export::Progress;
 use crate::ffmpeg::{format, frame, software::scaling};
-use crate::models::{self, Fetch, Need};
+use crate::models::{self, Need};
 
 pub mod ppocr;
 pub mod retinaface;
@@ -180,35 +180,12 @@ pub fn name(subject: Subject, model: FindModel) -> String {
 }
 
 pub fn needed(dir: &Path, subject: Subject, model: FindModel) -> Vec<Need> {
-    let file = file(subject, model);
-    if models::present(dir, &file) {
-        return Vec::new();
-    }
-    vec![Need {
-        title: file.title.into(),
-        bytes: Some(file.bytes),
-        system: false,
-    }]
+    models::needs(dir, &file(subject, model))
 }
 
 pub fn get_ready(dir: &Path, subject: Subject, model: FindModel, download: bool) -> Result<()> {
     takes(subject, model)?;
-    let file = file(subject, model);
-    if models::present(dir, &file) {
-        return Ok(());
-    }
-    if !download {
-        return Err(Error::Missing(format!(
-            "{} ({}) isn't on this computer yet: pass download (--download) to download it into \
-             {}, checked against its SHA-256",
-            file.title,
-            models::size(file.bytes),
-            dir.display()
-        )));
-    }
-    models::network();
-    models::fetch(&Fetch::of(&file), dir)?;
-    Ok(())
+    models::ready(dir, &file(subject, model), download)
 }
 
 pub fn inspect(dir: &Path, subject: Subject, model: FindModel, download: bool) -> Result<()> {
@@ -239,6 +216,7 @@ pub(crate) fn small(
     scaler: &mut Option<scaling::Context>,
     decoded: &frame::Video,
     (w, h): (u32, u32),
+    how: scaling::Flags,
 ) -> Result<frame::Video> {
     let down;
     let decoded = if crate::hw::on_gpu(decoded) {
@@ -262,7 +240,7 @@ pub(crate) fn small(
                 format::Pixel::BGR24,
                 w,
                 h,
-                scaling::Flags::AREA,
+                how,
             )
             .ctx(|| "creating the scaler of the pictures to look at".into())?,
         ),
@@ -274,7 +252,7 @@ pub(crate) fn small(
     Ok(out)
 }
 
-fn planes(
+pub(crate) fn planes(
     bgr: &frame::Video,
     turn: u16,
     (cw, ch): (usize, usize),
@@ -303,13 +281,40 @@ fn planes(
     out
 }
 
+#[derive(Default)]
+pub(crate) struct Scenes {
+    measure: Option<scaling::Context>,
+    before: Option<(Vec<u8>, f64)>,
+}
+
+impl Scenes {
+    pub(crate) fn score(&mut self, picture: &frame::Video) -> Result<f32> {
+        let luma = crate::analysis::small_luma(&mut self.measure, picture)?;
+        let (scene, moved) = match &self.before {
+            Some((last, moved)) => {
+                let now = crate::analysis::mafd(last, &luma);
+                (crate::analysis::scene_score(now, *moved), now)
+            }
+            None => (0.0, 0.0),
+        };
+        self.before = Some((luma, moved));
+        Ok(scene)
+    }
+}
+
+pub(crate) trait Looker {
+    fn picture(&mut self, decoded: &frame::Video) -> Result<(Vec<f32>, f32)>;
+    fn found(&mut self, pictures: &[Vec<f32>], first: usize) -> Result<Vec<Vec<Found>>>;
+    fn done(&self, found: &[Vec<Found>]) -> Result<()>;
+}
+
 struct Looking {
     model: Net,
     content: (u32, u32),
     turn: u16,
     scaler: Option<scaling::Context>,
-    measure: Option<scaling::Context>,
-    before: Option<(Vec<u8>, f64)>,
+    scenes: Scenes,
+    dump: Option<PathBuf>,
 }
 
 impl Looking {
@@ -327,11 +332,13 @@ impl Looking {
             content,
             turn,
             scaler: None,
-            measure: None,
-            before: None,
+            scenes: Scenes::default(),
+            dump: dumped("VIDCUT_SUBJECTS_DUMP")?,
         })
     }
+}
 
+impl Looker for Looking {
     fn picture(&mut self, decoded: &frame::Video) -> Result<(Vec<f32>, f32)> {
         let (cw, ch) = self.content;
         let scaled = if self.turn % 180 == 90 {
@@ -339,22 +346,22 @@ impl Looking {
         } else {
             (cw, ch)
         };
-        let bgr = small(&mut self.scaler, decoded, scaled)?;
-        let luma = crate::analysis::small_luma(&mut self.measure, &bgr)?;
-        let (scene, moved) = match &self.before {
-            Some((last, moved)) => {
-                let now = crate::analysis::mafd(last, &luma);
-                (crate::analysis::scene_score(now, *moved), now)
-            }
-            None => (0.0, 0.0),
-        };
-        self.before = Some((luma, moved));
+        let bgr = small(&mut self.scaler, decoded, scaled, scaling::Flags::AREA)?;
+        let scene = self.scenes.score(&bgr)?;
         let content = (cw as usize, ch as usize);
         let planes = planes(&bgr, self.turn, content, self.model.size());
         Ok((planes, scene))
     }
 
-    fn found(&self, pictures: &[Vec<f32>]) -> Result<Vec<Vec<Found>>> {
+    fn found(&mut self, pictures: &[Vec<f32>], first: usize) -> Result<Vec<Vec<Found>>> {
+        if let Some(dir) = &self.dump {
+            for (i, picture) in pictures.iter().enumerate() {
+                dump_picture(dir, first + i, picture, self.model.size())?;
+            }
+            if first == 0 {
+                self.model.probe(dir, pictures)?;
+            }
+        }
         let content = (self.content.0 as usize, self.content.1 as usize);
         let (cw, ch) = (self.content.0 as f32, self.content.1 as f32);
         let share = |f: Found| Found {
@@ -368,10 +375,17 @@ impl Looking {
             .map(|f| f.into_iter().map(share).collect())
             .collect())
     }
+
+    fn done(&self, found: &[Vec<Found>]) -> Result<()> {
+        match &self.dump {
+            Some(dir) => dump_boxes(dir, found, self.content),
+            None => Ok(()),
+        }
+    }
 }
 
-fn dumped() -> Result<Option<PathBuf>> {
-    let Some(dir) = std::env::var_os("VIDCUT_SUBJECTS_DUMP") else {
+pub(crate) fn dumped(var: &str) -> Result<Option<PathBuf>> {
+    let Some(dir) = std::env::var_os(var) else {
         return Ok(None);
     };
     let dir = PathBuf::from(dir);
@@ -405,17 +419,12 @@ fn dump_boxes(dir: &Path, found: &[Vec<Found>], (w, h): (u32, u32)) -> Result<()
     crate::npy::write(&dir.join("content.npy"), &[2], &[w as f32, h as f32])
 }
 
-pub fn find(
+pub(crate) fn looked<L: Looker>(
     source: &Input,
-    subject: Subject,
     look: Look,
-    gpu: Option<&crate::hw::GpuDecoder>,
-    dir: &Path,
+    (gpu, batch): (Option<&crate::hw::GpuDecoder>, usize),
+    start: impl Fn(&frame::Video, u16) -> Result<L>,
 ) -> Result<Detections> {
-    crate::cancel::stop()?;
-    get_ready(dir, subject, look.model, false)?;
-    let weights = dir.join(file(subject, look.model).name);
-    let _turn = crate::turns::cpu_analysis()?;
     let mut reader = VideoReader::open_as(source, gpu, Reading::Stream)?;
     let tick = f64::from(reader.time_base());
     let step = reader
@@ -425,11 +434,9 @@ pub fn find(
     let seed = crate::analysis::SEED;
     reader.seek(((look.from - seed as f64 * every) / tick).floor() as i64)?;
     let turn = reader.rotation();
-    let dump = dumped()?;
     let started = Instant::now();
-    let batch = crate::pool::threads().max(1);
     let mut out = Detections::default();
-    let mut looking: Option<Looking> = None;
+    let mut looking: Option<L> = None;
     let mut waiting: Vec<Vec<f32>> = Vec::new();
     let (mut ended, mut last, mut wanted) = (false, None, -seed);
     let (mut frames, mut in_model) = (0u64, Duration::ZERO);
@@ -446,22 +453,11 @@ pub fn find(
                 if pts >= due {
                     let seeing = match &mut looking {
                         Some(seeing) => seeing,
-                        None => {
-                            let seeing = Looking::start(
-                                (subject, look.model),
-                                &weights,
-                                (&decoded, turn),
-                                look.side,
-                            )?;
-                            looking.insert(seeing)
-                        }
+                        None => looking.insert(start(&decoded, turn)?),
                     };
                     let (picture, scene) = seeing.picture(&decoded)?;
                     wanted = wanted.max(((pts - look.from) / every).floor() as i64) + 1;
                     if wanted > 0 {
-                        if let Some(dir) = &dump {
-                            dump_picture(dir, out.pts.len(), &picture, seeing.model.size())?;
-                        }
                         waiting.push(picture);
                         out.pts.push(pts);
                         out.scene.push(scene);
@@ -470,17 +466,13 @@ pub fn find(
             }
             None => ended = true,
         }
-        if let Some(seeing) = &looking
+        if let Some(seeing) = &mut looking
             && (waiting.len() >= batch || ended)
             && !waiting.is_empty()
         {
-            if let Some(dir) = &dump
-                && out.found.is_empty()
-            {
-                seeing.model.probe(dir, &waiting)?;
-            }
             let asked = Instant::now();
-            out.found.extend(seeing.found(&waiting)?);
+            let first = out.found.len();
+            out.found.extend(seeing.found(&waiting, first)?);
             in_model += asked.elapsed();
             waiting.clear();
             let length = (look.to - look.from).max(step);
@@ -489,16 +481,33 @@ pub fn find(
             crate::progress::report(source.path(), seen);
         }
     }
-    if let (Some(dir), Some(seeing)) = (&dump, &looking) {
-        dump_boxes(dir, &out.found, seeing.content)?;
+    if let Some(seeing) = &looking {
+        seeing.done(&out.found)?;
     }
     crate::debug!(
         "subjects",
-        "{}: {} pictures of {frames} frames in {:.2} s, {:.2} s of it in the model on {batch} threads",
+        "{}: {} pictures of {frames} frames in {:.2} s, {:.2} s of it in the model, {batch} at a time",
         source.path().display(),
         out.pts.len(),
         started.elapsed().as_secs_f64(),
         in_model.as_secs_f64()
     );
     Ok(out)
+}
+
+pub fn find(
+    source: &Input,
+    subject: Subject,
+    look: Look,
+    gpu: Option<&crate::hw::GpuDecoder>,
+    dir: &Path,
+) -> Result<Detections> {
+    crate::cancel::stop()?;
+    get_ready(dir, subject, look.model, false)?;
+    let weights = dir.join(file(subject, look.model).name);
+    let _turn = crate::turns::cpu_analysis()?;
+    let batch = crate::pool::threads().max(1);
+    looked(source, look, (gpu, batch), |first, turn| {
+        Looking::start((subject, look.model), &weights, (first, turn), look.side)
+    })
 }

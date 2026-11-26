@@ -104,16 +104,22 @@ enum Dtype {
     F32,
     Bf16,
     F16,
+    I64,
 }
 
 impl Dtype {
     fn size(self) -> usize {
         match self {
+            Self::I64 => 8,
             Self::F32 => 4,
             Self::Bf16 | Self::F16 => 2,
         }
     }
 }
+
+const LEGACY: [u8; 15] = [
+    0x80, 0x02, 0x8a, 0x0a, 0x6c, 0xfc, 0x9c, 0x46, 0xf9, 0x20, 0x6a, 0xa8, 0x50, 0x19, 0x2e,
+];
 
 #[derive(Debug, Clone)]
 struct Tensor {
@@ -131,6 +137,7 @@ enum Value {
     Int(i64),
     Str(String),
     Tuple(Vec<Value>),
+    List(Vec<Value>),
     Global(String),
     Storage(String, Dtype),
     Tensor(Tensor),
@@ -201,6 +208,7 @@ fn storage(pid: Value) -> std::result::Result<Value, String> {
                 "torch.FloatStorage" => Dtype::F32,
                 "torch.BFloat16Storage" => Dtype::Bf16,
                 "torch.HalfStorage" => Dtype::F16,
+                "torch.LongStorage" => Dtype::I64,
                 other => return Err(format!("storage of {other}")),
             };
             Ok(Value::Storage(key.clone(), dtype))
@@ -238,7 +246,7 @@ fn call(callable: Value, args: Value) -> std::result::Result<Value, String> {
     }
 }
 
-fn unpickle(data: &[u8]) -> std::result::Result<Value, String> {
+fn unpickle(data: &[u8]) -> std::result::Result<(Value, usize), String> {
     let mut p = Pickle { data, at: 0 };
     let mut stack: Vec<Value> = Vec::new();
     let mut memo: HashMap<u32, Value> = HashMap::new();
@@ -324,6 +332,17 @@ fn unpickle(data: &[u8]) -> std::result::Result<Value, String> {
             0x89 => stack.push(Value::None),
             b'N' => stack.push(Value::None),
             b'}' => stack.push(Value::Dict(Vec::new())),
+            b']' => stack.push(Value::List(Vec::new())),
+            b'a' | b'e' => {
+                let items = match op {
+                    b'a' => vec![pop(&mut stack)?],
+                    _ => marked(&mut stack)?,
+                };
+                let Some(Value::List(list)) = stack.last_mut() else {
+                    return Err("items for a value that is not a list".into());
+                };
+                list.extend(items);
+            }
             b'Q' => {
                 let pid = pop(&mut stack)?;
                 stack.push(storage(pid)?);
@@ -354,7 +373,7 @@ fn unpickle(data: &[u8]) -> std::result::Result<Value, String> {
             b'b' => {
                 pop(&mut stack)?;
             }
-            b'.' => return pop(&mut stack),
+            b'.' => return Ok((pop(&mut stack)?, p.at)),
             other => return Err(format!("pickle opcode {other:#04x}")),
         }
     }
@@ -367,45 +386,98 @@ pub(crate) struct Torch {
     storages: HashMap<String, Vec<u8>>,
 }
 
-impl Torch {
-    pub(crate) fn open(path: &Path, title: &'static str) -> Result<Self> {
-        let bad = |what: &dyn std::fmt::Display| bad(path, title, what);
-        let file = std::fs::File::open(path)?;
-        let mut zip = zip::ZipArchive::new(file).map_err(|e| bad(&e))?;
-        let pkl = zip
-            .file_names()
-            .filter_map(|n| n.ok())
-            .find(|n| n.ends_with("data.pkl"))
-            .map(|n| n.to_string())
-            .ok_or_else(|| bad(&"no data.pkl"))?;
-        let prefix = pkl.trim_end_matches("data.pkl").to_string();
-        let mut data = Vec::new();
-        zip.by_name(&pkl)
-            .map_err(|e| bad(&e))?
-            .read_to_end(&mut data)?;
-        let value = unpickle(&data).map_err(|e| bad(&e))?;
-        let tensors: HashMap<String, Tensor> = match value {
-            Value::Tensor(t) => [(String::new(), t)].into(),
-            Value::Dict(entries) => entries
+fn tensors(value: Value) -> Option<HashMap<String, Tensor>> {
+    match value {
+        Value::Tensor(t) => Some([(String::new(), t)].into()),
+        Value::Dict(entries) => Some(
+            entries
                 .into_iter()
                 .filter_map(|(k, v)| match (k, v) {
                     (Value::Str(k), Value::Tensor(t)) => Some((k, t)),
                     _ => None,
                 })
                 .collect(),
-            _ => return Err(bad(&"no tensors")),
-        };
-        let mut storages = HashMap::new();
-        for t in tensors.values() {
-            if storages.contains_key(&t.storage) {
-                continue;
-            }
-            let mut bytes = Vec::new();
-            zip.by_name(&format!("{prefix}data/{}", t.storage))
-                .map_err(|e| bad(&e))?
-                .read_to_end(&mut bytes)?;
-            storages.insert(t.storage.clone(), bytes);
+        ),
+        _ => None,
+    }
+}
+
+type Parts = (HashMap<String, Tensor>, HashMap<String, Vec<u8>>);
+
+fn zipped(file: std::fs::File, bad: &dyn Fn(&dyn std::fmt::Display) -> Error) -> Result<Parts> {
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| bad(&e))?;
+    let pkl = zip
+        .file_names()
+        .filter_map(|n| n.ok())
+        .find(|n| n.ends_with("data.pkl"))
+        .map(|n| n.to_string())
+        .ok_or_else(|| bad(&"no data.pkl"))?;
+    let prefix = pkl.trim_end_matches("data.pkl").to_string();
+    let mut data = Vec::new();
+    zip.by_name(&pkl)
+        .map_err(|e| bad(&e))?
+        .read_to_end(&mut data)?;
+    let (value, _) = unpickle(&data).map_err(|e| bad(&e))?;
+    let tensors = tensors(value).ok_or_else(|| bad(&"no tensors"))?;
+    let mut storages = HashMap::new();
+    for t in tensors.values() {
+        if storages.contains_key(&t.storage) {
+            continue;
         }
+        let mut bytes = Vec::new();
+        zip.by_name(&format!("{prefix}data/{}", t.storage))
+            .map_err(|e| bad(&e))?
+            .read_to_end(&mut bytes)?;
+        storages.insert(t.storage.clone(), bytes);
+    }
+    Ok((tensors, storages))
+}
+
+fn legacy(data: &[u8], bad: &dyn Fn(&dyn std::fmt::Display) -> Error) -> Result<Parts> {
+    let mut at = LEGACY.len();
+    let mut next = || -> Result<Value> {
+        let (value, used) = unpickle(&data[at..]).map_err(|e| bad(&e))?;
+        at += used;
+        Ok(value)
+    };
+    next()?;
+    next()?;
+    let tensors = tensors(next()?).ok_or_else(|| bad(&"no tensors"))?;
+    let Value::List(keys) = next()? else {
+        return Err(bad(&"no storage keys"));
+    };
+    let dtypes: HashMap<&str, Dtype> = tensors
+        .values()
+        .map(|t| (t.storage.as_str(), t.dtype))
+        .collect();
+    let mut storages = HashMap::new();
+    for key in keys {
+        let Value::Str(key) = key else {
+            return Err(bad(&"a storage key"));
+        };
+        let dtype = dtypes.get(key.as_str()).ok_or_else(|| bad(&key))?;
+        let count = data.get(at..at + 8).ok_or_else(|| bad(&"the end"))?;
+        let count = u64::from_le_bytes(count.try_into().map_err(|_| bad(&"the end"))?);
+        let len = usize::try_from(count).map_err(|e| bad(&e))? * dtype.size();
+        let bytes = data.get(at + 8..at + 8 + len).ok_or_else(|| bad(&key))?;
+        storages.insert(key, bytes.to_vec());
+        at += 8 + len;
+    }
+    Ok((tensors, storages))
+}
+
+impl Torch {
+    pub(crate) fn open(path: &Path, title: &'static str) -> Result<Self> {
+        let bad = |what: &dyn std::fmt::Display| bad(path, title, what);
+        let mut file = std::fs::File::open(path)?;
+        let mut head = [0u8; LEGACY.len()];
+        let (tensors, storages) = match file.read_exact(&mut head).is_ok() && head == LEGACY {
+            true => legacy(&std::fs::read(path)?, &bad)?,
+            false => {
+                file.seek(SeekFrom::Start(0))?;
+                zipped(file, &bad)?
+            }
+        };
         Ok(Self {
             path: path.to_path_buf(),
             title,
@@ -456,6 +528,12 @@ impl Torch {
                 .0
                 .iter()
                 .map(|b| full(u16::from_le_bytes(*b)))
+                .collect(),
+            Dtype::I64 => raw
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|b| i64::from_le_bytes(*b) as f32)
                 .collect(),
         })
     }

@@ -807,7 +807,10 @@ impl Workspace {
             !vidcut_core::editor::close_up_looks(p, &request, Some(at)).is_empty()
         });
         match faces {
-            true => self.ask(vec![ask], Some((Subject::Face, FindModel::Fast))),
+            true => {
+                let wanted = super::inspector::Wanted::Finder(Subject::Face, FindModel::Fast);
+                self.ask(vec![ask], wanted)
+            }
             false => self.send(ask.0, ask.1),
         }
     }

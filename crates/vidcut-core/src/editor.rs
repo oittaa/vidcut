@@ -179,6 +179,13 @@ pub trait Env {
         ))
     }
 
+    fn salience(&self, media: &Media, look: Look, download: bool) -> Result<Arc<Detections>> {
+        let _ = (media, look, download);
+        Err(Error::usage(
+            "what stands out in a picture is found by the vidcut program",
+        ))
+    }
+
     fn tracked(
         &self,
         media: &Media,
@@ -8667,7 +8674,7 @@ pub fn stabilize_looks(
 
 enum Follows {
     Subject {
-        subject: Subject,
+        subject: Option<Subject>,
         look: Look,
         span: (i64, i64),
         rate: f64,
@@ -8844,8 +8851,15 @@ fn reframe_plans(
         return Err(Error::invalid("not a picture.reframe request"));
     };
     let rules = reframe_rules(request)?;
-    let subject = subject.unwrap_or(Subject::Person);
-    finder_checked(*model, subject, *size)?;
+    match subject {
+        Some(subject) => finder_checked(*model, *subject, *size)?,
+        None if size.is_some() || *model != crate::model::FindModel::Fast => {
+            return Err(Error::usage(
+                "model (--model) and size (--size) go with a subject (--subject)",
+            ));
+        }
+        None => {}
+    }
     let mut ids = resolve_clips(p, &clips.to_vec(), playhead)?;
     ids.dedup();
     if reference.is_some() && ids.len() != 1 {
@@ -8877,7 +8891,7 @@ fn reframe_plans(
                     ..subject_look(&media, rate, span)
                 };
                 Follows::Subject {
-                    subject,
+                    subject: *subject,
                     look,
                     span,
                     rate,
@@ -8907,10 +8921,11 @@ fn reframe_move(env: &dyn Env, r: &ReframePlan) -> Result<crate::reframe::Moved>
             span,
             rate,
         } => {
-            let found = env.subjects(&r.media, *subject, *look, r.download)?;
+            let found = match subject {
+                Some(s) => env.subjects(&r.media, *s, *look, r.download)?,
+                None => env.salience(&r.media, *look, r.download)?,
+            };
             let origin = r.media.origin();
-            let rules = crate::motion::Join::of(*subject);
-            let paths = crate::motion::joined(&found, origin, *rate, *span, &rules);
             let shown = |f: i64| crate::motion::shown_time(origin, *rate, f);
             let cuts: Vec<bool> = (0..r.files.len())
                 .map(|t| t > 0 && found.cut(shown(r.files[t - 1]), shown(r.files[t])))
@@ -8918,7 +8933,17 @@ fn reframe_move(env: &dyn Env, r: &ReframePlan) -> Result<crate::reframe::Moved>
             for (f, cut) in frames.iter_mut().zip(&cuts) {
                 f.cut = *cut;
             }
-            crate::reframe::found(&paths, &r.files, &cuts)
+            match subject {
+                Some(s) => {
+                    let rules = crate::motion::Join::of(*s);
+                    let paths = crate::motion::joined(&found, origin, *rate, *span, &rules);
+                    crate::reframe::found(&paths, &r.files, &cuts)
+                }
+                None => {
+                    let times: Vec<f64> = r.files.iter().map(|&f| shown(f)).collect();
+                    crate::reframe::salient(&found, &times)
+                }
+            }
         }
         Follows::Reference { plan, follow, base } => {
             let found = env.tracked(&r.media, plan, *follow, r.download)?;
@@ -8931,8 +8956,11 @@ fn reframe_move(env: &dyn Env, r: &ReframePlan) -> Result<crate::reframe::Moved>
     Ok(crate::reframe::moved(&frames, &r.shape, &r.rules))
 }
 
+pub type SalientLook = (Media, Look, bool);
+
 pub enum ReframeLook {
     Subject(SubjectLook),
+    Salient(SalientLook),
     Track(Box<TrackLook>),
 }
 
@@ -8941,9 +8969,16 @@ pub fn reframe_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
     plans
         .into_iter()
         .map(|r| match r.follows {
-            Follows::Subject { subject, look, .. } => {
-                ReframeLook::Subject((r.media, subject, look, r.download))
-            }
+            Follows::Subject {
+                subject: Some(subject),
+                look,
+                ..
+            } => ReframeLook::Subject((r.media, subject, look, r.download)),
+            Follows::Subject {
+                subject: None,
+                look,
+                ..
+            } => ReframeLook::Salient((r.media, look, r.download)),
             Follows::Reference { plan, follow, .. } => {
                 ReframeLook::Track(Box::new((r.media, *plan, follow, r.download)))
             }

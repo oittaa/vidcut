@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::analysis::Tracked;
+use crate::analysis::{Detections, Tracked};
 use crate::model::{Keyframe, MotionPath, Picture};
 use crate::motion::FoundPath;
 use crate::request::ReframeMode;
@@ -271,6 +271,18 @@ pub fn found(paths: &[FoundPath], files: &[i64], cuts: &[bool]) -> Vec<Option<Se
         }
     }
     out
+}
+
+pub fn salient(found: &Detections, times: &[f64]) -> Vec<Option<Seen>> {
+    times
+        .iter()
+        .map(|&t| {
+            found.shown(t).first().map(|f| Seen {
+                center: f.center.map(f64::from),
+                size: f.size.map(f64::from),
+            })
+        })
+        .collect()
 }
 
 pub fn tracked(found: &Tracked, base: i64, files: &[i64]) -> Vec<Option<Seen>> {
