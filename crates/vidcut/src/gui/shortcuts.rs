@@ -114,6 +114,24 @@ pub(super) fn owner(b: &Bindings, panel: Panel, event: &Event) -> Option<(Action
     }
 }
 
+pub(super) fn conflicted(b: &Bindings, panel: Panel, input: &egui::InputState) -> Vec<Combo> {
+    input
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Key {
+                key,
+                pressed: true,
+                repeat: false,
+                modifiers,
+                ..
+            } => combo(*key, held_of(*modifiers)),
+            _ => None,
+        })
+        .filter(|&c| b.owners(panel, c).len() > 1)
+        .collect()
+}
+
 pub(crate) struct Fired(Vec<(Action, bool)>);
 
 impl Fired {
