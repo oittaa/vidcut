@@ -5643,7 +5643,8 @@ impl Live {
             self.selection.media = m.to_vec();
         }
         if let Some(mut t) = thumbnails {
-            t.dedup();
+            let mut seen = HashSet::new();
+            t.retain(|c| seen.insert(c.clone()));
             self.selection.thumbnails = t;
         }
         self.selection.keep_order();

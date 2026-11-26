@@ -569,6 +569,7 @@ Voice Isolation:
   - The tile workers make the pictures (`Tiles::clip_job`). The key of a picture holds a digest of the clip, its media and the project settings. Why: a change of the grade gives a new key, and the old picture leaves the tile memory as other tiles do.
   - The session's `Selection` holds the clips selected in the strip in `thumbnails`, apart from its `clips`. Why: the Color and Deliver pages share one selection, and the timeline has another (measured).
   - A click sends one `selection.set` with `thumbnails`. A plain click then seeks the timeline player.
+  - `thumb_anchor` holds the last clicked clip, where a Shift-click range starts. Why: a Ctrl-click can take that clip out of the selection. Without it, the range starts at the last selected clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
   - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.

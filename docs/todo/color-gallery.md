@@ -36,7 +36,7 @@ The pages are of the DaVinci Resolve 21.1 manual.
   - Apply Grades Using, Use labels on still export, Show All Stills and Show Current Timeline Only.
 - Live Preview shows the grade of a still on the current node while the pointer is on the still (p. 3335).
   - Hover Scrub Preview sets whether the thumbnail and the viewer scrub the clip (pp. 3335–3336).
-- Measured in Resolve Studio 21.2 (`fixtures/color/NOTES.md` of the test data, the run of 2026-11-26):
+- Measured in Resolve Studio 21.2 (`fixtures/color/NOTES.md` of the test data):
   - The second number of the ID is the place of the clip on its own track. A clip on V2 gives 2.x.x.
   - The third number counts the stills of that clip in the album, in album order. A grab or a delete counts them again.
   - A still grabbed in the Timeline mode ends in ".T". A still grabbed in the Group Pre Clip mode ends in ".PRE".
@@ -303,11 +303,11 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 Each run is in the project "vidcut measure". [Script] steps use the scripting API. [Window] steps need the windows of Resolve.
 
-The stills, Gallery menus, copy and groups runs are done. `fixtures/color/NOTES.md` of the test data has the results.
+`fixtures/color/NOTES.md` of the test data has the measured results.
 
 - **Groups rest** ([script] and [window], 15 min): the place of the Pre-Clip grade against an effect of the Edit page, in a render.
   - Also Post Group Node Stack Layer, Ripple Node Changes to Current Group and the Grouped filter.
-- **Labels** ([window], 5 min): the Change Label dialog and its undo. The dialog did not show in the run of 2026-11-26.
+- **Labels** ([window], 5 min): the Change Label dialog and its undo.
 - **Current clip** ([window], 5 min): what playback does to a current clip that is under a clip of a higher track.
 - **Wipes run** ([window], 15 min): the wipe styles, the drag, Invert Wipe and the picture of the still side.
 - **Timelines album run** ([window], 15 min): the Timelines album, Copy Active Layer and Display Node Graph.

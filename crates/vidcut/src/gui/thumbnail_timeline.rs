@@ -195,7 +195,11 @@ impl Workspace {
                     }
                 });
             });
-        let pick = picked.map(|(i, mods)| pick(list, selected, i, mods));
+        let anchor = self.export.thumb_anchor.as_deref();
+        let pick = picked.map(|(i, mods)| pick(list, selected, anchor, i, mods));
+        if let Some((i, _)) = picked {
+            self.export.thumb_anchor = Some(list[i].clip.clone());
+        }
         self.export.strip = Some(strip);
         if cycle {
             self.export.clip_label = match label {
@@ -260,7 +264,13 @@ struct Pick {
     seek: Option<i64>,
 }
 
-fn pick(list: &[Thumb], selected: &[String], i: usize, mods: egui::Modifiers) -> Pick {
+fn pick(
+    list: &[Thumb],
+    selected: &[String],
+    anchor: Option<&str>,
+    i: usize,
+    mods: egui::Modifiers,
+) -> Pick {
     let t = &list[i];
     if mods.command {
         let mut clips = selected.to_vec();
@@ -272,14 +282,18 @@ fn pick(list: &[Thumb], selected: &[String], i: usize, mods: egui::Modifiers) ->
         }
         return Pick { clips, seek: None };
     }
-    let anchor = (selected.last()).and_then(|last| list.iter().position(|o| o.clip == *last));
+    let place = |c: &str| list.iter().position(|o| o.clip == c);
+    let from = (anchor.and_then(place)).or_else(|| selected.last().and_then(|c| place(c)));
     if mods.shift
-        && let Some(from) = anchor
+        && let Some(from) = from
     {
-        let clips = list[from.min(i)..=from.max(i)]
+        let mut clips: Vec<String> = list[from.min(i)..=from.max(i)]
             .iter()
             .map(|o| o.clip.clone())
             .collect();
+        if i < from {
+            clips.reverse();
+        }
         return Pick { clips, seek: None };
     }
     Pick {

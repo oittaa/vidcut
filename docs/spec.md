@@ -5873,7 +5873,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
   - The text under the clip at the playhead is white. The text under the other clips is grey.
   - A click on a picture moves the playhead to the first frame of the clip. It also selects that clip alone.
-  - A Ctrl-click adds a clip to the selection or takes it out. A Shift-click selects the clips from the last selected clip to this clip.
+  - A Ctrl-click adds a clip to the selection or takes it out. A Shift-click selects the clips from the last clicked clip to this clip.
   - A Ctrl-click and a Shift-click do not move the playhead. The selected clips other than the clip at the playhead have a red outline.
   - The Color page and the Deliver page share this selection. The timeline of the Cut and Edit pages has its own selection.
   - `thumbnails` of `selection.set` sets the selection, and `selection.get` gives it. A change of the open timeline clears it.
