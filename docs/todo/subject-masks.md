@@ -1,6 +1,6 @@
 # Subject masks
 
-**When:** the plan below waits for the owner's OK.
+**When:** now. The owner approved the plan on 2026-11-26.
 
 A subject mask is the Magic Mask palette of the Color page. Clicks on a person or a thing make the key of a corrector. The key follows the subject through the clip.
 
@@ -76,7 +76,8 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
 - The training data:
   - The README does not name the training data of the checkpoints.
   - SA-V is CC BY 4.0. SA-1B has a research-only license. A secondary source also names MOSE (CC BY-NC-SA 4.0).
-  - The checkpoints themselves are Apache 2.0. The owner decides whether the training data matters.
+  - The checkpoints themselves are Apache 2.0. vidcut does not distribute them. Each one downloads from Meta on first use.
+  - The owner accepts this caveat, as for UNISAL.
 - The video logic is outside the network: the memory of past frames, the frames with prompts, and their time codes. vidcut writes it.
 - These later choices change only that logic. They keep the SAM 2.1 checkpoints:
   - DAM4SAM (SAM2.1++) keeps the subject apart from look-alikes. Apache 2.0. LaSOT 70.0 to 75.1, about 20 % slower ([page](https://github.com/jovanavidenovic/DAM4SAM)).
@@ -115,6 +116,7 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
   - A drag of a click on a tracked frame gives that click a new reference frame (p. 3304).
   - Run R5 shows how the marks of the clicks move on the tracked frames.
 - The model runs in vidcut's own GPU kernels, as FlashVSR does. `weights.rs` reads the checkpoints of Meta.
+  - Why: the GPU comes first ([AGENTS.md](../../AGENTS.md), rule 9), and Meta's own link has only these checkpoints.
   - The kernels in `compute` have convolutions, layer norm and windowed attention.
   - SAM 2.1 also needs full attention with rotary positions.
 - Each action of the palette is a request: `grade.mask.click`, `grade.mask.set`, `grade.mask.track` and `grade.mask.clear`.
@@ -140,7 +142,12 @@ Each step is one pull request.
 
 ## Measurements
 
-The owner's OK comes first. These are vidcut's runs:
+vidcut's runs need downloads. They wait for the owner's OK of the downloads.
+
+- The files go to `sam2` in the test data folder, never into git.
+- DAVIS 2017 states no license. Its pages ask for a citation. The set is only for these runs.
+
+These are vidcut's runs:
 
 - **M1, port check:** the official SAM 2.1 code and vidcut on DAVIS 2017 val: 30 videos, 1,999 frames.
   - The official code runs in Python, in a uv environment outside the repository.
@@ -153,7 +160,7 @@ The owner's OK comes first. These are vidcut's runs:
   - A video of each mask over the picture, for the owner to look at.
 - The time of each run is known after the first video. I stop and ask if the total passes 2 hours.
 
-The Resolve runs are in the project "vidcut measure", at 1920 × 1080 and 3840 × 2160:
+The Resolve runs are approved. They wait for a free slot on Resolve. They are in the project "vidcut measure", at 1920 × 1080 and 3840 × 2160:
 
 - **R1, palette:** the controls of version 2 in Resolve 21.2, their ranges, their usual values and the options menu.
 - **R2, the key:** float renders of a Magic Mask with a circle window, and with a qualifier, in one node. Also the Key palette.
