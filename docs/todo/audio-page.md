@@ -217,7 +217,7 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 **The pull requests.** Each leaves vidcut working:
 
 1. **Link groups** (#1411). `Clip::link` holds the groups of compound clips and clips with no media. The parts still need one place. Each part moves by the change of the lead. The behavior does not change.
-2. **Sound clips.** The sound moves to the audio tracks, in each part above but the Cut page drawing. The parts of a group no longer need one place. The Cut page shows the sound clips on their audio tracks, as the Edit page does. The spec, the deviations and the design docs change.
+2. **Sound clips** (#1420). The sound moves to the audio tracks, in each part above but the Cut page drawing. The parts of a group no longer need one place. The Cut page shows the sound clips on their audio tracks, as the Edit page does. The spec, the deviations and the design docs change.
 3. **Cut page items.** The Cut page draws a linked pair as one item, with the band, the header mute, the J/L drag and the sync offset.
 4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914) and the fixes for a group out of sync (p. 915). The fixes are Slip into place, Move into place, Slip others into place and Move others into place. Resync Clip on the Cut page (p. 646).
 
