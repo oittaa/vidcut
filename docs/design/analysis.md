@@ -204,7 +204,8 @@ flowchart TD
     - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them, on neither thing.
     - Why not the highest place: when two peaks are near in height, the highest place jumps from one to the other. The power moves the point between them smoothly.
 - `weights::Torch` reads the weights from the PyTorch file of the authors, also in the legacy form of that file. `unisal::Model::load` then puts each batch norm into its convolution.
-- `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights and the rules (`salience::name`) and the `Look`.
+- `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights, the frames of each step and `SHARP` (`salience::name`), and the `Look`.
+  - Why `SHARP`: a new power gives other points, so the cache must not give the points of the old power.
 - The model file is `catalog::UNISAL_WEIGHTS`, at one commit of the repository of the authors. `salience::get_ready` fetches it when the request has `download`.
 - `VIDCUT_SALIENCY_DUMP` and `scripts/saliency-check.py` compare the maps with the code of the authors ([tools](../tools.md)).
 - `models.check` loads UNISAL with the GPU setting of the preferences. Its `loaded` names the device.

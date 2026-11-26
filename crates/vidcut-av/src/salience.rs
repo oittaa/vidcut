@@ -14,7 +14,11 @@ pub use vidcut_core::catalog::UNISAL_WEIGHTS as FILE;
 
 pub fn name() -> String {
     let weights: String = FILE.sha256.chars().take(8).collect();
-    format!("salient-{weights}-unisal-{}-centroid", unisal::FRAMES)
+    format!(
+        "salient-{weights}-unisal-{}-centroid-{}",
+        unisal::FRAMES,
+        unisal::SHARP
+    )
 }
 
 pub fn needed(dir: &Path) -> Vec<Need> {
