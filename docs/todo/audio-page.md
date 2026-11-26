@@ -1,6 +1,6 @@
 # The audio page
 
-**When:** after the owner approves the steps and the runs below.
+**When:** the steps come in the order below. The Page step starts when the owner answers the questions at the end.
 
 The audio page is a page for sound, beside the Cut, Effects, Color and Export pages. It shows the tracks with sound as tall rows, the Mixer and the meters together. vidcut names its pages in plain words, so the page is "Audio".
 
@@ -418,5 +418,4 @@ The runs go in three batches. Each batch measures before the code of its steps:
 ## Questions for the owner
 
 - **Rows:** A or B of [the rows of the page](#the-rows-of-the-page). The pick is A, with a deviation.
-- **Steps:** build in the order above. The first batch is Page, Loudness meter, Clip fades and Track pan.
 - **Runs:** computer use on Resolve for the first batch, about 2 h 35 min.
