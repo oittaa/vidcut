@@ -65,7 +65,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The edit-function buttons go with the pool, as they do for the other tabs. vidcut: no measurement tells where they go in Resolve.
     - `gui.close media` hides the pool. `gui.show media` shows it.
   - On the right: Quick Export and the Full Screen viewer.
-    - vidcut also has a Full Screen button on the viewer.
+    - The viewer covers the top bar while it fills the page or the display. Then the viewer's header shows Full Screen.
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
@@ -216,7 +216,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
   - The Sync Bin tab ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
-  - vidcut's bar also has Import and Import Folder, Export and Jobs (deviation X3), and Help.
+  - vidcut's bar also has Jobs (deviation X3) and Help.
   - vidcut: F1, or Help in the top bar, opens the Help window.
     - It lists every shortcut, with one action in each row.
     - A ? beside a less obvious action explains it in a few plain words.
@@ -673,7 +673,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ### 4.5 Other viewer features
 - Full Screen (Shift+F) fills the display with the viewer.
   - Shift+F again returns to the page.
-  - The Full Screen button on the viewer does the same thing.
+  - The Full Screen button in the top bar does the same thing.
   - `viewer.frame` with `full_screen` or `page` does it from a script.
 - Enhanced viewer (Alt+F) fills the page with the viewer.
   - The Media Pool, the timelines and the bars are covered.
@@ -1379,7 +1379,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The row opens to show the steps. Its Undo all button goes back to before the first step.
   - `history.get` gives all of this. `history.go` goes to any step.
 - **vidcut's History window:**
-  - It is a window of its own. Edit > History > Open History Window, or History in the top bar, opens it.
+  - It is a window of its own. Edit > History > Open History Window opens it.
   - When the pointer is on a step, the timeline shows the state after that step. This works in the panel and in Edit > History.
     - The project does not change.
     - The timeline also outlines what the step changed. If that part is off screen, the lower timeline scrolls to it.
@@ -5786,7 +5786,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: "Replace Existing File?" and the prompt before a render look at the files of all outputs.
   - Measured: after a render, the panel shows output 1.
 - **In vidcut:**
-  - The Export page is `gui.page` with `export`. The Export button of the bar opens it.
+  - The Export page is `gui.page` with `export`. Export in the status bar opens it.
   - On the page, the viewer shows the timeline. When another page opens, the viewer gets its earlier mode again.
   - The range of each timeline is the `render` of `timeline.set`: `entire` or `in_out`. A new timeline renders the entire timeline.
   - In/Out Range uses the marks that are set. Without an In, it starts at the start of the timeline. Without an Out, it goes to the end.
@@ -7325,7 +7325,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The ⋯ menu takes the place of the first item to go. It lists the items in the order of the bar.
   - The items come back when there is room.
   - The top bar keeps File, Edit and Timeline.
-  - It gives up Help, Mixer, Transcription, History, Export, Quick Export, Import Folder, Import, Jobs, and last the no preview warning.
+  - It gives up Full Screen, Help, Mixer, Transcription, Quick Export, Jobs, and last the no preview warning.
   - The transport keeps the timecode.
   - It gives up the shuttle speed, Clear, Mark Out, Mark In, Loop, the trim buttons, Next Edit, Previous Edit, Stop and Play.
   - The header of the viewer keeps Duration. It gives up Source Tape, Source Clip and Timeline.
