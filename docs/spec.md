@@ -5023,9 +5023,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a part of a person gives that part, for example the face or the hair (p. 3281).
   - After a track of the clicks, each frame of the shot gets its mask. A change of a click changes the mask at once (p. 3283).
   - Invert Mask inverts the mask (p. 3286).
+  - Pages 3288–3304 tell of version 1. The next three rules are from these pages.
   - The mask of a node is the union of its subjects (p. 3296).
   - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
   - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
+  - No measurement of version 2 checks these three rules yet ([todo](todo/subject-masks.md#measurements)).
 - vidcut:
   - The Magic Mask is a part of a corrector of the grade of a clip. SAM 2.1 tiny makes the mask ([design](design/analysis.md#subject-masks)).
   - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask or one click. `grade.mask.clear` deletes one click or all of them.
