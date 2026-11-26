@@ -2987,7 +2987,7 @@ pub enum Request {
         smooth: Option<f64>,
         /// How far the keyframes may stray from the move, in pixels of the
         /// frame, from 0.01 to 100. A larger value gives fewer keyframes.
-        /// Usual: 1.
+        /// Usual: 4.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tolerance: Option<f64>,
         /// Download the model when it is not on this computer, checked

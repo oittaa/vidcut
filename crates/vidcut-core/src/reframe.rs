@@ -9,7 +9,7 @@ use crate::request::ReframeMode;
 pub const SMOOTH: (f64, f64) = (0.0, 10.0);
 pub const USUAL_SMOOTH: f64 = 0.5;
 pub const TOLERANCE: (f64, f64) = (0.01, 100.0);
-pub const USUAL_TOLERANCE: f64 = 1.0;
+pub const USUAL_TOLERANCE: f64 = 4.0;
 const ROOM: f64 = 1e-6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

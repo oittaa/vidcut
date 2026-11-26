@@ -4592,7 +4592,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds. The usual value is 0.5 s.
   - Then the picture covers the frame on each axis where it is larger than the frame.
   - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
-  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes, in pixels of the frame. The usual value is 1 pixel.
+  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes, in pixels of the frame. The usual value is 4 pixels.
+    - Why 4: on 16 shots that Resolve reframed, 4 pixels moves the picture as 1 pixel does. Its keyframe count is near that of Resolve.
   - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point and the flips of each frame, and they stay.
   - Each `picture.reframe` is one undo step, "Smart Reframe".
   - The Video tab of the Inspector has the Smart Reframe section, below Transform: Object of Interest, Mode, Subject, Smooth and Reframe.

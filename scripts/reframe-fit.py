@@ -73,7 +73,7 @@ def main():
     ask.add_argument("--fps", default="24")
     ask.add_argument("--scaling", default="fill")
     ask.add_argument("--smooth", default="0.25,0.5,0.75,1,1.5")
-    ask.add_argument("--tolerance", default="1")
+    ask.add_argument("--tolerance", default="4")
     ask.add_argument("--json", type=Path)
     a = ask.parse_args()
     if not VIDCUT.exists():
