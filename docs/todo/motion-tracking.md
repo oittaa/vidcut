@@ -68,7 +68,7 @@ In this file, a path is never a track of the timeline.
 | A number plate | LPD-YuNet, from OpenCV Zoo | 4.15 MB | Apache 2.0 |
 | A person and a vehicle. The model also has an animal and the other COCO classes. | YOLOX-S, from OpenCV Zoo | 35.9 MB | Apache 2.0 |
 | A drawn box | VitTrack, from OpenCV Zoo | 715 kB | Apache 2.0 |
-| A subject with its matte | EdgeTAM, or SAM 2.1 tiny | not read | Apache 2.0 |
+| A subject with its matte ([subject masks](subject-masks.md#the-models)) | SAM 2.1 tiny, base+ and large, from Meta | 156 to 898 MB | Apache 2.0 |
 
 - LPD-YuNet learned from Chinese number plates. Its maker says that it can miss other plates.
 - YOLOX has smaller sizes at its maker: Nano with 0.91 M parameters, and Tiny with 5.06 M.
