@@ -827,11 +827,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - A video clip shows a filmstrip. Each picture is the frame under its left edge, and the first picture is the first frame of the clip.
   - Thus a picture that starts before a cut in the source shows the shot before the cut.
 - Its audio shows as a waveform band along the bottom. The band becomes larger with the track (p. 647).
+  - The band shows the linked sound clip of each picture, at the place of the sound clip. Thus a J or L cut shows past the picture.
+  - vidcut: a picture with two or more sound clips shows the first one, on the lowest audio track.
+- An audio track that holds only the linked sound of pictures has no row of its own (p. 646). An audio track with other clips shows them in its row (p. 648).
+  - vidcut: an empty audio track has a row. A linked sound clip shows only in its band, also on an audio track that has a row.
 - Its duration shows as seconds:frames, at the bottom left.
 - The clips of a locked track are stippled. The clips of a disabled track are dimmed.
 - A disabled clip is dull. A muted clip shows a mute icon.
 
 **Track headers** (pp. 647, 678, 717): Enlarge (one track at a time), Lock, Mute (audio) and Video Enable icons (D43).
+- The Mute of a main track mutes each audio track that holds the linked sound of its clips. A second click turns the mute off. This is a measurement in Resolve Studio 21.2, on one timeline.
+  - vidcut: the Mute is lit when all these audio tracks are muted. A click sets them all to the other state, in one undo step.
+  - A main track with no linked sound has no Mute.
 - These are measurements in Resolve Studio 21.2:
   - Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
   - A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
@@ -872,7 +879,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A picture clip and its sound clips are linked. They are one link group.
   - An edit of one clip of a group acts on each clip of the group (p. 3875): move, trim, roll, slip, slide, split, join, delete, speed and paste.
   - Each clip of a group moves and trims by the same amount. Thus a J/L cut stays (§8.7).
-  - The Cut page shows the sound clips on their audio tracks, as the Edit page does ([deviation X177](deviations.md#x177-the-cut-page-shows-sound-clips-on-their-audio-tracks)).
+  - The Cut page shows a picture clip and its linked sound as one item. The sound is the band along the bottom of the item (§5; pp. 646–647).
   - The Cut page has no link/unlink.
 
 ## 7. Edit functions (pp. 696–701)
@@ -1314,8 +1321,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 
 ### 8.7 J/L cuts (p. 728)
 - A J or L cut is a linked sound clip that starts or ends at a different time than its picture clip.
-- Hover over the edge of a linked sound clip on an audio track until the cursor shows a note. Then drag.
-- Only the sound edit moves, as a roll on the audio track. The picture clips do not change.
+- Hover over an edit in the band of a main track until the cursor shows a note. Then drag (p. 728).
+  - Enlarge Track makes the band larger. It is not necessary.
+- Only the sound edits move. Each linked sound clip of the picture rolls on its audio track. The picture clips do not change.
 - A click selects that audio edit, and `,` / `.` move it (D20).
 - The edit needs sound on one side only.
   - With sound on the outgoing side only, the sound goes on past the picture, into a gap of the audio track.
@@ -7805,6 +7813,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
   - The line is in the sound part of the clip, 2 px in from its top and its bottom.
   - It shows only where the sound part is 20 px high or more.
+  - It is on the clips of an audio row. The band of a main track has no line, as in Resolve (X73). The Inspector sets the volume of a linked sound clip.
   - **Scale:**
     - −100 dB is at the bottom, and +30 dB is at the top.
     - 0 dB is at 10/13 of the height.

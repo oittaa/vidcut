@@ -1791,8 +1791,10 @@ impl Workspace {
                     );
                     let at = if side == crate::gui::timeline::Side::Audio {
                         self.project()
-                            .and_then(|p| p.track(&track.id()))
-                            .map(|t| crate::gui::timeline::audio_at_cut(t, f))
+                            .and_then(|p| {
+                                let t = p.track(&track.id())?;
+                                Some(crate::gui::timeline::audio_at_cut(p, t, f))
+                            })
                             .unwrap_or(f)
                     } else {
                         f

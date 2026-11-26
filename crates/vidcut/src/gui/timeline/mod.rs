@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
     Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
+    TrackKind,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -68,7 +69,7 @@ fn hit_edit(p: &Project, what: &Hit) -> Option<EditSel> {
         Hit::Edge(id, Edge::Head) => (id, p.clip(id)?.start, Side::In),
         Hit::Edge(id, Edge::Tail) => (id, p.clip(id)?.end(), Side::Out),
         Hit::Roll { outgoing, .. } => (outgoing, p.clip(outgoing)?.end(), Side::Both),
-        Hit::AudioEdit { clip, edge } => (clip, audio_edge(p.clip(clip)?, *edge)?, Side::Audio),
+        Hit::AudioEdit { clip, edge } => (clip, audio_edge(p, clip, *edge)?, Side::Audio),
         _ => return None,
     };
     let track = TrackRef::of_clip(p, id)?;
@@ -79,17 +80,38 @@ pub(crate) fn repaint_in(ctx: &egui::Context, wait: Duration) {
     ctx.request_repaint_after(wait);
 }
 
-pub(crate) fn audio_edge(c: &Clip, edge: Edge) -> Option<i64> {
-    c.audio.as_ref()?;
-    Some(if edge == Edge::Tail { c.end() } else { c.start })
+pub(crate) fn audio_edge(p: &Project, id: &str, edge: Edge) -> Option<i64> {
+    let c = p.clip(id)?;
+    let s = if c.audio.is_some() {
+        c
+    } else {
+        let link = c.link?;
+        p.tracks_of(TrackKind::Audio)
+            .into_iter()
+            .flat_map(|i| &p.tracks[i].clips)
+            .find(|x| x.link == Some(link))?
+    };
+    Some(if edge == Edge::Tail { s.end() } else { s.start })
 }
 
-pub(crate) fn audio_edit_at(t: &Track, at: i64) -> Option<(String, Edge)> {
-    [Edge::Tail, Edge::Head].into_iter().find_map(|edge| {
+pub(crate) fn audio_edit_at(p: &Project, t: &Track, at: i64) -> Option<(String, Edge)> {
+    let edges: Vec<(&Clip, i64, i64)> = if t.kind == TrackKind::Video {
+        geometry::band(p, t)
+            .into_iter()
+            .map(|b| (b.picture, b.sound.start, b.sound.end()))
+            .collect()
+    } else {
         t.clips
             .iter()
-            .find(|c| audio_edge(c, edge) == Some(at))
-            .map(|c| (c.id.clone(), edge))
+            .filter(|c| c.audio.is_some())
+            .map(|c| (c, c.start, c.end()))
+            .collect()
+    };
+    [Edge::Tail, Edge::Head].into_iter().find_map(|edge| {
+        edges
+            .iter()
+            .find(|&&(_, head, tail)| at == if edge == Edge::Tail { tail } else { head })
+            .map(|(c, ..)| (c.id.clone(), edge))
     })
 }
 
@@ -105,15 +127,31 @@ pub(crate) fn edit_exists(p: &Project, e: &EditSel) -> bool {
         return false;
     };
     match e.side {
-        Side::Audio => audio_edit_at(t, e.at).is_some(),
+        Side::Audio => audio_edit_at(p, t, e.at).is_some(),
         _ => t.clips.iter().any(|c| c.start == e.at || c.end() == e.at),
     }
 }
 
-pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
-    audio_edits(t)
+pub(crate) fn audio_at_cut(p: &Project, t: &Track, picture: i64) -> i64 {
+    audio_points(p, t)
+        .into_iter()
         .find(|&(cut, _)| cut == picture)
         .map_or(picture, |(_, at)| at)
+}
+
+pub(crate) fn audio_points(p: &Project, t: &Track) -> Vec<(i64, i64)> {
+    if t.kind == TrackKind::Video {
+        return geometry::band(p, t)
+            .iter()
+            .flat_map(|b| {
+                [
+                    (b.picture.start, b.sound.start),
+                    (b.picture.end(), b.sound.end()),
+                ]
+            })
+            .collect();
+    }
+    audio_edits(t).collect()
 }
 
 fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
@@ -130,6 +168,10 @@ pub(crate) fn nearest_edit(t: &Track, near: i64, side: Side) -> Option<i64> {
         Side::Both => t.edit_points().into_iter().map(|e| (e, e)).collect(),
         Side::Audio => audio_edits(t).collect(),
     };
+    closest_cut(points, near)
+}
+
+fn closest_cut(points: Vec<(i64, i64)>, near: i64) -> Option<i64> {
     points
         .into_iter()
         .min_by_key(|&(cut, _)| ((cut - near).abs(), cut))
@@ -993,6 +1035,7 @@ impl Workspace {
                     &overview,
                     compact,
                     placed_on(t),
+                    &layout.upper.bands,
                 );
             }
             self.paint_boring(&painter, &layout.upper, &upper_scale, drawn);
@@ -1087,6 +1130,7 @@ impl Workspace {
                     &assets,
                     look,
                     placed_on(t),
+                    &layout.lower.bands,
                 );
             }
             self.paint_edit_selection(
@@ -1225,8 +1269,8 @@ impl Workspace {
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
                 let on_volume = rows.at(pos.y).and_then(|r| {
-                    let t = p.track(&r.track)?;
-                    geometry::volume_target(t, scale, &r.rect, pos, &self.timeline.keys)
+                    let t = rows.bands.apart(p.track(&r.track)?);
+                    geometry::volume_target(&t, scale, &r.rect, pos, &self.timeline.keys)
                 });
                 let on_key = on_volume
                     .as_ref()
@@ -1236,7 +1280,7 @@ impl Workspace {
                     .is_some_and(|(_, l)| l.speed > 0.0);
                 if let Hit::AudioEdit { clip, edge } = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
-                    && let Some(at) = p.clip(clip).and_then(|c| audio_edge(c, *edge))
+                    && let Some(at) = audio_edge(&p, clip, *edge)
                 {
                     let x = scale.xf(at);
                     let band = egui::Rangef::new(row.rect.audio_top, row.rect.rect.bottom());
@@ -2102,14 +2146,26 @@ impl Workspace {
                 json!({ "track": t.id, "locked": !t.locked }),
                 parts.icons[1],
             )];
-            if t.has_sound() {
-                let sound = if t.muted {
+            let heard = if t.has_sound() {
+                vec![t.id.clone()]
+            } else {
+                geometry::heard_on(p, t)
+            };
+            if !heard.is_empty() {
+                let muted = heard.iter().all(|id| p.track(id).is_some_and(|a| a.muted));
+                let sound = if muted {
                     icon::AUDIO_OFF
                 } else {
                     icon::AUDIO_ON
                 };
-                let change = json!({ "track": t.id, "muted": !t.muted });
-                buttons.push(("Audio", "Mute", t.muted, sound, change, parts.icons[3]));
+                let commands: Vec<Value> = heard
+                    .iter()
+                    .map(|id| {
+                        json!({ "method": "track.set", "params": { "track": id, "muted": !muted } })
+                    })
+                    .collect();
+                let change = json!({ "commands": commands });
+                buttons.push(("Audio", "Mute", muted, sound, change, parts.icons[3]));
             }
             if t.kind == vidcut_core::model::TrackKind::Video {
                 let picture = if t.video_enabled {
@@ -2133,7 +2189,12 @@ impl Workspace {
                     .on_hover_text(tip)
                     .clicked()
                 {
-                    self.send("track.set", change);
+                    let method = if change.get("commands").is_some() {
+                        "apply"
+                    } else {
+                        "track.set"
+                    };
+                    self.send(method, change);
                 }
             }
         }
@@ -2204,8 +2265,8 @@ impl Workspace {
                 sound,
             }
         } else if let Some((clip, band, on)) = rows.at(press.y).and_then(|r| {
-            let t = p.track(&r.track)?;
-            geometry::volume_target(t, &scale, &r.rect, press, &self.timeline.keys)
+            let t = rows.bands.apart(p.track(&r.track)?);
+            geometry::volume_target(&t, &scale, &r.rect, press, &self.timeline.keys)
         }) {
             match on {
                 geometry::OnVolume::Line => {
@@ -2239,7 +2300,7 @@ impl Workspace {
                     },
                 },
                 Hit::AudioEdit { clip, edge } => Gesture::AudioRoll {
-                    from: p.clip(&clip).and_then(|c| audio_edge(c, edge)).unwrap_or(0),
+                    from: audio_edge(p, &clip, edge).unwrap_or(0),
                     clip,
                     edge,
                 },
@@ -2610,8 +2671,8 @@ impl Workspace {
         let keys = self.timeline.keys.clone();
         let on_volume = |pos: Pos2| {
             rows.at(pos.y).and_then(|r| {
-                let t = p.track(&r.track)?;
-                geometry::volume_target(t, &scale, &r.rect, pos, &keys)
+                let t = rows.bands.apart(p.track(&r.track)?);
+                geometry::volume_target(&t, &scale, &r.rect, pos, &keys)
                     .map(|(clip, _, on)| (clip, on))
             })
         };
@@ -4303,7 +4364,11 @@ impl Workspace {
         let tr = p
             .track(track)
             .ok_or_else(|| format!("There is no {track}"))?;
-        let at = nearest_edit(tr, near, side).ok_or_else(|| match side {
+        let at = match side {
+            Side::Audio => closest_cut(audio_points(&p, tr), near),
+            _ => nearest_edit(tr, near, side),
+        };
+        let at = at.ok_or_else(|| match side {
             Side::Audio => format!("{track} has no clip with sound"),
             _ => format!("{track} has no clips"),
         })?;
@@ -4328,10 +4393,12 @@ impl Workspace {
                 .ok_or_else(|| format!("There is no {}", e.track.id()))?;
             let at = match (e.side, side) {
                 (Side::Audio, Side::Audio) => e.at,
-                (Side::Audio, _) => audio_edits(t)
+                (Side::Audio, _) => audio_points(&p, t)
+                    .into_iter()
                     .find(|&(_, at)| at == e.at)
                     .map_or(e.at, |(cut, _)| cut),
-                (_, Side::Audio) => audio_edits(t)
+                (_, Side::Audio) => audio_points(&p, t)
+                    .into_iter()
                     .find(|&(cut, _)| cut == e.at)
                     .map(|(_, at)| at)
                     .ok_or("No audio edit here: no clip has sound")?,

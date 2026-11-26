@@ -178,12 +178,13 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 
 **The Cut page (pp. 646–648, 679):**
 
-- A main track shows the clips of its video track and the sound clips linked to them as one item. The sound shows as the band along the bottom (p. 647), as now.
-- The Link run measures which audio tracks the Cut page shows apart (p. 648). It also measures what the Cut page shows for a pair on tracks of different numbers.
-- The mute of a main track header mutes the sound of its linked audio track (p. 647). The Link run checks this.
+- A main track shows the clips of its video track and the sound clips linked to them as one item. The sound shows as the band along the bottom (p. 647).
+- An audio track that holds only linked sound has no row. An audio track with other clips has a row, and an empty audio track too.
+  - Open: batch 1 measured one timeline. An empty A2 and A4 had no row. A sound-only clip on A1 showed as a thin strip in the row of V1. Batch 2 measures more timelines.
+- The mute of a main track header mutes each audio track that holds the linked sound of its clips (p. 647).
 - A J/L drag on the band rolls the edit of the linked sound clips.
 - The Audio part of the Inspector edits the linked sound clips of the selected item.
-- A group out of sync shows its offset, as on the Edit page (pp. 915, 3878). An OpenTimelineIO import can bring such a group.
+- A group out of sync shows its offset, as on the Edit page (pp. 915, 3878). An OpenTimelineIO import can bring such a group. This is still to do.
 
 **Compound clips:**
 
@@ -217,8 +218,8 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 **The pull requests.** Each leaves vidcut working:
 
 1. **Link groups** (#1411). `Clip::link` holds the groups of compound clips and clips with no media. The parts still need one place. Each part moves by the change of the lead. The behavior does not change.
-2. **Sound clips** (#1420). The sound moves to the audio tracks, in each part above but the Cut page drawing. The parts of a group no longer need one place. The Cut page shows the sound clips on their audio tracks, as the Edit page does. The spec, the deviations and the design docs change.
-3. **Cut page items.** The Cut page draws a linked pair as one item, with the band, the header mute, the J/L drag and the sync offset.
+2. **Sound clips** (#1420). The sound moves to the audio tracks, in each part above. The parts of a group no longer need one place. The Cut page draws a linked pair as one item, with the band, the header mute and the J/L drag. The spec, the deviations and the design docs change.
+3. **Cut page rows.** The sync offset of a group, and the rows of the audio tracks as batch 2 measures them.
 4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914) and the fixes for a group out of sync (p. 915). The fixes are Slip into place, Move into place, Slip others into place and Move others into place. Resync Clip on the Cut page (p. 646).
 
 Each pull request changes the existing tests to the new model. It adds no tests.

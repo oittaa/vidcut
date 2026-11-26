@@ -374,6 +374,18 @@ The bar and the Jobs button:
 - `Rows::layout` lays out the rows of the lower timeline from the bottom, and shrinks them to fit, down to a minimum.
 - When they still overflow, the wheel (`scroll_rows`) and the scrollbar (`row_scrollbar`) lift them (`TimelineView::rows_lift`, `Rows::overflow`).
 
+**Sound bands** ([spec §5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718)).
+
+- `geometry::Bands` holds each sound clip that is linked to a picture clip, with the video track of that picture. `Rows::layout` makes it.
+- `Rows::layout` leaves out an audio track whose clips are all in bands. Why: the row of the picture shows them.
+- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the first linked sound clip of each picture, at its own place. Thus a J/L cut shows.
+- The band draws the sound transitions between its sound clips. It draws no volume line.
+- `geometry::band_hit` finds the edge of a band sound under the pointer. It gives `Hit::AudioEdit` with the picture clip.
+  - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
+  - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
+- An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
+- The Mute of a main track header sets `muted` on each audio track that holds the linked sound of its clips (`geometry::heard_on`). Several tracks go as one `apply`.
+
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
 - `paint::volume_line` draws the volume line of each clip with sound. With volume keyframes, the line is the curve (`geometry::curve_y`), with a mark on each keyframe.

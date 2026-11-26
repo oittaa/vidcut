@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+
 use eframe::egui::{Pos2, Rect, pos2, vec2};
 use vidcut_core::model::{Clip, Keyframe, Project, Track, TrackKind, Transition};
 use vidcut_core::ops::{Edge, MAIN};
@@ -88,6 +91,129 @@ pub struct Row {
 pub struct Rows {
     pub rows: Vec<Row>,
     pub area: Rect,
+    pub bands: Bands,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Bands {
+    sounds: HashMap<String, String>,
+}
+
+impl Bands {
+    pub fn of(p: &Project) -> Self {
+        let mut pictures: HashMap<u32, &str> = HashMap::new();
+        for i in p.tracks_of(TrackKind::Video) {
+            let t = &p.tracks[i];
+            for l in t.clips.iter().filter_map(|c| c.link) {
+                pictures.entry(l).or_insert(&t.id);
+            }
+        }
+        let sounds = p
+            .tracks_of(TrackKind::Audio)
+            .into_iter()
+            .flat_map(|i| &p.tracks[i].clips)
+            .filter_map(|c| Some((c.id.clone(), pictures.get(&c.link?)?.to_string())))
+            .collect();
+        Self { sounds }
+    }
+
+    pub fn has(&self, id: &str) -> bool {
+        self.sounds.contains_key(id)
+    }
+
+    pub fn row(&self, id: &str) -> Option<&str> {
+        self.sounds.get(id).map(String::as_str)
+    }
+
+    pub fn hides(&self, t: &Track) -> bool {
+        t.kind == TrackKind::Audio && !t.clips.is_empty() && t.clips.iter().all(|c| self.has(&c.id))
+    }
+
+    pub fn apart<'a>(&self, t: &'a Track) -> Cow<'a, Track> {
+        if !t.clips.iter().any(|c| self.has(&c.id)) {
+            return Cow::Borrowed(t);
+        }
+        let mut kept = t.clone();
+        kept.clips.retain(|c| !self.has(&c.id));
+        Cow::Owned(kept)
+    }
+
+    pub fn joins(&self, x: &Transition) -> bool {
+        [&x.from, &x.to]
+            .into_iter()
+            .flatten()
+            .any(|id| self.has(id))
+    }
+}
+
+pub struct Banded<'a> {
+    pub track: &'a Track,
+    pub sound: &'a Clip,
+    pub picture: &'a Clip,
+}
+
+pub fn band<'a>(p: &'a Project, t: &'a Track) -> Vec<Banded<'a>> {
+    if t.kind != TrackKind::Video {
+        return Vec::new();
+    }
+    let mut first: HashMap<u32, (&Track, &Clip)> = HashMap::new();
+    for i in p.tracks_of(TrackKind::Audio) {
+        let a = &p.tracks[i];
+        for s in &a.clips {
+            if let Some(l) = s.link {
+                first.entry(l).or_insert((a, s));
+            }
+        }
+    }
+    t.clips
+        .iter()
+        .filter_map(|c| {
+            let &(track, sound) = first.get(&c.link?)?;
+            Some(Banded {
+                track,
+                sound,
+                picture: c,
+            })
+        })
+        .collect()
+}
+
+pub fn heard_on(p: &Project, t: &Track) -> Vec<String> {
+    if t.kind != TrackKind::Video {
+        return Vec::new();
+    }
+    let links: HashSet<u32> = t.clips.iter().filter_map(|c| c.link).collect();
+    p.tracks_of(TrackKind::Audio)
+        .into_iter()
+        .map(|i| &p.tracks[i])
+        .filter(|a| {
+            a.clips
+                .iter()
+                .any(|c| c.link.is_some_and(|l| links.contains(&l)))
+        })
+        .map(|a| a.id.clone())
+        .collect()
+}
+
+pub fn band_hit(p: &Project, t: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Option<Hit> {
+    if !tr.rect.contains(pos) || tr.audio_top <= tr.rect.top() || !tr.in_audio(pos.y) {
+        return None;
+    }
+    band(p, t)
+        .into_iter()
+        .flat_map(|b| {
+            [
+                (b.picture, Edge::Tail, b.sound.end()),
+                (b.picture, Edge::Head, b.sound.start),
+            ]
+        })
+        .map(|(c, edge, at)| (c, edge, (pos.x - scale.xf(at)).abs()))
+        .filter(|&(.., away)| away <= AUDIO_EDIT)
+        .min_by(|x, y| x.2.total_cmp(&y.2))
+        .map(|(c, edge, _)| Hit::AudioEdit {
+            clip: c.id.clone(),
+            edge,
+        })
 }
 
 pub const NEW_TRACK_STRIP: f32 = 14.0;
@@ -125,14 +251,17 @@ impl Rows {
         };
         let share = |t: &'_ Track| match t.kind {
             TrackKind::Audio => 1.0,
-            TrackKind::Video => 0.0,
+            TrackKind::Video if t.id == MAIN => 0.32,
+            TrackKind::Video => 0.3,
         };
+        let bands = Bands::of(p);
         order.extend(
             p.tracks_of(TrackKind::Video)
                 .into_iter()
                 .rev()
                 .chain(p.tracks_of(TrackKind::Audio))
                 .map(|i| &p.tracks[i])
+                .filter(|t| !bands.hides(t))
                 .map(|t| (t.id.as_str(), track(t), share(t))),
         );
         let big = order.iter().position(|t| Some(t.0) == enlarged);
@@ -179,7 +308,7 @@ impl Rows {
                 }
             })
             .collect();
-        Self { rows, area }
+        Self { rows, area, bands }
     }
 
     pub fn get(&self, track: &str) -> Option<&Row> {
@@ -263,7 +392,7 @@ impl Rows {
                 pos2(self.area.right(), bottom + NEW_TRACK_STRIP),
             )
         };
-        TrackRect::new(rect, if track.starts_with('A') { 1.0 } else { 0.0 })
+        TrackRect::new(rect, if track.starts_with('A') { 1.0 } else { 0.3 })
     }
 
     pub fn rect_of(&self, track: &str) -> TrackRect {
@@ -632,7 +761,7 @@ pub fn fade_edge_at(
     tr: &TrackRect,
     pos: Pos2,
 ) -> Option<(i64, bool)> {
-    if !tr.rect.contains(pos) || track.kind != TrackKind::Video {
+    if !tr.rect.contains(pos) || track.kind != TrackKind::Video || tr.in_audio(pos.y) {
         return None;
     }
     let cuts = Cuts::of(p, track);
@@ -659,7 +788,7 @@ pub fn transition_at(
     tr: &TrackRect,
     pos: Pos2,
 ) -> Option<i64> {
-    if !tr.rect.contains(pos) || track.kind != TrackKind::Video {
+    if !tr.rect.contains(pos) || track.kind != TrackKind::Video || tr.in_audio(pos.y) {
         return None;
     }
     transition_over(p, track, scale, pos.x).filter(|&at| (pos.x - scale.xf(at)).abs() > ROLL)
@@ -701,9 +830,11 @@ pub fn clip_edge_near(track: &Track, scale: &Scale, x: f32, px: f32) -> Option<i
 pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<String>, Hit) {
     match rows.at(pos.y) {
         Some(r) => {
-            let what = p
-                .track(&r.track)
-                .map_or(Hit::Empty, |t| hit(t, scale, &r.rect, pos));
+            let what = match p.track(&r.track) {
+                None => Hit::Empty,
+                Some(t) => band_hit(p, t, scale, &r.rect, pos)
+                    .unwrap_or_else(|| hit(&rows.bands.apart(t), scale, &r.rect, pos)),
+            };
             (Some(r.track.clone()), what)
         }
         None => (None, Hit::Empty),
