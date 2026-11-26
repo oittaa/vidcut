@@ -240,12 +240,15 @@ impl Workspace {
             Header::Mode(ViewerMode::MultiSource),
         ];
         let export = self.effects_page.page == Page::Export;
+        let covering = self.snap.viewer_frame != ViewerFrame::Page;
         let row = Row {
             left: if export { &[] } else { &modes },
             fill: Some((Header::Title, Align::Min)),
-            right: match export {
-                true => &[Header::Scopes, Header::FullScreen],
-                false => &[Header::Scopes, Header::FullScreen, Header::Duration],
+            right: match (export, covering) {
+                (true, true) => &[Header::Scopes, Header::FullScreen],
+                (true, false) => &[Header::Scopes],
+                (false, true) => &[Header::Scopes, Header::FullScreen, Header::Duration],
+                (false, false) => &[Header::Scopes, Header::Duration],
             },
             leaving: &[
                 Header::Scopes,
