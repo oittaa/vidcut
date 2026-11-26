@@ -53,6 +53,7 @@ pub struct Letter {
 pub struct Letters {
     pub letters: Vec<Letter>,
     pub pivot: [f32; 2],
+    pub stretch: f32,
     pub turn: f64,
     pub top: i32,
     pub height: u32,
@@ -1839,10 +1840,11 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
     })
 }
 
-fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
-    let x0 = s.x.max(0);
+fn inside(s: Sprite, (w, h): (f64, f64), (px, stretch): (f64, f64)) -> Option<Sprite> {
+    let back = 1.0 / stretch - 1.0;
+    let x0 = s.x.max((0.0 - px * back) as i32);
     let y0 = s.y.max(0);
-    let x1 = (s.x + s.width as i32).min(w as i32);
+    let x1 = (s.x + s.width as i32).min((w + (w - px) * back) as i32);
     let y1 = (s.y + s.height as i32).min(h as i32);
     if x1 <= x0 || y1 <= y0 {
         return None;
@@ -2155,6 +2157,7 @@ fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> 
     Some(turned(
         sprite,
         ((px * w) as f32, (py * h) as f32),
+        1.0,
         block.turn,
     ))
 }
@@ -2171,13 +2174,20 @@ fn title_block(
         return shaped_box(t, block, (w, h), h / f64::from(timeline.max(1)));
     }
     let (sprite, _) = upright_block(t, block, (width, height), timeline)?;
-    if block.turn == 0.0 {
+    let stretch = block.stretch();
+    if block.turn == 0.0 && stretch == 1.0 {
         return Some(sprite);
     }
     let [px, py] = block.pivot;
+    let held = if block.turn == 0.0 {
+        sprite
+    } else {
+        inside(sprite, (w, h), (px * w, stretch))?
+    };
     Some(turned(
-        inside(sprite, (w, h))?,
+        held,
         ((px * w) as f32, (py * h) as f32),
+        stretch as f32,
         block.turn,
     ))
 }
@@ -2207,6 +2217,7 @@ pub fn title_letters(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<L
                     })
                     .collect(),
                 pivot: [(b.pivot[0] * w) as f32, (b.pivot[1] * h) as f32],
+                stretch: b.stretch() as f32,
                 turn: b.turn,
                 top: s.y,
                 height: s.height,
@@ -2223,7 +2234,7 @@ fn upright_block(
     timeline: u32,
 ) -> Option<(Sprite, Vec<Letter>)> {
     let (w, h) = (f64::from(width), f64::from(height));
-    let zoom = block.zoom;
+    let zoom = block.zoom[1];
     let pixel = h / f64::from(timeline.max(1));
     let exact = h * t.text_fraction(timeline) * zoom;
     let drawn = match t.kind {
@@ -2324,8 +2335,8 @@ fn upright_block(
     Some((sprite, letters))
 }
 
-fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
-    if degrees == 0.0 || s.width == 0 || s.height == 0 {
+fn turned(s: Sprite, (px, py): (f32, f32), stretch: f32, degrees: f64) -> Sprite {
+    if (degrees == 0.0 && stretch == 1.0) || s.width == 0 || s.height == 0 {
         return s;
     }
     let (sin, cos) = (
@@ -2333,7 +2344,7 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         degrees.to_radians().cos() as f32,
     );
     let forward = |x: f32, y: f32| {
-        let (u, v) = (x - px, y - py);
+        let (u, v) = ((x - px) * stretch, y - py);
         (px + u * cos + v * sin, py - u * sin + v * cos)
     };
     let (x0, y0) = (s.x as f32, s.y as f32);
@@ -2353,6 +2364,8 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         let p = s.at(x, y);
         [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]]
     };
+    let taps = (1.0 / stretch).ceil().max(1.0) as usize;
+    let share = 1.0 / taps as f32;
     let mut rgba = vec![[0.0f32; 4]; ow * oh];
     for oy in 0..oh {
         for ox in 0..ow {
@@ -2360,20 +2373,24 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
                 lo_x as f32 + ox as f32 + 0.5 - px,
                 lo_y as f32 + oy as f32 + 0.5 - py,
             );
-            let (sx, sy) = (px + u * cos - v * sin - 0.5, py + u * sin + v * cos - 0.5);
-            let (fx, fy) = (sx.floor(), sy.floor());
-            let (ax, ay) = (sx - fx, sy - fy);
-            let (ix, iy) = (fx as i32, fy as i32);
             let mut p = [0.0f32; 4];
-            for (dx, dy, k) in [
-                (0, 0, (1.0 - ax) * (1.0 - ay)),
-                (1, 0, ax * (1.0 - ay)),
-                (0, 1, (1.0 - ax) * ay),
-                (1, 1, ax * ay),
-            ] {
-                let q = held(ix + dx, iy + dy);
-                for c in 0..4 {
-                    p[c] += q[c] * k;
+            for tap in 0..taps {
+                let d = (tap as f32 + 0.5) * share - 0.5;
+                let sx = px + u * cos / stretch - v * sin / stretch + d / stretch - 0.5;
+                let sy = py + u * sin + v * cos - 0.5;
+                let (fx, fy) = (sx.floor(), sy.floor());
+                let (ax, ay) = (sx - fx, sy - fy);
+                let (ix, iy) = (fx as i32, fy as i32);
+                for (dx, dy, k) in [
+                    (0, 0, (1.0 - ax) * (1.0 - ay)),
+                    (1, 0, ax * (1.0 - ay)),
+                    (0, 1, (1.0 - ax) * ay),
+                    (1, 1, ax * ay),
+                ] {
+                    let q = held(ix + dx, iy + dy);
+                    for c in 0..4 {
+                        p[c] += q[c] * k * share;
+                    }
                 }
             }
             rgba[oy * ow + ox] = if p[3] > 0.0 {

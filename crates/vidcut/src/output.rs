@@ -474,6 +474,25 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 print_rounded(o);
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
+                for m in o["more"].as_array().into_iter().flatten() {
+                    let encoder = &m["video_encoder"];
+                    println!(
+                        "  and {}  video {}  audio {}",
+                        m["path"].as_str().unwrap_or_default(),
+                        match encoder["error"].as_str() {
+                            Some(e) => format!("unavailable: {e}"),
+                            None => format!(
+                                "{} ({})",
+                                encoder["name"].as_str().unwrap_or_default(),
+                                encoder["pixel"].as_str().unwrap_or_default()
+                            ),
+                        },
+                        m["settings"]["audio"]["codec"].as_str().unwrap_or("none")
+                    );
+                    print_rounded(m);
+                    print_color(&m["color"]);
+                    print_metadata(&m["metadata"]);
+                }
             }
             print_notes(&r.result["notes"]);
         }
@@ -696,6 +715,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
             }
             for key in listed("unusable_keys") {
                 println!("left out a key that vidcut can't use: {key}");
+            }
+            for c in r.result["conflicts"].as_array().into_iter().flatten() {
+                let actions: Vec<&str> = c["actions"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                println!(
+                    "{} is on {}",
+                    c["key"].as_str().unwrap_or_default(),
+                    actions.join(" and ")
+                );
             }
         }
         "preferences.get" | "preferences.set" | "preferences.reset" => {

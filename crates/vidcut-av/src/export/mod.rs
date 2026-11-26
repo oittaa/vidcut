@@ -534,7 +534,7 @@ pub fn run(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
     let none = Subtitles::default();
-    run_decoding_on(
+    let mut reports = run_decoding_on(
         plan,
         settings,
         output,
@@ -543,31 +543,34 @@ pub fn run(
             record: plan.range.0,
             drop_frame: false,
         },
+        &[],
         available,
         None,
         &none,
         cancel,
         progress,
-    )
+    )?;
+    Ok(reports.remove(0))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn run_decoding_on(
+#[derive(Debug, Clone)]
+pub struct More {
+    pub settings: ExportSettings,
+    pub output: PathBuf,
+    pub numbering: Numbering,
+}
+
+type Chosen = (ExportSettings, Option<ColorChoice>, Option<MetadataChoice>);
+
+fn chosen_colors(
     plan: &RenderPlan,
     settings: &ExportSettings,
-    output: &Path,
-    numbering: Numbering,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
     subtitles: &Subtitles,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
-) -> Result<Report> {
-    crate::init();
-    crate::screen::retry_lost();
-    validate(settings).map_err(|e| Error::Invalid(e.message))?;
-    let copies = std::sync::Arc::new(crate::copies::Copies::default());
-    let _counting = crate::copies::Guard::set(copies.clone());
+) -> Result<Chosen> {
     let mut settings = settings.clone();
     let mut chosen = None;
     if let Some(v) = settings.video.as_mut()
@@ -604,11 +607,55 @@ pub fn run_decoding_on(
         }
         metadata_chosen = Some(c);
     }
+    Ok((settings, chosen, metadata_chosen))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_decoding_on(
+    plan: &RenderPlan,
+    settings: &ExportSettings,
+    output: &Path,
+    numbering: Numbering,
+    more: &[More],
+    available: &Availability,
+    decoder: Option<&crate::hw::GpuDecoder>,
+    subtitles: &Subtitles,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Vec<Report>> {
+    crate::init();
+    crate::screen::retry_lost();
+    validate(settings).map_err(|e| Error::Invalid(e.message))?;
+    for m in more {
+        validate(&m.settings).map_err(|e| Error::Invalid(e.message))?;
+    }
+    if !more.is_empty() && settings.video.as_ref().is_none_or(|v| v.bypass_reencode) {
+        return Err(Error::Invalid(
+            "more outputs need the video of the first output, without bypass_reencode".into(),
+        ));
+    }
+    let copies = std::sync::Arc::new(crate::copies::Copies::default());
+    let _counting = crate::copies::Guard::set(copies.clone());
+    let (settings, chosen, metadata_chosen) = chosen_colors(
+        plan, settings, available, decoder, subtitles, cancel, progress,
+    )?;
     if chosen.is_some() || metadata_chosen.is_some() {
         crate::progress::note(Note::Color {
             color: chosen.clone(),
             metadata: metadata_chosen.clone(),
         });
+    }
+    let mut more_chosen = Vec::new();
+    for m in more {
+        more_chosen.push(chosen_colors(
+            plan,
+            &m.settings,
+            available,
+            decoder,
+            subtitles,
+            cancel,
+            progress,
+        )?);
     }
     let settings = &settings;
     if cancel.load(Ordering::Relaxed) {
@@ -616,12 +663,33 @@ pub fn run_decoding_on(
     }
     let (part, file) = vidcut_core::temp::file(output)?;
     drop(file);
-    let report = encode(
-        plan,
+    let mut parts = Vec::new();
+    for m in more {
+        let (part, file) = vidcut_core::temp::file(&m.output)?;
+        drop(file);
+        parts.push(part);
+    }
+    let targets: Vec<Target> = more
+        .iter()
+        .zip(&more_chosen)
+        .zip(&parts)
+        .map(|((m, c), part)| Target {
+            settings: &c.0,
+            part: part.path(),
+            output: &m.output,
+            numbering: m.numbering,
+        })
+        .collect();
+    let first = Target {
         settings,
-        part.path(),
+        part: part.path(),
         output,
         numbering,
+    };
+    let mut reports = encode(
+        plan,
+        first,
+        &targets,
         available,
         decoder,
         subtitles,
@@ -631,12 +699,20 @@ pub fn run_decoding_on(
     if !settings.container.image_sequence() {
         part.keep(output)?;
     }
-    Ok(Report {
-        color: chosen,
-        metadata: metadata_chosen,
-        copies: copies.counted(),
-        ..report
-    })
+    for ((part, m), (s, _, _)) in parts.into_iter().zip(more).zip(&more_chosen) {
+        if !s.container.image_sequence() {
+            part.keep(&m.output)?;
+        }
+    }
+    let counted = copies.counted();
+    let choices = std::iter::once((chosen, metadata_chosen))
+        .chain(more_chosen.into_iter().map(|(_, c, m)| (c, m)));
+    for (r, (color, metadata)) in reports.iter_mut().zip(choices) {
+        r.color = color;
+        r.metadata = metadata;
+        r.copies = counted;
+    }
+    Ok(reports)
 }
 
 struct FrameFiles {
@@ -757,12 +833,12 @@ impl PassFiles {
 
 fn made_hdr10plus_light(
     plan: &RenderPlan,
-    enc: &encode::VideoEncoder,
+    hdr10plus: bool,
     decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &AtomicBool,
 ) -> Result<std::collections::HashMap<PathBuf, std::sync::Arc<crate::light::LightAnalysis>>> {
     let mut out = std::collections::HashMap::new();
-    if !enc.dynamic.hdr10plus {
+    if !hdr10plus {
         return Ok(out);
     }
     let mut probe = probed_files(decoder);
@@ -871,20 +947,23 @@ pub(crate) fn write_packet(
 
 struct VideoIn {
     frames: VideoFrames,
-    vaapi: Option<Upload>,
     name: String,
     passes: encode::Passes,
     _pass_files: Option<PassFiles>,
+    first: Feed,
+    more: Vec<Feed>,
+}
+
+type Fed = (frame::Video, Option<Vec<u8>>);
+
+struct Feed {
+    vaapi: Option<Upload>,
     metadata: crate::hdr::Static,
     hdr10plus: bool,
 }
 
-impl VideoIn {
-    fn next(&mut self, j: i64) -> Result<(frame::Video, Option<Vec<u8>>)> {
-        let mut f = self
-            .frames
-            .next_frame()?
-            .ok_or_else(|| Error::Invalid("plan has fewer video frames than expected".into()))?;
+impl Feed {
+    fn fed(&self, mut f: frame::Video, j: i64) -> Result<Fed> {
         f.set_pts(Some(j));
         f.set_kind(ffmpeg::picture::Type::None);
         let t35 = self
@@ -899,6 +978,20 @@ impl VideoIn {
             crate::hdr::attach(&mut f, &self.metadata)?;
         }
         Ok((f, t35))
+    }
+}
+
+impl VideoIn {
+    fn next(&mut self, j: i64) -> Result<(Fed, Vec<Fed>)> {
+        let f = self
+            .frames
+            .next_frame()?
+            .ok_or_else(|| Error::Invalid("plan has fewer video frames than expected".into()))?;
+        let first = self.first.fed(f, j)?;
+        let more = (self.frames.take_more().into_iter().zip(&self.more))
+            .map(|(f, feed)| feed.fed(f, j))
+            .collect::<Result<Vec<_>>>()?;
+        Ok((first, more))
     }
 }
 
@@ -1287,16 +1380,20 @@ fn paced<'a>(
 #[allow(clippy::too_many_arguments)]
 fn encode(
     plan: &RenderPlan,
-    settings: &ExportSettings,
-    part: &Path,
-    output: &Path,
-    numbering: Numbering,
+    first: Target,
+    more: &[Target],
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
     subs: &Subtitles,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
-) -> Result<Report> {
+) -> Result<Vec<Report>> {
+    let Target {
+        settings,
+        part,
+        output,
+        numbering,
+    } = first;
     let started = Instant::now();
     let fps = ffmpeg_rate(plan.fps);
     let times = (fps.invert(), Some(fps));
@@ -1306,7 +1403,7 @@ fn encode(
 
     let timeline = (plan.width, plan.height);
     let mut tried_encoders = Vec::new();
-    let (mut video, mut video_out, mut copying, bypass_note) = match &settings.video {
+    let (mut video, mut video_out, mut copying, bypass_note, more_made) = match &settings.video {
         Some(v) => {
             let drawn = v.drawn_size(timeline);
             let (w, h) = v.written_size(timeline);
@@ -1364,23 +1461,26 @@ fn encode(
                 }
             }
             let Some((enc, (encoder, vaapi), gpu)) = opened else {
-                if failed.len() == 1 {
-                    return Err(failed.remove(0).1);
-                }
-                let why: Vec<String> = failed
-                    .iter()
-                    .map(|(name, e)| tried(name.as_deref(), e).text())
-                    .collect();
-                return Err(Error::Invalid(format!(
-                    "no video encoder would open: {}",
-                    why.join("; ")
-                )));
+                return Err(none_opened(failed));
             };
             tried_encoders = failed
                 .iter()
                 .map(|(name, e)| tried(name.as_deref(), e))
                 .collect();
-            let light = made_hdr10plus_light(plan, &enc, decoder, cancel)?;
+            if !more.is_empty() && enc.passes.runs() == 2 {
+                return Err(Error::Invalid(format!(
+                    "{} makes two runs; with more_outputs, set passes to 1",
+                    enc.name
+                )));
+            }
+            let mut opened_more = Vec::new();
+            for t in more {
+                let made = open_more(plan, t, available, decoder, subs, drawn);
+                opened_more.push(made.map_err(|e| about(t.output, e))?);
+            }
+            let hdr10plus =
+                enc.dynamic.hdr10plus || opened_more.iter().any(|(_, _, o)| o.dynamic.hdr10plus);
+            let light = made_hdr10plus_light(plan, hdr10plus, decoder, cancel)?;
             let (encoder, vaapi) = match &pass_files {
                 Some(files) if enc.passes.runs() == 2 => {
                     let buffer = first_run(
@@ -1468,21 +1568,33 @@ fn encode(
                 Some(video::Handoff::Cuda(..)) => gpu_pixel(&enc),
                 _ => enc.pixel,
             };
+            let mut more_made = Vec::new();
+            let mut feeds = Vec::new();
+            let mut outs = Vec::new();
+            for (made, feed, out) in opened_more {
+                more_made.push(made);
+                feeds.push(feed);
+                outs.push(out);
+            }
             let frames = frames_of(plan, &enc, pixel, (drawn, (w, h)), burn, decoder)?
                 .encode_on(handoff)
                 .with_light(light)
-                .writing_alpha(v.alpha.then_some(v.alpha_mode));
+                .writing_alpha(v.alpha.then_some(v.alpha_mode))
+                .also(outs);
             let hdr10plus = (enc.dynamic.hdr10plus
                 && matches!(id, ffmpeg::codec::Id::HEVC | ffmpeg::codec::Id::AV1))
             .then(|| (id, std::collections::HashMap::new()));
             let made = VideoIn {
                 frames,
-                vaapi,
                 name: enc.name.clone(),
                 passes: enc.passes,
                 _pass_files: pass_files,
-                metadata: enc.metadata,
-                hdr10plus: hdr10plus.is_some(),
+                first: Feed {
+                    vaapi,
+                    metadata: enc.metadata,
+                    hdr10plus: hdr10plus.is_some(),
+                },
+                more: feeds,
             };
             let encoding = VideoOut {
                 encoder: Some(encoder),
@@ -1506,9 +1618,9 @@ fn encode(
                     false => None,
                 },
             };
-            (Some(made), Some(encoding), copying, bypass_note)
+            (Some(made), Some(encoding), copying, bypass_note, more_made)
         }
-        None => (None, None, None, None),
+        None => (None, None, None, None, Vec::new()),
     };
 
     let mut normalized = None;
@@ -1521,44 +1633,9 @@ fn encode(
                     plan.sample_rate, spec.rate
                 )));
             }
-            let codec = encoder::find_by_name(&spec.name)
-                .ok_or_else(|| Error::Invalid(format!("no {}", spec.name)))?;
-            let mut ctx = ffmpeg::codec::context::Context::new_with_codec(codec)
-                .encoder()
-                .audio()
-                .ctx(|| format!("creating {}", spec.name))?;
-            ctx.set_rate(spec.rate as i32);
-            ctx.set_channel_layout(audio::channel_layout(spec.channels));
-            ctx.set_format(spec.sample);
-            ctx.set_time_base(ffmpeg::Rational(1, spec.rate as i32));
-            if let Some(b) = spec.bitrate {
-                ctx.set_bit_rate(b as usize);
-            }
-            if spec.name == "pcm_s24le" || spec.name == "flac" {
-                unsafe { (*ctx.as_mut_ptr()).bits_per_raw_sample = 24 };
-            }
-            if spec.name == "opus" {
-                unsafe {
-                    (*ctx.as_mut_ptr()).strict_std_compliance =
-                        ffmpeg::ffi::FF_COMPLIANCE_EXPERIMENTAL
-                };
-            }
-            if global_header {
-                ctx.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
-            }
-            let encoder = ctx
-                .open_as(codec)
-                .ctx(|| format!("opening {} with {} channels", spec.name, spec.channels))?;
             let index = usize::from(video.is_some());
-            let mut ost = octx
-                .add_stream(codec)
-                .ctx(|| "adding audio stream".into())?;
-            ost.set_parameters(&encoder);
-            ost.set_time_base(ffmpeg::Rational(1, spec.rate as i32));
-            let frame_size = match encoder.frame_size() {
-                0 => 1024,
-                n => n as usize,
-            };
+            let encoding = open_audio(spec, &mut octx, global_header, index, plan.sample_rate)?;
+            let spec = &encoding.spec;
             let declick = if settings.declick { DECLICK_MS } else { 0 };
             crate::isolate::check(&plan.audio)?;
             let mut mix = AudioMix::new(&plan.audio, plan.sample_rate, spec.channels, declick)
@@ -1584,15 +1661,6 @@ fn encode(
                 bitrate: spec.bitrate,
                 loudness: normalized,
             }));
-            let encoding = AudioOut {
-                encoder,
-                spec,
-                stream: index,
-                stream_tb: ffmpeg::Rational(1, plan.sample_rate as i32),
-                frame_size,
-                fifo: Vec::new(),
-                sent: 0,
-            };
             (Some(mix), Some(encoding))
         }
         None => (None, None),
@@ -1618,19 +1686,7 @@ fn encode(
         (None, _) => None,
     };
 
-    let mut opts = ffmpeg::Dictionary::new();
-    if matches!(settings.container.muxer(), "mp4" | "mov" | "ipod") {
-        opts.set("movflags", "+faststart");
-        if settings
-            .video
-            .as_ref()
-            .is_some_and(|v| v.hdr_metadata.dolby_vision())
-        {
-            opts.set("strict", "unofficial");
-        }
-    }
-    octx.write_header_with(opts)
-        .ctx(|| "writing header".into())?;
+    write_header(&mut octx, settings)?;
     if let Some(v) = video_out.as_mut() {
         v.stream_tb = octx.stream(0).expect("video stream").time_base();
         if let Some(c) = copying.as_mut() {
@@ -1653,6 +1709,14 @@ fn encode(
         subtitles: subtitle_outs,
     };
     let mut writing = Worker::spawn(holds, move |outs| writer.run(outs))?;
+    let mut also = Vec::new();
+    let mut facts = Vec::new();
+    for MoreMade { writer, facts: f } in more_made {
+        let hears = writer.audio.is_some();
+        let holds = worker::AHEAD * (1 + usize::from(hears));
+        also.push((Worker::spawn(holds, move |outs| writer.run(outs))?, hears));
+        facts.push(f);
+    }
     let mut produced = 0i64;
     let runs = video.as_ref().map_or(1, |v| v.passes.runs());
     let looped = Instant::now();
@@ -1660,6 +1724,7 @@ fn encode(
     let made = (|| -> Result<()> {
         let mut sound_for = |j: i64,
                              writing: &mut Worker<Out, Spent>,
+                             also: &mut [(Worker<Out, Spent>, bool)],
                              sound: &mut Duration,
                              handing: &mut Duration|
          -> Result<()> {
@@ -1672,6 +1737,9 @@ fn encode(
             *sound += clock.elapsed();
             produced = until;
             let clock = Instant::now();
+            for (w, _) in also.iter_mut().filter(|(_, hears)| *hears) {
+                w.send(Out::Sound(j, samples.clone()))?;
+            }
             writing.send(Out::Sound(j, samples))?;
             *handing += clock.elapsed();
             Ok(())
@@ -1713,7 +1781,7 @@ fn encode(
                         handing += clock.elapsed();
                     }
                     while until < batch.covered {
-                        sound_for(until, &mut writing, &mut sound, &mut handing)?;
+                        sound_for(until, &mut writing, &mut also, &mut sound, &mut handing)?;
                         tell(until, Some(&*v), progress);
                         until += 1;
                     }
@@ -1721,7 +1789,7 @@ fn encode(
                 let end = c.end(&run);
                 if end > j {
                     while until < end {
-                        sound_for(until, &mut writing, &mut sound, &mut handing)?;
+                        sound_for(until, &mut writing, &mut also, &mut sound, &mut handing)?;
                         tell(until, Some(&*v), progress);
                         until += 1;
                     }
@@ -1731,12 +1799,15 @@ fn encode(
                 }
             }
             if let Some(v) = video.as_mut() {
-                let (picture, t35) = v.next(j)?;
+                let ((picture, t35), more_pictures) = v.next(j)?;
                 let clock = Instant::now();
+                for ((w, _), (picture, t35)) in also.iter_mut().zip(more_pictures) {
+                    w.send(Out::Picture { j, picture, t35 })?;
+                }
                 writing.send(Out::Picture { j, picture, t35 })?;
                 handing += clock.elapsed();
             }
-            sound_for(j, &mut writing, &mut sound, &mut handing)?;
+            sound_for(j, &mut writing, &mut also, &mut sound, &mut handing)?;
             tell(j, video.as_ref(), progress);
             j += 1;
         }
@@ -1744,8 +1815,17 @@ fn encode(
     })();
     let clock = Instant::now();
     let spent = match made {
-        Ok(()) => writing.finish()?,
-        Err(e) => return Err(writing.abandon(e)),
+        Ok(()) => {
+            let spent = writing.finish()?;
+            for (w, _) in also {
+                w.finish()?;
+            }
+            spent
+        }
+        Err(e) => {
+            let e = also.into_iter().fold(e, |e, (w, _)| w.abandon(e));
+            return Err(writing.abandon(e));
+        }
     };
     handing += clock.elapsed();
     let (decoding, drawing) = video.as_ref().map(|v| v.frames.spent()).unwrap_or_default();
@@ -1786,10 +1866,21 @@ fn encode(
     let rounded = settings.video.as_ref().and_then(|v| {
         v.rounded(timeline).or_else(|| {
             let encoder = video.as_ref().map(|m| m.name.as_str())?;
-            rounded_by_encoder(part, v.drawn_size(timeline), encoder)
+            let r = rounded_by_encoder(part, v.drawn_size(timeline), encoder)?;
+            crate::progress::note(Note::Rounded(r.clone()));
+            Some(r)
         })
     });
-    Ok(Report {
+    let gpu_frames = video.as_ref().map_or(0, |v| v.frames.gpu_frames());
+    let gpu_decoded = video.as_ref().map_or(0, |v| v.frames.gpu_decoded());
+    let sources = video
+        .as_ref()
+        .map_or_else(Vec::new, |v| v.frames.sources().to_vec());
+    let more_memory = video
+        .as_ref()
+        .map_or_else(Vec::new, |v| v.frames.more_through_memory());
+    let seconds = started.elapsed().as_secs_f64();
+    let mut reports = vec![Report {
         output: settings.first_file(output, numbering.first),
         frames: plan.frames,
         samples: if audio_encoder.is_some() {
@@ -1797,31 +1888,332 @@ fn encode(
         } else {
             0
         },
-        gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
-        gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
+        gpu_frames,
+        gpu_decoded,
         through_memory: video
             .as_ref()
             .and_then(|v| v.frames.through_memory().map(String::from)),
         tried: tried_encoders,
-        sources: video
-            .as_ref()
-            .map_or_else(Vec::new, |v| v.frames.sources().to_vec()),
+        sources: sources.clone(),
         passes: video.as_ref().map(|v| v.passes.count()),
         video_encoder: video.map(|v| v.name),
         audio_encoder,
-        seconds: started.elapsed().as_secs_f64(),
+        seconds,
         loudness: normalized,
         color: None,
         metadata: None,
         copies: Default::default(),
         subtitle_streams,
-        burned_in,
+        burned_in: burned_in.clone(),
         rounded,
         bypass: bypass_note.map(|n| BypassNote {
             frames: copying.as_ref().map_or(0, bypass::Copying::copied),
             ..n
         }),
+    }];
+    for (i, (f, t)) in facts.into_iter().zip(more).enumerate() {
+        let rounded = t.settings.video.as_ref().and_then(|v| {
+            v.rounded(timeline)
+                .or_else(|| rounded_by_encoder(t.part, v.drawn_size(timeline), &f.name))
+        });
+        let hears = f.audio_encoder.is_some();
+        reports.push(Report {
+            output: t.settings.first_file(t.output, t.numbering.first),
+            frames: plan.frames,
+            samples: if hears { plan.samples() } else { 0 },
+            gpu_frames,
+            gpu_decoded,
+            through_memory: more_memory.get(i).cloned().flatten(),
+            tried: f.tried,
+            sources: sources.clone(),
+            passes: Some(f.passes.count()),
+            video_encoder: Some(f.name),
+            audio_encoder: f.audio_encoder,
+            seconds,
+            loudness: normalized.filter(|_| hears),
+            color: None,
+            metadata: None,
+            copies: Default::default(),
+            subtitle_streams: f.subtitle_streams,
+            burned_in: burned_in.clone(),
+            rounded,
+            bypass: None,
+        });
+    }
+    Ok(reports)
+}
+
+struct Target<'a> {
+    settings: &'a ExportSettings,
+    part: &'a Path,
+    output: &'a Path,
+    numbering: Numbering,
+}
+
+fn none_opened(mut failed: Vec<(Option<String>, Error)>) -> Error {
+    if failed.len() == 1 {
+        return failed.remove(0).1;
+    }
+    let why: Vec<String> = failed
+        .iter()
+        .map(|(name, e)| tried(name.as_deref(), e).text())
+        .collect();
+    Error::Invalid(format!("no video encoder would open: {}", why.join("; ")))
+}
+
+fn about(path: &Path, e: Error) -> Error {
+    let at = |m: String| format!("{}: {m}", path.display());
+    match e {
+        Error::Invalid(m) => Error::Invalid(at(m)),
+        Error::Missing(m) => Error::Missing(at(m)),
+        Error::Ffmpeg { context, source } => Error::Ffmpeg {
+            context: at(context),
+            source,
+        },
+        Error::Io(e) => Error::Invalid(at(e.to_string())),
+    }
+}
+
+fn open_audio(
+    spec: AudioEncoder,
+    octx: &mut format::context::Output,
+    global_header: bool,
+    stream: usize,
+    rate: u32,
+) -> Result<AudioOut> {
+    let codec = encoder::find_by_name(&spec.name)
+        .ok_or_else(|| Error::Invalid(format!("no {}", spec.name)))?;
+    let mut ctx = ffmpeg::codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .audio()
+        .ctx(|| format!("creating {}", spec.name))?;
+    ctx.set_rate(spec.rate as i32);
+    ctx.set_channel_layout(audio::channel_layout(spec.channels));
+    ctx.set_format(spec.sample);
+    ctx.set_time_base(ffmpeg::Rational(1, spec.rate as i32));
+    if let Some(b) = spec.bitrate {
+        ctx.set_bit_rate(b as usize);
+    }
+    if spec.name == "pcm_s24le" || spec.name == "flac" {
+        unsafe { (*ctx.as_mut_ptr()).bits_per_raw_sample = 24 };
+    }
+    if spec.name == "opus" {
+        unsafe {
+            (*ctx.as_mut_ptr()).strict_std_compliance = ffmpeg::ffi::FF_COMPLIANCE_EXPERIMENTAL
+        };
+    }
+    if global_header {
+        ctx.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
+    }
+    let encoder = ctx
+        .open_as(codec)
+        .ctx(|| format!("opening {} with {} channels", spec.name, spec.channels))?;
+    let mut ost = octx
+        .add_stream(codec)
+        .ctx(|| "adding audio stream".into())?;
+    ost.set_parameters(&encoder);
+    ost.set_time_base(ffmpeg::Rational(1, spec.rate as i32));
+    let frame_size = match encoder.frame_size() {
+        0 => 1024,
+        n => n as usize,
+    };
+    Ok(AudioOut {
+        encoder,
+        spec,
+        stream,
+        stream_tb: ffmpeg::Rational(1, rate as i32),
+        frame_size,
+        fifo: Vec::new(),
+        sent: 0,
     })
+}
+
+fn write_header(octx: &mut format::context::Output, settings: &ExportSettings) -> Result<()> {
+    let mut opts = ffmpeg::Dictionary::new();
+    if matches!(settings.container.muxer(), "mp4" | "mov" | "ipod") {
+        opts.set("movflags", "+faststart");
+        if settings
+            .video
+            .as_ref()
+            .is_some_and(|v| v.hdr_metadata.dolby_vision())
+        {
+            opts.set("strict", "unofficial");
+        }
+    }
+    octx.write_header_with(opts)
+        .ctx(|| "writing header".into())?;
+    Ok(())
+}
+
+struct MoreMade {
+    writer: Writer,
+    facts: MoreFacts,
+}
+
+struct MoreFacts {
+    name: String,
+    passes: encode::Passes,
+    tried: Vec<Tried>,
+    subtitle_streams: Vec<StreamNote>,
+    audio_encoder: Option<String>,
+}
+
+fn open_more(
+    plan: &RenderPlan,
+    t: &Target,
+    available: &Availability,
+    decoder: Option<&crate::hw::GpuDecoder>,
+    subs: &Subtitles,
+    drawn: (u32, u32),
+) -> Result<(MoreMade, Feed, video::MoreOut)> {
+    let fps = ffmpeg_rate(plan.fps);
+    let times = (fps.invert(), Some(fps));
+    let v = (t.settings.video.as_ref())
+        .ok_or_else(|| Error::Invalid("a more output needs video".into()))?;
+    let mut octx = format::output_as(t.part, t.settings.container.muxer())
+        .ctx(|| format!("creating {}", t.output.display()))?;
+    let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
+    let (w, h) = v.written_size((plan.width, plan.height));
+    let only = encode::Pass::Only;
+    let mut failed: Vec<(Option<String>, Error)> = Vec::new();
+    let mut opened = None;
+    for candidate in encode::video_encoders(v, available) {
+        let enc = match candidate {
+            Ok(enc) if enc.passes.runs() == 2 => {
+                let e = Error::Invalid("a more output runs in one pass".into());
+                failed.push((Some(enc.name.clone()), e));
+                continue;
+            }
+            Ok(enc) => enc,
+            Err(e) => {
+                failed.push((None, e));
+                continue;
+            }
+        };
+        if let Some((device, frames)) = gpu_output(&enc, w, h)
+            && let Ok(o) = encode::open_video(
+                &enc,
+                w,
+                h,
+                times,
+                global_header,
+                Some(frames.as_ptr()),
+                None,
+                only,
+            )
+        {
+            opened = Some((enc, o, Some((device, frames))));
+            break;
+        }
+        let shared = decoder.filter(|d| encode::shares(enc.kind, enc.device.as_deref(), d));
+        match encode::open_video(&enc, w, h, times, global_header, None, shared, only) {
+            Ok(o) => {
+                opened = Some((enc, o, None));
+                break;
+            }
+            Err(e) => failed.push((Some(enc.name.clone()), e)),
+        }
+    }
+    let Some((enc, (encoder, vaapi), gpu)) = opened else {
+        return Err(none_opened(failed));
+    };
+    let tried_encoders = failed
+        .iter()
+        .map(|(name, e)| tried(name.as_deref(), e))
+        .collect();
+    let id = encoder.id();
+    let handoff = video::Handoff::of(enc.kind, gpu, vaapi.as_ref())?;
+    let mut ost = octx
+        .add_stream(encoder::find_by_name(&enc.name))
+        .ctx(|| "adding video stream".into())?;
+    ost.set_parameters(&encoder);
+    ost.set_time_base(fps.invert());
+    ost.set_avg_frame_rate(fps);
+    let pixel = match handoff {
+        Some(video::Handoff::Cuda(..)) => gpu_pixel(&enc),
+        _ => enc.pixel,
+    };
+    let hdr10plus = (enc.dynamic.hdr10plus
+        && matches!(id, ffmpeg::codec::Id::HEVC | ffmpeg::codec::Id::AV1))
+    .then(|| (id, std::collections::HashMap::new()));
+    let feed = Feed {
+        vaapi,
+        metadata: enc.metadata,
+        hdr10plus: hdr10plus.is_some(),
+    };
+    let out = video::MoreOut {
+        pixel,
+        target: enc.hdr,
+        written: ((w, h) != drawn).then_some((w, h)),
+        alpha: v.alpha.then_some(v.alpha_mode),
+        handoff,
+        dynamic: enc.dynamic,
+    };
+    let files = match t.settings.container.image_sequence() {
+        true => Some(FrameFiles::new(
+            t.settings,
+            t.output,
+            t.numbering,
+            plan.fps,
+            (w, h),
+        )?),
+        false => None,
+    };
+    let mut video_out = VideoOut {
+        encoder: Some(encoder),
+        cut: None,
+        last_dts: None,
+        enc_tb: fps.invert(),
+        stream_tb: fps.invert(),
+        name: enc.name.clone(),
+        metadata: enc.metadata,
+        hdr10plus,
+        codec: id,
+        kind: enc.kind,
+        files,
+    };
+    let mut audio = match &t.settings.audio {
+        Some(a) => {
+            let spec = encode::resolve_audio(a, plan.sample_rate, plan.channels)?;
+            Some(open_audio(
+                spec,
+                &mut octx,
+                global_header,
+                1,
+                plan.sample_rate,
+            )?)
+        }
+        None => None,
+    };
+    let mut subtitles = Vec::new();
+    let mut subtitle_streams = Vec::new();
+    for track in &subs.streams {
+        let (out, note) = SubtitleOut::add(&mut octx, track, plan.fps)?;
+        subtitles.push(out);
+        subtitle_streams.push(note);
+    }
+    write_header(&mut octx, t.settings)?;
+    video_out.stream_tb = octx.stream(0).expect("video stream").time_base();
+    if let Some(a) = audio.as_mut() {
+        a.stream_tb = octx.stream(a.stream).expect("audio stream").time_base();
+    }
+    for s in &mut subtitles {
+        s.opened(&octx);
+    }
+    let facts = MoreFacts {
+        name: enc.name,
+        passes: enc.passes,
+        tried: tried_encoders,
+        subtitle_streams,
+        audio_encoder: audio.as_ref().map(|a| a.spec.name.clone()),
+    };
+    let writer = Writer {
+        octx,
+        video: Some(video_out),
+        audio,
+        subtitles,
+    };
+    Ok((MoreMade { writer, facts }, feed, out))
 }
 
 fn plan_copies(
@@ -1879,9 +2271,5 @@ fn rounded_by_encoder(part: &Path, asked: (u32, u32), encoder: &str) -> Option<R
     }
     let v = crate::probe::probe(part, None).ok()?.video?;
     let written = (v.width, v.height);
-    (written != asked).then(|| {
-        let r = Rounded::by_encoder(asked, written, encoder);
-        crate::progress::note(Note::Rounded(r.clone()));
-        r
-    })
+    (written != asked).then(|| Rounded::by_encoder(asked, written, encoder))
 }

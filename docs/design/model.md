@@ -572,24 +572,29 @@ Writing:
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
   - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../spec.md#12-decisions-on-gaps-and-contradictions))
-  - `position_keys` with `position_y`, `zoom_keys` and `rotation_keys`: `Keyframe`s on source frames, beside the plain values
+  - `position_keys` with `position_y`, `zoom_keys` with `zoom_y`, and `rotation_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
+  - `keys`: one `EffectKeys` for each value of the shadow and the background with keyframes (`Title::KEYED`)
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - The `Picture` of the clip places the picture that the text is drawn on ([pictures](#pictures)). Its opacity is the opacity of the title.
 - `KeyParam::on_text` tells which values of the `keyframes` requests are those of the text: its position, zoom and rotation, and those of each line. The other values are those of the clip's `Picture`, as on every clip.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
+- `Title` is `Keyed` for the values of its shadow and background, as an `Effect` is. `Title::steps_of` names the values that stay whole. `Title::stepped_at` rounds them for `Keyed::adopted` and for a new key.
+  - `KeyParam::style_value` names these values in the `keyframes` requests. `ops::keyframes` works on them through `Keyed`.
+  - Why: then the keyframe work of the effects serves them, and their numbers stay those of `TitleStyle`.
 - The upper line of a lower third can go apart from its lower line:
   - `Title::upper` holds a `TitleLine`: the anchor, place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
   - Without `Title::upper`, the two lines go together. The point of the upper line is then `Title::UPPER_DROP` below the point of the lower line (`Title::upper_with_lower`).
   - `Title::swap_lines` swaps the values of the two lines, and `Title::upper_view` gives a title with the upper line's values in the fields of the title. Thus `ops::keyframes`, `ops::titles` and `otio::titles` have one code for the two lines.
   - `Title::part_lines` puts the values of `Title::upper_with_lower` into a `TitleLine`. `ops::titles::on_line` parts and swaps the lines around one edit.
   - `Title::each_line` makes one change on each line.
-- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, its anchor, the edge of its text, its zoom and its rotation:
+- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, its anchor, the edge of its text, its zoom across and down, and its rotation:
   - A Text title or a scroll is one `TitlePart::Whole`.
   - A lower third is a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background. Each line has its own point, as in the file.
   - `Title::block_text` gives the text of a block.
-- A title's zoom is one number.
+- A title's zoom has an X and a Y, as the zoom of a `Picture`: `zoom`, `zoom_keys` and `zoom_y`. `Title::scale` gives both.
+- `zoom_link` is the Zoom link of the title, and of each `TitleLine`. It is a stored switch, because the link stays on when Zoom X and Zoom Y are different.
 - A handle of a title's position key is a point in the picture, not frames and a value. Thus it is not a `Handle` of the `Keyframe`:
   - `Title::place_at` gives the point on the path. It uses the same `cubic` as the other curves, at one speed along the length.
   - `Title::as_picture` leaves the handles out. `Title::take_picture` keeps the handles of the keys that stay.
@@ -749,7 +754,7 @@ Writing:
   - Why: the names in the request are then those of the model. Each name has one field, and thus one text in the schema and in `--help`.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
 - The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
-  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.
+  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect`, a `Node` and a `Title`: read, write, sample, split, hold, scale, retime and retarget.
   - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
   - The functions of `Picture` that work on keyframes do not change the keys of the nodes. Why: the keys are on frames of the file, and a trim or a speed change keeps those frames.
 - `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.
@@ -807,6 +812,7 @@ Writing:
 
 - A track can carry a `TrackEqualizer`. It holds `on`, the `EqType`, six `EqBand` values as a clip equalizer has, and the slopes of the pass filters.
 - `track.set` takes a `TrackEqualizerSet`. Its fields replace their own (`equalizer::track::patched`).
+- A Q goes to a whole step, and the band keeps the Q of that step (`equalizer::track::stepped`). `patched` and the Equalizer window both use it.
 - `equalizer::track::problem` is the check that `validate::violations` and the import of an OTIO file share.
 - An OTIO file carries the `TrackEqualizer` in the `vidcut` metadata of its track.
 - [export](export.md#sound) tells how it plays.
@@ -1036,11 +1042,17 @@ Requests:
   - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
   - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
   - A set file holds one table, `keys`, in the form of `Preferences.keys`.
+  - A set file also holds `base`, the built-in set that it changes (`KeySet::base`). The file leaves it out for vidcut's own set.
+    - `keys.save` gives the new set the base of the set in its `from`. An import gives the base of the set that the file names.
   - `keys.export` and `keys.import` use the key file of other editors (`key_file`). `key_file::text` writes it, and `key_file::parse` reads it.
+    - `key_file::text` names the base, and writes only the commands whose keys differ from the base. Why: the other editor then keeps the keys of that base for the commands that vidcut does not have.
     - `key_file` has a table of the commands of the other editor and the action of each. An action with two commands splits its keys by the default keys of each command.
     - An action that has no command is in a comment line of vidcut. Why: the other editor skips comments, and vidcut keeps all keys of its own files.
-    - `key_file::parse` starts from the set that the file names, applies the listed commands, and keeps only the changes from the table. Thus the free-key rule of the set applies.
+    - `key_file::parse` starts from the set that the file names, applies the listed commands, and keeps only the changes from the table.
+    - An action with a command and no line keeps the keys of that set, also a key that a line gives to another action. Then the set lists both actions, and `Bindings::conflicts` gives the key.
+    - The actions without a command follow the free-key rule of the set. Why: the other editor does not know them, as a later version of vidcut adds actions.
     - A file that names no set starts with no key for each command. Thus an export of a built-in preset gives the same keys as the built-in set.
+    - The Avid Media Composer file is the one exception. It gives V to two commands, and the import keeps V on both.
   - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
   - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
   - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.

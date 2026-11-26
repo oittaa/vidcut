@@ -53,5 +53,6 @@ In order of value:
   - Run: the Keyframe button of Film Grain in the Inspector of the Cut page, with Freeze on. Also the grain of a frozen frame before the first Freeze keyframe.
 - **Dynamic Zoom at other times.** vidcut keeps the two boxes at the ends of the clip.
   - Run: import a file with the two keys at other times, and look for a control that moves them.
-- **The shadow and the background of a title.** Resolve's Inspector keys the Drop Shadow and the Background values of a title ([§8.14](../spec.md#814-titles-pp-762764-11761178)).
-  - Run: key each value, render and export OTIO.
+- **The shadow and the background of a title between keys.** Run T14 read the Inspector, not a render, between two whole values ([§8.14](../spec.md#814-titles-pp-762764-11761178)).
+  - vidcut draws the nearest whole number. Each eased gap of T14 was 24 frames, so the handle can be a third of the gap or 8 frames.
+  - Run: key the Outline Width from 4 to 12 over 48 frames, and render frame 4. Then ease a key on a gap of 36 frames, and read `OutBez`.

@@ -5,8 +5,8 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::looks::{Look, LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow, TitleShape,
-    TitleStyle,
+    EffectValue, Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow,
+    TitleShape, TitleStyle,
 };
 
 use super::export::Ask;
@@ -401,6 +401,8 @@ pub(super) struct TextFields {
     frame: Option<[f64; 2]>,
 }
 
+pub(super) type KeyRow<'a> = &'a mut dyn FnMut(&mut egui::Ui, EffectValue);
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct ShapeFields {
     width: String,
@@ -478,7 +480,7 @@ impl ShapeFields {
             outline_width: kept_whole(
                 &self.outline_width,
                 stored.and_then(|s| s.outline_width),
-                Title::BOX_MOST_OUTLINE,
+                (0, Title::BOX_MOST_OUTLINE),
                 "box outline width",
             )?,
         }))
@@ -501,7 +503,7 @@ fn kept_within(
 fn kept_whole(
     shown: &str,
     stored: Option<u32>,
-    most: u32,
+    (least, most): (u32, u32),
     what: &str,
 ) -> Result<Option<u32>, String> {
     let t = shown.trim().trim_end_matches('%').trim();
@@ -516,7 +518,9 @@ fn kept_whole(
         .ok()
         .filter(|n| n.is_finite())
         .ok_or_else(|| format!("{what} is a whole number, such as 5"))?;
-    Ok(Some(n.trunc().clamp(0.0, f64::from(most)) as u32))
+    Ok(Some(
+        n.trunc().clamp(f64::from(least), f64::from(most)) as u32
+    ))
 }
 
 fn usual_font() -> &'static str {
@@ -634,7 +638,20 @@ impl TextFields {
 
     pub(super) fn whole_opacity(&self, stored: Option<f64>) -> Result<Option<f64>, String> {
         let shown = stored.map(|o| (o * 100.0).round() as u32);
-        Ok(kept_whole(&self.opacity, shown, 100, "opacity")?.map(|p| f64::from(p) / 100.0))
+        Ok(kept_whole(&self.opacity, shown, (0, 100), "opacity")?.map(|p| f64::from(p) / 100.0))
+    }
+
+    pub(super) fn whole_shadow(
+        &self,
+        stored: Option<&TitleShadow>,
+    ) -> Result<[Option<f64>; 2], String> {
+        let opacity = stored
+            .and_then(|h| h.opacity)
+            .map(|o| (o * 100.0).round() as u32);
+        let blur = stored.and_then(|h| h.blur).map(|b| b.round() as u32);
+        let opacity = kept_whole(&self.shadow_opacity, opacity, (0, 100), "shadow opacity")?;
+        let blur = kept_whole(&self.shadow_blur, blur, (1, 100), "shadow blur")?;
+        Ok([opacity.map(|p| f64::from(p) / 100.0), blur.map(f64::from)])
     }
 
     pub(super) fn refilled(&self, stored: &Parts) -> Self {
@@ -670,10 +687,16 @@ impl TextFields {
         families: &[String],
         usual: &Usual,
         spaced: Option<(&mut String, &mut String)>,
-        shaped: Option<&mut ShapeFields>,
+        titled: Option<(&mut ShapeFields, KeyRow<'_>)>,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
+        let (shaped, mut keyed) = titled.unzip();
+        let mut keys = |ui: &mut egui::Ui, v: EffectValue| {
+            if let Some(k) = keyed.as_mut() {
+                k(ui, v);
+            }
+        };
         let mut row = |ui: &mut egui::Ui, on: bool, label: &str, text: &mut String, hint: &str| {
             ui.add_enabled(on, egui::Label::new(label));
             let r = ui.add_enabled(
@@ -731,18 +754,23 @@ impl TextFields {
             .inner;
         ui.end_row();
         changed |= row(ui, on, "Opacity", &mut self.opacity, usual.opacity);
+        keys(ui, EffectValue::BackgroundOpacity);
         ui.end_row();
         if let Some(s) = shaped {
             let corner = plain(Some(Title::BOX_CORNER));
             changed |= row(ui, on, "Box Width", &mut s.width, "Fits Text");
+            keys(ui, EffectValue::BackgroundWidth);
             ui.end_row();
             changed |= row(ui, on, "Box Height", &mut s.height, "Fits Text");
+            keys(ui, EffectValue::BackgroundHeight);
             ui.end_row();
             changed |= row(ui, on, "Box Center X", &mut s.across, "0");
+            keys(ui, EffectValue::BackgroundCenter);
             ui.end_row();
             changed |= row(ui, on, "Box Center Y", &mut s.down, "0");
             ui.end_row();
             changed |= row(ui, on, "Box Corner Radius", &mut s.corner, &corner);
+            keys(ui, EffectValue::BackgroundCornerRadius);
             ui.end_row();
             changed |= row(ui, on, "Box Outline", &mut s.outline, "#000000");
             changed |= ui
@@ -750,6 +778,7 @@ impl TextFields {
                 .inner;
             ui.end_row();
             changed |= row(ui, on, "Box Outline Width", &mut s.outline_width, "0");
+            keys(ui, EffectValue::BackgroundOutlineWidth);
             ui.end_row();
         }
         if usual.switches {
@@ -768,6 +797,7 @@ impl TextFields {
             &mut self.shadow_opacity,
             &shadow_opacity,
         );
+        keys(ui, EffectValue::ShadowOpacity);
         ui.end_row();
         changed |= row(
             ui,
@@ -776,10 +806,12 @@ impl TextFields {
             &mut self.shadow_across,
             &shadow_across,
         );
+        keys(ui, EffectValue::ShadowOffset);
         ui.end_row();
         changed |= row(ui, on, "Shadow down", &mut self.shadow_down, &shadow_down);
         ui.end_row();
         changed |= row(ui, on, "Shadow blur", &mut self.shadow_blur, &shadow_blur);
+        keys(ui, EffectValue::ShadowBlur);
         ui.end_row();
         (changed, enter)
     }

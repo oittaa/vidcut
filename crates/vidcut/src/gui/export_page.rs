@@ -6,7 +6,7 @@ use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{RangeEnd, TimeSpec};
 
 use super::export::{
-    self, Ask, Picked, SavePreset, Tab, Update, audio_tab, file_tab, plan_and_command,
+    self, Ask, Picked, SavePreset, Tab, Update, audio_tab, file_tab, more_tab, plan_and_command,
     subtitle_settings, video_tab,
 };
 use super::theme::{self, Deco};
@@ -214,6 +214,7 @@ impl Workspace {
             return;
         };
         d.range = self.render_range_spec();
+        d.output_tab = d.output_tab.min(d.more.len());
         if self.queue_rendering() {
             ui.disable();
         }
@@ -241,6 +242,12 @@ impl Workspace {
                 ui.menu_button("⋯", |ui| {
                     if ui.button("Save As New Preset…").clicked() {
                         d.save = Some(SavePreset::new());
+                        ui.close();
+                    }
+                    let video = !d.settings.container.audio_only();
+                    let create = egui::Button::new("Create Additional Video Output");
+                    if ui.add_enabled(video, create).clicked() {
+                        d.add_output();
                         ui.close();
                     }
                     if ui
@@ -320,8 +327,9 @@ impl Workspace {
                                         (false, true) => " (yours)",
                                         (false, false) => "",
                                     };
+                                    let video = d.more.is_empty() || p.settings.video.is_some();
                                     let r = ui
-                                        .add_enabled_ui(p.unavailable.is_none(), |ui| {
+                                        .add_enabled_ui(p.unavailable.is_none() && video, |ui| {
                                             ui.selectable_label(
                                                 p.name == d.preset,
                                                 format!("{}{mark}", p.title),
@@ -370,29 +378,44 @@ impl Workspace {
                             browse = true;
                         }
                     });
-                    super::dialog::row(ui, "Render", |ui| {
+                    if !d.more.is_empty() {
+                        super::dialog::row(ui, "Output", |ui| {
+                            super::dialog::switch(ui, |ui| {
+                                for i in 0..=d.more.len() {
+                                    ui.selectable_value(&mut d.output_tab, i, (i + 1).to_string());
+                                }
+                            })
+                        });
+                    }
+                    if d.output_tab == 0 {
+                        super::dialog::row(ui, "Render", |ui| {
+                            super::dialog::switch(ui, |ui| {
+                                ui.selectable_value(&mut d.per_clip, false, "Single Clip");
+                                ui.selectable_value(&mut d.per_clip, true, "Individual Clips");
+                            })
+                        });
+                    }
+                });
+                ui.add_space(6.0);
+                if d.output_tab > 0 {
+                    more_tab(ui, &mut d, &can);
+                } else {
+                    ui.horizontal(|ui| {
                         super::dialog::switch(ui, |ui| {
-                            ui.selectable_value(&mut d.per_clip, false, "Single Clip");
-                            ui.selectable_value(&mut d.per_clip, true, "Individual Clips");
+                            ui.selectable_value(&mut d.tab, Tab::Video, "Video");
+                            ui.selectable_value(&mut d.tab, Tab::Audio, "Audio");
+                            ui.selectable_value(&mut d.tab, Tab::File, "File");
                         })
                     });
-                });
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    super::dialog::switch(ui, |ui| {
-                        ui.selectable_value(&mut d.tab, Tab::Video, "Video");
-                        ui.selectable_value(&mut d.tab, Tab::Audio, "Audio");
-                        ui.selectable_value(&mut d.tab, Tab::File, "File");
-                    })
-                });
-                ui.add_space(6.0);
-                match d.tab {
-                    Tab::Video => {
-                        video_tab(ui, &mut d, &can, size);
-                        subtitle_settings(ui, &mut d, &tracks);
+                    ui.add_space(6.0);
+                    match d.tab {
+                        Tab::Video => {
+                            video_tab(ui, &mut d, &can, size);
+                            subtitle_settings(ui, &mut d, &tracks);
+                        }
+                        Tab::Audio => audio_tab(ui, &mut d, &can, audio),
+                        Tab::File => file_tab(ui, &mut d),
                     }
-                    Tab::Audio => audio_tab(ui, &mut d, &can, audio),
-                    Tab::File => file_tab(ui, &mut d),
                 }
                 ui.separator();
                 plan_and_command(ui, &mut d, project.as_deref());
@@ -674,6 +697,9 @@ impl Workspace {
         }
         self.queue_prompts(&ctx);
         self.leave_edit_prompt(&ctx);
+        if self.export.duplicate_paths && ask_duplicate_paths(&ctx) {
+            self.export.duplicate_paths = false;
+        }
     }
 
     fn queue_progress(&self) -> Option<(usize, usize, f32)> {
@@ -1035,13 +1061,18 @@ impl Workspace {
             QueueStep::Starting(ask) => match ask.take() {
                 None => Some(QueueStep::Starting(ask)),
                 Some(Err(e)) => Some(QueueStep::Error(e.message)),
-                Some(Ok(r)) => Some(QueueStep::Rendering {
-                    started: (r.result["started"].as_array())
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|s| s["id"].as_str().map(String::from))
-                        .collect(),
-                }),
+                Some(Ok(r)) => {
+                    if let Some(d) = &mut self.export.render {
+                        d.output_tab = 0;
+                    }
+                    Some(QueueStep::Rendering {
+                        started: (r.result["started"].as_array())
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|s| s["id"].as_str().map(String::from))
+                            .collect(),
+                    })
+                }
             },
             QueueStep::Rendering { started } => Some(QueueStep::Rendering { started }),
             QueueStep::Error(e) => Some(QueueStep::Error(e)),
@@ -1127,6 +1158,28 @@ fn ask_update_job(ctx: &egui::Context, name: &str) -> Option<SaveJob> {
         focus_reset(ctx, "render-update-focus");
     }
     answer
+}
+
+fn ask_duplicate_paths(ctx: &egui::Context) -> bool {
+    let mut done = false;
+    let modal = egui::Modal::new(egui::Id::unique("render-duplicate-paths")).show(ctx, |ui| {
+        ui.set_width(super::dialog::WIDTH);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.heading("Duplicate Render Paths");
+        ui.label("Enter unique sub-folder names for each additional output in the render settings");
+        super::dialog::footer(ui, |ui| {
+            let ok = super::dialog::main_button_ui(ui, "OK", true);
+            focus_once(ui.ctx(), "render-duplicate-focus", &ok);
+            done = ok.clicked();
+        });
+    });
+    if escape_cancels(ctx, &modal) {
+        done = true;
+    }
+    if done {
+        focus_reset(ctx, "render-duplicate-focus");
+    }
+    done
 }
 
 fn fps_text(num: i64, den: i64) -> String {

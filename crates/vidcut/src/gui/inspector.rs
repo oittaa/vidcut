@@ -2295,9 +2295,10 @@ fn node_rows(
             let modes = (
                 &ApplyMode::ALL[..],
                 ApplyMode::label as fn(ApplyMode) -> &'static str,
+                ApplyMode::opens_group as fn(ApplyMode) -> bool,
             );
             let mode = (m.mode(), ApplyMode::default());
-            choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
+            grouped_choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
             if m.mode().has_operator() {
                 let ops = (
                     &MergeOperator::ALL[..],
@@ -2317,6 +2318,10 @@ fn node_rows(
                 value(ui, acts, V::BurnIn, "Burn In");
             }
             value(ui, acts, V::Blend, "Blend");
+            if m.mode().has_operator() {
+                let clamp = (slot, "Clamp Coverage", m.clamps(), true);
+                check(ui, clamp, "clamp_coverage", acts);
+            }
             let edges = (
                 &MergeEdges::ALL[..],
                 MergeEdges::label as fn(MergeEdges) -> &'static str,
@@ -2486,9 +2491,10 @@ fn operation_rows(
         let modes = (
             &ApplyMode::ALL[..],
             ApplyMode::label as fn(ApplyMode) -> &'static str,
+            ApplyMode::opens_group as fn(ApplyMode) -> bool,
         );
         let mode = (m.mode(), ApplyMode::default());
-        choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
+        grouped_choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
         if m.mode().has_operator() {
             let ops = (
                 &MergeOperator::ALL[..],
@@ -3805,12 +3811,16 @@ fn pair_row(
 }
 
 fn link_button(ui: &mut egui::Ui, lit: bool, acts: &mut Vec<Act>) {
+    if link_toggle(ui, lit) {
+        acts.push(Act::Link(!lit));
+    }
+}
+
+pub(super) fn link_toggle(ui: &mut egui::Ui, lit: bool) -> bool {
     let icon = if lit { LINK_SIMPLE } else { LINK_SIMPLE_BREAK };
     let b = ui.add(egui::Button::selectable(lit, icon));
     b.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, lit, "Link Zoom"));
-    if b.clicked() {
-        acts.push(Act::Link(!lit));
-    }
+    b.clicked()
 }
 
 fn keyed_look(off: bool) -> Look<'static> {
@@ -4631,9 +4641,21 @@ fn mosaic_folds(
 
 fn choice_row<T: Copy + PartialEq + serde::Serialize>(
     ui: &mut egui::Ui,
+    row: (usize, &str, &str),
+    values: (T, T),
+    (all, text): (&[T], fn(T) -> &'static str),
+    acts: &mut Vec<Act>,
+) {
+    grouped_choice_row(ui, row, values, (all, text, |_| false), acts);
+}
+
+type Grouped<'a, T> = (&'a [T], fn(T) -> &'static str, fn(T) -> bool);
+
+fn grouped_choice_row<T: Copy + PartialEq + serde::Serialize>(
+    ui: &mut egui::Ui,
     (n, name, put): (usize, &str, &str),
     (now, usual): (T, T),
-    (all, text): (&[T], fn(T) -> &'static str),
+    (all, text, opens): Grouped<T>,
     acts: &mut Vec<Act>,
 ) {
     let set = |v: T| {
@@ -4646,6 +4668,9 @@ fn choice_row<T: Copy + PartialEq + serde::Serialize>(
         .selected_text(text(now))
         .show_ui(ui, |ui| {
             for v in all {
+                if opens(*v) {
+                    ui.separator();
+                }
                 if ui.selectable_label(*v == now, text(*v)).clicked() && *v != now {
                     acts.push(set(*v));
                 }

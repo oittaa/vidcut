@@ -7,7 +7,7 @@ use vidcut_core::analysis::{
     AudioLevels, Detections, Look, Loudness, PictureStats, Shake, Shaky, SoundMatch, Tracked,
     VoiceActivity,
 };
-use vidcut_core::auto_color::Balance;
+use vidcut_core::auto_color::AutoResult;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Measured;
 use vidcut_core::editor::GeneratedProxy;
@@ -134,7 +134,7 @@ static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::
 const LOUD_KEPT: usize = 4096;
 static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
 const BALANCES_KEPT: usize = 16;
-static BALANCES: Mutex<Lru<String, Balance, BALANCES_KEPT>> = Mutex::new(Lru::new());
+static BALANCES: Mutex<Lru<(bool, String), AutoResult, BALANCES_KEPT>> = Mutex::new(Lru::new());
 
 fn loud_key(plan: &RenderPlan) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
@@ -413,9 +413,12 @@ impl Env for AvEnv {
         )
     }
 
-    fn auto_balance(&self, plan: &RenderPlan) -> Result<Balance> {
+    fn auto_balance(&self, plan: &RenderPlan, legacy: bool) -> Result<AutoResult> {
         let lock = || BALANCES.lock().unwrap_or_else(PoisonError::into_inner);
-        let key = vidcut_core::fingerprint::digest(&serde_json::to_vec(plan).unwrap_or_default());
+        let key = (
+            legacy,
+            vidcut_core::fingerprint::digest(&serde_json::to_vec(plan).unwrap_or_default()),
+        );
         if let Some(v) = lock().get(&key) {
             return Ok(*v);
         }
@@ -431,12 +434,20 @@ impl Env for AvEnv {
         let decoder = crate::preferences::gpu_decoding().own_decoder();
         let size = (plan.width, plan.height);
         let colors = (plan.colors, None, None);
-        let pixels =
-            vidcut_av::export::still::floats(piece, plan.fps, size, colors, decoder.as_ref())
+        let (w, h, pixels) =
+            vidcut_av::export::still::floats_sized(piece, plan.fps, size, colors, decoder.as_ref())
                 .map_err(av_error)?;
-        let balance = vidcut_core::auto_color::balance(pixels);
-        lock().insert(key, balance);
-        Ok(balance)
+        let result = match legacy {
+            true => AutoResult::Legacy(vidcut_core::auto_color::balance(pixels)),
+            false => {
+                let gpu = crate::preferences::gpu_acceleration();
+                AutoResult::Neural(
+                    vidcut_av::auto_color::balance(w, h, &pixels, gpu).map_err(av_error)?,
+                )
+            }
+        };
+        lock().insert(key, result);
+        Ok(result)
     }
 
     fn voice_isolation(&self, download: bool) -> Result<()> {

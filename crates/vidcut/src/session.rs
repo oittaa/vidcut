@@ -278,10 +278,12 @@ pub fn run_with(
             name,
             overwrite,
             keys,
+            from,
         } => answer(crate::preferences::keys_save(
             name,
             *overwrite,
             keys.as_ref(),
+            from.as_deref(),
             envelope.dry_run,
         )?),
         Request::KeysDelete { name } => {
@@ -595,6 +597,9 @@ pub fn render(
             }
             if let Some(notes) = plan["notes"].as_array_mut() {
                 notes.extend(export::subtitle_notes(&subtitles));
+                if let Err(e) = export::refuse_written_twice(params) {
+                    notes.push(json!({ "code": "written_twice", "message": e.message }));
+                }
             }
             answer(plan)
         }
@@ -693,13 +698,17 @@ pub fn export_media(
     path: &Path,
     params: &vidcut_core::request::ExportParams,
     hooks: &mut Hooks<'_>,
-    started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>) -> Result<()>,
+    started: &mut dyn FnMut(Vec<crate::live::JobOutput>) -> Result<()>,
 ) -> Result<Response> {
     if export::timeline_format(&params.output).is_some() {
         let name = export::timeline_name(p, path);
         let plan = export::timeline(p, &name, params, None, None)?;
         let frames = plan["outputs"][0]["frames"].as_i64().unwrap_or(0);
-        started(vec![(params.output.clone(), frames)])?;
+        started(vec![crate::live::JobOutput {
+            path: params.output.clone(),
+            frames,
+            more: Vec::new(),
+        }])?;
         let clock = std::time::Instant::now();
         let output = params.output.clone();
         let progress = &mut *hooks.progress;
@@ -730,6 +739,7 @@ pub fn export_media(
         r.rev = p.rev;
         return Ok(r);
     }
+    export::refuse_written_twice(params)?;
     let mut prepared = export::prepare(p, params, None, &AvEnv::for_project(path).proxy_dir())?;
     let subtitles = export::subtitles_beside(p, &prepared, params)?;
     export::refuse_existing(&subtitles, params.overwrite)?;
@@ -763,7 +773,7 @@ pub fn export_media(
         }
     }
     export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
-    let available = if export::needs_gpu_info(&prepared.settings) {
+    let available = if export::needs_gpu_info(&prepared) {
         export::availability(false)
     } else {
         Default::default()
@@ -772,7 +782,11 @@ pub fn export_media(
         prepared
             .outputs
             .iter()
-            .map(|o| (o.written(), o.plan.frames))
+            .map(|o| crate::live::JobOutput {
+                path: o.written(),
+                frames: o.plan.frames,
+                more: o.more.iter().map(export::More::written).collect(),
+            })
             .collect(),
     )?;
     let count = prepared.outputs.len();

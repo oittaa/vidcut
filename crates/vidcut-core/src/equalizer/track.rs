@@ -22,8 +22,9 @@ const FIRST_KIND: [EqKind; BANDS] = [
 const BELL_Q: f64 = 16.0 / 15.0;
 const SHELF_Q: f64 = 7.0 / 3.0;
 const SLOPE: u32 = 12;
-const STEP: f64 = 15.0;
-const FIRST_STEP: f64 = 10.0;
+const STEP: f32 = 15.0;
+const LOWEST_STEP: f32 = 15.0;
+const ZERO_STEP: f64 = 10.0;
 const NOTCH_DEPTH: f64 = 20.0;
 const NOTCH_WIDTH: f64 = 30.0;
 const FIRE_SHELF_Q: (f64, f64) = (0.43, 0.004667);
@@ -93,7 +94,12 @@ fn response(kind: EqType) -> Response {
 }
 
 fn step_of(q: f64) -> f64 {
-    STEP * q + FIRST_STEP
+    let above = (q as f32 - *Q.start() as f32) * STEP;
+    f64::from((above + LOWEST_STEP).floor())
+}
+
+pub fn stepped(q: f64) -> f64 {
+    ((step_of(q) - ZERO_STEP) / f64::from(STEP)).min(*Q.end())
 }
 
 fn peak(freq: f64, rate: f64, a: f64, width: f64) -> Biquad {
@@ -240,7 +246,7 @@ pub fn patched(old: Option<&TrackEqualizer>, set: &TrackEqualizerSet) -> Result<
             band.gain = v;
         }
         if let Some(v) = b.q {
-            band.q = v;
+            band.q = stepped(v);
         }
     }
     Ok(eq)

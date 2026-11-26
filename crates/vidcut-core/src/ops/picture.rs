@@ -469,7 +469,7 @@ fn sharpen_checked(s: &Sharpen) -> Result<Sharpen> {
     })
 }
 
-fn keys_checked<T: Keyed>(
+pub(super) fn keys_checked<T: Keyed>(
     e: &T,
     label: &str,
     plain_checked: impl Fn(&T) -> Result<T>,
@@ -818,6 +818,7 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         subtractive_additive: m.subtractive_additive.filter(|v| *v != 1.0),
         alpha_gain: m.alpha_gain.filter(|v| *v != 1.0),
         burn_in: m.burn_in.filter(|v| *v != 0.0),
+        clamp_coverage: m.clamp_coverage.filter(|on| !*on),
         reference_width: m.reference_width.filter(|v| *v != 1.0),
         reference_height: m.reference_height.filter(|v| *v != 1.0),
         foreground_z_offset: m.foreground_z_offset.filter(|v| *v != 0.0),
@@ -1847,13 +1848,13 @@ pub fn point(what: &str, raw: &[f64]) -> Result<Option<[f64; 2]>> {
     }
 }
 
-pub fn zoom(raw: &[f64]) -> Result<[f64; 2]> {
+pub fn zoom(raw: &[f64], what: &str) -> Result<[f64; 2]> {
     match raw {
         [z] => Ok([*z, *z]),
         [x, y] => Ok([*x, *y]),
-        _ => Err(Error::usage(
-            "a picture's zoom is one number for both ways, or two, across and down",
-        )),
+        _ => Err(Error::usage(format!(
+            "a {what}'s zoom is one number for both ways, or two, across and down"
+        ))),
     }
 }
 

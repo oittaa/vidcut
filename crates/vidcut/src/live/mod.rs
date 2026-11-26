@@ -368,7 +368,7 @@ pub(crate) enum Msg {
     },
     JobPlanned {
         id: String,
-        outputs: Vec<(PathBuf, i64)>,
+        outputs: Vec<JobOutput>,
     },
     JobProgress {
         id: String,
@@ -2128,14 +2128,17 @@ impl Live {
             }));
         }
         if let Request::GradeAutoColor { .. } = &envelope.request {
-            let looks = vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead);
+            let use_legacy =
+                crate::preferences::load().is_ok_and(|p| p.color.use_legacy_auto_color);
+            let looks =
+                vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead, use_legacy);
             if looks.is_empty() {
                 return None;
             }
             return Some(plain(move || {
                 use vidcut_core::Env;
-                for plan in &looks {
-                    AvEnv::new().auto_balance(plan)?;
+                for (plan, legacy) in &looks {
+                    AvEnv::new().auto_balance(plan, *legacy)?;
                 }
                 Ok(())
             }));
@@ -2561,7 +2564,7 @@ impl Live {
         }
     }
 
-    fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
+    fn job_planned(&mut self, id: String, outputs: Vec<JobOutput>) {
         if let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
             .find(|j| j.id == id)

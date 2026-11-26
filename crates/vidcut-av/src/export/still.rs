@@ -32,6 +32,16 @@ pub fn floats(
     colors: super::renderer::Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<Vec<[f32; 3]>> {
+    Ok(floats_sized(piece, fps, size, colors, decoder)?.2)
+}
+
+pub fn floats_sized(
+    piece: &VideoPiece,
+    fps: Rational,
+    size: (u32, u32),
+    colors: super::renderer::Finish<'_>,
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<(u32, u32, Vec<[f32; 3]>)> {
     crate::cancel::stop()?;
     crate::init();
     let pixel = format::Pixel::GBRPF32LE;
@@ -52,7 +62,7 @@ pub fn floats(
             out.push([value(2, x, y), value(0, x, y), value(1, x, y)]);
         }
     }
-    Ok(out)
+    Ok((frame.width(), frame.height(), out))
 }
 
 pub fn rgba(

@@ -223,6 +223,44 @@ Notes:
   - The error does not say that the size is the cause. Why: the error code does not tell the cause, and the FFmpeg codec data holds no size limits.
 - [live](live.md#jobs) tells how a job collects the notes.
 
+## Additional outputs
+
+[Spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
+
+- `MoreOutput::path` gives the file: the name of `output` with the extension of its container, in the folder of `output` or in its `folder`.
+- `MoreOutput::settings` makes the `ExportSettings` of an additional output from those of output 1. It is the one place that decides them.
+  - The frame size, the use of proxies, the HDR metadata, the alpha and the frame numbers come from output 1.
+  - The HDR mode comes from output 1 when the codec carries HDR, or when output 1 is SDR. Else it is Auto.
+  - The audio of output 1 goes in when the container takes that codec (`Container::takes_audio`). Else the file has no audio.
+  - The `quality` of output 1 goes in. The encoder of the additional output applies it.
+  - With a `bitrate` on output 1, the quality and the bitrate are not set. Thus the codec gives its default quality.
+  - Why: the measurements show the audio and the quality of output 1 in each output. An output 1 with a bitrate is not measured.
+- `written_twice` finds two outputs with the same path. It compares the paths part by part, in lowercase. Why: Windows and macOS do not see the case of a name, and Windows takes both / and \ between folders.
+  - `refuse_written_twice` refuses them in `render.add` and `render.update` (`queue::existing`), and in `export.start` (`session::export_media`).
+  - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.
+- `prepare` puts the additional outputs in `Output::more`, as `export::More`.
+  - `more_outputs` refuses `per_clip`, `video.bypass_reencode` and two runs of the encoder. Why: these cases are not measured.
+  - `more_refused` holds these rules. The Export page uses it too, and shows its own short text for each `MoreRefused`.
+  - Two runs are two passes (`passes` 2, or a bitrate with no `passes`) with encoder `cpu` and H.264, H.265 or VP9.
+  - With encoder `auto`, `encode` refuses two runs when the chosen encoder makes them. NVENC makes its two passes in one run.
+- `choose_once` and `measure_outputs` choose the colors and the metadata of each additional output, as for output 1.
+- `Output::taken` and `Output::named` check the files of all outputs. Thus "Replace Existing File?", the `existing` of a dry run and `render.start` cover each file.
+
+One render writes all outputs:
+
+- `run_decoding_on` takes the additional outputs as `vidcut_av::export::More`. Each gets its own hidden file (`temp::file`), which is renamed on success.
+- `encode` opens output 1. Then `open_more` opens each additional output: its muxer, its video encoder, its audio encoder, its subtitle streams and its header.
+  - Each has its own hardware frames (`Handoff`). Why: two encoders cannot share one frames pool.
+  - An additional output encodes in one pass. `encode` refuses additional outputs when output 1 encodes two runs.
+- `VideoFrames::also` gives the `MoreOut` of each additional output to the `Drawer`. The picture is drawn once.
+- `Drawer::more_frames` then calls `Screen::encoded_in` once for each additional output, with its pixel format, its HDR target, its written size and its sink.
+  - Each output has its own `Writing`: the alpha layout, the written size, the scaled picture and the `Encoded` buffers.
+  - Why: the buffers of one output are not made again for each frame of another output.
+- `VideoFrames` keeps the dynamic metadata of all outputs. `dress` gives each frame only the HDR10+ and Dolby Vision of its own output.
+- Each output has its own `Writer` on its own `vidcut-encode` thread. The export thread sends each picture to each writer, and the samples to each writer with audio.
+- `encode` returns a `Report` for each file. `export::run` puts them all in the report of the export.
+- The job gives the files of the additional outputs in `JobOutput::more`. The job details show a Writes row for each. The other notes and details are those of output 1.
+
 ## Bypass re-encode
 
 [Spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109) gives the rule. `VideoSettings::bypass_reencode` turns it on.
@@ -518,6 +556,10 @@ Voice Isolation:
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
 - The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
   - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
+  - `Render::more` holds the additional outputs, and `Render::output_tab` the open tab. `more_tab` draws the rows of an additional output.
+  - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
+  - The default type of ProRes, DNxHR, TIFF and OpenEXR comes from `VideoCodec::fixed_profile`, not from the plan. Why: the label stays the same while a plan runs or fails. The encoders use the same default (`VideoSettings::named_profile`).
+  - Before Add or Update Job, `start_render` checks the paths with `written_twice`. Two equal paths show the prompt `ask_duplicate_paths`, and nothing is sent.
   - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
@@ -625,6 +667,11 @@ Cancel:
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - `lay_out` takes a `Typeset`: the text, its layers and its `Rules`. `Rules::Title` gives the size, the line gap, the tracking and the seat of a title. `Rules::Plain` gives the line gap of a subtitle.
   - Why: each kind of text has its own measured rules, and one engine shapes and draws them all.
+  - A block lays out its text at its Zoom Y. A block with another Zoom X is then stretched across about its pivot, by `TitleBlock::stretch`.
+    - `turned` does the stretch and the turn in one step. It maps each pixel of the result back to the drawing.
+    - A stretch below 1 takes the mean of several samples across each pixel. Thus thin strokes do not drop out.
+    - A turned block is first cut to the part that the stretch puts in the frame (`inside`).
+    - Why: a title with equal axes draws as with one zoom.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Typeset`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
     - The `drop` field of `Typeset` brings the top of the box down to where the upper line starts.
@@ -933,15 +980,16 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
-  - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
+- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
+  - `editor::auto_color_looks` makes the `RenderPlan` of one frame and pairs it with the legacy flag (`false` with `tool`, else `ColorPrefs::use_legacy_auto_color`).
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
-  - With `tool`, the corrector is at its usual values in that frame. Thus the analysis reads the picture that comes into it.
-  - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
-  - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
-  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`. With `tool`, it writes the `AutoColor` of the corrector.
-- The Auto Color tool (`Corrector::auto_color`) has its own Lift and Gain.
-  - `ToolGrading` gives their numbers with `wheel`, at Gamma 0. The tool has no Offset and a Lum Mix of 100.
+  - In neural mode, the corrector is at its usual values in that frame. In legacy mode, only its Lift and Gain reset.
+  - `Env::auto_balance` renders that frame in float (`still::floats_sized`). `BALANCES` keeps recent results keyed by mode and plan.
+  - Neural mode runs `auto_color::balance` in `vidcut-av` to give six `exposure` and three `white` values (`AutoResult::Neural`). With `gpu.acceleration` on, it runs in `compute::ops` and a GPU failure returns an error that names `gpu.acceleration`. With it off, the CPU runs the model.
+  - Legacy mode runs `auto_color::balance` in `vidcut-core` to give Lift and Gain (`AutoResult::Legacy`).
+  - `ops::grade::auto_color` writes the `AutoColor` tool in neural mode, or Lift and Gain in legacy mode.
+- The Auto Color tool (`Corrector::auto_color`) holds `exposure` and `white` numbers (`grade_auto`).
+  - `ToolGrading` passes `exposure` and `white_scale` directly to `fs_grade` and `fs_grade_stats`.
   - `fs_grade` applies the tool first, before step 1. `fs_grade_stats` also applies it. Thus the tone stage filters the luma that it changes.
   - A tool that is off keeps its values and does nothing. `Corrector::changes_nothing` does not count it, and the render plan uses that test.
   - `Corrector::is_usual` counts a tool that is off. Thus a keyframe that holds only such a tool keeps it in the project file.
@@ -1161,6 +1209,7 @@ The draw:
   - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`. That picture is register 0.
   - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
   - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
+  - `merge_cover` stops the coverage of Normal and Screen at 1 when `Merging.clamp` is on.
   - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
   - With `Merging.replaces`, the result of `fs_merge` is the foreground that `merge_fore` reads, with no mode.
   - `made_into` draws an `Op::Make`. `fs_background` fills the register with the colors of a `Painting` as they are. The colors are not multiplied by their alpha. Thus a Merge adds them as premultiplied colors ([spec](../spec.md#the-background-tool)). The stops go to the shader in a storage buffer.

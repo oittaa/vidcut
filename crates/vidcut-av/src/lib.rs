@@ -1,6 +1,7 @@
 pub use ffmpeg_next as ffmpeg;
 
 pub mod analysis;
+pub mod auto_color;
 pub mod barcode;
 pub mod beep;
 pub(crate) mod buffers;

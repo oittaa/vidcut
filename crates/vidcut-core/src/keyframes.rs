@@ -1103,6 +1103,7 @@ impl Title {
             !u.position_keys.is_empty() || !u.zoom_keys.is_empty() || !u.rotation_keys.is_empty()
         });
         upper
+            || self.has_keys()
             || PictureValue::ALL
                 .into_iter()
                 .any(|v| !self.keys_of(v).is_empty())
@@ -1200,14 +1201,13 @@ impl Title {
     }
 
     pub fn as_picture(&self) -> Picture {
-        let zoom = self.scale();
         Picture {
             position: Some(self.place()),
             position_keys: self.position_keys.clone(),
             position_y: self.position_y.clone(),
-            zoom: Some([zoom, zoom]),
+            zoom: Some(self.scale()),
             zoom_keys: self.zoom_keys.clone(),
-            zoom_y: self.zoom_keys.iter().map(|k| k.value).collect(),
+            zoom_y: self.zoom_y.clone(),
             rotation: self.rotation,
             rotation_keys: self.rotation_keys.clone(),
             ..Picture::default()
@@ -1221,8 +1221,9 @@ impl Title {
         self.position_y.clone_from(&p.position_y);
         let held = |h: &PositionHandles| p.position_keys.iter().any(|k| k.frame == h.frame);
         self.position_handles.retain(held);
-        self.zoom = Some(p.scale()[0]).filter(|z| *z != 1.0);
+        self.zoom = Some(p.scale()).filter(|z| *z != [1.0, 1.0]);
         self.zoom_keys.clone_from(&p.zoom_keys);
+        self.zoom_y.clone_from(&p.zoom_y);
         self.rotation = p.rotation;
         self.rotation_keys.clone_from(&p.rotation_keys);
     }
@@ -1231,7 +1232,7 @@ impl Title {
         if !self.is_keyed() {
             return self.clone();
         }
-        let mut t = self.clone();
+        let mut t = Keyed::sampled(self, frame);
         t.each_line(|line| {
             let mut picture = line.as_picture().sampled(frame);
             if let Some(at) = line.on_path(frame) {

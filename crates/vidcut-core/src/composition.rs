@@ -383,6 +383,10 @@ impl Merge {
         self.burn_in.unwrap_or(0.0)
     }
 
+    pub fn clamps(&self) -> bool {
+        self.clamp_coverage.unwrap_or(true)
+    }
+
     pub fn z_offset(&self) -> f64 {
         self.foreground_z_offset.unwrap_or(0.0)
     }
@@ -1142,6 +1146,18 @@ impl ApplyMode {
 
     pub fn has_operator(self) -> bool {
         matches!(self, ApplyMode::Normal | ApplyMode::Screen)
+    }
+
+    pub fn opens_group(self) -> bool {
+        matches!(
+            self,
+            ApplyMode::Darken
+                | ApplyMode::Lighten
+                | ApplyMode::Overlay
+                | ApplyMode::Difference
+                | ApplyMode::Hue
+                | ApplyMode::Hypotenuse
+        )
     }
 }
 

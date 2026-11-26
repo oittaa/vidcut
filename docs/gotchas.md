@@ -700,6 +700,11 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
   - The renders use the typed value. A render with a typed Soft 20 at Width 10 matches Soft 20 within 2e-4.
   - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+- **Two eases do not stay on the Center and the Offset of a title.**
+  - The Center of the Background and the Offset of the Drop Shadow are `POINTF` values.
+  - On them, Ease Out on the first key and Ease In on the last key do not stay set.
+  - On the other values of these two groups, the same items write `OutBez` and `InBez`.
+  - vidcut does not copy this fault. Each ease stays on Center and Offset too ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 
 - **Close Up leaves the Out frame out.**
   - With a timeline Out at frame 200 alone, the copy ends before frame 200.
@@ -769,6 +774,13 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The ramp of Inside and Outside fits best at (x − 0.5, y − 0.5).
   - Thus the edge and the ramp are half a pixel apart in x, and one pixel apart in y.
   - vidcut reads both at (x, y + 0.5) (`CURVE_SAMPLE`, `window_curve`).
+- **Step 21 of a track equalizer Q shows 0.8.**
+  - The Equalizer window of a track shows the step n of a Q as (n − 10) / 15, with one decimal.
+  - Step 21 is 0.733, but the window shows 0.8. Earth, Ice and Fire show the same.
+  - Steps 36 and 51 are 1.733 and 2.733, and the window shows 1.7 and 2.7.
+  - A typed 0.7 goes to step 21. Thus the window shows 0.8 after a typed 0.7.
+  - In renders, the Earth bell of step 21 has the width 21/30 = 0.7.
+  - vidcut does not copy this fault. Step 21 shows 0.7 ([spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
 - **A circle window that Resolve makes with Toggle Display Mode on has no radius.**
   - With the viewer hidden, the grade of a new circle has no base radius.
   - The circle then renders about 30 pixels wide. The viewer draws the usual oval.
@@ -813,6 +825,15 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
   - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+
+## Resolve's key files
+
+These facts come from measurements in Resolve Studio 21.2 on Windows.
+
+- **An exported key file has CR CR LF line ends.**
+  - Export Preset wrote three lines, with CR CR LF after the first two. The last line has no line end.
+  - Resolve reads key files with LF line ends.
+  - vidcut writes LF line ends. It reads each line without its CR characters ([spec §11](spec.md#11-keyboard-shortcuts)).
 
 ## Resolve's Fusion page
 

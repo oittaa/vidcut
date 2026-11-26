@@ -306,7 +306,7 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 
 ## GPU layers
 
-`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model and the model of people and vehicles ([analysis](analysis.md#subjects)).
+`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model, the model of people and vehicles ([analysis](analysis.md#subjects)) and Auto Color (`auto_color::balance`, [export](export.md)).
 
 - A `View` is a part of a buffer of 32-bit floats. The channels of a pixel are next to each other.
 - `Ops::conv` is a convolution as a matrix multiply. The bias, a residual and the activation are in the same pass.

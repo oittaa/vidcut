@@ -1608,6 +1608,7 @@ struct Merging {
     y: vec4<f32>,
     how: vec4<f32>,
     slide: vec4<f32>,
+    more: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> merging: Merging;
@@ -1784,6 +1785,10 @@ fn merge_rgb(y: vec3<f32>) -> vec3<f32> {
     );
 }
 
+fn merge_cover(c: vec4<f32>) -> vec4<f32> {
+    return select(c, min(c, vec4<f32>(1.0)), merging.more.x > 0.5);
+}
+
 fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let mode = i32(merging.how.x);
     let op = i32(merging.how.y);
@@ -1792,15 +1797,15 @@ fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let keep = select(1.0, 1.0 - merging.slide.z, mode == 0 && op == 0);
     switch mode {
         case 0: {
-            return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, op);
+            let cover = array(merge_cover(vec4<f32>(fa)), merge_cover(vec4<f32>(ba)));
+            return merge_operated(fore, back, cover, keep, op);
         }
         case 2: {
             return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, 0);
         }
         case 1: {
-            let cf = vec4<f32>(min(fore.rgb, vec3<f32>(1.0)), fa);
-            let cb = vec4<f32>(min(back.rgb, vec3<f32>(1.0)), ba);
-            return merge_operated(fore, back, array(cf, cb), keep, op);
+            let cover = array(merge_cover(fore), merge_cover(back));
+            return merge_operated(fore, back, cover, keep, op);
         }
         case 25: {
             return sqrt(fore * fore + back * back);
@@ -2226,8 +2231,8 @@ struct Grading {
     tone: vec4<f32>,
     curve: array<vec4<f32>, 256>,
     auto_how: vec4<f32>,
-    auto_lift: vec4<f32>,
-    auto_weight: vec4<f32>,
+    auto_tone: vec4<f32>,
+    auto_white: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> grading: Grading;
@@ -2235,8 +2240,8 @@ struct Grading {
 struct Guide {
     eps: vec4<f32>,
     auto_how: vec4<f32>,
-    auto_lift: vec4<f32>,
-    auto_weight: vec4<f32>,
+    auto_tone: vec4<f32>,
+    auto_white: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> guiding: Guide;
@@ -2247,19 +2252,34 @@ const TONE_TOP: f32 = 2.0;
 
 const TONE_GAIN: f32 = 4.0;
 
-fn grade_auto(c: vec3<f32>, how: vec4<f32>, l: vec4<f32>, w: vec4<f32>) -> vec3<f32> {
+fn grade_spow(v: f32, p: f32) -> f32 {
+    if v == 0.0 {
+        return 0.0;
+    }
+    return sign(v) * pow(abs(v), p);
+}
+
+fn grade_auto(c: vec3<f32>, how: vec4<f32>, tone: vec4<f32>, white: vec4<f32>) -> vec3<f32> {
     if how.x < 0.5 {
         return c;
     }
-    let f = w.xyz * (l.xyz + (1.0 - l.xyz) * c);
-    let y = w.w * (l.w + (1.0 - l.w) * dot(c, BT709));
-    return f + (y - dot(f, BT709));
+    var v = how.y * c + how.z;
+    v = vec3<f32>(
+        grade_spow(v.x, how.w),
+        grade_spow(v.y, how.w),
+        grade_spow(v.z, how.w),
+    );
+    let y = dot(v, vec3<f32>(0.299, 0.587, 0.114));
+    v = vec3<f32>(y) + (1.0 + tone.x) * (v - vec3<f32>(y));
+    v = tone.y * v;
+    v = tone.z + (1.0 - tone.z) * v;
+    return v * white.xyz;
 }
 
 fn grade_luma(at: vec2<i32>) -> f32 {
     let c = effect_taken(textureLoad(blur_source, at, 0), 0.0).rgb;
     let g = guiding;
-    return dot(grade_auto(c, g.auto_how, g.auto_lift, g.auto_weight), BT709);
+    return dot(grade_auto(c, g.auto_how, g.auto_tone, g.auto_white), BT709);
 }
 
 @fragment
@@ -2335,10 +2355,6 @@ fn grade_tone(px: vec2<i32>, c: vec3<f32>) -> vec3<f32> {
 const BOOST_POWER: f32 = -0.6;
 
 const LOG_KNOTS: i32 = 24;
-
-fn grade_spow(v: f32, p: f32) -> f32 {
-    return sign(v) * pow(abs(v), p);
-}
 
 fn grade_hermite(a: vec3<f32>, b: vec3<f32>, x: f32) -> f32 {
     let h = b.x - a.x;
@@ -2426,7 +2442,7 @@ fn grade_boost(v: vec3<f32>) -> vec3<f32> {
 fn fs_grade(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let was = effect_taken(textureLoad(blur_start, px, 0), 0.0);
-    let into = grade_auto(was.rgb, grading.auto_how, grading.auto_lift, grading.auto_weight);
+    let into = grade_auto(was.rgb, grading.auto_how, grading.auto_tone, grading.auto_white);
     let x = grade_boost(grade_tone(px, into));
     let v = vec3<f32>(dot(grading.temp[0].xyz, x), dot(grading.temp[1].xyz, x), dot(grading.temp[2].xyz, x));
     let l = grading.lift;

@@ -4,6 +4,7 @@ use vidcut_core::lru::Lru;
 use vidcut_core::model::{Clip, Project, Title, TitleKind, TrackKind};
 use vidcut_core::render::Run;
 
+use super::placing::Side;
 use super::timeline::tools::landing;
 use super::title_text::{Laid, Typing};
 use super::workspace::Workspace;
@@ -18,6 +19,7 @@ const KEPT: usize = 8;
 enum Hold {
     Move,
     Zoom,
+    Stretch(Side),
     Turn,
 }
 
@@ -75,12 +77,25 @@ impl Shown {
         self.within(p, LIFT + GRAB * 1.6)
     }
 
+    fn side(&self, side: Side) -> Pos2 {
+        let (a, b) = match side {
+            Side::Left => (0, 3),
+            Side::Right => (1, 2),
+            Side::Top => (0, 1),
+            Side::Bottom => (3, 2),
+        };
+        self.corners[a].lerp(self.corners[b], 0.5)
+    }
+
     fn grip(&self, p: Pos2) -> Option<Hold> {
         let handles = self.title.kind != TitleKind::Scroll;
-        if handles && self.turn_at.distance(p) <= GRAB * 1.6 {
+        let near = |q: Pos2| q.distance(p) <= GRAB * 1.6;
+        if handles && near(self.turn_at) {
             Some(Hold::Turn)
-        } else if handles && self.corners.iter().any(|c| c.distance(p) <= GRAB * 1.6) {
+        } else if handles && self.corners.into_iter().any(near) {
             Some(Hold::Zoom)
+        } else if handles && let Some(s) = Side::ALL.into_iter().find(|s| near(self.side(*s))) {
+            Some(Hold::Stretch(s))
         } else {
             self.inside(p).then_some(Hold::Move)
         }
@@ -90,6 +105,14 @@ impl Shown {
         match hold {
             Hold::Move => CursorIcon::Move,
             Hold::Turn => CursorIcon::PointingHand,
+            Hold::Stretch(side) => {
+                let n = axis(&self.title, side);
+                if n.x.abs() >= n.y.abs() {
+                    CursorIcon::ResizeHorizontal
+                } else {
+                    CursorIcon::ResizeVertical
+                }
+            }
             Hold::Zoom => {
                 let d = p - self.corners[0].lerp(self.corners[2], 0.5);
                 if d.x * d.y > 0.0 {
@@ -126,6 +149,15 @@ fn rounded(v: f64, places: i32) -> f64 {
 
 fn angle_of(v: Vec2) -> f32 {
     (-v.y).atan2(v.x)
+}
+
+fn axis(t: &Title, side: Side) -> Vec2 {
+    let (sin, cos) = (t.turn().to_radians() as f32).sin_cos();
+    if side.across() {
+        vec2(cos, -sin)
+    } else {
+        vec2(sin, cos)
+    }
 }
 
 impl Grab {
@@ -229,18 +261,18 @@ impl Workspace {
             else {
                 continue;
             };
-            let z = title.scale() as f32;
+            let [zx, zy] = title.scale().map(|v| v as f32);
             let [qx, qy] = base.place().map(|v| v as f32);
             let [px, py] = title.place();
             let (rx, ry) = (px as f32, py as f32);
             let (fw, fh) = (w as f32, h as f32);
-            let x = rx * fw + (bx - qx * fw) * z;
+            let x = rx * fw + (bx - qx * fw) * zx;
             let y = if title.moves() {
                 by
             } else {
-                ry * fh + (by - qy * fh) * z
+                ry * fh + (by - qy * fh) * zy
             };
-            let (bw, bh) = (bw * z, bh * z);
+            let (bw, bh) = (bw * zx, bh * zy);
             let run = title.moves().then_some(Run {
                 at: at - c.start,
                 of: c.duration,
@@ -330,8 +362,21 @@ impl Workspace {
                 let pivot = self.pivot_on(t0, picture);
                 let (d0, d1) = (held.from.distance(pivot), to.distance(pivot));
                 if d0 > 1.0 {
-                    let z = t0.scale() * f64::from(d1 / d0);
-                    next.now.zoom = Some(rounded(z.clamp(0.25, 4.0), 3));
+                    let [zx, zy] = t0.scale();
+                    let (least, most) = Title::ZOOM;
+                    let low = (least / zx).max(least / zy);
+                    let high = (most / zx).min(most / zy);
+                    let k = f64::from(d1 / d0).clamp(low, high);
+                    next.now.zoom = Some([rounded(zx * k, 3), rounded(zy * k, 3)]);
+                }
+            }
+            Hold::Stretch(side) => {
+                let pivot = self.pivot_on(t0, picture);
+                let held_at = (held.from - pivot, to - pivot);
+                let (least, most) = Title::ZOOM;
+                let at = |z: f64, k: f64| rounded((z * k).clamp(least, most), 3);
+                if let Some(z) = side.stretched(axis(t0, side), held_at, t0.scale(), at) {
+                    next.now.zoom = Some(z);
                 }
             }
             Hold::Turn => {
@@ -432,9 +477,9 @@ impl Workspace {
         }
         let typing = self.title_typing(ui, &shapes, picture);
         if let Some(h) = &self.timeline.title_grab.held
-            && h.hold == Hold::Zoom
+            && matches!(h.hold, Hold::Zoom | Hold::Stretch(_))
         {
-            let zoom = format!("{:.0}%", h.now.scale() * 100.0);
+            let zoom = super::placing::zoom_text(h.now.scale());
             egui::Tooltip::always_open(
                 ui.ctx().clone(),
                 ui.layer_id(),
@@ -537,7 +582,7 @@ impl Workspace {
             }
         };
         let (w, h) = (size.0 as f32, size.1 as f32);
-        let tall = (s.title.text_fraction(size.1) * s.title.scale()) as f32 * picture.height();
+        let tall = (s.title.text_fraction(size.1) * s.title.scale()[1]) as f32 * picture.height();
         let home = [
             s.pivot - vec2(0.0, tall / 2.0),
             s.pivot + vec2(0.0, tall / 2.0),
@@ -623,11 +668,10 @@ impl Workspace {
                         accent,
                     );
                 }
-                let top_middle = Pos2::new(
-                    (s.corners[0].x + s.corners[1].x) / 2.0,
-                    (s.corners[0].y + s.corners[1].y) / 2.0,
-                );
-                painter.line_segment([top_middle, s.turn_at], stroke);
+                for side in Side::ALL {
+                    painter.circle_filled(s.side(side), GRAB * 0.7, accent);
+                }
+                painter.line_segment([s.side(Side::Top), s.turn_at], stroke);
                 painter.circle_filled(s.turn_at, GRAB * 0.9, accent);
             }
         }
