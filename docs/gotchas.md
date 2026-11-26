@@ -827,6 +827,7 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 - **The crop of a file with a rotation cuts other sides of the picture.**
   - The files have a rotation of 90, 180 or 270 in the `tkhd` matrix. The timeline shows them upright.
+  - One 1280 x 720 file was measured at each angle.
   - At 90, Crop Left cuts the right side, and Crop Right cuts the left side. Crop Top and Crop Bottom cut their own sides.
   - At 270, Crop Top cuts the bottom, and Crop Bottom cuts the top. Crop Left and Crop Right cut their own sides.
   - At 180, each crop cuts the opposite side.

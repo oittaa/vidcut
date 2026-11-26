@@ -2329,18 +2329,29 @@ pub fn rounded_place(
     ]
 }
 
+fn shown_size((w, h): (u32, u32), sar: (i32, i32), rotation: u16) -> (f64, f64) {
+    let across = match sar.0 > 0 && sar.1 > 0 {
+        true => f64::from(sar.0) / f64::from(sar.1),
+        false => 1.0,
+    };
+    let (dw, dh) = (f64::from(w) * across, f64::from(h));
+    match rotation % 180 == 90 {
+        true => (dh, dw),
+        false => (dw, dh),
+    }
+}
+
 pub fn fitted(
-    (w, h): (u32, u32),
+    size: (u32, u32),
     sar: (i32, i32),
     rotation: u16,
     (out_w, out_h): (u32, u32),
 ) -> [f64; 4] {
-    let square = sar.0 == sar.1 || sar.0 <= 0 || sar.1 <= 0;
-    if !square || rotation != 0 || w == 0 || h == 0 {
-        return rounded_place((w, h), sar, rotation, (out_w, out_h));
-    }
-    let (pw, ph) = (f64::from(w), f64::from(h));
+    let (pw, ph) = shown_size(size, sar, rotation);
     let (fw, fh) = (f64::from(out_w), f64::from(out_h));
+    if pw <= 0.0 || ph <= 0.0 {
+        return [0.0, 0.0, fw, fh];
+    }
     let (sw, sh) = if pw * fh >= ph * fw {
         (fw, fw * ph / pw)
     } else {
@@ -2357,16 +2368,7 @@ pub fn mapped(
     (out_w, out_h): (u32, u32),
 ) -> [f64; 4] {
     let fit = fitted((w, h), sar, rotation, (out_w, out_h));
-    let across = match sar.0 > 0 && sar.1 > 0 {
-        true => f64::from(sar.0) / f64::from(sar.1),
-        false => 1.0,
-    };
-    let (dw, dh) = (f64::from(w) * across, f64::from(h));
-    let (sw, sh) = if rotation % 180 == 90 {
-        (dh, dw)
-    } else {
-        (dw, dh)
-    };
+    let (sw, sh) = shown_size((w, h), sar, rotation);
     let (fw, fh) = (f64::from(out_w), f64::from(out_h));
     if sw <= 0.0 || sh <= 0.0 {
         return fit;
@@ -2547,6 +2549,18 @@ mod tests {
             adjustment: false,
         };
         assert_eq!(detail(&[placed]), 0.4);
+    }
+
+    #[test]
+    fn pixels_of_9_to_8_fit_the_display_size_with_no_rounding() {
+        let place = fitted((1000, 800), (9, 8), 0, (1280, 720));
+        assert_eq!(place, [133.75, 0.0, 1012.5, 720.0]);
+    }
+
+    #[test]
+    fn a_file_turned_90_fits_its_upright_size_with_no_rounding() {
+        let place = fitted((1280, 720), (1, 1), 90, (1920, 1080));
+        assert_eq!(place, [656.25, 0.0, 607.5, 1080.0]);
     }
 
     #[test]

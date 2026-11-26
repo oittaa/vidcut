@@ -269,6 +269,8 @@ The audio device:
 - The drawing:
   - It fits the picture and turns it upright.
     - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../spec.md#the-fit-to-the-timeline)).
+      - It fits the display size of the upright picture. Thus the pixel aspect ratio and the rotation of a file go into the one rule.
+      - The handles of the viewer use the same place.
     - `fs` covers a pixel at the edge of that place in part.
     - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
