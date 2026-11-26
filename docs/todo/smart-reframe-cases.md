@@ -8,6 +8,7 @@ The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-95
 
 - **Files for each case:** the press conference (59.94 fps, 3840×2160), the film (24 fps, 1280×534), and at least two more files. Use one file at 25 or 30 fps and one with two or more people. Use one 4:3 file.
 - **Frame shapes:** 9:16 and 16:9 timelines, and one 1:1 timeline.
+- **Prepared:** section SR2 of `fixtures/program/NOTES.md` in the test data gives the files, the timelines and the steps. The scripts are `sr2_render.py`, `sr2_make.py` and `sr2_script.py`. The batch takes about 60 minutes of Resolve.
 
 ## One clip or one file
 
