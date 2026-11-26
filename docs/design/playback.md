@@ -276,6 +276,8 @@ The audio device:
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
       - It does not open it for a crop on any side, or for a Crop Softness below 0. Then each bar shows at its exact width.
     - The Inspector counts a crop in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
+    - `Placing::new` turns a picture with pixels that are not square as the measured turn of those pixels ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
+      - It takes the shape of one source pixel from the `Extent` and the fitted size. Thus the viewer and an export turn the picture in the same way.
     - `Placing::new` counts a crop in whole pixels of the frame that it draws (`Fit::pixels`, [spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.

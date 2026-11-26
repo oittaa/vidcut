@@ -1717,9 +1717,11 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let [cx, cy, cw, ch] = extent.within(fitted);
     let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
+    let (gw, gh) = extent.grid;
+    let ((sin, cos), [across, down]) = turn_of(p.turn(), (cw * fw * gh) / (ch * fh * gw));
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
+    let (zx, zy) = (zx * across, zy * down);
     let [ax, ay] = p.pivot();
-    let (sin, cos) = p.turn().to_radians().sin_cos();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
     let [qx, qy] = anchored(p, frame, fitted);
@@ -1731,7 +1733,6 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
-    let (gw, gh) = extent.grid;
     let crop = [
         cx + whole_pixels(c0.left, gw) * cw,
         cy + whole_pixels(c0.top, gh) * ch,
@@ -1779,6 +1780,17 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
             }
         },
     }
+}
+
+fn turn_of(degrees: f64, aspect: f64) -> ((f64, f64), [f64; 2]) {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let p = match aspect.is_finite() && aspect > 0.0 {
+        true => aspect,
+        false => 1.0,
+    };
+    let (x, y) = (cos, sin / p);
+    let across = x.hypot(y);
+    ((y / across, x / across), [across, cos.hypot(p * sin)])
 }
 
 fn leaned(
@@ -2638,6 +2650,45 @@ mod tests {
     fn a_file_turned_90_fits_its_upright_size_with_no_rounding() {
         let place = fitted((1280, 720), (1, 1), 90, (1920, 1080));
         assert_eq!(place, [656.25, 0.0, 607.5, 1080.0]);
+    }
+
+    fn wide_pixels_turned(rotation: f64, pixels: (f64, f64)) -> Level {
+        let placed = Placed {
+            clip: "c1".into(),
+            picture: Picture {
+                rotation: Some(rotation),
+                ..Picture::default()
+            },
+            mapped: None,
+            run: None,
+            source: 0,
+            frame: 0,
+            start: 0,
+            ready: true,
+            ramp: None,
+            crossing: false,
+            moving: None,
+            clock: Default::default(),
+            adjustment: false,
+        };
+        let frame = (1280.0, 720.0);
+        Placing::new(&[placed], frame, [0.0, 0.0, 1280.0, 720.0], pixels).level
+    }
+
+    #[test]
+    fn pixels_of_2_to_1_turned_90_turn_as_square_source_pixels() {
+        let level = wide_pixels_turned(90.0, (640.0, 720.0));
+        let at = |uv| level.forward(uv).map(|v| (v * 1e6).round() / 1e6);
+        assert_eq!(
+            (at([1.0, 0.5]), at([0.5, 0.0])),
+            ([640.0, 40.0], [-80.0, 360.0])
+        );
+    }
+
+    #[test]
+    fn pixels_of_4_to_3_keep_the_limit_at_rotation_0_0235() {
+        let level = wide_pixels_turned(0.0235, (960.0, 720.0));
+        assert_eq!(level.edge, [-1.0, -1.0, 2.0, 2.0]);
     }
 
     #[test]

@@ -7466,8 +7466,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - In its own axes, it scales by √(cos²θ + sin²θ / p²) across and by √(cos²θ + p² sin²θ) down. It stays rectangular.
       - The marks fit this within 0.4 px over about 1000 px. At Rotation 2, the edge slopes are tan 2° / p.
       - Thus a small Rotation on these files leaves corner gaps of W / 2 × θ / p and H / 2 × θ / p, with θ in radians.
-      - vidcut turns the shown picture by θ, with no change of shape ([todo](todo/picture-fit.md)).
+      - vidcut turns the picture in this way. p is the shape of one source pixel in the frame, width over height.
       - Not measured: Zoom, Pitch and Yaw with a Rotation on these files, and a file with pixels that are not square and a rotation.
+      - Not measured: an anchor point away from the middle and a flip on these files, and a Rotation with the Stretch scaling on any file.
+      - vidcut applies the Zoom and the scale of the turn in the picture's own axes, before the turn, about the anchor point.
+      - With the Stretch scaling, vidcut takes p from the stretched source pixel. Thus a square pixel that Stretch makes wider turns as a wide pixel.
     - The crop cuts the source picture, and what is left stays where it was.
     - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
       - The number of pixels that a side loses is its crop in source pixels, rounded down.
@@ -8520,3 +8523,4 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - It uses the same rule on the corners of a leaned picture, with the gaps of the projective lean ([todo](todo/picture-fit.md)).
   - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
   - It does not use the limit in the fit for an encoder.
+  - On pixels that are not square, a Rotation leaves the gaps of the turn of those pixels. Thus the limit acts at W / 2 × θ / p under 0.2, as measured.
