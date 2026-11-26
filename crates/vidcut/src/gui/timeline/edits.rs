@@ -1,7 +1,6 @@
 use serde_json::{Value, json};
 use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge};
-use vidcut_core::otio::tied;
 
 use super::{EditSel, Side, audio_edge, audio_edit_at, ripples};
 
@@ -104,7 +103,7 @@ impl Plan {
                     "a roll and a trim cannot move together",
                 ));
             }
-            let part_of = |x: &Cut| tied(p, x.clip()).iter().any(|o| o == c.clip());
+            let part_of = |x: &Cut| p.tied(x.clip()).iter().any(|o| o == c.clip());
             if cuts.iter().any(|(_, x, _)| part_of(x)) {
                 continue;
             }

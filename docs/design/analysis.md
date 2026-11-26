@@ -59,7 +59,8 @@ flowchart TD
   - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::Person` is a person. `Subject::Vehicle` is a vehicle.
   - `Subject::ALL` lists the subjects.
   - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.
-  - A `FindModel` picks the model of the subject. `FindModel::Fast` is the small model of each subject, on the CPU.
+  - A `FindModel` picks the model of the subject. `FindModel::Fast` is the small model of each subject.
+    - The fast models of faces and text run on the CPU. The model of people and vehicles runs on the GPU when `gpu.acceleration` is on (`subjects::uses_gpu`).
     - `FindModel::Slow` is a second model of `Subject::Face`, on the GPU (`retinaface`). The other subjects have no second model, and `FindModel::finds` refuses them.
   - `Subject::Person` and `Subject::Vehicle` have one model and one model file. Each keeps its own classes of that model (`yolox::PEOPLE`, `yolox::VEHICLES`).
 - `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
@@ -72,7 +73,10 @@ flowchart TD
     - With a given size, the picture is never larger than its source.
     - `AvEnv` puts a given size in the name of the cached find.
   - A model on the CPU runs with tract, one picture on each thread of the pool (`subjects::each`).
-  - The model on the GPU takes several pictures in one pass, and one readback gives the outputs of all passes (`retinaface::Model::find`).
+  - A model on the GPU takes several pictures in one pass, and one readback gives the outputs of all passes (`net::Runner::find`).
+    - `subjects::net` holds what the GPU models share: the weights reader (`Onnx`), the batch size (`net::batch`), the upload of the picture planes and the readback.
+    - Each model gives its layers and its work buffers (`net::Net`).
+    - A pass takes up to `MOST` pictures, with up to `PIXELS` pixels in all.
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
     - `Looking::picture` measures it on the small picture, with `small_luma`, `mafd` and `scene_score` of `analyze.scenes`. Thus the file is not decoded a second time.
@@ -85,7 +89,7 @@ flowchart TD
   - The score of a box is the root of the product of the two scores.
   - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays (`subjects::apart`).
 - `retinaface` finds faces with RetinaFace and a ResNet-34, in the shaders of vidcut on the shared off-screen device ([GPU](gpu.md#gpu-layers)):
-  - The weights come from the ONNX file of the maker. `Onnx` reads the weights of each convolution by the name of its node, with the proto parser of tract.
+  - The weights come from the ONNX file of the maker. `retinaface` reads the weights of each convolution by the name of its node (`Onnx::parts`), with the proto parser of tract.
     - The file has each batch norm in the weights of its convolution.
     - The file runs the first convolution of a context module twice on the same input. `retinaface` runs it once.
   - The picture goes in as blue, green and red values from 0 to 255, each less its mean (`MEAN`). Its right side and its bottom are padded to a multiple of 32.
@@ -96,7 +100,6 @@ flowchart TD
   - Of the boxes that overlap more than `retinaface::SAME`, the box with the highest score stays (`subjects::apart`).
   - Layers 2 to 4, the merge layers and the context modules use `ops::layer`. The first layer uses `Ops::conv`.
     - Why: with 64 channels, Winograd measured slower than the direct convolution.
-  - A pass takes up to `MOST` pictures, with up to `PIXELS` pixels in all.
   - The work buffers have one size for each find (`plan`). The picture planes, the first feature map and the middle of each residual block share one buffer (`Work::wide`).
     - Why: no two of them are in use at the same time. A buffer that a layer reads is never the buffer that it writes.
   - Two more buffers hold the transformed pictures of Winograd (`Work::scratch`).
@@ -111,6 +114,20 @@ flowchart TD
     - The code of the maker does this for each class alone. `yolox` does it for the classes of the subject together.
     - Why: a `Found` holds no class. Two boxes of two classes on one vehicle must not make two paths.
   - The maker scales the picture with a bilinear filter. `subjects::small` scales with the mean of an area, as for the other subjects.
+  - With `gpu.acceleration` on, the model runs in the shaders of vidcut on the shared off-screen device (`yolox::gpu`, [GPU](gpu.md#gpu-layers)). With it off, tract runs the model on the CPU.
+    - Why: the GPU takes the work off the CPU ([AGENTS.md](../../AGENTS.md), rule 9).
+    - With `gpu.acceleration` on and no usable GPU, the find fails, and the error names `gpu.acceleration`. Why: vidcut does not move the work to the CPU without the user.
+    - The CPU makes the planes of `colors` and sends them. Three copies on the GPU interleave the colors (`net::plane`).
+    - `Convs` reads the weights of the 83 convolutions in the order of the file. Each convolution must have the shape that YOLOX-S gives it, and the file must have no more convolutions.
+    - The file has each batch norm in the weights of its convolution.
+    - The Focus layer takes the four pixels of each 2×2 square as 12 channels. The next convolution is 3×3. Together they are one 6×6 convolution with a stride of 2 on the picture (`Convs::focus`).
+      - Why: no layer moves the pixels, and the sums are the same.
+    - A concatenation is two parts of the channels of one buffer. Each layer writes its part.
+      - A layer never reads its own buffer. Thus the 1×1 convolution before the pools of the last stage writes a buffer of its own. A copy puts it into its part (`Ops::copy`).
+    - The pools keep the largest value in windows of 5, 9 and 13 pixels (`Ops::pool`). The feature pyramid enlarges with `Ops::nearest`.
+    - The last convolutions of each stride write the rows of the output, as the file gives them. A row holds the box, the object score and the class scores. The object and class scores take their sigmoid in the same pass.
+    - The CPU and the GPU decode the rows with the same code (`yolox::boxes`).
+    - The 3×3 convolutions with a stride of 1 use `ops::layer`. The others use `Ops::conv`.
 - `ppocr` finds text with the PP-OCRv5 mobile detection model, by the rules of the config of that model:
   - The picture goes in as blue, green and red values, each less its mean and divided by its spread (`MEAN`, `SPREAD`).
   - The model gives one map of the picture. A value tells how sure the model is that the pixel is in the middle part of a line of text.
@@ -162,14 +179,15 @@ flowchart TD
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
   - Each model names its own rules (`yunet::name`, `retinaface::name`, `ppocr::name`, `yolox::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
   - `yolox::name` also holds the classes of the subject.
-- With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
+- With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames and the time. It also gives the time in the model and the device of the model.
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model files are `catalog::YUNET_ONNX`, `catalog::RETINAFACE_ONNX`, `catalog::PPOCR_DET_ONNX` and `catalog::YOLOX_ONNX`. `subjects::get_ready` fetches the file of the subject and its model when the request has `download`.
 - `models.check` finds the subject and the model of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
+  - It loads the model as a find does, with the GPU setting of the preferences. Its `loaded` is `vidcut` for a model in the GPU layers of vidcut, and `tract` for a model in tract.
 
 ## Saliency
 
-- `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
 - It reads the frames as `subjects::find` does. `subjects::looked` decodes, seeks and measures the scene scores and the `SEED` pictures for both.
   - The `Looker` trait is the part that is different. `Looking` finds boxes. `Seeing` makes saliency maps.
 - The model is UNISAL (`unisal`), with its weights for DHF1K, on the GPU (`compute::ops`).
@@ -296,7 +314,7 @@ flowchart TD
 
 ## Smart Reframe
 
-- `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
 - `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
   - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
     - It also gives the zoom, the anchor point, the rotation, the box of the Dynamic Zoom (`DynamicZoom::at`) and the position of each frame.
@@ -323,6 +341,57 @@ flowchart TD
     - The pixels are those of a frame 1080 pixels on its short side. Why: Resolve gives the same keyframes in 1080×1920 and in 2160×3840.
 - `ops::picture::reframed` puts the keyframes in `Picture.position_keys` and `Picture.position_y`.
 - In a GUI, `Live::measuring` measures first, as a job of kind `reframe`. Headless, `work_first` measures on `vidcut-subjects`.
+
+## Subject masks
+
+The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297)) has three parts:
+
+- The project keeps the clicks, Invert Mask and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
+- `vidcut_core::masks` keeps the maps. Each map holds the logits of one subject on one frame.
+- The key stage scales each map to the frame on the GPU, and cuts it at 0.
+
+**A request.** `grade.mask.click`, `grade.mask.set` and `grade.mask.clear` go through `editor::mask_edit`:
+
+- `ops::grade_masks` changes the clicks. `clicked` chooses the subject of a new click with `subject_at`, which reads the maps of its frame.
+- `editor::mask_maps` makes the needs of the subjects that the request changed (`MaskNeed`).
+  - `mask_plan` gives the picture that comes into the corrector: the plan of `solo_plan`, with the input of the node as the output of the grade.
+  - The plan leaves out the Magic Mask of the node itself. Thus a click does not change the picture that the next click reads.
+  - The name of a map is a digest of the model, the plan and the clicks of its subject (`masks::name`).
+  - A need lists only the names that the store does not have.
+- `editor::mask_made` runs `Env::subject_masks` for each need and puts the maps into the store.
+- In a GUI, `Live::measuring` makes the maps first (`editor::mask_looks`). The edit then finds them in the store.
+
+**The model.** `AvEnv::subject_masks` renders the frame of the plan in float with `floats_sized`. Then `mask::find` in vidcut-av runs SAM 2.1:
+
+- `net::Net` runs the image encoder, the prompt encoder and the mask decoder in vidcut's own GPU kernels (`compute`).
+  - `weights::Torch` reads Meta's checkpoint. `mask::kernels` adds windowed attention, the window partition and the scale to the input square.
+- The input is the picture clamped to 0..1, scaled to the square with the bicubic filter of `bicubic::taps`, and normalized.
+  - Meta's video code rounds the scaled picture to 8 bits. vidcut keeps it in float ([AGENTS.md](../../AGENTS.md), rule 1).
+- One encode serves all the subjects of the frame. Each subject gets one decode with its clicks.
+- The choice of the output is the choice of SAM 2.1 (`chosen`):
+  - With one click, the output with the best predicted overlap.
+  - With more clicks, the first output when it is stable, else the best one.
+  - With a negative object score, no mask.
+- `mask::NET` keeps the loaded model for the next frame.
+- The model needs a GPU. It runs on the GPU also with `gpu.acceleration` off, as the AI upscalers do. With no GPU, the request fails.
+
+**The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
+
+- `masks::get` reads the memory cache first, then the disk. The memory cache is a `lru::ByBytes` with the limit `MAPS_BYTES`.
+- The disk cache limit can remove a map. Before an export, `editor::mask_remakes` lists the maps that the store does not have. The export makes them again.
+  - It makes one plan for each frame, with all the missing subjects of that frame.
+  - It skips a clip that is off, a frame outside the clip and a node with no input. Such a map does not show.
+  - It also reads each compound clip that the export plays, opened alone in a copy of the project (`ops::compound::open_alone`).
+- A split gives each part all the clicks and maps. A frame outside a part gets no new map (`mask_maps`).
+- `grade_masks::checked` lets a map name be only a digest. Thus a name from a project file stays in the `masks` folder.
+
+**The key.** `Grade::at` keeps only the maps of its frame. `key_steps` adds `KeySource::Mask` after the windows and the qualifier.
+
+- `Pass::Mask` names the maps of the frame (`Masking`). `mask_into` in the screen puts them into one storage buffer.
+- `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above 0.
+- A `Pass::KeyFold` then applies Invert Mask and folds the mask into the key of the corrector.
+
+**Checks.** The scripts and results are in the sam2 folder of the test data. On the first frames of DAVIS 2017 val, vidcut and Meta's network agree on the same input to 0.9999 mean overlap.
 
 ## In a GUI
 
@@ -592,6 +661,7 @@ flowchart TD
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | the boxes of the faces of a range | `analysis` (`AvEnv`) | origin, the model and its sizes, the `Look` |
 | the motion of the camera in a clip (`Shake`) | `analysis` (`AvEnv`) | origin, the digest of the plan, the mode, the frames |
+| the maps of the Magic Mask | `masks` (`masks::put`) | the digest of the model, the plan and the clicks |
 | sound matches of two files | `analysis` (`AvEnv`) | both origins |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
@@ -620,7 +690,7 @@ flowchart TD
 
 `disk_cache` keeps what vidcut can make again under one limit:
 
-- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render-cache`
+- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render-cache`, `masks`
 - the proxies (`.mkv` files) and the render cache in the folder of playback files, when it is in the cache dir (`Policy`)
 
 These stay, and do not count: transcripts (`words` files in `analysis`, `Kind::keeps`), the `.keys` files of the render cache, `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json`.
@@ -683,6 +753,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`
 - `crates/vidcut-av/src/stabilize.rs`, `crates/vidcut-core/src/stabilize.rs`
+- `crates/vidcut-av/src/mask.rs`, `crates/vidcut-av/src/mask/net.rs`, `crates/vidcut-av/src/mask/kernels.rs`, `crates/vidcut-core/src/masks.rs`, `crates/vidcut-core/src/ops/grade_masks.rs`
 - `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-av/src/subjects/retinaface.rs`, `crates/vidcut-av/src/subjects/yolox.rs`, `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/waveform.rs`, `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`, `crates/vidcut/src/paths.rs`, `crates/vidcut/src/preferences.rs`, `crates/vidcut/src/services.rs`

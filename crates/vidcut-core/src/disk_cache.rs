@@ -13,15 +13,17 @@ pub enum Kind {
     Analysis,
     DecoderTests,
     Render,
+    Masks,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [
+    pub const ALL: [Kind; 6] = [
         Kind::Thumbs,
         Kind::Waveforms,
         Kind::Analysis,
         Kind::DecoderTests,
         Kind::Render,
+        Kind::Masks,
     ];
 
     pub fn folder(self) -> &'static str {
@@ -31,6 +33,7 @@ impl Kind {
             Kind::Analysis => "analysis",
             Kind::DecoderTests => "decoder-tests",
             Kind::Render => crate::preferences::RENDER_CACHE_FOLDER,
+            Kind::Masks => "masks",
         }
     }
 

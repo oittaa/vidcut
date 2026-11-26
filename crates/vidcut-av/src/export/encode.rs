@@ -566,7 +566,7 @@ fn videotoolbox_options(
     c: &mut Chosen,
 ) -> Vec<(String, String)> {
     if v.codec == VideoCodec::Prores {
-        return vec![c.profile("profile", v.profile.as_deref().unwrap_or("hq"))];
+        return vec![c.profile("profile", v.named_profile())];
     }
     let mut options = Vec::new();
     match v.bitrate {
@@ -740,7 +740,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             o
         }),
         "prores_ks" | "prores_aw" => {
-            let named = v.profile.as_deref().unwrap_or("hq");
+            let named = v.named_profile();
             c.profile = Some(named.to_string());
             let (profile, pixel) = match named {
                 "proxy" => (0, Pixel::YUV422P10LE),
@@ -755,7 +755,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             (pixel, vec![opt("profile", profile), opt("vendor", "apl0")])
         }
         "dnxhd" => {
-            let p = v.profile.as_deref().unwrap_or("hq");
+            let p = v.named_profile();
             c.profile = Some(p.to_string());
             let pixel = match p {
                 "hqx" => Pixel::YUV422P10LE,
@@ -765,7 +765,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             (pixel, vec![opt("profile", format!("dnxhr_{p}"))])
         }
         "tiff" => {
-            let named = v.profile.as_deref().unwrap_or("rgb16");
+            let named = v.named_profile();
             c.profile = Some(named.to_string());
             let (depth, compression) = named.split_once('_').unwrap_or((named, "raw"));
             let pixel = match (depth, v.alpha) {
@@ -777,7 +777,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             (pixel, vec![opt("compression_algo", compression)])
         }
         "rawvideo" => {
-            c.profile = Some(v.profile.as_deref().unwrap_or("half").to_string());
+            c.profile = Some(v.named_profile().to_string());
             let pixel = match v.alpha {
                 true => Pixel::GBRAPF32LE,
                 false => Pixel::GBRPF32LE,

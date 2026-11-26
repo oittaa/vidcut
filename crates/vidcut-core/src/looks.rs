@@ -74,9 +74,9 @@ pub struct TitleLook {
     /// `[x, y]` as fractions of the picture. Usual: the kind's place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
-    /// From 1/4 to 4. Usual: 1.
+    /// `[x, y]` across and down, each from 1/4 to 4. Usual: `[1, 1]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
     /// Degrees turned counterclockwise. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
@@ -395,7 +395,7 @@ fn reserved(name: &str) -> bool {
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || numbered("COM") || numbered("LPT")
 }
 
-pub fn checked_name(name: &str) -> Result<String> {
+pub fn checked_name(what: &str, name: &str) -> Result<String> {
     let n = name.trim();
     let ok = !n.is_empty()
         && !n.starts_with('.')
@@ -408,7 +408,7 @@ pub fn checked_name(name: &str) -> Result<String> {
         Ok(n.to_string())
     } else {
         Err(Error::usage(format!(
-            "look name {name:?}: without / \\ : * ? \" < > |, \
+            "{what} name {name:?}: without / \\ : * ? \" < > |, \
              not starting or ending with a dot"
         )))
     }
@@ -451,7 +451,9 @@ pub fn read(dir: &Path, kind: LookKind) -> Listing {
             if built_in(kind).iter().any(|b| same(&b.name, &name)) {
                 Err(format!("{name} is a built-in look's name"))
             } else {
-                checked_name(&name).map(|_| styled).map_err(|e| e.message)
+                checked_name("look", &name)
+                    .map(|_| styled)
+                    .map_err(|e| e.message)
             }
         });
         match found {
@@ -530,7 +532,7 @@ pub fn save(
     overwrite: bool,
     dry_run: bool,
 ) -> Result<(Look, PathBuf)> {
-    let name = checked_name(name)?;
+    let name = checked_name("look", name)?;
     let kind = styled.kind();
     if built_in(kind).iter().any(|b| same(&b.name, &name)) {
         return Err(Error::invalid(format!(

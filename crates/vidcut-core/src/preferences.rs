@@ -28,9 +28,15 @@ pub struct Preferences {
     pub editing: Editing,
     pub color: ColorPrefs,
     pub luts: LutPrefs,
-    /// The keys that differ from the defaults, by action. `keys.list` names
-    /// the actions. An action that is not here has its default keys, and an
-    /// empty list leaves an action with no key. `keys.set` and `keys.reset`
+    /// The key set that the keys in force come from (`keys.sets`). It is
+    /// left out while vidcut's own keys are the set. `keys.use` and
+    /// `keys.save` change it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_set: Option<String>,
+    /// The keys in force that differ from vidcut's own keys, by action.
+    /// `keys.list` names the actions. An empty list leaves an action with no
+    /// key. An action that is not here has its default keys, less the keys
+    /// that an action here has. `keys.set`, `keys.reset` and `keys.use`
     /// change them.
     #[schemars(with = "BTreeMap<String, Vec<String>>")]
     pub keys: crate::shortcuts::Custom,
@@ -77,6 +83,10 @@ pub struct ColorPrefs {
     /// The thumbnails keep their picture while the timeline plays, and
     /// show the frame again when it stops. Default off.
     pub disable_thumbnail_refresh: bool,
+    /// Use the earlier Lift and Gain method on the Color page Auto
+    /// Color controls (`A` button, Color > Auto Color and scripts without
+    /// `tool`). Default off.
+    pub use_legacy_auto_color: bool,
 }
 
 impl Default for ColorPrefs {
@@ -87,6 +97,7 @@ impl Default for ColorPrefs {
             switching_clips: SwitchingClips::LastAdjusted,
             show_thumbnails: true,
             disable_thumbnail_refresh: false,
+            use_legacy_auto_color: false,
         }
     }
 }
@@ -122,6 +133,8 @@ pub struct ColorPrefsPatch {
     pub show_thumbnails: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_thumbnail_refresh: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_legacy_auto_color: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -268,7 +281,7 @@ pub struct ViewerPrefs {
 
 /// The scopes that the viewer shows. Each reads the picture of the viewer,
 /// in the timeline color space. A scope that is off does no work.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Scopes {
     /// The luma of each column of the picture.
@@ -277,8 +290,150 @@ pub struct Scopes {
     pub parade: bool,
     /// The hue and the saturation of the picture: Cb across, Cr up.
     pub vectorscope: bool,
+    /// How many pixels have each value, one band for each channel.
+    pub histogram: bool,
+    /// The chromaticity of the picture against the gamut of the timeline.
+    pub chromaticity: bool,
     /// The scale at the left of the Waveform and the Parade.
     pub scale: ScopeScale,
+    /// Video Level Scopes: the Waveform and the Parade show black at code
+    /// 64 and white at code 940 of the 10-bit scale. Off: Data Level
+    /// Scopes, black at 0 and white at 1023. The picture does not change.
+    pub video_levels: bool,
+    /// What the Waveform shows.
+    pub waveform_mode: WaveformMode,
+    /// In RGB mode, the Waveform shows red.
+    pub waveform_red: bool,
+    /// In RGB mode, the Waveform shows green.
+    pub waveform_green: bool,
+    /// In RGB mode, the Waveform shows blue.
+    pub waveform_blue: bool,
+    /// What the Parade shows side by side.
+    pub parade_mode: ParadeMode,
+    /// The Vectorscope shows a line at the skin tone angle.
+    pub skin_tone: bool,
+    /// The bands of the Histogram.
+    pub histogram_mode: HistogramMode,
+    /// The graph of the CIE Chromaticity scope.
+    pub chromaticity_mode: ChromaticityMode,
+}
+
+impl Default for Scopes {
+    fn default() -> Self {
+        Self {
+            waveform: false,
+            parade: false,
+            vectorscope: false,
+            histogram: false,
+            chromaticity: false,
+            scale: ScopeScale::default(),
+            video_levels: false,
+            waveform_mode: WaveformMode::default(),
+            waveform_red: true,
+            waveform_green: true,
+            waveform_blue: true,
+            parade_mode: ParadeMode::default(),
+            skin_tone: false,
+            histogram_mode: HistogramMode::default(),
+            chromaticity_mode: ChromaticityMode::default(),
+        }
+    }
+}
+
+/// What the Waveform shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WaveformMode {
+    /// Luma.
+    Y,
+    /// The two color differences over one another. No color difference is
+    /// at the middle of the scale.
+    Cbcr,
+    /// Red, green and blue over one another, each in its color.
+    #[default]
+    Rgb,
+}
+
+impl WaveformMode {
+    pub const ALL: [Self; 3] = [Self::Y, Self::Cbcr, Self::Rgb];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Y => "Y",
+            Self::Cbcr => "CbCr",
+            Self::Rgb => "RGB",
+        }
+    }
+}
+
+/// The graph of the CIE Chromaticity scope.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChromaticityMode {
+    /// CIE 1931 xy.
+    #[default]
+    Xy,
+    /// CIE 1976 u'v'.
+    Uv,
+}
+
+impl ChromaticityMode {
+    pub const ALL: [Self; 2] = [Self::Xy, Self::Uv];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Xy => "CIE 1931 xy",
+            Self::Uv => "CIE 1976 uv",
+        }
+    }
+}
+
+/// The bands of the Histogram, from top to bottom.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistogramMode {
+    /// Red, green and blue.
+    #[default]
+    Rgb,
+    /// Luma, red, green and blue.
+    Yrgb,
+}
+
+impl HistogramMode {
+    pub const ALL: [Self; 2] = [Self::Rgb, Self::Yrgb];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rgb => "RGB",
+            Self::Yrgb => "YRGB",
+        }
+    }
+}
+
+/// What the Parade shows side by side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ParadeMode {
+    /// Red, green and blue.
+    #[default]
+    Rgb,
+    /// Luma, red, green and blue.
+    Yrgb,
+    /// Luma and the two color differences. No color difference is at the
+    /// middle of the scale.
+    Ycbcr,
+}
+
+impl ParadeMode {
+    pub const ALL: [Self; 3] = [Self::Rgb, Self::Yrgb, Self::Ycbcr];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rgb => "RGB",
+            Self::Yrgb => "YRGB",
+            Self::Ycbcr => "YCbCr",
+        }
+    }
 }
 
 /// The scale of the Waveform and the Parade. Each one spans the full range
@@ -326,16 +481,26 @@ pub enum Scope {
     Waveform,
     Parade,
     Vectorscope,
+    Histogram,
+    Chromaticity,
 }
 
 impl Scope {
-    pub const ALL: [Self; 3] = [Self::Waveform, Self::Parade, Self::Vectorscope];
+    pub const ALL: [Self; 5] = [
+        Self::Waveform,
+        Self::Parade,
+        Self::Vectorscope,
+        Self::Histogram,
+        Self::Chromaticity,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Waveform => "Waveform",
             Self::Parade => "Parade",
             Self::Vectorscope => "Vectorscope",
+            Self::Histogram => "Histogram",
+            Self::Chromaticity => "CIE Chromaticity",
         }
     }
 }
@@ -346,6 +511,8 @@ impl Scopes {
             Scope::Waveform => self.waveform,
             Scope::Parade => self.parade,
             Scope::Vectorscope => self.vectorscope,
+            Scope::Histogram => self.histogram,
+            Scope::Chromaticity => self.chromaticity,
         }
     }
 
@@ -358,7 +525,18 @@ impl Scopes {
             waveform: patch.waveform.unwrap_or(self.waveform),
             parade: patch.parade.unwrap_or(self.parade),
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
+            histogram: patch.histogram.unwrap_or(self.histogram),
+            chromaticity: patch.chromaticity.unwrap_or(self.chromaticity),
             scale: patch.scale.unwrap_or(self.scale),
+            video_levels: patch.video_levels.unwrap_or(self.video_levels),
+            waveform_mode: patch.waveform_mode.unwrap_or(self.waveform_mode),
+            waveform_red: patch.waveform_red.unwrap_or(self.waveform_red),
+            waveform_green: patch.waveform_green.unwrap_or(self.waveform_green),
+            waveform_blue: patch.waveform_blue.unwrap_or(self.waveform_blue),
+            parade_mode: patch.parade_mode.unwrap_or(self.parade_mode),
+            skin_tone: patch.skin_tone.unwrap_or(self.skin_tone),
+            histogram_mode: patch.histogram_mode.unwrap_or(self.histogram_mode),
+            chromaticity_mode: patch.chromaticity_mode.unwrap_or(self.chromaticity_mode),
         }
     }
 }
@@ -375,6 +553,28 @@ pub struct ScopesPatch {
     pub vectorscope: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<ScopeScale>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_levels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_mode: Option<WaveformMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_red: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_green: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_blue: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parade_mode: Option<ParadeMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skin_tone: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub histogram: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub histogram_mode: Option<HistogramMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chromaticity: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chromaticity_mode: Option<ChromaticityMode>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
@@ -698,8 +898,9 @@ pub struct Player {
 #[serde(default, deny_unknown_fields)]
 pub struct Gpu {
     /// Use the GPU to decode, scale and encode: in the preview, exports and
-    /// proxies. Off, all of it runs on the CPU, even when an export names a
-    /// GPU encoder.
+    /// proxies. It also finds people and vehicles, measures the shake and
+    /// transcribes. Off, all of it runs on the CPU, even when an export
+    /// names a GPU encoder.
     pub acceleration: bool,
     /// While `acceleration` is on, decode H.264, HEVC, AV1 and VP9 on the
     /// GPU in the viewer, exports and proxies, and all but H.264 in the
@@ -1218,6 +1419,7 @@ impl Preferences {
             c.show_thumbnails = x.show_thumbnails.unwrap_or(c.show_thumbnails);
             c.disable_thumbnail_refresh =
                 (x.disable_thumbnail_refresh).unwrap_or(c.disable_thumbnail_refresh);
+            c.use_legacy_auto_color = (x.use_legacy_auto_color).unwrap_or(c.use_legacy_auto_color);
         }
         if let Some(folders) = patch.luts.as_ref().and_then(|l| l.folders.as_ref()) {
             p.luts.folders = folders.clone();

@@ -44,6 +44,14 @@ impl Group {
             Group::App => "Project and app",
         }
     }
+
+    pub fn level(self) -> Option<Panel> {
+        match self {
+            Group::Nodes => Some(Panel::Effects),
+            Group::Color => Some(Panel::Color),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,6 +60,33 @@ pub enum Panel {
     Transcription,
     Effects,
     Color,
+}
+
+impl Panel {
+    pub const ALL: [Panel; 4] = [
+        Panel::App,
+        Panel::Transcription,
+        Panel::Effects,
+        Panel::Color,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Panel::App => "app",
+            Panel::Transcription => "transcription",
+            Panel::Effects => "effects",
+            Panel::Color => "color",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Panel::App => "Application",
+            Panel::Transcription => "Transcription",
+            Panel::Effects => "Effects Page",
+            Panel::Color => "Color Page",
+        }
+    }
 }
 
 macro_rules! actions {
@@ -165,6 +200,7 @@ actions! {
     AddLayerNode "add_layer_node",
     AppendNode "append_node",
     AddOutsideNode "add_outside_node",
+    AddSplitterCombiner "add_splitter_combiner",
     AddCircleNode "add_circle_node",
     AddLinearNode "add_linear_node",
     AddPolygonNode "add_polygon_node",
@@ -187,6 +223,7 @@ actions! {
     Undo "undo",
     Redo "redo",
     Import "import",
+    EffectsSearch "effects_search",
     NewBin "new_bin",
     NewTimeline "new_timeline",
     Preferences "preferences",
@@ -217,6 +254,7 @@ impl Action {
             | Action::AddLayerNode
             | Action::AppendNode
             | Action::AddOutsideNode
+            | Action::AddSplitterCombiner
             | Action::AddCircleNode
             | Action::AddLinearNode
             | Action::AddPolygonNode
@@ -243,7 +281,7 @@ impl Action {
             .map_or(self.name(), |s| s.title)
     }
 
-    fn named(name: &str) -> Option<Action> {
+    pub fn named(name: &str) -> Option<Action> {
         Action::ALL.iter().copied().find(|a| a.name() == name)
     }
 
@@ -538,10 +576,59 @@ impl<'de> Deserialize<'de> for Combo {
 pub type Custom = BTreeMap<Action, Vec<Combo>>;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Conflict {
+    pub panel: Panel,
+    pub combo: Combo,
+    pub actions: Vec<Action>,
+}
+
+type Resolved = (
+    BTreeMap<Action, Vec<Combo>>,
+    BTreeMap<(Panel, Combo), Action>,
+);
+
+fn resolve(custom: &Custom) -> Result<Resolved> {
+    let mut keys = BTreeMap::new();
+    let mut owners = BTreeMap::new();
+    for (&action, combos) in custom {
+        for &combo in combos {
+            owners.entry((action.panel(), combo)).or_insert(action);
+        }
+        keys.insert(action, combos.clone());
+    }
+    let listed = owners.clone();
+    for &action in Action::ALL {
+        if custom.contains_key(&action) {
+            continue;
+        }
+        let mut free = Vec::new();
+        for combo in action.default_keys() {
+            let place = (action.panel(), combo);
+            if listed.contains_key(&place) {
+                continue;
+            }
+            if let Some(other) = owners.insert(place, action) {
+                return Err(Error::internal(format!(
+                    "the default keys give {combo} to both {} and {}",
+                    other.name(),
+                    action.name(),
+                )));
+            }
+            free.push(combo);
+        }
+        keys.insert(action, free);
+    }
+    Ok((keys, owners))
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Bindings {
     keys: BTreeMap<Action, Vec<Combo>>,
     owners: BTreeMap<(Panel, Combo), Action>,
     custom: Custom,
+    set_name: Option<String>,
+    set_keys: BTreeMap<Action, Vec<Combo>>,
+    set_custom: Custom,
 }
 
 impl Default for Bindings {
@@ -552,48 +639,93 @@ impl Default for Bindings {
 
 impl Bindings {
     pub fn of(custom: &Custom) -> Result<Self> {
-        let mut keys = BTreeMap::new();
-        let mut owners = BTreeMap::new();
-        for &action in Action::ALL {
-            let combos = match custom.get(&action) {
-                Some(combos) => combos.clone(),
-                None => action.default_keys(),
-            };
-            for &combo in &combos {
-                match owners.insert((action.panel(), combo), action) {
-                    Some(other) if other != action => {
-                        return Err(Error::usage(format!(
-                            "{combo} belongs to both {} and {}: one key has one action",
-                            other.title(),
-                            action.title(),
-                        )));
-                    }
-                    _ => {}
-                }
-            }
-            keys.insert(action, combos);
-        }
+        Self::in_set(None, &Custom::new(), custom)
+    }
+
+    pub fn in_set(set_name: Option<String>, set: &Custom, custom: &Custom) -> Result<Self> {
+        let (keys, owners) = resolve(custom)?;
+        let (set_keys, _) = resolve(set)?;
         Ok(Self {
             keys,
             owners,
             custom: custom.clone(),
+            set_name,
+            set_keys,
+            set_custom: set.clone(),
         })
+    }
+
+    pub fn with(&self, custom: &Custom) -> Result<Self> {
+        Self::in_set(self.set_name.clone(), &self.set_custom, custom)
     }
 
     pub fn keys(&self, action: Action) -> &[Combo] {
         self.keys.get(&action).map_or(&[], Vec::as_slice)
     }
 
+    pub fn set_keys(&self, action: Action) -> &[Combo] {
+        self.set_keys.get(&action).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn set_name(&self) -> Option<&str> {
+        self.set_name.as_deref()
+    }
+
     pub fn owner(&self, panel: Panel, combo: Combo) -> Option<Action> {
         self.owners.get(&(panel, combo)).copied()
     }
 
+    pub fn owners(&self, panel: Panel, combo: Combo) -> Vec<Action> {
+        Action::ALL
+            .iter()
+            .copied()
+            .filter(|&a| a.panel() == panel && self.keys(a).contains(&combo))
+            .collect()
+    }
+
+    pub fn conflicting(&self, action: Action) -> Vec<Combo> {
+        self.keys(action)
+            .iter()
+            .copied()
+            .filter(|&c| self.owners(action.panel(), c).len() > 1)
+            .collect()
+    }
+
+    pub fn conflicts(&self) -> Vec<Conflict> {
+        let mut found: BTreeMap<(Panel, Combo), Vec<Action>> = BTreeMap::new();
+        for (&action, combos) in &self.keys {
+            for &combo in combos {
+                found
+                    .entry((action.panel(), combo))
+                    .or_default()
+                    .push(action);
+            }
+        }
+        found
+            .into_iter()
+            .filter(|(_, actions)| actions.len() > 1)
+            .map(|((panel, combo), actions)| Conflict {
+                panel,
+                combo,
+                actions,
+            })
+            .collect()
+    }
+
     pub fn is_custom(&self, action: Action) -> bool {
-        self.custom.contains_key(&action)
+        self.keys(action) != self.set_keys(action)
     }
 
     pub fn any_custom(&self) -> bool {
-        !self.custom.is_empty()
+        Action::ALL.iter().any(|&a| self.is_custom(a))
+    }
+
+    pub fn changes(&self) -> Custom {
+        Action::ALL
+            .iter()
+            .filter(|&&a| self.keys(a) != a.default_keys() || !self.conflicting(a).is_empty())
+            .map(|&a| (a, self.keys(a).to_vec()))
+            .collect()
     }
 
     pub fn first(&self, action: Action) -> Option<String> {
@@ -608,6 +740,13 @@ impl Bindings {
         match self.first(action) {
             Some(key) => format!("{label}  ({key})"),
             None => label.to_string(),
+        }
+    }
+
+    pub fn combos(&self, s: &Shortcut) -> Vec<Combo> {
+        match s.keys {
+            Keys::Own(action, _) | Keys::Same(action) => self.keys(action).to_vec(),
+            Keys::Hold(..) | Keys::Pointer(_) => Vec::new(),
         }
     }
 
@@ -645,6 +784,9 @@ impl Bindings {
 
     fn refuse_taken(&self, action: Action, combos: &[Combo]) -> Result<()> {
         for &combo in combos {
+            if self.keys(action).contains(&combo) {
+                continue;
+            }
             if let Some(other) = self.owner(action.panel(), combo)
                 && other != action
             {
@@ -668,7 +810,10 @@ impl Bindings {
             }
         }
         let mut custom = self.custom.clone();
-        if unique == action.default_keys() {
+        let shared = unique
+            .iter()
+            .any(|&c| self.owners(action.panel(), c).iter().any(|&o| o != action));
+        if unique == action.default_keys() && !shared {
             custom.remove(&action);
         } else {
             custom.insert(action, unique);
@@ -678,12 +823,9 @@ impl Bindings {
 
     pub fn reset(&self, action: Option<Action>) -> Result<Custom> {
         let Some(action) = action else {
-            return Ok(Custom::new());
+            return Ok(self.set_custom.clone());
         };
-        self.refuse_taken(action, &action.default_keys())?;
-        let mut custom = self.custom.clone();
-        custom.remove(&action);
-        Ok(custom)
+        self.set(action, self.set_keys(action))
     }
 }
 
@@ -1063,7 +1205,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Clips,
         Action::Delete,
-        &["Delete", "Backspace"],
+        &["Delete", "Backspace", "Shift+Backspace"],
         "Delete",
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
@@ -1265,7 +1407,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Select all",
         Some(
             "Every clip and subtitle on the timeline. After a click in the Media tab, all it \
-             shows.",
+             shows. After a click in the Keyframes tab or the keyframe tray, all its \
+             keyframes.",
         ),
     ),
     own(
@@ -1422,7 +1565,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         App,
         Action::Undo,
-        &["Ctrl+Z"],
+        &["Ctrl+Z", "`"],
         "Undo",
         Some("While Ripple Delete Silence is open, it undoes a change to its stripes or settings."),
     ),
@@ -1434,6 +1577,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some("While Ripple Delete Silence is open, it redoes a change to its stripes or settings."),
     ),
     own(App, Action::Import, &["Ctrl+I"], "Import media", None),
+    own(
+        App,
+        Action::EffectsSearch,
+        &["Shift+Space"],
+        "Effects Search",
+        Some("Adds an effect, found by its name or group, to the selected clip."),
+    ),
     own(
         Nodes,
         Action::PassThrough,
@@ -1581,9 +1731,16 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Color,
         Action::AddOutsideNode,
-        &["Alt+O"],
+        &[],
         "Add an outside node",
         Some("A corrector after the current node, on the inverse of its key."),
+    ),
+    own(
+        Color,
+        Action::AddSplitterCombiner,
+        &["Alt+Y"],
+        "Add a splitter and a combiner",
+        Some("After the current node: a corrector for each channel, joined again."),
     ),
     own(
         Color,
@@ -1625,7 +1782,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Action::DeleteNode,
         &["Shift+Backspace", "Delete"],
         "Delete the selected nodes",
-        Some("The nodes after them get lower numbers. The last corrector becomes current."),
+        Some(
+            "The nodes after them get lower numbers. The last corrector becomes current. With selected points of a curve window, it deletes those points.",
+        ),
     ),
     own(
         Color,

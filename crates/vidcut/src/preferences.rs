@@ -3,8 +3,11 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use vidcut_core::disk_cache::{self, Policy};
+use vidcut_core::key_sets::{self, OWN};
 use vidcut_core::preferences::{Preferences, PreferencesPatch};
-use vidcut_core::shortcuts::{Action, Bindings, Combo, Keys, SHORTCUTS, Shortcut, key_name};
+use vidcut_core::shortcuts::{
+    Action, Bindings, Combo, Custom, Keys, SHORTCUTS, Shortcut, key_name,
+};
 use vidcut_core::{Error, Result};
 
 use crate::{paths, themes, thumbcache};
@@ -69,6 +72,7 @@ fn read_noting() -> Result<(Preferences, Vec<String>)> {
 fn known() -> toml::Table {
     let mut every = Preferences::default();
     every.cache.gb = Some(1);
+    every.key_set = Some(OWN.to_string());
     every.keys = Action::ALL.iter().map(|a| (*a, Vec::new())).collect();
     match toml::Value::try_from(every) {
         Ok(toml::Value::Table(t)) => t,
@@ -253,8 +257,18 @@ pub fn set_scopes(patch: vidcut_core::preferences::ScopesPatch, dry_run: bool) -
 pub fn bindings() -> Bindings {
     read()
         .ok()
-        .and_then(|p| Bindings::of(&p.keys).ok())
+        .and_then(|p| bindings_of(&p).ok())
         .unwrap_or_default()
+}
+
+fn bindings_of(p: &Preferences) -> Result<Bindings> {
+    let set = match &p.key_set {
+        None => Custom::new(),
+        Some(name) => {
+            key_sets::find(&key_sets::dir(), name).map_or_else(|_| p.keys.clone(), |s| s.keys)
+        }
+    };
+    Bindings::in_set(p.key_set.clone(), &set, &p.keys)
 }
 
 fn key_row(b: &Bindings, s: &Shortcut) -> Value {
@@ -265,37 +279,56 @@ fn key_row(b: &Bindings, s: &Shortcut) -> Value {
             .collect::<Vec<_>>()
             .join("+")
     };
+    let level = match s.keys {
+        Keys::Own(a, _) | Keys::Same(a) => Some(s.group.level().unwrap_or(a.panel()).name()),
+        Keys::Hold(..) | Keys::Pointer(_) => None,
+    };
     let (action, default_keys, custom, follows) = match s.keys {
         Keys::Own(a, _) => {
-            let defaults: Vec<String> = a.default_keys().iter().map(Combo::shown).collect();
+            let defaults: Vec<String> = b.set_keys(a).iter().map(Combo::shown).collect();
             (Some(a), defaults, b.is_custom(a), Vec::new())
         }
         Keys::Same(a) => (None, Vec::new(), false, vec![a]),
         Keys::Hold(first, then) => (None, Vec::new(), false, vec![first, then]),
         Keys::Pointer(_) => (None, Vec::new(), false, Vec::new()),
     };
+    let conflicts: Vec<String> = action
+        .map(|a| b.conflicting(a).iter().map(Combo::shown).collect())
+        .unwrap_or_default();
     json!({
         "group": s.group,
         "group_title": s.group.title(),
+        "level": level,
         "title": s.title,
         "action": action,
         "keys": b.row(s).into_iter().map(shown).collect::<Vec<_>>(),
         "default_keys": default_keys,
         "custom": custom,
+        "conflicts": conflicts,
         "follows": follows,
         "explanation": s.explanation.map(|e| b.explain(e)),
     })
 }
 
-pub fn keys_list() -> Result<Value> {
-    let b = Bindings::of(&read()?.keys)?;
-    let rows: Vec<Value> = SHORTCUTS.iter().map(|s| key_row(&b, s)).collect();
-    Ok(json!({ "shortcuts": rows }))
+fn in_force(b: &Bindings) -> Value {
+    json!({ "set": b.set_name().unwrap_or(OWN), "changed": b.any_custom() })
+}
+
+pub fn keys_list(key: Option<Combo>) -> Result<Value> {
+    let b = bindings_of(&read()?)?;
+    let rows: Vec<Value> = SHORTCUTS
+        .iter()
+        .filter(|s| key.is_none_or(|k| b.combos(s).contains(&k)))
+        .map(|s| key_row(&b, s))
+        .collect();
+    let mut out = in_force(&b);
+    out["shortcuts"] = json!(rows);
+    Ok(out)
 }
 
 fn keys_changed(p: &Preferences, before: &Bindings, dry_run: bool) -> Result<Value> {
     p.check()?;
-    let after = Bindings::of(&p.keys)?;
+    let after = bindings_of(p)?;
     if !dry_run {
         write(p)?;
     }
@@ -305,13 +338,16 @@ fn keys_changed(p: &Preferences, before: &Bindings, dry_run: bool) -> Result<Val
         .map(|s| key_row(&after, s))
         .collect();
     let rows: Vec<Value> = SHORTCUTS.iter().map(|s| key_row(&after, s)).collect();
-    Ok(json!({ "changed": changed, "shortcuts": rows }))
+    let mut out = in_force(&after);
+    out["changed_keys"] = json!(changed);
+    out["shortcuts"] = json!(rows);
+    Ok(out)
 }
 
 pub fn keys_set(action: Action, keys: &[Combo], dry_run: bool) -> Result<Value> {
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = load()?;
-    let before = Bindings::of(&p.keys)?;
+    let before = bindings_of(&p)?;
     p.keys = before.set(action, keys)?;
     keys_changed(&p, &before, dry_run)
 }
@@ -319,9 +355,132 @@ pub fn keys_set(action: Action, keys: &[Combo], dry_run: bool) -> Result<Value> 
 pub fn keys_reset(action: Option<Action>, dry_run: bool) -> Result<Value> {
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = load()?;
-    let before = Bindings::of(&p.keys)?;
+    let before = bindings_of(&p)?;
     p.keys = before.reset(action)?;
     keys_changed(&p, &before, dry_run)
+}
+
+pub fn keys_sets() -> Result<Value> {
+    let b = bindings_of(&read()?)?;
+    let dir = key_sets::dir();
+    let listing = key_sets::all(&dir);
+    let sets: Vec<Value> = listing
+        .sets
+        .iter()
+        .map(|s| match s.built_in {
+            true => json!({ "name": s.name, "built_in": true }),
+            false => json!({
+                "name": s.name,
+                "built_in": false,
+                "base": s.base,
+                "path": dir.join(format!("{}.toml", s.name)),
+            }),
+        })
+        .collect();
+    let refused: Vec<Value> = listing
+        .refused
+        .iter()
+        .map(|r| json!({ "name": r.name, "path": r.path, "why": r.why }))
+        .collect();
+    let mut out = in_force(&b);
+    out["sets"] = json!(sets);
+    out["refused"] = json!(refused);
+    Ok(out)
+}
+
+fn named_set(name: &str) -> Option<String> {
+    (!key_sets::same(name, OWN)).then(|| name.to_string())
+}
+
+pub fn keys_use(set: &str, dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let before = bindings_of(&p)?;
+    let found = key_sets::find(&key_sets::dir(), set)?;
+    p.keys = found.keys;
+    p.key_set = named_set(&found.name);
+    keys_changed(&p, &before, dry_run)
+}
+
+pub fn keys_save(
+    name: &str,
+    overwrite: bool,
+    keys: Option<&Custom>,
+    from: Option<&str>,
+    dry_run: bool,
+) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let keys = match keys {
+        Some(keys) => Bindings::of(keys)?.changes(),
+        None => bindings_of(&p)?.changes(),
+    };
+    let dir = key_sets::dir();
+    let base = match from {
+        Some(from) => key_sets::find(&dir, from)?.base,
+        None => p
+            .key_set
+            .as_deref()
+            .and_then(|set| key_sets::find(&dir, set).ok())
+            .map_or_else(|| OWN.to_string(), |set| set.base),
+    };
+    let (set, path) = key_sets::save(&dir, name, &base, &keys, overwrite, dry_run)?;
+    p.keys = keys;
+    p.key_set = Some(set.name.clone());
+    p.check()?;
+    if !dry_run {
+        write(&p)?;
+    }
+    Ok(json!({ "saved": set.name, "path": path }))
+}
+
+pub fn keys_delete(name: &str, dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let path = key_sets::delete(&key_sets::dir(), name, dry_run)?;
+    let was_in_force = p
+        .key_set
+        .as_deref()
+        .is_some_and(|s| key_sets::same(s, name));
+    if was_in_force {
+        p.key_set = None;
+        p.keys = Custom::new();
+        if !dry_run {
+            write(&p)?;
+        }
+    }
+    Ok(json!({ "deleted": name.trim(), "path": path, "was_in_force": was_in_force }))
+}
+
+pub fn keys_export(set: &str, path: &std::path::Path, dry_run: bool) -> Result<Value> {
+    let found = key_sets::export(&key_sets::dir(), set, path, dry_run)?;
+    Ok(json!({ "exported": found.name, "path": path }))
+}
+
+pub fn keys_import(
+    from: &std::path::Path,
+    name: Option<&str>,
+    overwrite: bool,
+    dry_run: bool,
+) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let before = bindings_of(&p)?;
+    let (set, path, read) = key_sets::import(&key_sets::dir(), from, name, overwrite, dry_run)?;
+    p.keys = set.keys;
+    p.key_set = named_set(&set.name);
+    let mut out = keys_changed(&p, &before, dry_run)?;
+    out["imported"] = json!(set.name);
+    out["path"] = json!(path);
+    out["unknown_commands"] = json!(read.unknown);
+    out["unusable_keys"] = json!(read.unusable);
+    let conflicts: Vec<Value> = read
+        .conflicts
+        .iter()
+        .map(|c| json!({ "key": c.combo.shown(), "level": c.panel.name(), "actions": c.actions }))
+        .collect();
+    out["conflicts"] = json!(conflicts);
+    Ok(out)
 }
 
 fn write(p: &Preferences) -> Result<()> {

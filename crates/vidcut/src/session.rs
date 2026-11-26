@@ -39,7 +39,8 @@ fn models_check(id: &str, download: bool) -> Result<Value> {
         )));
     }
     let dir = crate::paths::models_dir();
-    let inspected = vidcut_av::models::inspect(model, &dir, download)
+    let gpu = crate::preferences::gpu_acceleration();
+    let inspected = vidcut_av::models::inspect(model, &dir, download, gpu)
         .map_err(|e| export::av_error(&e, ErrorCode::Media, String::new()))?;
     let found = &inspected.found;
     let differences = catalog::differences(model, found);
@@ -262,7 +263,7 @@ pub fn run_with(
             envelope.dry_run,
             |_| None,
         )?),
-        Request::KeysList {} => answer(crate::preferences::keys_list()?),
+        Request::KeysList { key } => answer(crate::preferences::keys_list(*key)?),
         Request::KeysSet { action, keys } => answer(crate::preferences::keys_set(
             *action,
             keys,
@@ -271,6 +272,38 @@ pub fn run_with(
         Request::KeysReset { action } => {
             answer(crate::preferences::keys_reset(*action, envelope.dry_run)?)
         }
+        Request::KeysSets {} => answer(crate::preferences::keys_sets()?),
+        Request::KeysUse { set } => answer(crate::preferences::keys_use(set, envelope.dry_run)?),
+        Request::KeysSave {
+            name,
+            overwrite,
+            keys,
+            from,
+        } => answer(crate::preferences::keys_save(
+            name,
+            *overwrite,
+            keys.as_ref(),
+            from.as_deref(),
+            envelope.dry_run,
+        )?),
+        Request::KeysDelete { name } => {
+            answer(crate::preferences::keys_delete(name, envelope.dry_run)?)
+        }
+        Request::KeysExport { set, path } => answer(crate::preferences::keys_export(
+            set,
+            path,
+            envelope.dry_run,
+        )?),
+        Request::KeysImport {
+            path,
+            name,
+            overwrite,
+        } => answer(crate::preferences::keys_import(
+            path,
+            name.as_deref(),
+            *overwrite,
+            envelope.dry_run,
+        )?),
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
             *service,
             key.as_deref(),
@@ -304,12 +337,34 @@ pub fn run_with(
             parade,
             vectorscope,
             scale,
+            video_levels,
+            waveform_mode,
+            waveform_red,
+            waveform_green,
+            waveform_blue,
+            parade_mode,
+            skin_tone,
+            histogram,
+            histogram_mode,
+            chromaticity,
+            chromaticity_mode,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
                 parade: *parade,
                 vectorscope: *vectorscope,
                 scale: *scale,
+                video_levels: *video_levels,
+                waveform_mode: *waveform_mode,
+                waveform_red: *waveform_red,
+                waveform_green: *waveform_green,
+                waveform_blue: *waveform_blue,
+                parade_mode: *parade_mode,
+                skin_tone: *skin_tone,
+                histogram: *histogram,
+                histogram_mode: *histogram_mode,
+                chromaticity: *chromaticity,
+                chromaticity_mode: *chromaticity_mode,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }
@@ -353,11 +408,12 @@ pub fn run_with(
                 envelope.dry_run,
             )?)
         }
-        Request::RenderAdd(params) => {
+        Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } => {
             let store = open(project)?;
             let env = AvEnv::for_project(store.path());
             let editor = store.load_project()?;
-            let files = crate::queue::existing(editor.project(), params, &env.proxy_dir())?;
+            let job = crate::queue::updated(&envelope.request);
+            let files = crate::queue::existing(editor.project(), job, params, &env.proxy_dir())?;
             if envelope.dry_run {
                 answer(json!({ "existing": files }))
             } else {
@@ -544,6 +600,9 @@ pub fn render(
             }
             if let Some(notes) = plan["notes"].as_array_mut() {
                 notes.extend(export::subtitle_notes(&subtitles));
+                if let Err(e) = export::refuse_written_twice(params) {
+                    notes.push(json!({ "code": "written_twice", "message": e.message }));
+                }
             }
             answer(plan)
         }
@@ -642,13 +701,17 @@ pub fn export_media(
     path: &Path,
     params: &vidcut_core::request::ExportParams,
     hooks: &mut Hooks<'_>,
-    started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>) -> Result<()>,
+    started: &mut dyn FnMut(Vec<crate::live::JobOutput>) -> Result<()>,
 ) -> Result<Response> {
     if export::timeline_format(&params.output).is_some() {
         let name = export::timeline_name(p, path);
         let plan = export::timeline(p, &name, params, None, None)?;
         let frames = plan["outputs"][0]["frames"].as_i64().unwrap_or(0);
-        started(vec![(params.output.clone(), frames)])?;
+        started(vec![crate::live::JobOutput {
+            path: params.output.clone(),
+            frames,
+            more: Vec::new(),
+        }])?;
         let clock = std::time::Instant::now();
         let output = params.output.clone();
         let progress = &mut *hooks.progress;
@@ -679,6 +742,7 @@ pub fn export_media(
         r.rev = p.rev;
         return Ok(r);
     }
+    export::refuse_written_twice(params)?;
     let mut prepared = export::prepare(p, params, None, &AvEnv::for_project(path).proxy_dir())?;
     let subtitles = export::subtitles_beside(p, &prepared, params)?;
     export::refuse_existing(&subtitles, params.overwrite)?;
@@ -705,6 +769,12 @@ pub fn export_media(
         params.download,
     )
     .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
+    if prepared.settings.video.is_some() {
+        let env = AvEnv::for_project(path);
+        for need in vidcut_core::editor::mask_remakes(p, params.download) {
+            vidcut_core::editor::mask_made(&env, &need)?;
+        }
+    }
     if prepared.settings.audio.is_some() {
         let env = AvEnv::for_project(path);
         for o in &mut prepared.outputs {
@@ -712,7 +782,7 @@ pub fn export_media(
         }
     }
     export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
-    let available = if export::needs_gpu_info(&prepared.settings) {
+    let available = if export::needs_gpu_info(&prepared) {
         export::availability(false)
     } else {
         Default::default()
@@ -721,7 +791,11 @@ pub fn export_media(
         prepared
             .outputs
             .iter()
-            .map(|o| (o.written(), o.plan.frames))
+            .map(|o| crate::live::JobOutput {
+                path: o.written(),
+                frames: o.plan.frames,
+                more: o.more.iter().map(export::More::written).collect(),
+            })
             .collect(),
     )?;
     let count = prepared.outputs.len();

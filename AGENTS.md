@@ -6,6 +6,7 @@
    - Do a different thing only when Resolve has a bug, or when a more modern way is clearly better. Example: Smooth Cut has better defaults and gives a cleaner result.
    - A feature that Resolve does not have is an extra, not a deviation.
    - If Resolve has on obvious bug, fixing it or working around it is not a deviation. Record the bug in gotchas.md.
+   - Undo and redo cover every edit, also where Resolve has no undo. This is not a deviation. Record the Resolve gap in gotchas.md.
    - OTIO files go between vidcut and Resolve with as little loss as possible.
    - The picture path is a pipeline ([spec §13](docs/spec.md#13-order-of-operations-pp-287296-3407), Chapter 144 of the manual). Each stage takes the output of the stage before it.
    - All image data is processed as full range, uncompressed, 32-bit floating point data.
@@ -26,7 +27,7 @@
 4. **No media in git.**
    - Test media, generated fixtures and the manual are in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
    - Test outputs go to temp dirs.
-   - `scripts/check.sh` refuses any binary file. Thus `.gitignore` lists no file types.
+   - `scripts/check.sh` refuses any binary file except `crates/vidcut-av/src/auto_color.safetensors`. Thus `.gitignore` lists no file types.
    - `tests/media-manifest.toml` lists the real-world clips (URL, license, sha256). `scripts/fetch-test-media.sh` gets them.
 5. **No ffmpeg or ffprobe subprocesses.** Use `vidcut-av`, which links the FFmpeg libraries.
 6. **License:** MIT.

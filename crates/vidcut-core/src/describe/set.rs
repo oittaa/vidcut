@@ -178,6 +178,30 @@ impl<'a, T> Set<'a, T> {
         given
     }
 
+    fn zooms(&mut self, zoom: impl Fn(&T) -> Option<[f64; 2]>) {
+        let p = self.p;
+        if p["zoom"].is_null() {
+            return;
+        }
+        let [zx, zy] = match &p["zoom"] {
+            Value::Array(a) => [0, 1].map(|k| a.get(k).cloned().unwrap_or(Value::Null)),
+            one => [one.clone(), one.clone()],
+        };
+        let linked = zx == zy && self.of.iter().all(|q| zoom(q).is_none_or(|[a, b]| a == b));
+        if linked {
+            self.add("Zoom", &zx, &percent, json!(1.0), |q| {
+                json!(zoom(q).map(|[a, _]| a))
+            });
+        } else {
+            self.add("Zoom X", &zx, &percent, json!(1.0), |q| {
+                json!(zoom(q).map(|[a, _]| a))
+            });
+            self.add("Zoom Y", &zy, &percent, json!(1.0), |q| {
+                json!(zoom(q).map(|[_, b]| b))
+            });
+        }
+    }
+
     fn told(&mut self, key: &str, name: &str, show: Show) {
         let p = self.p;
         if !p[key].is_null() {
@@ -221,6 +245,13 @@ fn number(v: &Value) -> String {
 fn percent(v: &Value) -> String {
     v.as_f64()
         .map_or_else(|| raw(v), |n| format!("{}%", trim(n * 100.0)))
+}
+
+fn numbers(v: &Value) -> String {
+    match v.as_array() {
+        Some(a) => a.iter().map(number).collect::<Vec<_>>().join(", "),
+        None => number(v),
+    }
 }
 
 fn percents(v: &Value) -> String {
@@ -352,7 +383,7 @@ const STYLE: [(&str, &str); 32] = [
     ("background.off", "Background Off"),
     ("shape.size", "Box Size"),
     ("shape.center", "Box Center"),
-    ("shape.corner", "Box Corner"),
+    ("shape.corner", "Box Corner Radius"),
     ("shape.outline_color", "Box Outline"),
     ("shape.outline_width", "Box Outline Width"),
     ("shadow", "Shadow"),
@@ -373,12 +404,15 @@ const STYLE: [(&str, &str); 32] = [
 
 fn style_show(key: &str) -> Show<'static> {
     match key {
-        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop"
-        | "shape.corner" => &percent,
-        "shape.size" | "shape.center" => &percents,
-        "outline.size" | "shadow.blur" | "line_spacing" | "tracking" | "shape.outline_width" => {
-            &number
-        }
+        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop" => &percent,
+        "shape.center" => &percents,
+        "shape.size" => &numbers,
+        "outline.size"
+        | "shadow.blur"
+        | "line_spacing"
+        | "tracking"
+        | "shape.outline_width"
+        | "shape.corner" => &number,
         "case" | "words.show" | "speaker_color" | "anchor" => &word,
         _ => &raw,
     }
@@ -513,7 +547,8 @@ impl Words<'_> {
         });
         s.usual("anchor", "Anchor", &word, anchor, |t| json!(t.anchor));
         if self.params["style"].is_object() {
-            let size = Title::usual_size(first.map_or(TitleKind::Text, |t| t.kind));
+            let kind = first.map_or(TitleKind::Text, |t| t.kind);
+            let size = Title::usual_size(kind, self.project.map_or(1080, |pr| pr.height()));
             let olds = s.olds(|t| json!(t.style));
             style(&mut s.f, &olds, &self.params["style"], size, None);
         }
@@ -523,7 +558,10 @@ impl Words<'_> {
         s.usual("position", "Position", &percents, place, |t| {
             json!(t.position)
         });
-        s.usual("zoom", "Zoom", &percent, json!(1.0), |t| json!(t.zoom));
+        s.zooms(|t| t.zoom);
+        s.usual("zoom_link", "Zoom Link", &on_off, json!(true), |t| {
+            json!(t.zoom_link)
+        });
         s.usual("rotation", "Rotation", &degrees, json!(0.0), |t| {
             json!(t.rotation)
         });
@@ -592,22 +630,7 @@ impl Words<'_> {
                 json!(q.position.map(|[_, b]| y(b)))
             });
         }
-        if !p["zoom"].is_null() {
-            let [zx, zy] = match &p["zoom"] {
-                Value::Array(a) => [0, 1].map(|k| a.get(k).cloned().unwrap_or(Value::Null)),
-                one => [one.clone(), one.clone()],
-            };
-            let linked = zx == zy && s.of.iter().all(|q| q.zoom.is_none_or(|[a, b]| a == b));
-            let across = |q: &Picture| json!(q.zoom.map(|[a, _]| a));
-            if linked {
-                s.add("Zoom", &zx, &percent, json!(1.0), across);
-            } else {
-                s.add("Zoom X", &zx, &percent, json!(1.0), across);
-                s.add("Zoom Y", &zy, &percent, json!(1.0), |q| {
-                    json!(q.zoom.map(|[_, b]| b))
-                });
-            }
-        }
+        s.zooms(|q| q.zoom);
         s.usual("rotation", "Rotation", &degrees, json!(0.0), |q| {
             json!(q.rotation)
         });
@@ -738,6 +761,8 @@ impl Words<'_> {
                     "video_enabled": t.video_enabled,
                     "name": t.name,
                     "duck": t.duck,
+                    "dynamics": t.dynamics,
+                    "equalizer": t.equalizer,
                 })),
                 (None, Some(t)) => Some(json!({
                     "locked": t.locked,
@@ -763,6 +788,8 @@ impl Words<'_> {
         s.put("video_enabled", "Video", &raw, |t| {
             t["video_enabled"].clone()
         });
+        s.put("dynamics", "Dynamics", &raw, |t| t["dynamics"].clone());
+        s.put("equalizer", "Equalizer", &raw, |t| t["equalizer"].clone());
         s.put("shown", "Show", &raw, |t| t["shown"].clone());
         s.put("destination", "Destination", &raw, |t| {
             t["destination"].clone()

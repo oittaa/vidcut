@@ -202,6 +202,10 @@ pub struct Timeline {
     /// What the Export page renders of it. Left out when it is `entire`.
     #[serde(default)]
     pub render: RenderRange,
+    /// The clips that its Thumbnail timeline shows. Left out when it is
+    /// `all`.
+    #[serde(default)]
+    pub clip_filter: ClipFilter,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
     /// Timeline In/Out marks.
@@ -229,6 +233,51 @@ pub enum RenderRange {
 impl RenderRange {
     pub fn is_entire(&self) -> bool {
         *self == Self::Entire
+    }
+}
+
+/// The clips that the Thumbnail timeline shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ClipFilter {
+    /// Every clip.
+    #[default]
+    All,
+    /// The clips with a grade that is not the usual grade.
+    Graded,
+    /// The clips with the usual grade.
+    Ungraded,
+    /// The clips with a composition that has more nodes than its MediaIn
+    /// and its MediaOut.
+    Composition,
+    /// The clips with no clip color. A clip with no color of its own shows
+    /// the color of its media.
+    NoClipColor,
+    /// The clips with this clip color. Left out: any clip color.
+    ClipColor {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// The clips with no marker in the part of their media that they show.
+    NoMarker,
+    /// The clips with a marker of this color in the part of their media
+    /// that they show. Left out: a marker of any color.
+    Marked {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// The clips with effects on their picture.
+    Effects,
+    /// The clips whose media has a frame rate that is not the frame rate
+    /// of the timeline.
+    OtherRate,
+    /// The clips with a changed transform or crop.
+    Sizing,
+}
+
+impl ClipFilter {
+    pub fn is_all(&self) -> bool {
+        *self == Self::All
     }
 }
 
@@ -314,6 +363,8 @@ struct TimelineOut<'a> {
     grade: Option<&'a Grade>,
     #[serde(skip_serializing_if = "RenderRange::is_entire")]
     render: RenderRange,
+    #[serde(skip_serializing_if = "ClipFilter::is_all")]
+    clip_filter: &'a ClipFilter,
     tracks: &'a [Track],
     #[serde(skip_serializing_if = "Marks::is_empty")]
     marks: &'a Marks,
@@ -333,6 +384,7 @@ impl<'a> TimelineOut<'a> {
             own: t.own,
             grade: t.grade.as_ref(),
             render: t.render,
+            clip_filter: &t.clip_filter,
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
@@ -475,6 +527,14 @@ pub struct Settings {
     /// out at 1 and 1.
     #[serde(default, skip_serializing_if = "DynamicsProfile::is_usual")]
     pub dynamics_profile: DynamicsProfile,
+    /// The names of the node stack layers of each clip grade, layer 1
+    /// first: 1 to 8 names. Their number is the number of layers. Left out
+    /// at one layer named `L1`.
+    #[serde(
+        default = "Settings::one_layer",
+        skip_serializing_if = "Settings::has_one_layer"
+    )]
+    pub node_stack_layers: Vec<String>,
 }
 
 impl Default for Settings {
@@ -501,6 +561,7 @@ impl Default for Settings {
             color_viewer_lut: MonitorLut::VideoMonitor,
             scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
+            node_stack_layers: Self::one_layer(),
         }
     }
 }
@@ -570,6 +631,18 @@ impl Format {
 }
 
 impl Settings {
+    pub fn one_layer() -> Vec<String> {
+        vec![Self::layer_name(1)]
+    }
+
+    pub fn layer_name(n: usize) -> String {
+        format!("L{n}")
+    }
+
+    fn has_one_layer(names: &[String]) -> bool {
+        names == Self::one_layer()
+    }
+
     pub const MOST_CHANNELS: u16 = 24;
 
     pub fn viewer_lut_file(&self) -> Option<&Path> {
@@ -1758,6 +1831,16 @@ pub struct Track {
     /// D76).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<Duck>,
+    /// The equalizer of the track, after its Dynamics and before its fader.
+    /// Left out when the track has none, as a new track: then it is off,
+    /// with the usual bands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equalizer: Option<TrackEqualizer>,
+    /// The Dynamics of the track, after its ducking and before its
+    /// equalizer. Left out when the track has none, as a new track: then
+    /// they are on, with each module off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<TrackDynamics>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -2299,6 +2382,12 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
+    /// Its link group. The clips of a group with the same start, length,
+    /// source start and speed act as one clip in an edit: the picture and
+    /// the sound of a compound clip, or the parts of a clip with no media.
+    /// Left out when the clip has no link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<u32>,
 }
 
 /// The motion path of a pattern of a tracker: where its thing is on the
@@ -3127,15 +3216,25 @@ pub struct Title {
     /// none. Left out when no keyframe has a handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
-    /// How much larger its text is drawn, from 1/4 to 4, about the `position`
-    /// of a `text` title or a lower third's line; a scroll has none. Usual: 1.
-    /// With `zoom_keys`, the zoom at a frame is that curve.
+    /// How much larger its text is drawn across and down, `[x, y]`, each
+    /// from 1/4 to 4, about the `position` of a `text` title or a lower
+    /// third's line; a scroll has none. Usual: `[1, 1]`. With `zoom_keys`,
+    /// the zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
-    /// Zoom keyframes, on the clip's source frames. Left out when the zoom
-    /// has no keyframes.
+    pub zoom: Option<[f64; 2]>,
+    /// Zoom keyframes, one for X and Y, on the clip's source frames. `value`
+    /// is X. `zoom_y` is Y, one number for each keyframe, in the same order.
+    /// A handle value moves X. Y keeps the handle frames and a value offset
+    /// of 0. Left out when the zoom has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
+    /// Y of each `zoom_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
+    /// The Zoom link: `false` when it is off. Off, Zoom X and Zoom Y change
+    /// apart in the Title section. Left out when on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_link: Option<bool>,
     /// Degrees it is turned counterclockwise, with its background and
     /// shadow, about the same point as `zoom`. Usual: 0. With
     /// `rotation_keys`, the angle at a frame is that curve.
@@ -3146,11 +3245,23 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rotation_keys: Vec<Keyframe>,
     /// A lower third's upper line, when it goes apart from the lower line.
-    /// `position`, `zoom` and `rotation` and their keyframes above are then
-    /// the lower line's alone. `anchor` above is always the lower line's. Left
+    /// `position`, `zoom`, `zoom_link` and `rotation` and their keyframes
+    /// above are then the lower line's alone. `anchor` above is always the lower line's. Left
     /// out when the two lines go together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper: Option<TitleLine>,
+    /// Keyframes of the shadow and the background, on the clip's source
+    /// frames, one entry for each value with keyframes, sorted by value:
+    /// `shadow_offset`, `shadow_blur`, `shadow_opacity`,
+    /// `background_outline_width`, `background_width`, `background_height`,
+    /// `background_corner_radius`, `background_center` and
+    /// `background_opacity`. Their numbers are those of `style`. A value takes
+    /// keyframes only while `style` has its part: `shadow`, `background` or
+    /// `shape`. With keyframes, the value at a frame is that curve. A lower
+    /// third keeps them for its whole title. Left out when no value has
+    /// keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<EffectKeys>,
 }
 
 /// One line of a lower third: `upper` or `lower`.
@@ -3180,9 +3291,13 @@ pub struct TitleLine {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_link: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3204,8 +3319,14 @@ pub struct TitleBlock {
     pub anchor: [f64; 2],
     pub pivot: [f64; 2],
     pub edge: f64,
-    pub zoom: f64,
+    pub zoom: [f64; 2],
     pub turn: f64,
+}
+
+impl TitleBlock {
+    pub fn stretch(&self) -> f64 {
+        self.zoom[0] / self.zoom[1]
+    }
 }
 
 /// The handles of one position keyframe of a title, as fractions of the
@@ -3320,8 +3441,9 @@ pub struct TitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
     /// Text height as a fraction of the picture height, from 1/1080 to
-    /// 4096/1080. Usual: 96/1080 for `text`, 108/1080 for `scroll`, and for a
-    /// `lower_third` 76/1080 on its lower line and 48/1080 on its upper line.
+    /// 4096/1080. Usual: 96/1080 for `text`, 108 pixels of the timeline for
+    /// `scroll` at any timeline height, and for a `lower_third` 76/1080 on its
+    /// lower line and 48/1080 on its upper line.
     /// A size set here goes on both lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
@@ -3378,10 +3500,10 @@ pub struct TitleShape {
     /// changed by the background's opacity. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline_color: Option<String>,
-    /// The width of its outline in pixels of the timeline, from 0 to 30. Half
-    /// of it is outside the box. Usual: 0.
+    /// The width of its outline in whole pixels of the timeline, from 0 to
+    /// 30. Half of it is outside the box. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outline_width: Option<f64>,
+    pub outline_width: Option<u32>,
 }
 
 /// A title's drop shadow. A field left out keeps the usual look.
@@ -3390,7 +3512,7 @@ pub struct TitleShadow {
     /// `#rrggbb`, `#rgb` or a name such as `navy`. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// From 0 to 1. Usual: 0.75.
+    /// From 0 to 1. On a title, it is in steps of 1/100. Usual: 0.75.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `[x, y]`: how far it falls right and down, as fractions of the
@@ -3399,7 +3521,8 @@ pub struct TitleShadow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
     /// How soft its edge is, from 1 to 100, where the blur's radius is
-    /// about 3% of the picture height. Usual: 20.
+    /// about 3% of the picture height. On a title, it is a whole number.
+    /// Usual: 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur: Option<f64>,
     /// `true` draws no shadow and keeps these values.
@@ -3411,6 +3534,7 @@ impl TitleShadow {
     pub const OPACITY: f64 = 0.75;
     pub const OFFSET: [f64; 2] = [0.0, 0.0];
     pub const BLUR: f64 = 20.0;
+    pub const BLURS: (f64, f64) = (1.0, 100.0);
     pub const BLUR_PER_PICTURE: f64 = 3370.0;
 
     pub fn is_off(&self) -> bool {
@@ -3447,6 +3571,7 @@ pub fn size_fits(v: f64, most: u32) -> bool {
 impl Title {
     pub const MOST_SIZE: u32 = 4096;
     pub const MOST_SPACING: f64 = 4096.0;
+    pub const ZOOM: (f64, f64) = (0.25, 4.0);
     pub const TRACKING_SHARE: f64 = 100.0;
     pub const TRACKING_SHARE_LESS: f64 = 200.0;
     pub const TRACKING_FILE: f64 = 0.85;
@@ -3457,7 +3582,8 @@ impl Title {
     pub const BOX_WIDTH: f64 = 0.9;
     pub const BOX_WHOLE: f64 = 1e-6;
     pub const BOX_CORNER: f64 = 1.0 / 27.0;
-    pub const BOX_MOST_OUTLINE: f64 = 30.0;
+    pub const BOX_MOST_OUTLINE: u32 = 30;
+    pub const BOX_OPACITY: f64 = 0.5;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -3467,6 +3593,7 @@ impl Title {
     pub const SCROLL_IN: f64 = 0.01;
     pub const SCROLL_LINE: f64 = 4.0 / 3.0;
     pub const SCROLL_LEAD: f64 = 10.0;
+    pub const SCROLL_SIZE: f64 = 108.0;
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const UPPER_TRACKING: f64 = 11.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
@@ -3493,9 +3620,12 @@ impl Title {
             position_handles: Vec::new(),
             zoom: None,
             zoom_keys: Vec::new(),
+            zoom_y: Vec::new(),
+            zoom_link: None,
             rotation: None,
             rotation_keys: Vec::new(),
             upper: None,
+            keys: Vec::new(),
         }
     }
 
@@ -3543,10 +3673,10 @@ impl Title {
             .fractions()
     }
 
-    pub fn usual_size(kind: TitleKind) -> f64 {
+    pub fn usual_size(kind: TitleKind, timeline_height: u32) -> f64 {
         match kind {
             TitleKind::Text => 96.0 / 1080.0,
-            TitleKind::Scroll => 108.0 / 1080.0,
+            TitleKind::Scroll => Self::SCROLL_SIZE / f64::from(timeline_height.max(1)),
             TitleKind::LowerThird => 76.0 / 1080.0,
         }
     }
@@ -3580,8 +3710,10 @@ impl Title {
         self.kind == TitleKind::Scroll
     }
 
-    pub fn text_fraction(&self) -> f64 {
-        self.style.size.unwrap_or(Self::usual_size(self.kind))
+    pub fn text_fraction(&self, timeline_height: u32) -> f64 {
+        self.style
+            .size
+            .unwrap_or(Self::usual_size(self.kind, timeline_height))
     }
 
     fn tracking_share(tracking: f64) -> f64 {
@@ -3603,6 +3735,10 @@ impl Title {
 
     pub fn tracking_to_file(tracking: f64) -> f64 {
         tracking * Self::TRACKING_SHARE * Self::TRACKING_FILE / Self::tracking_share(tracking)
+    }
+
+    pub fn scroll_size(text: f64, scale: f64) -> f64 {
+        (text / scale + Self::WIDTH_SLACK).floor().max(1.0) * scale
     }
 
     pub fn whole_size(text: f64, scale: f64) -> f64 {
@@ -3629,26 +3765,37 @@ impl Title {
         (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
-    pub fn seated_left(&self, across: f64, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
+    pub fn block_width(line: f64, freed: f64, pixel: f64) -> f64 {
+        ((line - freed.min(pixel)) / pixel + Self::WIDTH_SLACK).floor() + 1.0
+    }
+
+    pub fn seated_left(
+        &self,
+        across: f64,
+        middle: f64,
+        width: f64,
+        (widest, wrap): (f64, f64),
+        pixel: f64,
+    ) -> f64 {
         let lined = self.align().fraction();
-        let width = (widest / pixel + Self::WIDTH_SLACK).floor();
         ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 
-    pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
-        match self.kind {
-            TitleKind::Scroll => {
-                (heights[0] + heights[1]) * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
-            }
-            TitleKind::Text | TitleKind::LowerThird => {
-                let size = (text / zoom / pixel).round();
-                let line: f64 = heights
-                    .iter()
-                    .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
-                    .sum();
-                line.ceil() * zoom * pixel
-            }
-        }
+    pub fn line_gap(heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
+        let size = (text / zoom / pixel).round();
+        let line: f64 = heights
+            .iter()
+            .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
+            .sum();
+        line.ceil() * zoom * pixel
+    }
+
+    pub fn scroll_em(text: f64, pixel: f64) -> u32 {
+        (text / pixel * Self::SCROLL_LINE).round().max(1.0) as u32
+    }
+
+    pub fn scroll_gap(screen: u32, pixel: f64) -> f64 {
+        (f64::from(screen) + Self::SCROLL_LEAD) * pixel
     }
 
     pub fn ink(&self) -> [u8; 3] {
@@ -3691,25 +3838,21 @@ impl Title {
         let s = self.style.shape.as_ref();
         (
             paint(s.and_then(|s| s.outline_color.as_deref()), [0, 0, 0]),
-            s.and_then(|s| s.outline_width).unwrap_or(0.0),
+            s.and_then(|s| s.outline_width).map_or(0.0, f64::from),
         )
     }
 
-    pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
-        (picture_width * Self::SAFE).max(self.text_fraction() * picture_height)
-    }
-
-    pub fn scale(&self) -> f64 {
-        self.zoom.unwrap_or(1.0)
+    pub fn scale(&self) -> [f64; 2] {
+        self.zoom.unwrap_or([1.0, 1.0])
     }
 
     pub fn turn(&self) -> f64 {
         self.rotation.unwrap_or(0.0)
     }
 
-    pub fn lower_line(&self) -> f64 {
+    pub fn lower_line(&self, timeline_height: u32) -> f64 {
         let lines = crate::rich::lines(&self.text);
-        let base = self.text_fraction();
+        let base = self.text_fraction(timeline_height);
         let size = lines
             .last()
             .map_or(base, |line| crate::rich::largest(line, base));
@@ -3725,6 +3868,8 @@ impl Title {
             position_handles: self.position_handles.clone(),
             zoom: self.zoom,
             zoom_keys: self.zoom_keys.clone(),
+            zoom_y: self.zoom_y.clone(),
+            zoom_link: self.zoom_link,
             rotation: self.rotation,
             rotation_keys: self.rotation_keys.clone(),
         }
@@ -3758,6 +3903,8 @@ impl Title {
         std::mem::swap(&mut self.position_handles, &mut u.position_handles);
         std::mem::swap(&mut self.zoom, &mut u.zoom);
         std::mem::swap(&mut self.zoom_keys, &mut u.zoom_keys);
+        std::mem::swap(&mut self.zoom_y, &mut u.zoom_y);
+        std::mem::swap(&mut self.zoom_link, &mut u.zoom_link);
         std::mem::swap(&mut self.rotation, &mut u.rotation);
         std::mem::swap(&mut self.rotation_keys, &mut u.rotation_keys);
         self.upper = Some(u);
@@ -3797,7 +3944,7 @@ impl Title {
                 place[1]
             },
             zoom: if part == TitlePart::Shape {
-                1.0
+                [1.0, 1.0]
             } else {
                 self.scale()
             },
@@ -4211,8 +4358,9 @@ impl Stabilization {
 /// A grade: the nodes of the color page. The picture comes in, goes through
 /// the nodes that the inputs join, and goes out from the link `output`.
 /// A node's number is its place in `nodes`, from 1. The number 0 is the
-/// picture that comes into the grade. While a node has an empty input, or
-/// its picture goes nowhere, or nothing goes out, the grade does nothing.
+/// picture that comes into the grade. While a corrector or a splitter has
+/// an empty input, a parallel mixer, a layer mixer or a combiner has no
+/// input with a link, or nothing goes out, the grade does nothing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Grade {
     /// The nodes, in the order of their numbers.
@@ -4220,6 +4368,17 @@ pub struct Grade {
     /// What goes out. Left out when nothing goes out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<GradeLink>,
+    /// The grades of node stack layers 2 and up of a clip grade, in order.
+    /// This grade is layer 1. Each layer takes the picture that the layer
+    /// before it gives. A layer that is not here has one corrector at its
+    /// usual values. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<Grade>,
+    /// The grades of the layers above the project's `node_stack_layers`
+    /// count, in order. They do not act. A higher count gives them back.
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_layers: Vec<Grade>,
 }
 
 /// A link into an input: the node that it leaves and the output of that
@@ -4242,11 +4401,15 @@ pub struct GradeLink {
     /// out at 0.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub made: u32,
+    /// The RGB output of a splitter that the link leaves: 0 red, 1 green,
+    /// 2 blue. Left out at 0, the one RGB output of the other nodes.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub output: u8,
 }
 
 impl PartialEq for GradeLink {
     fn eq(&self, other: &Self) -> bool {
-        (self.node, self.key) == (other.node, other.key)
+        (self.node, self.key, self.output) == (other.node, other.key, other.output)
     }
 }
 
@@ -4254,7 +4417,12 @@ impl Eq for GradeLink {}
 
 impl GradeLink {
     pub fn new(node: u32, key: bool) -> Self {
-        Self { node, key, made: 0 }
+        Self {
+            node,
+            key,
+            made: 0,
+            output: 0,
+        }
     }
 
     pub fn picture(node: u32) -> Self {
@@ -4264,6 +4432,21 @@ impl GradeLink {
     pub fn key(node: u32) -> Self {
         Self::new(node, true)
     }
+
+    pub fn split(node: u32, output: u8) -> Self {
+        Self {
+            output,
+            ..Self::new(node, false)
+        }
+    }
+
+    pub fn leaves_picture_of(&self, node: u32) -> bool {
+        self.node == node && !self.key
+    }
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
 }
 
 fn is_zero_u32(n: &u32) -> bool {
@@ -4276,11 +4459,123 @@ impl Grade {
         Self {
             nodes: vec![GradeNode::corrector(source, [0.0, 0.0], frame)],
             output: Some(GradeLink::picture(1)),
+            layers: Vec::new(),
+            kept_layers: Vec::new(),
         }
     }
 
     pub fn is_usual(&self, frame: [f64; 2]) -> bool {
         *self == Self::usual(frame)
+    }
+
+    pub fn layer(&self, n: usize, frame: [f64; 2]) -> Grade {
+        match n {
+            0 | 1 => self.own(),
+            _ => (self.layers.get(n - 2).cloned()).unwrap_or_else(|| Self::usual(frame)),
+        }
+    }
+
+    fn own(&self) -> Grade {
+        Grade {
+            nodes: self.nodes.clone(),
+            output: self.output,
+            layers: Vec::new(),
+            kept_layers: Vec::new(),
+        }
+    }
+
+    pub fn with_layer(&self, n: usize, grade: Grade, frame: [f64; 2]) -> Grade {
+        let mut whole = self.padded(n, frame);
+        match n {
+            0 | 1 => (whole.nodes, whole.output) = (grade.nodes, grade.output),
+            _ => whole.layers[n - 2] = grade,
+        }
+        whole.trim(frame);
+        whole
+    }
+
+    pub fn padded(&self, n: usize, frame: [f64; 2]) -> Grade {
+        let mut whole = self.clone();
+        if whole.layers.len() + 1 < n {
+            whole.layers.resize_with(n - 1, || Self::usual(frame));
+        }
+        whole
+    }
+
+    pub fn below(&self, n: usize, top: Grade, frame: [f64; 2]) -> Grade {
+        let mut whole = self.padded(n, frame);
+        whole.layers.truncate(n.saturating_sub(1));
+        whole.kept_layers.clear();
+        match n {
+            0 | 1 => (whole.nodes, whole.output) = (top.nodes, top.output),
+            _ => whole.layers[n - 2] = top,
+        }
+        whole
+    }
+
+    fn trim(&mut self, frame: [f64; 2]) {
+        while self.kept_layers.last().is_some_and(|l| l.is_usual(frame)) {
+            self.kept_layers.pop();
+        }
+        if self.kept_layers.is_empty() {
+            while self.layers.last().is_some_and(|l| l.is_usual(frame)) {
+                self.layers.pop();
+            }
+        }
+    }
+
+    pub fn counted(&mut self, count: usize, frame: [f64; 2]) {
+        let mut all = std::mem::take(&mut self.layers);
+        all.append(&mut self.kept_layers);
+        let shown = count.saturating_sub(1);
+        if all.len() > shown {
+            self.kept_layers = all.split_off(shown);
+        }
+        self.layers = all;
+        self.trim(frame);
+    }
+
+    pub fn reset_layers(&mut self, frame: [f64; 2]) {
+        let shown = self.layers.len();
+        *self = Grade {
+            layers: vec![Self::usual(frame); shown],
+            kept_layers: std::mem::take(&mut self.kept_layers),
+            ..Self::usual(frame)
+        };
+        self.trim(frame);
+    }
+
+    pub fn layer_start(&self, n: usize) -> u32 {
+        match n {
+            0 | 1 => 0,
+            _ => (0..n - 2).fold(self.last(), |at, i| {
+                at + self.layers.get(i).map_or(1, Grade::last)
+            }),
+        }
+    }
+
+    pub fn stacked(&self) -> Cow<'_, Grade> {
+        if self.layers.is_empty() {
+            return Cow::Borrowed(self);
+        }
+        let mut whole = self.own();
+        for layer in &self.layers {
+            let (start, below) = (whole.last(), whole.output);
+            let moved = |l: GradeLink| match l.node {
+                0 => below,
+                n => Some(GradeLink {
+                    node: n + start,
+                    ..l
+                }),
+            };
+            whole.nodes.extend(layer.nodes.iter().map(|d| GradeNode {
+                inputs: d.inputs.iter().map(|l| l.and_then(moved)).collect(),
+                key_from: d.key_from.and_then(moved),
+                ..d.clone()
+            }));
+            whole.output = layer.output.and_then(moved);
+        }
+        Cow::Owned(whole)
     }
 
     pub fn node(&self, number: u32) -> Option<&GradeNode> {
@@ -4309,8 +4604,9 @@ pub struct GradeNode {
     #[serde(flatten)]
     pub tool: GradeTool,
     /// What comes into each input, in order, or null for nothing. A
-    /// corrector has one input, its RGB input. A mixer has one or more.
-    /// The inputs of a key mixer are key inputs.
+    /// corrector and a splitter have one input, an RGB input. A combiner
+    /// has three: red, green and blue. A mixer has one or more. The inputs
+    /// of a key mixer are key inputs.
     pub inputs: Vec<Option<GradeLink>>,
     /// Off, a corrector passes on the picture that comes into it, and a
     /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
@@ -4347,12 +4643,21 @@ pub struct GradeNode {
     /// out at its usual value.
     #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
     pub key_input: KeyInput,
+    /// The HSL qualifier of a corrector. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Qualifier::is_usual")]
+    pub qualifier: Qualifier,
     /// A locked node keeps its grade: the values, the keyframes and the
     /// Key Output of a corrector, and the kind and mode of a mixer. It can
     /// still go, move, switch off and on, and take links. Left out when
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// Auto-Keyframe of a corrector or a key mixer: a change to the node
+    /// on a frame where it has no keyframe first adds a Dynamic keyframe
+    /// there. That keyframe holds the values that the picture has on its
+    /// frame. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_key: bool,
     /// The windows of a corrector, in the order of the window list. They
     /// make the key of the corrector. A corrector has a linear, a circle, a
     /// polygon and a gradient window first, off at first, which stay. The
@@ -4360,6 +4665,9 @@ pub struct GradeNode {
     /// none, and leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// The Magic Mask of a corrector. Left out when it has no clicks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magic_mask: Option<MagicMask>,
 }
 
 impl GradeNode {
@@ -4375,8 +4683,11 @@ impl GradeNode {
             key: KeyOutput::default(),
             key_from: None,
             key_input: KeyInput::default(),
+            qualifier: Qualifier::default(),
             locked: false,
+            auto_key: false,
             windows: GradeWindow::fixed(frame),
+            magic_mask: None,
         }
     }
 
@@ -4392,8 +4703,11 @@ impl GradeNode {
             key: KeyOutput::default(),
             key_from: None,
             key_input: KeyInput::default(),
+            qualifier: Qualifier::default(),
             locked: false,
+            auto_key: false,
             windows: Vec::new(),
+            magic_mask: None,
         }
     }
 
@@ -4422,6 +4736,7 @@ impl GradeNode {
             own(k)
                 || k.key != self.key
                 || k.key_input != self.key_input
+                || k.qualifier != self.qualifier
                 || k.windows != self.windows
         };
         !self.keys.is_empty() && (self.animated || self.keys.iter().any(changes))
@@ -4663,6 +4978,58 @@ fn scaled_key((gain, offset, invert): (f64, f64, bool), key: f64) -> f64 {
     if invert { 1.0 - v } else { v }
 }
 
+/// The Magic Mask of a corrector. Clicks on a person or a thing make a
+/// mask of that subject on the frame of the clicks. The mask, the windows
+/// and the qualifier of the corrector make its key together: the key is
+/// where all of them are. On a frame with no map, the mask is empty.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MagicMask {
+    /// The clicks, in the order that they came.
+    pub clicks: Vec<MaskClick>,
+    /// Invert Mask: the mask is where the subjects are not. Left out when
+    /// off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+    /// One map for each subject on each frame that has clicks of it that
+    /// are on. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub maps: Vec<MaskMap>,
+}
+
+/// A click of the Magic Mask.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MaskClick {
+    /// The source frame of the click, counted as the `frame` of a
+    /// `GradeKey` is.
+    pub frame: i64,
+    /// The place of the click, `[x, y]`, from 0 to 1 across and down the
+    /// frame.
+    pub at: [f64; 2],
+    /// A negative click takes the part under it away from its subject.
+    /// Left out for a positive click.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub negative: bool,
+    /// The subject of the click, from 1. The mask is all the subjects
+    /// together.
+    pub subject: u32,
+    /// Off, the click does not act. Left out when on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub on: bool,
+}
+
+/// The map of one subject on one frame. The model gives 256 by 256 values
+/// over the frame. The mask is where these values, scaled to the frame
+/// size, are above 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MaskMap {
+    /// The source frame of the map.
+    pub frame: i64,
+    /// The subject of the map.
+    pub subject: u32,
+    /// The name of the map in the mask store of the cache folder.
+    pub name: String,
+}
+
 /// How the key input of a corrector takes the key that comes in. The key
 /// in is `gain` times the key plus `offset`, or 1 minus that with
 /// `invert`. With no window on, the key of the corrector comes from the
@@ -4707,6 +5074,192 @@ impl KeyInput {
 
     pub fn of(&self, key: f64) -> f64 {
         scaled_key((self.gain, self.offset, self.invert), key)
+    }
+}
+
+pub const QUALIFIER_HUE_STEP: f64 = 3.6;
+pub const QUALIFIER_SAT_SCALE: f64 = 0.4115;
+pub const QUALIFIER_LUM_MIDDLE: f64 = 0.5;
+pub const QUALIFIER_LUM_SCALE: f64 = 0.25;
+pub const QUALIFIER_LUMA: [f64; 3] = [0.299, 0.587, 0.114];
+pub const QUALIFIER_CHROMA: [f64; 2] = [1.402, 1.772];
+pub const QUALIFIER_SYM_HARD: [f64; 2] = [30.0, 70.0];
+pub const QUALIFIER_SYM_SPAN: f64 = 20.0;
+
+/// The HSL qualifier of a corrector: a key from the hue, the saturation
+/// and the luminance of the picture that comes into the corrector. The
+/// hue is the angle of the Rec. 601 chroma, the saturation 0.4115 times
+/// its length, and the luminance 0.5 plus a quarter of the Rec. 601 luma.
+/// The values of the ranges are from 0 to 100. The key is the product of
+/// the parts that are on, and 1 with no part on. Each soft edge falls as
+/// a smoothstep. With a window on, in Matte the key is where the qualifier
+/// and the windows both are, and with `mask` where either is.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Qualifier {
+    /// The middle of the hue range. 3.6 times it is the angle in degrees.
+    /// Usual: 50.
+    pub hue_center: f64,
+    /// The width of the hue range. 3.6 times it is the range in degrees.
+    /// Usual: 100.
+    pub hue_width: f64,
+    /// The soft edge on both sides of the hue range, at most 2 times
+    /// `hue_width`. 1.8 times it is its half in degrees. Usual: 0.
+    pub hue_soft: f64,
+    /// Below 50, the soft edge on the side of the larger angles is
+    /// shorter, and at 30 and below it ends hard. Above 50, the soft edge
+    /// on the other side is, and at 70 and above. Usual: 50.
+    pub hue_sym: f64,
+    /// The lowest saturation of the range. Usual: 0.
+    pub sat_low: f64,
+    /// The highest saturation of the range. Usual: 100.
+    pub sat_high: f64,
+    /// The soft edge at `sat_low`, half below it and half above it.
+    /// Usual: 0.
+    pub sat_low_soft: f64,
+    /// The soft edge at `sat_high`. Usual: 0.
+    pub sat_high_soft: f64,
+    /// The lowest luminance of the range. Usual: 0.
+    pub lum_low: f64,
+    /// The highest luminance of the range. Usual: 100.
+    pub lum_high: f64,
+    /// The soft edge at `lum_low`. Usual: 0.
+    pub lum_low_soft: f64,
+    /// The soft edge at `lum_high`. Usual: 0.
+    pub lum_high_soft: f64,
+    /// The hue part is on. Usual: on.
+    pub hue: bool,
+    /// The saturation part is on. Usual: on.
+    pub sat: bool,
+    /// The luminance part is on. Usual: on.
+    pub lum: bool,
+    /// The key of the qualifier is turned over: 1 minus it. Usual: off.
+    pub invert: bool,
+    /// The gain of the key of the qualifier in the key of the corrector,
+    /// from 0 to 2. Usual: 1.
+    pub gain: f64,
+    /// The offset of the key of the qualifier in the key of the corrector,
+    /// from -1 to 1. Usual: 0.
+    pub offset: f64,
+    /// The key with `gain` and `offset` is turned over: 1 minus it. Usual:
+    /// off.
+    pub key_invert: bool,
+    /// The key of the qualifier adds to the key of the windows. Off, it is
+    /// Matte. Usual: off.
+    pub mask: bool,
+}
+
+impl Default for Qualifier {
+    fn default() -> Self {
+        Self {
+            hue_center: 50.0,
+            hue_width: 100.0,
+            hue_soft: 0.0,
+            hue_sym: 50.0,
+            sat_low: 0.0,
+            sat_high: 100.0,
+            sat_low_soft: 0.0,
+            sat_high_soft: 0.0,
+            lum_low: 0.0,
+            lum_high: 100.0,
+            lum_low_soft: 0.0,
+            lum_high_soft: 0.0,
+            hue: true,
+            sat: true,
+            lum: true,
+            invert: false,
+            gain: 1.0,
+            offset: 0.0,
+            key_invert: false,
+            mask: false,
+        }
+    }
+}
+
+impl Qualifier {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn row_usual(&self) -> bool {
+        let usual = Self::default();
+        self.gain == usual.gain
+            && self.offset == usual.offset
+            && self.key_invert == usual.key_invert
+            && self.mask == usual.mask
+    }
+
+    pub fn hsl_usual(&self) -> bool {
+        let usual = Self::default();
+        Self {
+            gain: usual.gain,
+            offset: usual.offset,
+            key_invert: usual.key_invert,
+            mask: usual.mask,
+            ..*self
+        } == usual
+    }
+
+    pub fn all_on(&self) -> bool {
+        self.hue && self.sat && self.lum
+    }
+
+    pub fn with_hue_width(self, width: f64) -> Self {
+        Self {
+            hue_width: width,
+            hue_soft: self.hue_soft.min(2.0 * width),
+            ..self
+        }
+    }
+
+    pub fn with_hue_soft(self, soft: f64) -> Self {
+        Self {
+            hue_soft: soft,
+            hue_width: self.hue_width.max(soft / 2.0),
+            ..self
+        }
+    }
+
+    pub fn hue_edges(&self) -> [f64; 4] {
+        let half = self.hue_width * QUALIFIER_HUE_STEP / 2.0;
+        let soft = self.hue_soft * QUALIFIER_HUE_STEP / 2.0;
+        let inner = (half - soft).max(0.0);
+        let span = half + soft - inner;
+        let [hard_low, hard_high] = QUALIFIER_SYM_HARD;
+        let share = |v: f64| (v / QUALIFIER_SYM_SPAN).clamp(0.0, 1.0);
+        [
+            self.hue_center * QUALIFIER_HUE_STEP,
+            inner,
+            inner + span * share(self.hue_sym - hard_low),
+            inner + span * share(hard_high - self.hue_sym),
+        ]
+    }
+
+    pub fn range_edges(low: f64, high: f64, low_soft: f64, high_soft: f64) -> [f64; 4] {
+        let edge = |e: f64, s: f64| {
+            let (e, s) = (e / 100.0, s / 100.0);
+            [(e - s / 2.0).max(0.0), (e + s / 2.0).min(1.0)]
+        };
+        let [a, b] = edge(low, low_soft);
+        let [c, d] = edge(high, high_soft);
+        [a, b, c, d]
+    }
+
+    pub fn sat_edges(&self) -> [f64; 4] {
+        Self::range_edges(
+            self.sat_low,
+            self.sat_high,
+            self.sat_low_soft,
+            self.sat_high_soft,
+        )
+    }
+
+    pub fn lum_edges(&self) -> [f64; 4] {
+        Self::range_edges(
+            self.lum_low,
+            self.lum_high,
+            self.lum_low_soft,
+            self.lum_high_soft,
+        )
     }
 }
 
@@ -4772,6 +5325,12 @@ pub struct GradeKey {
     /// the next keyframe. Left out at its usual value, and on a key mixer.
     #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
     pub key_input: KeyInput,
+    /// The HSL qualifier of a corrector on this frame. The numbers blend as
+    /// the values do. The switches, `invert`, `key_invert` and `mask`
+    /// change on the frame of the next keyframe. Left out at its usual
+    /// value, and on a key mixer.
+    #[serde(default, skip_serializing_if = "Qualifier::is_usual")]
+    pub qualifier: Qualifier,
     /// How each input of a key mixer takes its key on this frame, in the
     /// order of the inputs. Gain and offset blend as the values do. Invert
     /// and matte change on the frame of the next keyframe. A corrector
@@ -4785,6 +5344,11 @@ pub struct GradeKey {
     /// mixer leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
+    /// A mark of Add EDL Marks on Tracks, on an edit of the timeline.
+    /// Delete EDL Marks on Tracks removes only these marks. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edl: bool,
 }
 
 /// What a keyframe does up to the next keyframe.
@@ -4847,13 +5411,40 @@ pub enum GradeTool {
         /// order.
         mix: Vec<KeyMix>,
     },
+    /// It splits the picture on its one input into its channels. RGB
+    /// output 0 gives red, 1 green and 2 blue, each as a gray picture: R, G
+    /// and B are that channel. It has no key input and no key output.
+    Splitter,
+    /// It joins three pictures into one: red from input 0, green from
+    /// input 1 and blue from input 2. The alpha comes from the first input
+    /// that has a link. An input with no link gives 0 to its channel. At
+    /// least one input needs a link. It has no key input or key output.
+    Combiner,
 }
 
 impl GradeTool {
     pub fn is_mixer(&self) -> bool {
         !matches!(self, Self::Corrector(_))
     }
+
+    pub fn takes_inputs(&self) -> bool {
+        matches!(
+            self,
+            Self::ParallelMixer | Self::LayerMixer { .. } | Self::KeyMixer { .. }
+        )
+    }
+
+    pub fn outputs(&self) -> u8 {
+        match self {
+            Self::Splitter => SPLIT_OUTPUTS,
+            _ => 1,
+        }
+    }
 }
+
+pub const SPLIT_OUTPUTS: u8 = 3;
+
+pub const COMBINER_INPUTS: usize = 3;
 
 /// A primary correction: the numbers of the Primaries palette. Each value
 /// keeps its own channel order, `[red, green, blue]`, with the master
@@ -4903,22 +5494,22 @@ pub struct Corrector {
     /// Where the Highlight range of the Log mode starts, below 1. Usual:
     /// 0.55.
     pub high_range: f64,
-    /// The Auto Color tool of the viewer Tools. Left out until that tool
-    /// runs on this corrector, and after its reset.
+    /// The Auto Color tool of the node or viewer Tools. Left out until
+    /// Auto Color runs on this corrector, and after its reset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_color: Option<AutoColor>,
 }
 
-/// The Auto Color tool of a corrector: a Lift and a Gain of its own, apart
-/// from the Lift and the Gain of the Primaries palette.
+/// The Auto Color tool of a corrector, with its own exposure, tone and
+/// white balance numbers, apart from the Primaries palette.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AutoColor {
     /// The tool changes the picture. Off, it keeps its values.
     pub on: bool,
-    /// Lift of red, green, blue and the master.
-    pub lift: [f64; 4],
-    /// Gain of red, green, blue and the master.
-    pub gain: [f64; 4],
+    /// Six exposure and tone numbers of the Auto Color tool.
+    pub exposure: [f64; 6],
+    /// Three white balance numbers of the Auto Color tool.
+    pub white: [f64; 3],
 }
 
 impl Default for Corrector {
@@ -5411,17 +6002,26 @@ pub struct Merge {
     pub operator: Option<MergeOperator>,
     /// From 0 to 1. At 0, the colors of the foreground are multiplied by
     /// its alpha first: a foreground with straight colors. At 1, they are
-    /// used as they are: premultiplied colors. Usual: 1.
+    /// used as they are: premultiplied colors. Only a `normal` merge uses
+    /// it. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// What the alpha of the foreground is multiplied by, from 0 to 1. At
-    /// 0, the foreground is added to the background. Usual: 1.
+    /// 0, a `normal` foreground is added to the background. The other apply
+    /// modes multiply the colors of the foreground too. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha_gain: Option<f64>,
     /// How much less the alpha of the foreground covers the background,
-    /// from 0 to 1. The foreground is still added in full. Usual: 0.
+    /// from 0 to 1. The foreground is still added in full. Only a `normal`
+    /// merge with the `over` operator uses it. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// On, a `normal` or a `screen` merge counts an alpha above 1 as 1
+    /// where the foreground covers the background, and a `screen` merge
+    /// also each color. Off, such a foreground takes away more than the
+    /// whole background. Usual: on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp_coverage: Option<bool>,
     /// The width that the center is shown in: its x shows as x × this
     /// width. It does not change the picture. From 1 to 32767. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6127,6 +6727,10 @@ pub struct Mask {
     /// of the picture. Below 0, the edge moves in. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How its own mask joins the masks on its effect mask input. With
+    /// nothing on that input, the mask is its own mask. Usual: `merge`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// On, the mask is the part outside its shape. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
@@ -6174,6 +6778,11 @@ pub struct Mask {
     /// Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
+    /// How the sharp corners of a `rectangle` are drawn where its edge moves
+    /// out: `sharp` keeps a square corner, `rounded` gives an arc and
+    /// `beveled` cuts the corner straight. Usual: `sharp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,
@@ -6189,6 +6798,37 @@ pub struct Mask {
     /// covers nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<[f64; 2]>,
+}
+
+/// How a mask joins its own mask n with the masks i on its effect mask
+/// input. n is its shape after `invert` and `level`. c is its shape before
+/// `level`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaintMode {
+    /// n + i × (1 − c).
+    #[default]
+    Merge,
+    /// i + n, at most 1.
+    Add,
+    /// i − n, at least 0.
+    Subtract,
+    /// The smaller of i and n.
+    Minimum,
+    /// The larger of i and n.
+    Maximum,
+    /// (i + n) / 2.
+    Average,
+    /// i × n.
+    Multiply,
+    /// n where n is above 0, else i.
+    Replace,
+    /// i + n − 2 × i × n: n turns i over.
+    Invert,
+    /// n.
+    Copy,
+    /// i.
+    Ignore,
 }
 
 /// Which parts a polygon whose sides cross covers.
@@ -6232,7 +6872,9 @@ pub struct EffectKeys {
 /// colors, from `top_left_red` to `bottom_right_alpha`, and `start`, `end`
 /// and `offset` of its gradient. A `fast_noise` has `center`, `detail`,
 /// `brightness`, `contrast`, `scale`, `y_scale`, `angle`, `seethe`,
-/// `seethe_rate` and the four channels of `color1` and `color2`.
+/// `seethe_rate` and the four channels of `color1` and `color2`. A title has
+/// the values of its shadow and its background, from `shadow_offset` to
+/// `background_opacity`. `shadow_offset` and `background_center` are points.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -6374,6 +7016,15 @@ pub enum EffectValue {
     Color2Green,
     Color2Blue,
     Color2Alpha,
+    ShadowOffset,
+    ShadowBlur,
+    ShadowOpacity,
+    BackgroundOutlineWidth,
+    BackgroundWidth,
+    BackgroundHeight,
+    BackgroundCornerRadius,
+    BackgroundCenter,
+    BackgroundOpacity,
 }
 
 /// What an effect does, with its own values.
@@ -7709,6 +8360,14 @@ impl Ease {
         *self == Self::Linear
     }
 
+    pub fn backward(self) -> Self {
+        match self {
+            Self::EaseIn => Self::EaseOut,
+            Self::EaseOut => Self::EaseIn,
+            other => other,
+        }
+    }
+
     pub fn of(self, t: f64) -> f64 {
         let t = t.clamp(0.0, 1.0);
         match self {
@@ -8387,7 +9046,7 @@ pub struct ClipAudio {
     pub dialogue_leveler: Option<DialogueLeveler>,
     /// The compressor. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compressor: Option<Compressor>,
+    pub compressor: Option<ClipCompressor>,
     /// Noise Reduction. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise_reduction: Option<NoiseReduction>,
@@ -8411,6 +9070,35 @@ pub struct Equalizer {
     pub bands: [EqBand; 6],
 }
 
+/// The equalizer of a track: six bands, one after the other, with one
+/// response curve for all of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackEqualizer {
+    /// The switch. Off keeps the bands.
+    pub on: bool,
+    /// The response curve of the bands.
+    pub r#type: EqType,
+    /// Bands 1 to 6, from the low end to the high end.
+    pub bands: [EqBand; 6],
+    /// The slope of band 1 as a `hi_pass` filter, in dB per octave: 6, 12,
+    /// 18 or 24.
+    pub hi_pass_slope: u32,
+    /// The slope of band 6 as a `lo_pass` filter, in dB per octave: 6, 12,
+    /// 18 or 24.
+    pub lo_pass_slope: u32,
+}
+
+/// The response curve of a track equalizer: `earth`, the usual one, or one
+/// of three classic mixing desks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EqType {
+    Earth,
+    Air,
+    Ice,
+    Fire,
+}
+
 /// One band of an equalizer.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EqBand {
@@ -8420,10 +9108,11 @@ pub struct EqBand {
     pub kind: EqKind,
     /// Its frequency in Hz, from 20 to 22000.
     pub freq: f64,
-    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
-    /// `hi_shelf` use it.
+    /// Its gain in dB: on a clip from -70 to 24, on a track from -20 to 20.
+    /// Only `bell`, `lo_shelf` and `hi_shelf` use it.
     pub gain: f64,
-    /// Its width, from 0.3 to 100. Only `bell` uses it.
+    /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// `bell` uses it, and on a track of the `fire` type the shelves too.
     pub q: f64,
 }
 
@@ -8473,22 +9162,84 @@ pub struct Compressor {
     pub on: bool,
     /// The level above which it compresses, in dB, from -50 to 0.
     pub threshold_db: f64,
-    /// The ratio of the input to the output, from 1 to 10.
+    /// The ratio of the input to the output, from 1.2 to 20.
     pub ratio: f64,
-    /// The width of the curve around the threshold, in dB, from 0 to 30.
-    /// At 0, compression starts at the threshold.
-    pub knee_db: f64,
-    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    /// How soft the curve is around the threshold, from 0 to 100. At 0,
+    /// compression starts at the threshold. At 100, it starts about 10 dB
+    /// below it and is full 10 dB above it.
+    pub knee: f64,
+    /// The share of the input in the result, from 0 to 100: 0 is all
+    /// compressed sound, and 100 is the input alone.
     pub mix: f64,
-    /// How fast it starts to compress, in ms, from 0 to 100.
+    /// How fast it starts to compress, in ms, from 0.7 to 100.
     pub attack_ms: f64,
     /// How long it keeps the reduction after the attack, in ms, from 0 to
     /// 4000.
     pub hold_ms: f64,
     /// How fast it stops to compress, in ms, from 50 to 4000.
     pub release_ms: f64,
-    /// The gain after it, in dB, from 0 to 24.
+}
+
+/// The compressor of a clip, with its own gain on the compressed sound.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipCompressor {
+    #[serde(flatten)]
+    pub compressor: Compressor,
+    /// The gain of the compressed sound before the mix, in dB, from 0 to
+    /// 24.
     pub makeup_db: f64,
+}
+
+/// The Dynamics of a track: an expander or gate, a compressor and a
+/// limiter, one after the other, then the make up gain.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackDynamics {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    pub expander: Expander,
+    pub compressor: Compressor,
+    pub limiter: Limiter,
+    /// The gain after the modules, in dB, from 0 to 20.
+    pub makeup_db: f64,
+}
+
+/// An expander or a gate: it lowers the level below its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Expander {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// A gate: it lowers the level by 4 dB for each dB below the threshold,
+    /// and by 0.1 dB when it is open. Off, an expander: by its ratio.
+    pub gate: bool,
+    /// The level below which it lowers the level, in dB, from -50 to 0.
+    pub threshold_db: f64,
+    /// The most that it lowers the level, in dB, from 0 to 60.
+    pub range_db: f64,
+    /// The expander's change of the output for each dB of the input below
+    /// the threshold, in dB, from 1.1 to 3.
+    pub ratio: f64,
+    /// How fast it opens, in ms, from 0.5 to 100.
+    pub attack_ms: f64,
+    /// How long it stays open after the level falls, in ms, from 0 to 4000.
+    pub hold_ms: f64,
+    /// How fast it closes, in ms, from 50 to 4000.
+    pub release_ms: f64,
+}
+
+/// A limiter: a compressor of ratio 20 above its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Limiter {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// The level above which it limits, in dB, from -30 to 0.
+    pub threshold_db: f64,
+    /// How fast it starts to limit, in ms, from 0.7 to 30.
+    pub attack_ms: f64,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    pub hold_ms: f64,
+    /// How fast it stops to limit, in ms, from 50 to 4000.
+    pub release_ms: f64,
 }
 
 /// Noise Reduction: it lowers the steady noise of the room and the hiss.
@@ -8536,6 +9287,13 @@ impl VoiceIsolation {
 }
 
 impl Clip {
+    pub fn tied_with(&self, o: &Clip) -> bool {
+        self.link.is_some()
+            && self.link == o.link
+            && (self.start, self.duration, self.source_in) == (o.start, o.duration, o.source_in)
+            && self.pace() == o.pace()
+    }
+
     pub const ADJUSTMENT_CLIP: &str = "Adjustment Clip";
 
     pub fn shown_color<'a>(&'a self, media: Option<&'a Media>) -> Option<&'a str> {
@@ -9063,8 +9821,8 @@ impl TextStroke {
 pub struct SubtitleBackground {
     /// `#rrggbb`, `#rgb` or a name.
     pub color: String,
-    /// From 0 to 1. `0` draws no box on a subtitle track. Usual: 1/2 on a
-    /// subtitle track, 1 on a title.
+    /// From 0 to 1. `0` draws no box on a subtitle track. On a title, it is
+    /// in steps of 1/100. Usual: 1/2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `true` draws no box and keeps these values.
@@ -9240,7 +9998,10 @@ fn stroke_of(o: Option<&SubtitleOutline>, usual: f64, ink: [u8; 3]) -> Option<Te
 
 fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
     let b = b.filter(|b| !b.is_off())?;
-    Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
+    Some((
+        paint(Some(&b.color), [0, 0, 0]),
+        b.opacity.unwrap_or(Title::BOX_OPACITY),
+    ))
 }
 
 /// A subtitle track: cues shown over the picture, one language or use.
@@ -9399,6 +10160,7 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
+            link: None,
         }
     }
 
@@ -9763,6 +10525,7 @@ impl Project {
             own: None,
             grade: None,
             render: RenderRange::Entire,
+            clip_filter: ClipFilter::All,
             tracks: Self::fresh_tracks(),
             marks: Marks::default(),
             markers: Vec::new(),
@@ -10035,6 +10798,30 @@ impl Project {
 
     pub fn clip(&self, id: &str) -> Option<&Clip> {
         self.find_clip(id).map(|(t, c)| &self.tracks[t].clips[c])
+    }
+
+    pub fn tied(&self, id: &str) -> Vec<String> {
+        let Some(c) = self.clip(id) else {
+            return Vec::new();
+        };
+        if c.link.is_none() {
+            return Vec::new();
+        }
+        self.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(|o| o.id != id && o.tied_with(c))
+            .map(|o| o.id.clone())
+            .collect()
+    }
+
+    pub fn free_link(&self) -> u32 {
+        self.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter_map(|c| c.link)
+            .max()
+            .map_or(1, |n| n + 1)
     }
 
     pub fn clip_color<'a>(&'a self, c: &'a Clip) -> Option<&'a str> {
@@ -10310,6 +11097,8 @@ impl Track {
             volume_db: 0.0,
             voice_isolation: None,
             duck: None,
+            dynamics: None,
+            equalizer: None,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),
@@ -10382,20 +11171,22 @@ impl Hash for Title {
             style,
             position,
             zoom,
+            zoom_link,
             rotation,
             upper,
             ..
         } = self;
         (kind, align, anchor, text, style).hash(h);
         pair_bits(*position).hash(h);
-        (floats_bits(*zoom), floats_bits(*rotation)).hash(h);
+        (pair_bits(*zoom), zoom_link, floats_bits(*rotation)).hash(h);
         upper
             .as_ref()
             .map(|u| {
                 (
                     u.anchor,
                     pair_bits(u.position),
-                    floats_bits(u.zoom),
+                    pair_bits(u.zoom),
+                    u.zoom_link,
                     floats_bits(u.rotation),
                 )
             })
@@ -10451,7 +11242,7 @@ impl Hash for TitleShape {
             pair_bits(*center),
             floats_bits(*corner),
             outline_color,
-            floats_bits(*outline_width),
+            outline_width,
         )
             .hash(h);
     }

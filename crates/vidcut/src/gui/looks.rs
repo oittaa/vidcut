@@ -5,8 +5,8 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::looks::{Look, LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow, TitleShape,
-    TitleStyle,
+    EffectValue, Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow,
+    TitleShape, TitleStyle,
 };
 
 use super::export::Ask;
@@ -322,7 +322,7 @@ impl<'a> Usual<'a> {
             ink: [0, 0, 0],
             outline_size: "none",
             background: "none",
-            opacity: "100%",
+            opacity: "50%",
             shadow: "none",
             switches: false,
         }
@@ -401,6 +401,8 @@ pub(super) struct TextFields {
     frame: Option<[f64; 2]>,
 }
 
+pub(super) type KeyRow<'a> = &'a mut dyn FnMut(&mut egui::Ui, EffectValue);
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct ShapeFields {
     width: String,
@@ -413,20 +415,24 @@ pub(super) struct ShapeFields {
 }
 
 impl ShapeFields {
-    pub(super) fn load(s: Option<&TitleShape>) -> Self {
+    pub(super) fn load(s: Option<&TitleShape>, frame: [f64; 2]) -> Self {
         let center = s.and_then(|s| s.center);
         Self {
-            width: percent(s.map(|s| s.size[0])),
-            height: percent(s.map(|s| s.size[1])),
-            across: percent(center.map(|c| c[0])),
-            down: percent(center.map(|c| c[1])),
-            corner: percent(s.and_then(|s| s.corner)),
+            width: plain(s.map(|s| s.size[0])),
+            height: plain(s.map(|s| s.size[1])),
+            across: plain(center.map(|c| c[0] * frame[0])),
+            down: plain(center.map(|c| 0.0 - c[1] * frame[1])),
+            corner: plain(s.and_then(|s| s.corner)),
             outline: s.and_then(|s| s.outline_color.clone()).unwrap_or_default(),
-            outline_width: plain(s.and_then(|s| s.outline_width)),
+            outline_width: plain(s.and_then(|s| s.outline_width).map(f64::from)),
         }
     }
 
-    pub(super) fn shape(&self, stored: Option<&TitleShape>) -> Result<Option<TitleShape>, String> {
+    pub(super) fn shape(
+        &self,
+        stored: Option<&TitleShape>,
+        frame: [f64; 2],
+    ) -> Result<Option<TitleShape>, String> {
         let bare = [
             &self.width,
             &self.height,
@@ -443,26 +449,78 @@ impl ShapeFields {
         }
         let size = stored.map(|s| s.size);
         let center = stored.and_then(|s| s.center);
-        let width = kept_number(&self.width, size.map(|s| s[0]), "box width")?;
-        let height = kept_number(&self.height, size.map(|s| s[1]), "box height")?;
-        let across = kept_number(&self.across, center.map(|c| c[0]), "box across")?;
-        let down = kept_number(&self.down, center.map(|c| c[1]), "box down")?;
+        let sides = (0.0, Title::BOX_MOST);
+        let width = kept_within(&self.width, size.map(|s| s[0]), 1.0, sides, "box width")?;
+        let height = kept_within(&self.height, size.map(|s| s[1]), 1.0, sides, "box height")?;
+        let reach = (-Picture::REACH, Picture::REACH);
+        let across = kept_within(
+            &self.across,
+            center.map(|c| c[0]),
+            frame[0],
+            reach,
+            "box center x",
+        )?;
+        let up = kept_within(
+            &self.down,
+            center.map(|c| 0.0 - c[1]),
+            frame[1],
+            reach,
+            "box center y",
+        )?;
         let Some(height) = height else {
             return Err("a box needs a height".into());
         };
+        let corner = stored.and_then(|s| s.corner);
         Ok(Some(TitleShape {
             size: [width.unwrap_or(Title::BOX_WIDTH), height],
-            center: (across.is_some() || down.is_some())
-                .then(|| [across.unwrap_or(0.0), down.unwrap_or(0.0)]),
-            corner: kept_number(&self.corner, stored.and_then(|s| s.corner), "box corner")?,
+            center: (across.is_some() || up.is_some())
+                .then(|| [across.unwrap_or(0.0), 0.0 - up.unwrap_or(0.0)]),
+            corner: kept_within(&self.corner, corner, 1.0, (0.0, 1.0), "box corner radius")?,
             outline_color: field(&self.outline),
-            outline_width: kept_plain(
+            outline_width: kept_whole(
                 &self.outline_width,
                 stored.and_then(|s| s.outline_width),
+                (0, Title::BOX_MOST_OUTLINE),
                 "box outline width",
             )?,
         }))
     }
+}
+
+fn kept_within(
+    shown: &str,
+    stored: Option<f64>,
+    unit: f64,
+    (low, high): (f64, f64),
+    what: &str,
+) -> Result<Option<f64>, String> {
+    if shown.trim() == plain(stored.map(|v| v * unit)) {
+        return Ok(stored);
+    }
+    Ok(kept_plain(shown, None, what)?.map(|v| (v / unit).clamp(low, high)))
+}
+
+fn kept_whole(
+    shown: &str,
+    stored: Option<u32>,
+    (least, most): (u32, u32),
+    what: &str,
+) -> Result<Option<u32>, String> {
+    let t = shown.trim().trim_end_matches('%').trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    if stored.is_some_and(|v| t == v.to_string()) {
+        return Ok(stored);
+    }
+    let n = t
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite())
+        .ok_or_else(|| format!("{what} is a whole number, such as 5"))?;
+    Ok(Some(
+        n.trunc().clamp(f64::from(least), f64::from(most)) as u32
+    ))
 }
 
 fn usual_font() -> &'static str {
@@ -578,6 +636,24 @@ impl TextFields {
         out
     }
 
+    pub(super) fn whole_opacity(&self, stored: Option<f64>) -> Result<Option<f64>, String> {
+        let shown = stored.map(|o| (o * 100.0).round() as u32);
+        Ok(kept_whole(&self.opacity, shown, (0, 100), "opacity")?.map(|p| f64::from(p) / 100.0))
+    }
+
+    pub(super) fn whole_shadow(
+        &self,
+        stored: Option<&TitleShadow>,
+    ) -> Result<[Option<f64>; 2], String> {
+        let opacity = stored
+            .and_then(|h| h.opacity)
+            .map(|o| (o * 100.0).round() as u32);
+        let blur = stored.and_then(|h| h.blur).map(|b| b.round() as u32);
+        let opacity = kept_whole(&self.shadow_opacity, opacity, (0, 100), "shadow opacity")?;
+        let blur = kept_whole(&self.shadow_blur, blur, (1, 100), "shadow blur")?;
+        Ok([opacity.map(|p| f64::from(p) / 100.0), blur.map(f64::from)])
+    }
+
     pub(super) fn refilled(&self, stored: &Parts) -> Self {
         let was = Self::load(stored);
         let kept = |shown: &str, was: &str| {
@@ -611,10 +687,16 @@ impl TextFields {
         families: &[String],
         usual: &Usual,
         spaced: Option<(&mut String, &mut String)>,
-        shaped: Option<&mut ShapeFields>,
+        titled: Option<(&mut ShapeFields, KeyRow<'_>)>,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
+        let (shaped, mut keyed) = titled.unzip();
+        let mut keys = |ui: &mut egui::Ui, v: EffectValue| {
+            if let Some(k) = keyed.as_mut() {
+                k(ui, v);
+            }
+        };
         let mut row = |ui: &mut egui::Ui, on: bool, label: &str, text: &mut String, hint: &str| {
             ui.add_enabled(on, egui::Label::new(label));
             let r = ui.add_enabled(
@@ -672,18 +754,23 @@ impl TextFields {
             .inner;
         ui.end_row();
         changed |= row(ui, on, "Opacity", &mut self.opacity, usual.opacity);
+        keys(ui, EffectValue::BackgroundOpacity);
         ui.end_row();
         if let Some(s) = shaped {
-            let corner = format!("{}%", percent(Some(Title::BOX_CORNER)));
+            let corner = plain(Some(Title::BOX_CORNER));
             changed |= row(ui, on, "Box Width", &mut s.width, "Fits Text");
+            keys(ui, EffectValue::BackgroundWidth);
             ui.end_row();
             changed |= row(ui, on, "Box Height", &mut s.height, "Fits Text");
+            keys(ui, EffectValue::BackgroundHeight);
             ui.end_row();
-            changed |= row(ui, on, "Box Across", &mut s.across, "0%");
+            changed |= row(ui, on, "Box Center X", &mut s.across, "0");
+            keys(ui, EffectValue::BackgroundCenter);
             ui.end_row();
-            changed |= row(ui, on, "Box Down", &mut s.down, "0%");
+            changed |= row(ui, on, "Box Center Y", &mut s.down, "0");
             ui.end_row();
-            changed |= row(ui, on, "Box Corner", &mut s.corner, &corner);
+            changed |= row(ui, on, "Box Corner Radius", &mut s.corner, &corner);
+            keys(ui, EffectValue::BackgroundCornerRadius);
             ui.end_row();
             changed |= row(ui, on, "Box Outline", &mut s.outline, "#000000");
             changed |= ui
@@ -691,6 +778,7 @@ impl TextFields {
                 .inner;
             ui.end_row();
             changed |= row(ui, on, "Box Outline Width", &mut s.outline_width, "0");
+            keys(ui, EffectValue::BackgroundOutlineWidth);
             ui.end_row();
         }
         if usual.switches {
@@ -709,6 +797,7 @@ impl TextFields {
             &mut self.shadow_opacity,
             &shadow_opacity,
         );
+        keys(ui, EffectValue::ShadowOpacity);
         ui.end_row();
         changed |= row(
             ui,
@@ -717,10 +806,12 @@ impl TextFields {
             &mut self.shadow_across,
             &shadow_across,
         );
+        keys(ui, EffectValue::ShadowOffset);
         ui.end_row();
         changed |= row(ui, on, "Shadow down", &mut self.shadow_down, &shadow_down);
         ui.end_row();
         changed |= row(ui, on, "Shadow blur", &mut self.shadow_blur, &shadow_blur);
+        keys(ui, EffectValue::ShadowBlur);
         ui.end_row();
         (changed, enter)
     }

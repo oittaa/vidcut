@@ -202,6 +202,7 @@ pub(super) struct NodeView<K> {
     shown: Option<Rect>,
     cell: Vec2,
     tile: Vec2,
+    pitch: Option<Vec2>,
 }
 
 impl<K> Default for NodeView<K> {
@@ -217,11 +218,19 @@ impl<K> Default for NodeView<K> {
             shown: None,
             cell: CELL,
             tile: BOX,
+            pitch: None,
         }
     }
 }
 
 impl<K> NodeView<K> {
+    pub(super) fn pitched(pitch: Vec2) -> Self {
+        Self {
+            pitch: Some(pitch),
+            ..Self::default()
+        }
+    }
+
     pub(super) fn ask(&mut self, zoom: NodeZoom) {
         self.asked = Some(zoom);
     }
@@ -662,7 +671,10 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     } else {
         BOX
     };
-    view.cell = CELL + vec2(0.0, view.tile.y - BOX.y);
+    view.cell = match view.pitch {
+        Some(pitch) => view.tile * pitch,
+        None => CELL + vec2(0.0, view.tile.y - BOX.y),
+    };
     let cell = view.cell;
     view.zoomed(rect, &graph.tiles);
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());

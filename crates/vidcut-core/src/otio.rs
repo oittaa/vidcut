@@ -872,9 +872,7 @@ fn export_with(
     };
     let (mut video_tracks, mut audio_tracks) = (Vec::new(), Vec::new());
     let mut groups: i64 = 0;
-    let links = compound_links(p, a, b);
-    let mut given = HashMap::new();
-    let ties = no_media_ties(p, a, b);
+    let ties = ties(p, a, b);
     let mut tied = HashMap::new();
     for t in &p.tracks {
         let (mut video, mut audio) = (Vec::new(), Vec::new());
@@ -899,8 +897,8 @@ fn export_with(
             let shows = c.video && e > s;
             let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
             let sounds = sounds.filter(|(s, e)| e > s);
-            let group = match no_media_tie(c).filter(|k| ties.get(k).is_some_and(|&n| n > 1)) {
-                Some(k) => Some(*tied.entry(k).or_insert_with(|| {
+            let group = match ties.get(c.id.as_str()) {
+                Some(&k) => Some(*tied.entry(k).or_insert_with(|| {
                     groups += 1;
                     groups
                 })),
@@ -982,7 +980,7 @@ fn export_with(
                     it["color"] = x;
                 }
                 if let Some(k) = compound {
-                    tie(&mut it, c, k, &links, &mut given, &mut groups);
+                    tie(&mut it, k, group);
                     own_pace(&mut it["metadata"][VIDCUT], c, s);
                 }
                 video.push(it);
@@ -1122,7 +1120,7 @@ fn export_with(
                         }),
                     );
                     let mut it = block(c, k, &label, c.source_at(s), e - s, effects)?;
-                    tie(&mut it, c, k, &links, &mut given, &mut groups);
+                    tie(&mut it, k, group);
                     own_pace(&mut it["metadata"][VIDCUT], c, s);
                     audio.push(it);
                     if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
@@ -1143,6 +1141,12 @@ fn export_with(
         }
         if let Some(d) = &t.duck {
             meta["duck"] = json!(d);
+        }
+        if let Some(d) = &t.dynamics {
+            meta["dynamics"] = json!(d);
+        }
+        if let Some(e) = &t.equalizer {
+            meta["equalizer"] = json!(e);
         }
         if !t.render_cache {
             meta["render_cache"] = json!(false);
@@ -1483,27 +1487,33 @@ fn plain_reference(item: &Value) -> Option<Value> {
     } else {
         return None;
     };
-    generators::keep_ties(&mut plain, &item["metadata"][EDITOR]);
+    generators::keep_channels(&mut plain, &item["metadata"][EDITOR]);
     Some(plain)
 }
 
-type NoMediaTie = (i64, i64, i64);
-
-fn no_media_tie(c: &Clip) -> Option<NoMediaTie> {
-    let link = c.generator.as_ref().and_then(generators::kept_link)?;
-    Some((link, c.start, c.duration))
-}
-
-fn no_media_ties(p: &Project, a: i64, b: i64) -> HashMap<NoMediaTie, usize> {
-    let mut ties = HashMap::new();
+fn ties(p: &Project, a: i64, b: i64) -> HashMap<&str, &str> {
+    let mut by_link: HashMap<u32, Vec<&Clip>> = HashMap::new();
     for c in p
         .tracks
         .iter()
         .flat_map(|t| &t.clips)
         .filter(|c| exported(c, a, b))
     {
-        if let Some(tie) = no_media_tie(c) {
-            *ties.entry(tie).or_insert(0) += 1;
+        if let Some(l) = c.link {
+            by_link.entry(l).or_default().push(c);
+        }
+    }
+    let mut ties = HashMap::new();
+    for list in by_link.values() {
+        for c in list {
+            let group: Vec<&str> = list
+                .iter()
+                .filter(|o| o.tied_with(c))
+                .map(|o| o.id.as_str())
+                .collect();
+            if let Some(&first) = group.iter().min().filter(|_| group.len() > 1) {
+                ties.insert(c.id.as_str(), first);
+            }
         }
     }
     ties
@@ -1543,79 +1553,11 @@ pub(crate) fn stack_id(stack: &Value) -> String {
     )
 }
 
-pub fn tied(p: &Project, id: &str) -> Vec<String> {
-    let Some(c) = p.clip(id) else {
-        return Vec::new();
-    };
-    if let Some(k) = no_media_tie(c) {
-        return p
-            .tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .filter(|o| o.id != id && no_media_tie(o) == Some(k))
-            .map(|o| o.id.clone())
-            .collect();
-    }
-    if c.compound.is_none() {
-        return Vec::new();
-    }
-    let links = compound_links(p, i64::MIN, i64::MAX);
-    let Some((n, _)) = links.get(id) else {
-        return Vec::new();
-    };
-    links
-        .iter()
-        .filter(|(o, (m, _))| **o != id && m == n)
-        .map(|(o, _)| (*o).to_string())
-        .collect()
-}
-
-type Links<'a> = HashMap<&'a str, (usize, String)>;
-
-fn compound_links(p: &Project, a: i64, b: i64) -> Links<'_> {
-    let blocks = |picture: bool| {
-        p.tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .filter(move |c| c.video == picture && c.start.max(a) < c.end().min(b))
-            .filter_map(|c| Some((c, p.clip_compound(c)?)))
-    };
-    let mut links = HashMap::new();
-    for (n, (c, k)) in blocks(true).enumerate() {
-        let same = |(s, j): &(&Clip, &Compound)| {
-            !links.contains_key(s.id.as_str())
-                && (s.start, s.duration, s.source_in) == (c.start, c.duration, c.source_in)
-                && s.pace() == c.pace()
-                && j.id == k.id
-        };
-        if let Some((s, _)) = blocks(false).find(same) {
-            let id = k.sequence_id.clone();
-            links.insert(s.id.as_str(), (n, id.clone()));
-            links.insert(c.id.as_str(), (n, id));
-        }
-    }
-    links
-}
-
-fn tie(
-    it: &mut Value,
-    c: &Clip,
-    k: &Compound,
-    links: &Links,
-    given: &mut HashMap<usize, i64>,
-    groups: &mut i64,
-) {
+fn tie(it: &mut Value, k: &Compound, group: Option<i64>) {
     let editor = &mut it["metadata"][EDITOR];
-    match links.get(c.id.as_str()) {
-        Some((n, id)) => {
-            let g = *given.entry(*n).or_insert_with(|| {
-                *groups += 1;
-                *groups
-            });
-            editor["Sequence ID"] = json!(id);
-            editor["Link Group ID"] = json!(g);
-        }
-        None => editor["Sequence ID"] = json!(&k.sequence_id),
+    editor["Sequence ID"] = json!(&k.sequence_id);
+    if let Some(g) = group {
+        editor["Link Group ID"] = json!(g);
     }
 }
 
@@ -1683,7 +1625,7 @@ pub struct ImportedClip {
     pub pan_keys: Vec<Keyframe>,
     pub equalizer: Option<crate::model::Equalizer>,
     pub dialogue_leveler: Option<crate::model::DialogueLeveler>,
-    pub compressor: Option<crate::model::Compressor>,
+    pub compressor: Option<crate::model::ClipCompressor>,
     pub noise_reduction: Option<crate::model::NoiseReduction>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
@@ -1741,7 +1683,7 @@ impl ImportedClip {
                     .is_none_or(|r| generators::read(r, 0).is_some()))
     }
 
-    fn has_no_media(&self) -> bool {
+    pub fn has_no_media(&self) -> bool {
         self.generator
             .as_ref()
             .is_some_and(|r| schema(r).starts_with("MissingReference"))
@@ -1782,7 +1724,7 @@ impl ImportedClip {
             compressor: None,
             noise_reduction: None,
             voice_isolation: None,
-            link: None,
+            link: link_group(item),
             effects: Vec::new(),
             audio_effects: Vec::new(),
             generator: None,
@@ -1823,6 +1765,8 @@ pub struct ImportedTrack {
     pub volume_db: f64,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub duck: Option<crate::model::Duck>,
+    pub dynamics: Option<crate::model::TrackDynamics>,
+    pub equalizer: Option<crate::model::TrackEqualizer>,
     pub video_enabled: bool,
     pub render_cache: bool,
     pub name: Option<String>,
@@ -1847,6 +1791,12 @@ impl ImportedTrack {
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
             voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
             duck: serde_json::from_value(meta["duck"].clone()).ok(),
+            dynamics: serde_json::from_value(meta["dynamics"].clone())
+                .ok()
+                .filter(|d| crate::dynamics::problem(d).is_none()),
+            equalizer: serde_json::from_value(meta["equalizer"].clone())
+                .ok()
+                .filter(|e| crate::equalizer::track::problem(e).is_none()),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             render_cache: meta["render_cache"].as_bool().unwrap_or(true),
             name: match meta.get("name") {
@@ -3035,12 +2985,17 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     })
 }
 
-pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+fn track_kept(
+    p: &Project,
+    span: Option<(i64, i64)>,
+    what: &str,
+    heard: fn(&crate::model::Track) -> bool,
+) -> Option<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let named: Vec<String> = p
         .tracks
         .iter()
-        .filter(|t| t.duck.as_ref().is_some_and(|d| d.on))
+        .filter(|t| heard(t))
         .filter(|t| {
             t.clips
                 .iter()
@@ -3050,9 +3005,27 @@ pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> 
         .collect();
     (!named.is_empty()).then(|| {
         format!(
-            "Ducking stays in vidcut's own metadata, so other editors won't hear it: {}",
+            "{what} stays in vidcut's own metadata, so other editors won't hear it: {}",
             named.join(", ")
         )
+    })
+}
+
+pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "Ducking", |t| {
+        t.duck.as_ref().is_some_and(|d| d.on)
+    })
+}
+
+pub fn unheard_track_dynamics(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "The track Dynamics", |t| {
+        t.dynamics.as_ref().is_some_and(|d| d.heard())
+    })
+}
+
+pub fn unheard_track_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "The track equalizer", |t| {
+        t.equalizer.as_ref().is_some_and(|e| e.heard())
     })
 }
 

@@ -82,6 +82,34 @@ impl Container {
         matches!(self, Self::Tiff | Self::Exr)
     }
 
+    pub fn takes_video(self, codec: VideoCodec) -> bool {
+        use VideoCodec as V;
+        match self {
+            Self::Mp4 => matches!(codec, V::H264 | V::Hevc | V::Av1 | V::Vp9),
+            Self::Mov => matches!(codec, V::H264 | V::Hevc | V::Prores | V::Dnxhr),
+            Self::Mkv => !matches!(codec, V::Tiff | V::Exr),
+            Self::Webm => matches!(codec, V::Vp9 | V::Av1),
+            Self::Tiff => codec == V::Tiff,
+            Self::Exr => codec == V::Exr,
+            _ => false,
+        }
+    }
+
+    pub fn takes_audio(self, codec: AudioCodec) -> bool {
+        use AudioCodec as A;
+        match self {
+            Self::Mp4 => matches!(codec, A::Aac | A::Mp3 | A::Opus | A::Flac),
+            Self::Mov => matches!(codec, A::Aac | A::PcmS16 | A::PcmS24),
+            Self::Mkv => true,
+            Self::Webm | Self::Ogg => matches!(codec, A::Opus),
+            Self::M4a => matches!(codec, A::Aac),
+            Self::Mp3 => matches!(codec, A::Mp3),
+            Self::Flac => matches!(codec, A::Flac),
+            Self::Wav => matches!(codec, A::PcmS16 | A::PcmS24),
+            Self::Tiff | Self::Exr => false,
+        }
+    }
+
     pub fn from_extension(ext: &str) -> Option<Self> {
         Some(match ext.to_ascii_lowercase().as_str() {
             "mp4" => Self::Mp4,
@@ -173,6 +201,15 @@ impl VideoCodec {
         match self {
             VideoCodec::H264 | VideoCodec::Hevc => 51,
             _ => 63,
+        }
+    }
+
+    pub fn fixed_profile(self) -> Option<&'static str> {
+        match self {
+            VideoCodec::Prores | VideoCodec::Dnxhr => Some("hq"),
+            VideoCodec::Tiff => Some("rgb16"),
+            VideoCodec::Exr => Some("half"),
+            VideoCodec::H264 | VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9 => None,
         }
     }
 }
@@ -474,6 +511,12 @@ impl VideoSettings {
         }
     }
 
+    pub fn named_profile(&self) -> &str {
+        (self.profile.as_deref())
+            .or(self.codec.fixed_profile())
+            .unwrap_or_default()
+    }
+
     pub fn dwa(&self) -> bool {
         self.codec == VideoCodec::Exr
             && self
@@ -718,6 +761,139 @@ pub struct Numbering {
     pub drop_frame: bool,
 }
 
+/// One more file of a render: the frames of `output` in a format of its
+/// own. It has the frame size, the frame rate and the range of `output`.
+/// It has the `quality` of `output`, and its own encoder makes it. With a
+/// `bitrate` on `output`, it has the default quality of its codec. It has
+/// the audio of `output` when its format takes that codec, else no audio.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoreOutput {
+    /// The format. The file has the name of `output` with the extension of
+    /// this format.
+    pub container: Container,
+    /// As `video.codec`.
+    pub codec: VideoCodec,
+    /// As `video.encoder`.
+    #[serde(default)]
+    pub encoder: EncoderChoice,
+    /// As `video.profile`: for ProRes, its type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// A folder for the file in the folder of `output`. Two outputs may not
+    /// write the same file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+impl Default for MoreOutput {
+    fn default() -> Self {
+        Self {
+            container: Container::Mp4,
+            codec: VideoCodec::H264,
+            encoder: EncoderChoice::Auto,
+            profile: None,
+            folder: None,
+        }
+    }
+}
+
+impl MoreOutput {
+    pub fn folder(&self) -> Option<&str> {
+        self.folder
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+    }
+
+    pub fn path(&self, output: &Path) -> PathBuf {
+        let dir = output.parent().unwrap_or(Path::new(""));
+        let dir = match self.folder() {
+            Some(folder) => dir.join(folder),
+            None => dir.to_path_buf(),
+        };
+        let mut name = output.file_stem().unwrap_or_default().to_os_string();
+        name.push(".");
+        name.push(self.container.extension());
+        dir.join(name)
+    }
+
+    pub fn check(&self) -> Result<()> {
+        if let Some(folder) = &self.folder {
+            let plain = Path::new(folder.trim())
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+            if !plain || folder.trim().is_empty() {
+                return Err(Error::usage(format!(
+                    "folder {folder:?} must be a folder name or a relative path, with no .."
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn settings(&self, first: &ExportSettings) -> ExportSettings {
+        let mut v = VideoSettings::new(self.codec, self.encoder);
+        v.profile = self.profile.clone();
+        if let Some(f) = &first.video {
+            (v.width, v.height) = (f.width, f.height);
+            v.use_proxy_media = f.use_proxy_media;
+            if f.bitrate.is_none() {
+                v.quality = f.quality;
+            }
+            if f.hdr == HdrMode::Sdr || color::carries_hdr(self.codec) {
+                v.hdr = f.hdr;
+            }
+            let holds_dolby_vision = matches!(self.codec, VideoCodec::Hevc | VideoCodec::Av1);
+            if v.image_bits().is_none() {
+                v.mastering_display = f.mastering_display.clone();
+                v.max_cll = f.max_cll.clone();
+                if holds_dolby_vision || !f.hdr_metadata.dolby_vision() {
+                    v.hdr_metadata = f.hdr_metadata;
+                }
+            } else if matches!(f.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None) {
+                v.hdr_metadata = f.hdr_metadata;
+            }
+            if f.alpha && v.holds_alpha() {
+                v.alpha = true;
+                v.alpha_mode = match v.alpha_modes().contains(&f.alpha_mode) {
+                    true => f.alpha_mode,
+                    false => v.alpha_modes()[0],
+                };
+            }
+            if self.container.image_sequence() {
+                v.filename_digits = f.filename_digits;
+                v.first_frame = f.first_frame;
+            }
+        }
+        let audio = (first.audio.clone()).filter(|a| self.container.takes_audio(a.codec));
+        ExportSettings {
+            container: self.container,
+            video: Some(v),
+            audio,
+            declick: first.declick,
+            render_speed: first.render_speed,
+        }
+    }
+}
+
+pub fn written_twice(output: &Path, more: &[MoreOutput]) -> Option<PathBuf> {
+    let key = |p: &Path| {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect::<Vec<_>>()
+    };
+    let mut seen = vec![key(output)];
+    for m in more {
+        let path = m.path(output);
+        if seen.contains(&key(&path)) {
+            return Some(path);
+        }
+        seen.push(key(&path));
+    }
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Preset {
     pub name: String,
@@ -833,14 +1009,14 @@ pub fn builtin_presets() -> Vec<Preset> {
         height: Some(h),
         ..video(V::H264, Some(q))
     };
-    let site = |family: &str, w: u32, h: u32, quick: bool| Preset {
+    let site = |family: &str, w: u32, h: u32, quick: bool, kbps: Option<u64>| Preset {
         family: Some(family.into()),
         ..preset(
             &format!("{}-{h}p", family.to_lowercase()),
             &format!("{family} {h}p"),
             &format!("MP4, H.264 {w}×{h}, AAC"),
             quick,
-            av(C::Mp4, sized(w, h, 18), audio(A::Aac, Some(320))),
+            av(C::Mp4, sized(w, h, 18), audio(A::Aac, kbps)),
         )
     };
     vec![
@@ -861,14 +1037,14 @@ pub fn builtin_presets() -> Vec<Preset> {
         preset(
             "h264-master",
             "H.264 Master",
-            "QuickTime, high-quality H.264, AAC 320 kb/s",
+            "QuickTime, high-quality H.264, AAC",
             true,
-            av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, Some(320))),
+            av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, None)),
         ),
         preset(
             "h265-master",
             "H.265 Master",
-            "QuickTime, 10-bit HEVC (Main10), AAC 320 kb/s",
+            "QuickTime, 10-bit HEVC (Main10), AAC",
             true,
             av(
                 C::Mov,
@@ -876,7 +1052,7 @@ pub fn builtin_presets() -> Vec<Preset> {
                     bit_depth: Some(10),
                     ..video(V::Hevc, Some(18))
                 },
-                audio(A::Aac, Some(320)),
+                audio(A::Aac, None),
             ),
         ),
         preset(
@@ -893,13 +1069,13 @@ pub fn builtin_presets() -> Vec<Preset> {
                 audio(A::PcmS24, None),
             ),
         ),
-        site("YouTube", 1280, 720, false),
-        site("YouTube", 1920, 1080, true),
-        site("YouTube", 2560, 1440, false),
-        site("YouTube", 3840, 2160, false),
-        site("Vimeo", 1280, 720, false),
-        site("Vimeo", 1920, 1080, true),
-        site("Vimeo", 3840, 2160, false),
+        site("YouTube", 1280, 720, false, Some(320)),
+        site("YouTube", 1920, 1080, true, Some(320)),
+        site("YouTube", 2560, 1440, false, Some(320)),
+        site("YouTube", 3840, 2160, false, Some(320)),
+        site("Vimeo", 1280, 720, false, None),
+        site("Vimeo", 1920, 1080, true, None),
+        site("Vimeo", 3840, 2160, false, None),
         preset(
             "tiktok",
             "TikTok",
@@ -911,7 +1087,7 @@ pub fn builtin_presets() -> Vec<Preset> {
                     hdr: HdrMode::Sdr,
                     ..sized(1080, 1920, 20)
                 },
-                audio(A::Aac, Some(256)),
+                audio(A::Aac, None),
             ),
         ),
         preset(
@@ -1052,16 +1228,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         return Err(Error::usage("export needs video or audio"));
     }
     if let Some(v) = &s.video {
-        let ok = match s.container {
-            C::Mp4 => matches!(v.codec, V::H264 | V::Hevc | V::Av1 | V::Vp9),
-            C::Mov => matches!(v.codec, V::H264 | V::Hevc | V::Prores | V::Dnxhr),
-            C::Mkv => !matches!(v.codec, V::Tiff | V::Exr),
-            C::Webm => matches!(v.codec, V::Vp9 | V::Av1),
-            C::Tiff => v.codec == V::Tiff,
-            C::Exr => v.codec == V::Exr,
-            _ => false,
-        };
-        if !ok {
+        if !s.container.takes_video(v.codec) {
             return Err(Error::usage(format!(
                 "{:?} video can't go in {}",
                 v.codec,
@@ -1230,18 +1397,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         )));
     }
     if let Some(a) = &s.audio {
-        let ok = match s.container {
-            C::Mp4 => matches!(a.codec, A::Aac | A::Mp3 | A::Opus | A::Flac),
-            C::Mov => matches!(a.codec, A::Aac | A::PcmS16 | A::PcmS24),
-            C::Mkv => true,
-            C::Webm | C::Ogg => matches!(a.codec, A::Opus),
-            C::M4a => matches!(a.codec, A::Aac),
-            C::Mp3 => matches!(a.codec, A::Mp3),
-            C::Flac => matches!(a.codec, A::Flac),
-            C::Wav => matches!(a.codec, A::PcmS16 | A::PcmS24),
-            C::Tiff | C::Exr => false,
-        };
-        if !ok {
+        if !s.container.takes_audio(a.codec) {
             return Err(Error::usage(format!(
                 "{:?} audio can't go in {}",
                 a.codec,

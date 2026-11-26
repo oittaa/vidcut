@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Align2, FontId, Layout, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::{Value, json};
-use vidcut_core::equalizer::{self, FREQUENCY, GAIN, Q, kinds, label, response_db};
-use vidcut_core::model::{EqBand, Equalizer, Project};
+use vidcut_core::equalizer::{self, Curve, FREQUENCY, GAIN, Q, kinds, label, response_db};
+use vidcut_core::model::{EqBand, EqKind, Equalizer, Project, TrackEqualizer};
 
 use super::inspector::switched_fold;
 use super::theme;
@@ -18,11 +18,49 @@ const MENU_WIDTH: f32 = 72.0;
 const HANDLE: f32 = 8.0;
 
 #[derive(Debug, Clone)]
-pub struct Draft {
-    clips: Vec<String>,
-    from: Equalizer,
-    to: Equalizer,
-    since: Option<Instant>,
+pub struct Draft<E = Equalizer> {
+    pub(super) owners: Vec<String>,
+    pub(super) from: E,
+    pub(super) to: E,
+    pub(super) since: Option<Instant>,
+}
+
+pub(super) trait Bands: Curve + PartialEq {
+    fn bands_mut(&mut self) -> &mut [EqBand; 6];
+    fn switched_on(&self) -> Self;
+}
+
+impl Bands for Equalizer {
+    fn bands_mut(&mut self) -> &mut [EqBand; 6] {
+        &mut self.bands
+    }
+
+    fn switched_on(&self) -> Self {
+        Self {
+            on: true,
+            ..self.clone()
+        }
+    }
+}
+
+impl Bands for TrackEqualizer {
+    fn bands_mut(&mut self) -> &mut [EqBand; 6] {
+        &mut self.bands
+    }
+
+    fn switched_on(&self) -> Self {
+        Self {
+            on: true,
+            ..self.clone()
+        }
+    }
+}
+
+pub(super) struct Limits<'a> {
+    pub(super) kinds: &'static [EqKind],
+    pub(super) gain: RangeInclusive<f64>,
+    pub(super) q: RangeInclusive<f64>,
+    pub(super) takes_q: &'a dyn Fn(EqKind) -> bool,
 }
 
 fn across(hz: f64) -> f32 {
@@ -30,12 +68,34 @@ fn across(hz: f64) -> f32 {
     ((hz / low).log10() / (high / low).log10()) as f32
 }
 
-fn hertz(share: f32) -> f64 {
+pub(super) fn hertz(share: f32) -> f64 {
     let (low, high) = (*FREQUENCY.start(), *FREQUENCY.end());
     low * (high / low).powf(f64::from(share))
 }
 
-fn graph(ui: &mut egui::Ui, eq: &mut Equalizer, rate: u32) -> bool {
+pub(super) fn curve<E: Bands>(eq: &E, rate: u32, rect: Rect, top: f64) -> Vec<egui::Pos2> {
+    let shape = eq.switched_on();
+    let half = rect.height() / 2.0;
+    let steps = rect.width().max(1.0) as usize;
+    (0..=steps)
+        .map(|i| {
+            let share = i as f32 / steps as f32;
+            let db = response_db(&shape, hertz(share), rate).clamp(-top, top);
+            pos2(
+                rect.left() + share * rect.width(),
+                rect.center().y - (db / top) as f32 * half,
+            )
+        })
+        .collect()
+}
+
+pub(super) fn graph<E: Bands>(
+    ui: &mut egui::Ui,
+    eq: &mut E,
+    rate: u32,
+    gain: RangeInclusive<f64>,
+    top: f64,
+) -> bool {
     let size = vec2(ui.available_width(), GRAPH_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter_at(rect);
@@ -48,16 +108,12 @@ fn graph(ui: &mut egui::Ui, eq: &mut Equalizer, rate: u32) -> bool {
     }
     painter.hline(rect.x_range(), rect.center().y, line);
     let half = rect.height() / 2.0;
-    let height_of = |db: f64| rect.center().y - (db / GRAPH_DB) as f32 * half;
+    let height_of = |db: f64| rect.center().y - (db / top) as f32 * half;
     let mut held = false;
-    for (i, band) in eq.bands.iter_mut().enumerate().filter(|(_, b)| b.on) {
+    for (i, band) in eq.bands_mut().iter_mut().enumerate().filter(|(_, b)| b.on) {
         let lifts = equalizer::takes_gain(band.kind);
         let place = |b: &EqBand| {
-            let db = if lifts {
-                b.gain.clamp(-GRAPH_DB, GRAPH_DB)
-            } else {
-                0.0
-            };
+            let db = if lifts { b.gain.clamp(-top, top) } else { 0.0 };
             pos2(rect.left() + across(b.freq) * rect.width(), height_of(db))
         };
         let hit = Rect::from_center_size(place(band), vec2(HANDLE, HANDLE) * 2.0);
@@ -71,8 +127,8 @@ fn graph(ui: &mut egui::Ui, eq: &mut Equalizer, rate: u32) -> bool {
             let share = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
             band.freq = hertz(share).round();
             if lifts {
-                let db = f64::from((rect.center().y - p.y) / half) * GRAPH_DB;
-                band.gain = ((db * 10.0).round() / 10.0).clamp(*GAIN.start(), *GAIN.end());
+                let db = f64::from((rect.center().y - p.y) / half) * top;
+                band.gain = ((db * 10.0).round() / 10.0).clamp(*gain.start(), *gain.end());
             }
         }
         let at = place(band);
@@ -81,23 +137,12 @@ fn graph(ui: &mut egui::Ui, eq: &mut Equalizer, rate: u32) -> bool {
         let number = (i + 1).to_string();
         painter.text(at, Align2::CENTER_CENTER, number, font, c.selected_text);
     }
-    let shape = Equalizer {
-        on: true,
-        ..eq.clone()
-    };
-    let steps = rect.width().max(1.0) as usize;
-    let points = (0..=steps)
-        .map(|i| {
-            let share = i as f32 / steps as f32;
-            let db = response_db(&shape, hertz(share), rate).clamp(-GRAPH_DB, GRAPH_DB);
-            pos2(rect.left() + share * rect.width(), height_of(db))
-        })
-        .collect();
+    let points = curve(eq, rate, rect, top);
     painter.add(Shape::line(points, Stroke::new(1.5, c.selection)));
     held
 }
 
-fn number(
+pub(super) fn number(
     ui: &mut egui::Ui,
     free: bool,
     value: &mut f64,
@@ -106,6 +151,8 @@ fn number(
     decimals: usize,
     unit: &str,
 ) -> bool {
+    let kept = *value;
+    let shown = format!("{kept:.decimals$}");
     ui.add_enabled(
         free,
         egui::DragValue::new(value)
@@ -113,39 +160,49 @@ fn number(
             .range(range)
             .speed(speed)
             .fixed_decimals(decimals)
+            .custom_formatter(move |v, _| format!("{v:.decimals$}"))
+            .custom_parser(move |text| {
+                let text: String = text
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .map(|c| if c == '\u{2212}' { '-' } else { c })
+                    .collect();
+                if text == shown {
+                    Some(kept)
+                } else {
+                    text.parse().ok()
+                }
+            })
             .suffix(unit),
     )
     .dragged()
 }
 
-fn band_row(ui: &mut egui::Ui, i: usize, band: &mut EqBand) -> bool {
+pub(super) fn band_row(ui: &mut egui::Ui, i: usize, band: &mut EqBand, limits: &Limits) -> bool {
     ui.checkbox(&mut band.on, (i + 1).to_string());
     egui::ComboBox::from_id_salt(("equalizer-kind", i))
         .selected_text(label(band.kind))
         .width(MENU_WIDTH)
         .show_ui(ui, |ui| {
-            for kind in kinds(i) {
+            for kind in limits.kinds {
                 ui.selectable_value(&mut band.kind, *kind, label(*kind));
             }
         });
     let speed = band.freq * 0.01;
     let mut held = number(ui, true, &mut band.freq, FREQUENCY, speed, 0, " Hz");
     let gain = equalizer::takes_gain(band.kind);
-    held |= number(ui, gain, &mut band.gain, GAIN, 0.1, 1, " dB");
-    if equalizer::takes_q(band.kind) {
-        held |= number(ui, true, &mut band.q, Q, 0.02, 1, "");
+    held |= number(ui, gain, &mut band.gain, limits.gain.clone(), 0.1, 1, " dB");
+    if (limits.takes_q)(band.kind) {
+        held |= number(ui, true, &mut band.q, limits.q.clone(), 0.02, 1, "");
     } else {
         ui.label("");
     }
-    ui.end_row();
     held
 }
 
-fn change(from: &Equalizer, to: &Equalizer) -> Option<Value> {
-    let bands: Vec<Value> = from
-        .bands
-        .iter()
-        .zip(&to.bands)
+pub(super) fn band_changes(from: &[EqBand; 6], to: &[EqBand; 6]) -> Vec<Value> {
+    from.iter()
+        .zip(to)
         .enumerate()
         .filter(|(_, (a, b))| a != b)
         .map(|(i, (a, b))| {
@@ -167,7 +224,11 @@ fn change(from: &Equalizer, to: &Equalizer) -> Option<Value> {
             }
             band
         })
-        .collect();
+        .collect()
+}
+
+fn change(from: &Equalizer, to: &Equalizer) -> Option<Value> {
+    let bands = band_changes(&from.bands, &to.bands);
     (from.on != to.on || !bands.is_empty()).then(|| json!({ "on": to.on, "bands": bands }))
 }
 
@@ -181,7 +242,7 @@ impl Workspace {
         };
         let stored = stored_of(&clips[0]);
         let draft = self.timeline.equalizer.take().filter(|d| {
-            d.clips == clips
+            d.owners == clips
                 && d.since
                     .is_none_or(|t| landing(&d.to, t.elapsed(), &d.from, &stored).is_some())
         });
@@ -205,7 +266,7 @@ impl Workspace {
         let mut held = false;
         let (flipped, reset) = switched_fold(ui, "Equalizer", Some(shown.on), header, |ui| {
             ui.add_enabled_ui(eq.on, |ui| {
-                held |= graph(ui, &mut eq, rate);
+                held |= graph(ui, &mut eq, rate, GAIN, GRAPH_DB);
                 egui::Grid::new("inspector-equalizer")
                     .num_columns(5)
                     .spacing([6.0, 6.0])
@@ -215,13 +276,20 @@ impl Workspace {
                         }
                         ui.end_row();
                         for (i, band) in eq.bands.iter_mut().enumerate() {
-                            held |= band_row(ui, i, band);
+                            let limits = Limits {
+                                kinds: kinds(i),
+                                gain: GAIN,
+                                q: Q,
+                                takes_q: &equalizer::takes_q,
+                            };
+                            held |= band_row(ui, i, band, &limits);
+                            ui.end_row();
                         }
                     });
             });
         });
         let draft_of = |from: Equalizer, to: Equalizer, since: Option<Instant>| Draft {
-            clips: clips.to_vec(),
+            owners: clips.to_vec(),
             from,
             to,
             since,

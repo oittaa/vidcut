@@ -305,8 +305,12 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
         unlocked(p, ai)?;
         clear_range(p, ai, sound.start, sound.end());
         fix_audio(p, ai);
+        let link = p.free_link();
+        let (ti, ci) = locate(p, id)?;
+        p.tracks[ti].clips[ci].link = Some(link);
         sound.id = p.alloc_clip_id();
         sound.video = false;
+        sound.link = Some(link);
         out.push(sound.id.clone());
         p.tracks[ai].clips.push(sound);
         p.tracks[ai].sort();
@@ -527,10 +531,12 @@ fn build(
         "tracks": whole,
     }));
     let mut clips = Vec::new();
+    let link = (!picture.is_empty() && !sound.is_empty()).then(|| p.free_link());
     let mut put = |p: &mut Project, track: String, video: bool| {
         let mut host = block_clip(p.alloc_clip_id(), (span.0, frames), None, None, false);
         host.video = video;
         host.compound = Some(cid.clone());
+        host.link = link;
         clips.push(host.id.clone());
         let t = p.track_mut(&track).expect("a track of the project");
         t.clips.push(host);
@@ -574,7 +580,7 @@ pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
     for id in ids {
         let compound = p.clip(id).is_some_and(|c| c.compound.is_some());
-        if compound && otio::tied(p, id).iter().any(|x| kept.contains(x)) {
+        if compound && p.tied(id).iter().any(|x| kept.contains(x)) {
             continue;
         }
         kept.push(id.clone());
@@ -706,9 +712,7 @@ pub(crate) fn unnest(
     lay: Lay,
     warnings: &mut Vec<String>,
 ) -> Result<(Clip, Vec<String>)> {
-    let parts: Vec<String> = std::iter::once(id.to_string())
-        .chain(otio::tied(p, id))
-        .collect();
+    let parts: Vec<String> = std::iter::once(id.to_string()).chain(p.tied(id)).collect();
     for x in &parts {
         locate(p, x)?;
     }
@@ -798,6 +802,12 @@ fn spread(
         }
         let ti = target(p, TrackKind::Audio, n, span, lay)?;
         lay_down(p, (ti, lay), track, &parts, &mut made);
+    }
+    let mut links = linked::Relink::new(p);
+    for id in &made {
+        if let Some((ti, ci)) = p.find_clip(id) {
+            links.clip(&mut p.tracks[ti].clips[ci]);
+        }
     }
     Ok(made)
 }
@@ -1242,7 +1252,7 @@ pub fn open_clip(p: &mut Project, id: &str) -> Result<Value> {
         return Err(Error::invalid(format!("{id} isn't a compound clip")));
     }
     let mut all_ids = vec![id.to_string()];
-    all_ids.extend(otio::tied(p, id));
+    all_ids.extend(p.tied(id));
     let lead_id = all_ids
         .iter()
         .find(|cid| p.clip(cid).is_some_and(|c| c.video))
@@ -1258,6 +1268,16 @@ pub fn open_clip(p: &mut Project, id: &str) -> Result<Value> {
         },
         &lead_id,
     )
+}
+
+pub(crate) fn open_alone(p: &mut Project, id: &str) -> Result<Value> {
+    if !p.compound_path.is_empty() {
+        close_all(p)?;
+    }
+    let target = CompoundTarget::Pooled {
+        compound: id.to_string(),
+    };
+    push_open(p, id.to_string(), target, id)
 }
 
 pub fn open_pooled(p: &mut Project, query: &str) -> Result<Value> {
@@ -2384,7 +2404,7 @@ mod tests {
     }
 
     #[test]
-    fn expanded_compound_adds_inner_and_outer_track_volume() {
+    fn expanded_compound_mixes_the_inner_track_into_the_outer_bus() {
         let mut f = Fixture::new(&[]);
         let mut info =
             crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
@@ -2398,14 +2418,12 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         f.ok(req("track.set", json!({"track": "A1", "volume_db": -3.0})));
         let plan = crate::render::flatten(f.editor.project(), 0, 10).unwrap();
-        let crate::render::AudioPiece::Source {
-            gain_db, silent, ..
-        } = &plan.audio[0][0]
-        else {
-            panic!("expected audio source");
-        };
-        assert!(!silent);
-        assert!((gain_db + 9.0).abs() < 1e-9);
+        let buses: Vec<_> = plan
+            .buses
+            .iter()
+            .map(|b| (b.lanes.clone(), b.into, b.gain_db))
+            .collect();
+        assert_eq!(buses, [(vec![], None, -3.0), (vec![0], Some(0), -6.0)]);
     }
 
     #[test]
@@ -2426,14 +2444,10 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         f.ok(req("track.set", json!({"track": "A1", "volume_db": 6.0})));
         let plan = crate::render::flatten(f.editor.project(), 0, 10).unwrap();
-        let crate::render::AudioPiece::Source {
-            gain_db, silent, ..
-        } = &plan.audio[0][0]
-        else {
+        let crate::render::AudioPiece::Source { silent, .. } = &plan.audio[0][0] else {
             panic!("expected audio source");
         };
         assert!(*silent);
-        assert!((gain_db + 100.0).abs() < 1e-9);
     }
 
     #[test]

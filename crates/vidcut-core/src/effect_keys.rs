@@ -7,8 +7,8 @@ use crate::keyframes::{
 };
 use crate::model::{
     Background, Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FastNoise,
-    FilmGrain, GaussianBlur, Glow, Keyframe, Mask, Merge, MosaicBlur, Node, ShadingElement,
-    Sharpen, TextPlus, Tool, Vignette,
+    FilmGrain, GaussianBlur, Glow, Keyframe, Mask, Merge, MosaicBlur, Node, Picture,
+    ShadingElement, Sharpen, TextPlus, Title, TitleShadow, Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -250,7 +250,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 136] = [
+    pub const ALL: [EffectValue; 145] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -387,6 +387,15 @@ impl EffectValue {
         EffectValue::Color2Green,
         EffectValue::Color2Blue,
         EffectValue::Color2Alpha,
+        EffectValue::ShadowOffset,
+        EffectValue::ShadowBlur,
+        EffectValue::ShadowOpacity,
+        EffectValue::BackgroundOutlineWidth,
+        EffectValue::BackgroundWidth,
+        EffectValue::BackgroundHeight,
+        EffectValue::BackgroundCornerRadius,
+        EffectValue::BackgroundCenter,
+        EffectValue::BackgroundOpacity,
     ];
 
     pub fn name(self) -> String {
@@ -404,6 +413,8 @@ impl EffectValue {
                 | EffectValue::ShadingOffset
                 | EffectValue::Start
                 | EffectValue::End
+                | EffectValue::ShadowOffset
+                | EffectValue::BackgroundCenter
         )
     }
 }
@@ -1027,6 +1038,154 @@ impl Keyed for Node {
             Some((p, _)) => *p = to,
             None => self.write(value, to[0]),
         }
+    }
+}
+
+impl Title {
+    pub const KEYED: [EffectValue; 9] = [
+        EffectValue::ShadowOffset,
+        EffectValue::ShadowBlur,
+        EffectValue::ShadowOpacity,
+        EffectValue::BackgroundOutlineWidth,
+        EffectValue::BackgroundWidth,
+        EffectValue::BackgroundHeight,
+        EffectValue::BackgroundCornerRadius,
+        EffectValue::BackgroundCenter,
+        EffectValue::BackgroundOpacity,
+    ];
+
+    pub fn steps_of(value: EffectValue) -> Option<f64> {
+        match value {
+            EffectValue::ShadowBlur | EffectValue::BackgroundOutlineWidth => Some(1.0),
+            EffectValue::ShadowOpacity | EffectValue::BackgroundOpacity => Some(100.0),
+            _ => None,
+        }
+    }
+
+    pub fn stepped_at(&self, value: EffectValue, frame: f64) -> [f64; 2] {
+        let [x, y] = self.point_at(value, frame);
+        let x = Title::steps_of(value).map_or(x, |n| (x * n).round() / n);
+        [x, y]
+    }
+
+    pub fn part_of(value: EffectValue) -> &'static str {
+        match value {
+            EffectValue::ShadowOffset | EffectValue::ShadowBlur | EffectValue::ShadowOpacity => {
+                "shadow"
+            }
+            EffectValue::BackgroundOpacity => "background",
+            _ => "background shape",
+        }
+    }
+}
+
+fn title_read(t: &Title, value: EffectValue) -> Option<([f64; 2], Range)> {
+    use EffectValue as V;
+    let s = &t.style;
+    let reach = (-Picture::REACH, Picture::REACH);
+    let shadow = || s.shadow.as_ref();
+    let shape = || s.shape.as_ref();
+    Some(match value {
+        V::ShadowOffset => (shadow()?.shift(), reach),
+        V::ShadowBlur => ([shadow()?.softness(), 0.0], TitleShadow::BLURS),
+        V::ShadowOpacity => ([shadow()?.alpha(), 0.0], BLEND),
+        V::BackgroundOpacity => {
+            let b = s.background.as_ref()?;
+            ([b.opacity.unwrap_or(Title::BOX_OPACITY), 0.0], BLEND)
+        }
+        V::BackgroundOutlineWidth => (
+            [f64::from(shape()?.outline_width.unwrap_or(0)), 0.0],
+            (0.0, f64::from(Title::BOX_MOST_OUTLINE)),
+        ),
+        V::BackgroundWidth => ([shape()?.size[0], 0.0], (0.0, Title::BOX_MOST)),
+        V::BackgroundHeight => ([shape()?.size[1], 0.0], (0.0, Title::BOX_MOST)),
+        V::BackgroundCornerRadius => ([shape()?.corner.unwrap_or(Title::BOX_CORNER), 0.0], BLEND),
+        V::BackgroundCenter => (shape()?.center.unwrap_or([0.0, 0.0]), reach),
+        _ => return None,
+    })
+}
+
+impl Keyed for Title {
+    fn key_list(&self) -> &[EffectKeys] {
+        &self.keys
+    }
+
+    fn key_list_mut(&mut self) -> &mut Vec<EffectKeys> {
+        &mut self.keys
+    }
+
+    fn read_point(&self, value: EffectValue) -> Option<([f64; 2], Range)> {
+        title_read(self, value)
+    }
+
+    fn values(&self) -> Vec<EffectValue> {
+        Title::KEYED
+            .into_iter()
+            .filter(|v| self.takes(*v))
+            .collect()
+    }
+
+    fn write(&mut self, value: EffectValue, to: f64) {
+        use EffectValue as V;
+        if value.pair() {
+            let [_, y] = self.point(value);
+            self.write_point(value, [to, y]);
+            return;
+        }
+        let s = &mut self.style;
+        match value {
+            V::ShadowBlur | V::ShadowOpacity => {
+                if let Some(h) = s.shadow.as_mut() {
+                    match value {
+                        V::ShadowBlur => h.blur = Some(to),
+                        _ => h.opacity = Some(to),
+                    }
+                }
+            }
+            V::BackgroundOpacity => {
+                if let Some(b) = s.background.as_mut() {
+                    b.opacity = Some(to);
+                }
+            }
+            _ => {
+                if let Some(b) = s.shape.as_mut() {
+                    match value {
+                        V::BackgroundOutlineWidth => {
+                            b.outline_width = Some(to.round().max(0.0) as u32);
+                        }
+                        V::BackgroundWidth => b.size[0] = to,
+                        V::BackgroundHeight => b.size[1] = to,
+                        V::BackgroundCornerRadius => b.corner = Some(to),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn write_point(&mut self, value: EffectValue, to: [f64; 2]) {
+        let s = &mut self.style;
+        match value {
+            EffectValue::ShadowOffset => {
+                if let Some(h) = s.shadow.as_mut() {
+                    h.offset = Some(to);
+                }
+            }
+            EffectValue::BackgroundCenter => {
+                if let Some(b) = s.shape.as_mut() {
+                    b.center = Some(to);
+                }
+            }
+            _ => self.write(value, to[0]),
+        }
+    }
+
+    fn adopted(&self, frame: f64) -> Self {
+        let mut t = self.clone();
+        for k in self.key_list() {
+            t.write_point(k.value, self.stepped_at(k.value, frame));
+        }
+        t
     }
 }
 

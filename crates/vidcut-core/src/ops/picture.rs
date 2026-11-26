@@ -10,7 +10,7 @@ use crate::model::{
     EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow,
     GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite,
     ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
+    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
     ShadingElement, Sharpen, Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind,
     Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
@@ -469,7 +469,7 @@ fn sharpen_checked(s: &Sharpen) -> Result<Sharpen> {
     })
 }
 
-fn keys_checked<T: Keyed>(
+pub(super) fn keys_checked<T: Keyed>(
     e: &T,
     label: &str,
     plain_checked: impl Fn(&T) -> Result<T>,
@@ -818,6 +818,7 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         subtractive_additive: m.subtractive_additive.filter(|v| *v != 1.0),
         alpha_gain: m.alpha_gain.filter(|v| *v != 1.0),
         burn_in: m.burn_in.filter(|v| *v != 0.0),
+        clamp_coverage: m.clamp_coverage.filter(|on| !*on),
         reference_width: m.reference_width.filter(|v| *v != 1.0),
         reference_height: m.reference_height.filter(|v| *v != 1.0),
         foreground_z_offset: m.foreground_z_offset.filter(|v| *v != 0.0),
@@ -1137,6 +1138,9 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         Mask::CORNERS,
         "a corner radius is from 0 to 1",
     )?;
+    if m.join_style.is_some() && tool != "rectangle" {
+        return Err(Error::invalid("only a rectangle has a join style"));
+    }
     if !polygon && !m.points.is_empty() {
         return Err(Error::invalid("only a polygon has points"));
     }
@@ -1163,6 +1167,7 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         filter: m.filter.filter(|f| *f != BlurFilter::default()),
         passes: m.passes.filter(|v| *v != Blur::PASSES),
         border_width: m.border_width.filter(|v| *v != 0.0),
+        paint_mode: m.paint_mode.filter(|p| *p != PaintMode::default()),
         center: m.center.filter(|c| *c != Mask::MIDDLE),
         width: m.width.filter(|v| *v != Mask::SIZE),
         height: m.height.filter(|v| *v != Mask::SIZE),
@@ -1172,6 +1177,7 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         x_rotation: m.x_rotation.filter(|v| *v != 0.0),
         y_rotation: m.y_rotation.filter(|v| *v != 0.0),
         corner_radius: m.corner_radius.filter(|v| *v != 0.0),
+        join_style: m.join_style.filter(|j| *j != Mask::JOIN),
         fill_method: m.fill_method.filter(|f| *f != FillMethod::default()),
         clipping: m.clipping.filter(|c| *c != BlurClipping::None),
         ..m.clone()
@@ -1875,13 +1881,13 @@ pub fn point(what: &str, raw: &[f64]) -> Result<Option<[f64; 2]>> {
     }
 }
 
-pub fn zoom(raw: &[f64]) -> Result<[f64; 2]> {
+pub fn zoom(raw: &[f64], what: &str) -> Result<[f64; 2]> {
     match raw {
         [z] => Ok([*z, *z]),
         [x, y] => Ok([*x, *y]),
-        _ => Err(Error::usage(
-            "a picture's zoom is one number for both ways, or two, across and down",
-        )),
+        _ => Err(Error::usage(format!(
+            "a {what}'s zoom is one number for both ways, or two, across and down"
+        ))),
     }
 }
 
@@ -1897,6 +1903,15 @@ pub fn violation(p: &Project, ti: usize, c: &Clip) -> Option<String> {
         && let Err(e) = footage(p, ti, c)
     {
         return Some(e.message);
+    }
+    let count = p.settings.node_stack_layers.len();
+    if let Some(g) = &picture.grade
+        && (g.layers.len() >= count || !g.kept_layers.is_empty() && g.layers.len() + 1 != count)
+    {
+        return Some(format!(
+            "{}: the grade does not fit {count} node stack layers",
+            c.id
+        ));
     }
     checked(picture)
         .err()

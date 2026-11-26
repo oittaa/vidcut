@@ -298,7 +298,6 @@ impl Primaries {
     }
 
     fn to_xyz(self) -> [[f64; 3]; 3] {
-        const WHITE: (f64, f64) = (0.3127, 0.3290);
         let xyz = |(x, y): (f64, f64)| [x / y, 1.0, (1.0 - x - y) / y];
         let p = self.xy().map(xyz);
         let m = [
@@ -306,7 +305,7 @@ impl Primaries {
             [p[0][1], p[1][1], p[2][1]],
             [p[0][2], p[1][2], p[2][2]],
         ];
-        let s = mul(invert(m), xyz(WHITE));
+        let s = mul(invert(m), xyz(D65));
         m.map(|row| [row[0] * s[0], row[1] * s[1], row[2] * s[2]])
     }
 }
@@ -329,12 +328,29 @@ fn mat_mul(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|r| std::array::from_fn(|k| (0..3).map(|i| a[r][i] * b[i][k]).sum()))
 }
 
-pub fn output_gamut(from: Option<Hdr>, to: Option<Hdr>) -> [[f64; 3]; 3] {
-    let primaries = |hdr: Option<Hdr>| match hdr {
+pub const D65: (f64, f64) = (0.3127, 0.3290);
+
+fn timeline(hdr: Option<Hdr>) -> Primaries {
+    match hdr {
         Some(_) => Primaries::Bt2020,
         None => Primaries::Bt709,
-    };
-    gamut(primaries(from), primaries(to))
+    }
+}
+
+pub fn bt709_primaries() -> [(f64, f64); 3] {
+    Primaries::Bt709.xy()
+}
+
+pub fn timeline_to_xyz(hdr: Option<Hdr>) -> [[f64; 3]; 3] {
+    timeline(hdr).to_xyz()
+}
+
+pub fn timeline_from_xyz(hdr: Option<Hdr>) -> [[f64; 3]; 3] {
+    invert(timeline(hdr).to_xyz())
+}
+
+pub fn output_gamut(from: Option<Hdr>, to: Option<Hdr>) -> [[f64; 3]; 3] {
+    gamut(timeline(from), timeline(to))
 }
 
 fn gamut(from: Primaries, to: Primaries) -> [[f64; 3]; 3] {

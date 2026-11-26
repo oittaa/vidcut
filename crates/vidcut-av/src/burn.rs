@@ -41,6 +41,25 @@ pub struct Sprite {
     pub rgba: Vec<[f32; 4]>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Letter {
+    pub at: usize,
+    pub x: [f32; 2],
+    pub y: [f32; 2],
+    pub rtl: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Letters {
+    pub letters: Vec<Letter>,
+    pub pivot: [f32; 2],
+    pub stretch: f32,
+    pub turn: f64,
+    pub top: i32,
+    pub height: u32,
+    pub lift: f32,
+}
+
 impl Sprite {
     fn at(&self, x: i32, y: i32) -> [f32; 4] {
         let (sx, sy) = (x - self.x, y - self.y);
@@ -208,6 +227,11 @@ const RAISED: usize = 4;
 const LOWERED: usize = 8;
 const FULL_SIZE_BIT: u32 = 4;
 const LTSH_HEAD: usize = 4;
+const VDMX_HEAD: usize = 6;
+const VDMX_RATIO: usize = 4;
+const VDMX_GROUP_HEAD: usize = 4;
+const VDMX_ENTRY: usize = 6;
+const VDMX_MOST: u32 = 255;
 
 fn spans<'a>(
     system: &FontSystem,
@@ -417,9 +441,14 @@ impl Rules<'_> {
         match self {
             Rules::Plain { .. } => None,
             Rules::Title(t) => face_of(system, attrs).and_then(|id| {
-                let own = font_heights(system, id, attrs.weight, !t.title.moves())?;
+                if t.title.moves() {
+                    let em = Title::scroll_em(f64::from(px), t.pixel);
+                    let screen = screen_height(system, id, attrs.weight, em)?;
+                    return Some(Title::scroll_gap(screen, t.pixel) as f32);
+                }
+                let own = font_heights(system, id, attrs.weight)?;
                 let zoom = f64::from(t.scale) / t.pixel;
-                Some(t.title.line_gap(own, f64::from(px), t.pixel, zoom) as f32)
+                Some(Title::line_gap(own, f64::from(px), t.pixel, zoom) as f32)
             }),
         }
         .unwrap_or(px * self.line())
@@ -429,24 +458,34 @@ impl Rules<'_> {
         match self {
             Rules::Plain { .. } => None,
             Rules::Title(_) => face_of(system, attrs).and_then(|id| {
-                let [ascent, descent, _] = font_heights(system, id, attrs.weight, true)?;
+                let [ascent, descent, _] = font_heights(system, id, attrs.weight)?;
                 Some(((ascent + descent) * f64::from(px)) as f32)
             }),
         }
         .unwrap_or(px * self.line())
     }
 
-    fn seated(&self, widest: f32, wrap: f32, lines: f32, above: f32) -> Option<[f32; 2]> {
+    fn seated(
+        &self,
+        ends: &[(f32, f32)],
+        (widest, wrap): (f32, f32),
+        lines: f32,
+        above: f32,
+    ) -> Option<[f32; 2]> {
         let Rules::Title(t) = self else {
             return None;
         };
         let s = t.seat?;
         let pixel = t.pixel;
+        let width = ends
+            .iter()
+            .map(|&(line, freed)| Title::block_width(f64::from(line), f64::from(freed), pixel))
+            .fold(0.0, f64::max);
         let left = t.title.seated_left(
             s.anchor[0],
             f64::from(s.middle),
-            f64::from(widest),
-            f64::from(wrap),
+            width,
+            (f64::from(widest), f64::from(wrap)),
             pixel,
         );
         let edge = ((f64::from(s.edge) / pixel).round() * pixel) as f32;
@@ -498,6 +537,7 @@ struct Laid {
     above: f32,
     popped: Option<(f32, f32)>,
     seated: Option<[f32; 2]>,
+    letters: Vec<Letter>,
 }
 
 struct Canvas {
@@ -769,7 +809,7 @@ fn text_lines(
         let full = deco.underline_metrics.thickness * span.font_size;
         let ascent = glyphs
             .first()
-            .and_then(|g| font_heights(system, g.font_id, g.font_weight, true))
+            .and_then(|g| font_heights(system, g.font_id, g.font_weight))
             .map_or(deco.ascent, |[ascent, ..]| ascent as f32)
             * span.font_size;
         let mut line = |middle: f32| {
@@ -1106,12 +1146,7 @@ fn with_face_weight<'a>(system: &FontSystem, attrs: Attrs<'a>) -> Attrs<'a> {
     attrs.weight(weight)
 }
 
-fn font_heights(
-    system: &mut FontSystem,
-    id: fontdb::ID,
-    weight: Weight,
-    typo: bool,
-) -> Option<[f64; 3]> {
+fn font_heights(system: &mut FontSystem, id: fontdb::ID, weight: Weight) -> Option<[f64; 3]> {
     use skrifa::raw::TableProvider;
     use skrifa::raw::tables::os2::SelectionFlags;
     let index = system.db().face(id)?.index;
@@ -1122,7 +1157,7 @@ fn font_heights(
     let parts = face
         .os2()
         .ok()
-        .filter(|t| !typo || !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
+        .filter(|t| !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
         .map_or([m.ascent, -m.descent, m.leading], |t| {
             let ascent = f32::from(t.us_win_ascent());
             let descent = f32::from(t.us_win_descent());
@@ -1130,6 +1165,56 @@ fn font_heights(
         });
     let em = f64::from(m.units_per_em);
     Some(parts.map(|part| f64::from(part) / em))
+}
+
+fn screen_height(system: &mut FontSystem, id: fontdb::ID, weight: Weight, em: u32) -> Option<u32> {
+    use skrifa::raw::TableProvider;
+    let index = system.db().face(id)?.index;
+    let font = system.get_font(id, weight)?;
+    let face = skrifa::FontRef::from_index(font.data(), index).ok()?;
+    let listed = face
+        .table_data(skrifa::Tag::new(b"VDMX"))
+        .and_then(|table| vdmx_height(table.as_bytes(), em));
+    if listed.is_some() {
+        return listed;
+    }
+    let os2 = face.os2().ok()?;
+    let units = f64::from(face.head().ok()?.units_per_em());
+    let pixels = |v: u16| (f64::from(v) * f64::from(em) / units + 0.5).floor() as u32;
+    Some(pixels(os2.us_win_ascent()) + pixels(os2.us_win_descent()))
+}
+
+fn vdmx_height(table: &[u8], em: u32) -> Option<u32> {
+    if em >= VDMX_MOST {
+        return None;
+    }
+    let word = |at: usize| {
+        table
+            .get(at..at + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+    };
+    let signed = |at: usize| {
+        table
+            .get(at..at + 2)
+            .map(|b| i16::from_be_bytes([b[0], b[1]]))
+    };
+    let ratios = usize::from(word(VDMX_HEAD - 2)?);
+    let group = (0..ratios).find_map(|i| {
+        let r = table.get(VDMX_HEAD + VDMX_RATIO * i..VDMX_HEAD + VDMX_RATIO * (i + 1))?;
+        let square = r[1..] == [0, 0, 0] || r[1..] == [1, 1, 1];
+        (r[0] != 0 && square).then_some(i)
+    })?;
+    let at = usize::from(word(VDMX_HEAD + VDMX_RATIO * ratios + 2 * group)?);
+    let entries = usize::from(word(at)?);
+    (0..entries).find_map(|i| {
+        let entry = at + VDMX_GROUP_HEAD + VDMX_ENTRY * i;
+        if u32::from(word(entry)?) != em {
+            return None;
+        }
+        let top = i32::from(signed(entry + 2)?);
+        let bottom = i32::from(signed(entry + 4)?);
+        u32::try_from(top - bottom).ok()
+    })
 }
 
 fn letter_x_width(system: &mut FontSystem, attrs: &Attrs<'_>, size: f32) -> Option<f32> {
@@ -1187,7 +1272,7 @@ fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> 
             };
             let m = font.metrics();
             let em = g.font_size / f32::from(m.units_per_em);
-            let own = font_heights(system, g.font_id, g.font_weight, true).filter(|_| seat);
+            let own = font_heights(system, g.font_id, g.font_weight).filter(|_| seat);
             let height = own.map_or((m.ascent - m.descent) * em, |[ascent, descent, _]| {
                 (ascent + descent) as f32 * g.font_size
             });
@@ -1209,7 +1294,7 @@ fn ascents(system: &mut FontSystem, buffer: &Buffer) -> Vec<f32> {
             r.glyphs
                 .iter()
                 .filter_map(|g| {
-                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight, true)?;
+                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight)?;
                     let size = if g.metadata & (RAISED | LOWERED) != 0 {
                         f32::from_bits((g.metadata >> FULL_SIZE_BIT) as u32)
                     } else {
@@ -1320,6 +1405,55 @@ fn kern_words(system: &mut FontSystem, buffer: &mut Buffer) -> bool {
         }
     }
     changed
+}
+
+fn letters_of(buffer: &Buffer, runs: &[LayoutRun<'_>], empty: f32) -> Vec<Letter> {
+    let mut starts = Vec::with_capacity(buffer.lines.len());
+    let mut n = 0;
+    for line in &buffer.lines {
+        starts.push(n);
+        n += line.text().chars().count() + line.ending().as_str().chars().count();
+    }
+    let mut out: Vec<Letter> = Vec::new();
+    for run in runs {
+        let first = starts.get(run.line_i).copied().unwrap_or(n);
+        let y = [run.line_top, run.line_top + run.line_height];
+        if run.glyphs.is_empty() {
+            out.push(Letter {
+                at: first,
+                x: [empty; 2],
+                y,
+                rtl: run.rtl,
+            });
+            continue;
+        }
+        for g in run.glyphs {
+            let c0 = first + run.text[..g.start].chars().count();
+            let c1 = first + run.text[..g.end].chars().count();
+            let count = (c1 - c0).max(1);
+            let rtl = g.level.is_rtl();
+            for k in 0..count {
+                let part = |i: usize| g.x + g.w * i as f32 / count as f32;
+                let x = if rtl {
+                    [part(count - k - 1), part(count - k)]
+                } else {
+                    [part(k), part(k + 1)]
+                };
+                match out.last_mut() {
+                    Some(l) if l.at == c0 + k && l.y == y => {
+                        l.x = [l.x[0].min(x[0]), l.x[1].max(x[1])];
+                    }
+                    _ => out.push(Letter {
+                        at: c0 + k,
+                        x,
+                        y,
+                        rtl,
+                    }),
+                }
+            }
+        }
+    }
+    out
 }
 
 fn lay_out(look: &Typeset) -> Option<Laid> {
@@ -1460,6 +1594,17 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
         Markup::Pieces(..) => Vec::new(),
     };
     let runs = spaced(&mut f.system, &buffer, &below, seat);
+    let spots = match look.markup {
+        Markup::Rich(..) => {
+            let lined = match look.align {
+                Align::Center => 0.5,
+                Align::Right | Align::End => 1.0,
+                Align::Left | Align::Justified => 0.0,
+            };
+            letters_of(&buffer, &runs, lined * look.wrap)
+        }
+        Markup::Pieces(..) => Vec::new(),
+    };
     let lifts: Vec<Vec<f32>> = runs
         .iter()
         .map(|r| shifts(&mut f.system, r, seat))
@@ -1478,7 +1623,19 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
         .filter(|r| Some(r.line_i) != last)
         .map(|r| r.line_height)
         .sum();
-    let seated = look.rules.seated(widest, look.wrap, lines, above);
+    let ends: Vec<(f32, f32)> = runs
+        .iter()
+        .map(|r| {
+            let own = freed.get(r.line_i).copied().unwrap_or(0.0);
+            let end = r
+                .glyphs
+                .last()
+                .filter(|g| g.end == r.text.len())
+                .map_or(0.0, |g| own * g.font_size);
+            (r.line_w, end)
+        })
+        .collect();
+    let seated = look.rules.seated(&ends, (widest, look.wrap), lines, above);
     let exact = seated.map(|at| at.map(|v| v - v.round()));
     let popped = runs.iter().find_map(|run| {
         let (x0, x1) = run
@@ -1679,13 +1836,15 @@ fn lay_out(look: &Typeset) -> Option<Laid> {
         tall,
         popped,
         seated,
+        letters: spots,
     })
 }
 
-fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
-    let x0 = s.x.max(0);
+fn inside(s: Sprite, (w, h): (f64, f64), (px, stretch): (f64, f64)) -> Option<Sprite> {
+    let back = 1.0 / stretch - 1.0;
+    let x0 = s.x.max((0.0 - px * back) as i32);
     let y0 = s.y.max(0);
-    let x1 = (s.x + s.width as i32).min(w as i32);
+    let x1 = (s.x + s.width as i32).min((w + (w - px) * back) as i32);
     let y1 = (s.y + s.height as i32).min(h as i32);
     if x1 <= x0 || y1 <= y0 {
         return None;
@@ -1998,6 +2157,7 @@ fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> 
     Some(turned(
         sprite,
         ((px * w) as f32, (py * h) as f32),
+        1.0,
         block.turn,
     ))
 }
@@ -2013,11 +2173,72 @@ fn title_block(
     if block.part == TitlePart::Shape {
         return shaped_box(t, block, (w, h), h / f64::from(timeline.max(1)));
     }
-    let zoom = block.zoom;
+    let (sprite, _) = upright_block(t, block, (width, height), timeline)?;
+    let stretch = block.stretch();
+    if block.turn == 0.0 && stretch == 1.0 {
+        return Some(sprite);
+    }
+    let [px, py] = block.pivot;
+    let held = if block.turn == 0.0 {
+        sprite
+    } else {
+        inside(sprite, (w, h), (px * w, stretch))?
+    };
+    Some(turned(
+        held,
+        ((px * w) as f32, (py * h) as f32),
+        stretch as f32,
+        block.turn,
+    ))
+}
+
+pub fn title_letters(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Letters> {
+    if t.text.trim().is_empty() {
+        return Vec::new();
+    }
+    let plain = vidcut_core::rich::plain(&t.text);
+    let last = plain.rfind('\n').map_or(0, |i| plain[..=i].chars().count());
+    let (w, h) = (f64::from(width), f64::from(height));
+    t.blocks()
+        .iter()
+        .filter_map(|b| {
+            let first = match b.part {
+                TitlePart::Whole | TitlePart::Upper => 0,
+                TitlePart::Lower => last,
+                TitlePart::Shape | TitlePart::Backing => return None,
+            };
+            let (s, letters) = upright_block(t, b, (width, height), timeline)?;
+            Some(Letters {
+                letters: letters
+                    .into_iter()
+                    .map(|l| Letter {
+                        at: l.at + first,
+                        ..l
+                    })
+                    .collect(),
+                pivot: [(b.pivot[0] * w) as f32, (b.pivot[1] * h) as f32],
+                stretch: b.stretch() as f32,
+                turn: b.turn,
+                top: s.y,
+                height: s.height,
+                lift: s.lift,
+            })
+        })
+        .collect()
+}
+
+fn upright_block(
+    t: &Title,
+    block: &TitleBlock,
+    (width, height): (u32, u32),
+    timeline: u32,
+) -> Option<(Sprite, Vec<Letter>)> {
+    let (w, h) = (f64::from(width), f64::from(height));
+    let zoom = block.zoom[1];
     let pixel = h / f64::from(timeline.max(1));
-    let exact = h * t.text_fraction() * zoom;
+    let exact = h * t.text_fraction(timeline) * zoom;
     let drawn = match t.kind {
-        TitleKind::Scroll => exact,
+        TitleKind::Scroll => Title::scroll_size(exact, pixel),
         TitleKind::Text | TitleKind::LowerThird => Title::whole_size(exact, pixel * zoom),
     };
     let size = drawn.max(1.0) as f32;
@@ -2042,7 +2263,7 @@ fn title_block(
         }),
         tracking: t.style.tracking.unwrap_or(0.0) as f32,
         case: t.style.case.unwrap_or_default(),
-        wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
+        wrap: ((w * Title::SAFE * zoom).max(exact) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,
             TitleAlign::Middle => Align::Center,
@@ -2076,12 +2297,13 @@ fn title_block(
         above,
         seated,
         tall,
+        letters,
         ..
     } = lay_out(&look)?
     else {
         return None;
     };
-    let [px, py] = block.pivot;
+    let [px, _] = block.pivot;
     let [across, down] = block.anchor;
     let lined = t.align().fraction() as f32;
     let exact = block_top(
@@ -2101,18 +2323,20 @@ fn title_block(
         },
         ..placed(sprite, left, top)
     };
-    if block.turn == 0.0 {
-        return Some(sprite);
-    }
-    Some(turned(
-        inside(sprite, (w, h))?,
-        ((px * w) as f32, (py * h) as f32),
-        block.turn,
-    ))
+    let (dx, dy) = (left.round(), top.round());
+    let letters = letters
+        .into_iter()
+        .map(|l| Letter {
+            x: l.x.map(|v| v + dx),
+            y: l.y.map(|v| v + dy),
+            ..l
+        })
+        .collect();
+    Some((sprite, letters))
 }
 
-fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
-    if degrees == 0.0 || s.width == 0 || s.height == 0 {
+fn turned(s: Sprite, (px, py): (f32, f32), stretch: f32, degrees: f64) -> Sprite {
+    if (degrees == 0.0 && stretch == 1.0) || s.width == 0 || s.height == 0 {
         return s;
     }
     let (sin, cos) = (
@@ -2120,7 +2344,7 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         degrees.to_radians().cos() as f32,
     );
     let forward = |x: f32, y: f32| {
-        let (u, v) = (x - px, y - py);
+        let (u, v) = ((x - px) * stretch, y - py);
         (px + u * cos + v * sin, py - u * sin + v * cos)
     };
     let (x0, y0) = (s.x as f32, s.y as f32);
@@ -2140,6 +2364,8 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         let p = s.at(x, y);
         [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]]
     };
+    let taps = (1.0 / stretch).ceil().max(1.0) as usize;
+    let share = 1.0 / taps as f32;
     let mut rgba = vec![[0.0f32; 4]; ow * oh];
     for oy in 0..oh {
         for ox in 0..ow {
@@ -2147,20 +2373,24 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
                 lo_x as f32 + ox as f32 + 0.5 - px,
                 lo_y as f32 + oy as f32 + 0.5 - py,
             );
-            let (sx, sy) = (px + u * cos - v * sin - 0.5, py + u * sin + v * cos - 0.5);
-            let (fx, fy) = (sx.floor(), sy.floor());
-            let (ax, ay) = (sx - fx, sy - fy);
-            let (ix, iy) = (fx as i32, fy as i32);
             let mut p = [0.0f32; 4];
-            for (dx, dy, k) in [
-                (0, 0, (1.0 - ax) * (1.0 - ay)),
-                (1, 0, ax * (1.0 - ay)),
-                (0, 1, (1.0 - ax) * ay),
-                (1, 1, ax * ay),
-            ] {
-                let q = held(ix + dx, iy + dy);
-                for c in 0..4 {
-                    p[c] += q[c] * k;
+            for tap in 0..taps {
+                let d = (tap as f32 + 0.5) * share - 0.5;
+                let sx = px + u * cos / stretch - v * sin / stretch + d / stretch - 0.5;
+                let sy = py + u * sin + v * cos - 0.5;
+                let (fx, fy) = (sx.floor(), sy.floor());
+                let (ax, ay) = (sx - fx, sy - fy);
+                let (ix, iy) = (fx as i32, fy as i32);
+                for (dx, dy, k) in [
+                    (0, 0, (1.0 - ax) * (1.0 - ay)),
+                    (1, 0, ax * (1.0 - ay)),
+                    (0, 1, (1.0 - ax) * ay),
+                    (1, 1, ax * ay),
+                ] {
+                    let q = held(ix + dx, iy + dy);
+                    for c in 0..4 {
+                        p[c] += q[c] * k * share;
+                    }
                 }
             }
             rgba[oy * ow + ox] = if p[3] > 0.0 {

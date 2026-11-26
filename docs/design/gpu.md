@@ -29,10 +29,13 @@ flowchart LR
   - Direct3D 11 on other GPUs on Windows. VA-API on other GPUs on Linux.
   - VideoToolbox on a Mac.
 - `VIDCUT_HWDEC` sets the decoder for tests.
-- The player uses that decoder. Exports, proxies, renders and tiles use `GpuDecoder::own`, a stream or a device of their own on the same GPU.
+- The player uses that decoder. Exports, proxies, renders, tiles and analyses use `GpuDecoder::own`, a stream or a device of their own on the same GPU.
   - Why: on the player's decoder, their work waits behind playback.
+  - A CUDA stream of `GpuDecoder::own` waits for the default stream of its device (`Waits::ForDefault`).
+  - Why: on a stream that does not wait, NVDEC's JPEG pictures can be the picture before ([gotchas](../gotchas.md#gpu-drivers)).
 - `gpu.acceleration` lets the GPU decode, scale and encode. `gpu.decoding` lets it decode. Both are on by default.
-- `GpuDecoder::why_not` names the streams that the CPU decodes. Stills and image sequences decode on the CPU.
+- `GpuDecoder::why_not` names the streams that the CPU decodes.
+- The draw path decodes stills and image sequences on the CPU (`Source::open`). Other readers, such as `motion.find`, decode them on the GPU where it can.
 - An OpenEXR decodes with the `exr` crate, not with FFmpeg's `exr` decoder ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)):
   - `VideoDecoder` opens FFmpeg's `rawvideo` decoder in its place. Its `send_packet` turns each file into the planes of that decoder (`openexr::Planes`).
   - The pixel format is the format that the probe gets from FFmpeg's `exr` decoder. Thus the frames and their path stay the same.
@@ -303,10 +306,11 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 
 ## GPU layers
 
-`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut: the frame interpolation and the slow face model ([analysis](analysis.md#subjects)).
+`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model, the model of people and vehicles ([analysis](analysis.md#subjects)), Auto Color (`auto_color::balance`, [export](export.md)) and the Magic Mask ([analysis](analysis.md#subject-masks)).
 
 - A `View` is a part of a buffer of 32-bit floats. The channels of a pixel are next to each other.
 - `Ops::conv` is a convolution as a matrix multiply. The bias, a residual and the activation are in the same pass.
+  - A `Res` adds the residual before the activation or after it. A ResNet block adds it before. A YOLOX bottleneck adds it after.
   - `CONV4` loads four channels at a time. `Ops::conv` uses it when the input has a multiple of 16 channels and the output a multiple of 4.
   - Each `View` of a `CONV4` pass starts on a multiple of 4 floats, with a multiple of 4 floats for each pixel. Other convolutions use `CONV`.
 - `ops::layer` makes a `Layer` from the weights of a convolution.
@@ -316,9 +320,11 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
   - Why: Winograd F(4×4, 3×3) does a quarter of the multiplies of a direct convolution. The transforms read and write more memory.
   - The caller gives the two work buffers between the passes.
 - `Ops::pool` keeps the largest value of each window. `Ops::nearest` enlarges with the nearest pixel. `Ops::resize` uses a bilinear filter.
+- An `Act` is the activation of a layer: none, leaky ReLU, PReLU, SiLU, GELU or sigmoid.
 - `ops::arena` plans the work buffers of a network. It refuses a buffer that is larger than the GPU takes.
 - `Kernels` compiles the shaders once for each `compute::Gpu`. The device must have the workgroup memory of `ops::SHARED`.
 - A layer never reads and writes one buffer in one pass. Why: wgpu refuses a buffer that is bound as read-only and as writable in one dispatch.
+- `Ops::conv_shuffled` gives a transposed convolution with a stride of 2 as a 1×1 convolution and a pixel shuffle. The Magic Mask uses it.
 
 ## Deinterlacing and HDR
 
@@ -374,7 +380,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 
 ## The scopes
 
-The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([spec §4.5](../spec.md#45-other-viewer-features)).
+The Waveform, the Parade, the Vectorscope, the Histogram and the CIE Chromaticity scope show the picture that the viewer draws ([spec §4.5](../spec.md#45-other-viewer-features)).
 
 What they read:
 
@@ -387,9 +393,23 @@ What they read:
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):
 
-- A compute pass adds one to a counter for each pixel of the canvas (`hits`). There is one entry point for each `Scope`: `waveform`, `parade` and `vectorscope`.
+- A compute pass adds one to a counter for each pixel of the canvas (`hits`). There is one entry point for each `Scope`: `waveform`, `parade`, `vectorscope`, `histogram` and `chromaticity`.
+  - `waveform` reads its mode from `WaveformMode`. In RGB mode, the counters have three planes, one for each color (`planes`). The other modes have one plane.
+  - `parade` puts three or four sections side by side (`sections`). `ParadeMode` gives the value of each section (`parade_value`).
+  - A color difference of zero is at the middle of the scale (`shown_difference`).
+  - A change of the count of planes makes the `Plot` again.
+  - `histogram` adds one to the bin of each band (`band_value`). A bin is one column of the scope. Its scale lines are columns.
+  - `chromaticity` makes each pixel linear (`linear`) and converts it to XYZ with the primaries of the timeline (`timeline_to_xyz`). It adds one at the place of its chromaticity (`chart_place`).
+  - `linear` uses `decode` of `transfer.wgsl`. The picture shader and the scope shader both start with that file. Thus there is one copy of the curves.
+  - The render pass paints each place of the chart in the color of its chromaticity (`chart_color`).
+  - `curve_points` gives the lines of the chart: the horseshoe (`LOCUS`), the black body locus (`PLANCK`), the gamut and the white point.
+  - The two tables come from the CIE 1931 2-degree observer. `wave_ticks` adds a tick outside the horseshoe each 10 nm.
+  - `chart_line` paints these lines. `on_chart_grid` paints the grid and the ticks of the axes.
+  - `chart_marks` gives the labels of the axes, the name of the gamut and its coordinates. The name of the gamut and its coordinates have their own color (`TEXT_COLOR`).
 - A render pass then paints the counters into a `Target` of the scope's own size (`fs`).
   - The brightness is the square root of the count, so that a thin trace still shows.
+  - The lines of the graticule are in `GRID_COLOR`. The parameters carry it (`grid`), so that the labels and the lines use one value.
+  - The labels of the scales are in `SCALE_COLOR`.
   - One column of a scope can take more columns of the canvas than the next one. `evened` scales each count for that. Thus the trace has no stripes.
   - The pass adds the lines of the scale.
 - Each size is clamped from `SMALLEST` to `LARGEST`.
@@ -400,9 +420,14 @@ The scales (`marks`):
 - `luma_of` takes the weights of the luma from `shader_colors`. They are BT.709 in SDR, and BT.2020 in HDR PQ and HDR HLG.
 - The Waveform and the Parade have the same room above and below the full range (`LOW`, `HIGH`). Thus a value out of range still shows.
 - The marks come from `ScopeScale` (`levels`): 10-bit codes, 12-bit codes, percent, millivolts or nits. Each scale spans the full range.
-- The nits go through `pq_code`, and through `hlg_code` on an HLG timeline.
-- A change of the scale draws each `Plot` again.
+- The nits go through `pq_code` on every timeline (`HDR_NITS`).
+- The HDR scale also has dashed lines with no label (`dashed`). The shader draws a row from index `how.z` on as a dashed line.
+- With `video_levels`, the Waveform and the Parade move each value to the 10-bit codes from 64 to 940 (`shown` in `scope.wgsl`).
+  - The marks of 10-bit and 12-bit stay. The marks of the other scales move the same way (`on_scale`).
+  - A scope shows only the marks inside its range (`in_range`). The Histogram spans 0 to 1, the Waveform and the Parade `LOW` to `HIGH`.
+- A change of the scale or of `video_levels` draws each `Plot` again. `Plots::paint` takes the whole `Scopes`.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
+- With `skin_tone`, the Vectorscope also has a line from the center to the circle at `SKIN_DEGREES` (`on_skin`).
 
 A scope that is off:
 

@@ -7,7 +7,7 @@ use vidcut_core::analysis::{
     AudioLevels, Detections, Look, Loudness, PictureStats, Shake, Shaky, SoundMatch, Tracked,
     VoiceActivity,
 };
-use vidcut_core::auto_color::Balance;
+use vidcut_core::auto_color::AutoResult;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Measured;
 use vidcut_core::editor::GeneratedProxy;
@@ -134,12 +134,13 @@ static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::
 const LOUD_KEPT: usize = 4096;
 static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
 const BALANCES_KEPT: usize = 16;
-static BALANCES: Mutex<Lru<String, Balance, BALANCES_KEPT>> = Mutex::new(Lru::new());
+static BALANCES: Mutex<Lru<(bool, String), AutoResult, BALANCES_KEPT>> = Mutex::new(Lru::new());
 
 fn loud_key(plan: &RenderPlan) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
         "audio": plan.audio,
         "ducking": plan.ducking,
+        "buses": plan.buses,
         "frames": plan.frames,
         "fps": plan.fps,
         "sample_rate": plan.sample_rate,
@@ -152,6 +153,7 @@ fn loud_key(plan: &RenderPlan) -> String {
 fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
         "audio": plan.audio,
+        "buses": plan.buses,
         "frames": plan.frames,
         "fps": plan.fps,
         "model": asked.model,
@@ -421,9 +423,12 @@ impl Env for AvEnv {
         )
     }
 
-    fn auto_balance(&self, plan: &RenderPlan) -> Result<Balance> {
+    fn auto_balance(&self, plan: &RenderPlan, legacy: bool) -> Result<AutoResult> {
         let lock = || BALANCES.lock().unwrap_or_else(PoisonError::into_inner);
-        let key = vidcut_core::fingerprint::digest(&serde_json::to_vec(plan).unwrap_or_default());
+        let key = (
+            legacy,
+            vidcut_core::fingerprint::digest(&serde_json::to_vec(plan).unwrap_or_default()),
+        );
         if let Some(v) = lock().get(&key) {
             return Ok(*v);
         }
@@ -439,12 +444,20 @@ impl Env for AvEnv {
         let decoder = crate::preferences::gpu_decoding().own_decoder();
         let size = (plan.width, plan.height);
         let colors = (plan.colors, None, None);
-        let pixels =
-            vidcut_av::export::still::floats(piece, plan.fps, size, colors, decoder.as_ref())
+        let (w, h, pixels) =
+            vidcut_av::export::still::floats_sized(piece, plan.fps, size, colors, decoder.as_ref())
                 .map_err(av_error)?;
-        let balance = vidcut_core::auto_color::balance(pixels);
-        lock().insert(key, balance);
-        Ok(balance)
+        let result = match legacy {
+            true => AutoResult::Legacy(vidcut_core::auto_color::balance(pixels)),
+            false => {
+                let gpu = crate::preferences::gpu_acceleration();
+                AutoResult::Neural(
+                    vidcut_av::auto_color::balance(w, h, &pixels, gpu).map_err(av_error)?,
+                )
+            }
+        };
+        lock().insert(key, result);
+        Ok(result)
     }
 
     fn voice_isolation(&self, download: bool) -> Result<()> {
@@ -491,7 +504,8 @@ impl Env for AvEnv {
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
                 let input = vidcut_av::decode::Input::of_media(media);
-                vidcut_av::subjects::find(&input, subject, look, decoder.as_ref(), &dir)
+                let gpu = (decoder.as_ref(), crate::preferences::gpu_acceleration());
+                vidcut_av::subjects::find(&input, subject, look, gpu, &dir)
             },
             Detections::to_bytes,
             Detections::from_bytes,
@@ -550,6 +564,50 @@ impl Env for AvEnv {
             Shake::to_bytes,
             Shake::from_bytes,
         )
+    }
+
+    fn subject_masks(
+        &self,
+        plan: &RenderPlan,
+        subjects: &[Vec<vidcut_core::masks::Point>],
+        download: bool,
+    ) -> Result<Vec<Arc<[f32]>>> {
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the picture changed while the Magic Mask read it; click again",
+            ));
+        }
+        let dir = paths::models_dir();
+        let size = vidcut_av::mask::Size::Tiny;
+        vidcut_av::mask::get_ready(&dir, size, download).map_err(av_error)?;
+        let piece = plan
+            .video
+            .first()
+            .ok_or_else(|| Error::invalid("there is no picture at the playhead"))?;
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let colors = (plan.colors, None, None);
+        let (w, h, pixels) = vidcut_av::export::still::floats_sized(
+            piece,
+            plan.fps,
+            (plan.width, plan.height),
+            colors,
+            decoder.as_ref(),
+        )
+        .map_err(av_error)?;
+        let clicks: Vec<Vec<vidcut_av::mask::Click>> = subjects
+            .iter()
+            .map(|points| {
+                (points.iter())
+                    .map(|p| vidcut_av::mask::Click {
+                        at: p.at,
+                        positive: !p.negative,
+                    })
+                    .collect()
+            })
+            .collect();
+        let found =
+            vidcut_av::mask::find(&dir, size, (w, h, &pixels), &clicks).map_err(av_error)?;
+        Ok(found.into_iter().map(|f| f.logits.into()).collect())
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {

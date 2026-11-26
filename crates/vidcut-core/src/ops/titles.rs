@@ -1,17 +1,17 @@
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title, TitleAlign,
-    TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle, Track, TrackKind,
+    EffectKeys, Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project,
+    SubtitleBackground, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow,
+    TitleShape, TitleStyle, Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
 use super::{block_clip, clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
 
 pub const DEFAULT_SECS: f64 = 5.0;
-
-const ZOOM: (f64, f64) = (0.25, 4.0);
 
 const PLACE: &str =
     "a title's position is two fractions of the picture, from -4 to 4 across and -3 to 5 down";
@@ -23,7 +23,10 @@ const SHAPED: &str = "a background shape needs a background";
 const SHAPE_SIZE: &str = "a background's width and height are from 0 to 2";
 const SHAPE_CENTER: &str = "a background's center is from -4 to 4";
 const SHAPE_CORNER: &str = "a background's corner is from 0 to 1";
-const SHAPE_OUTLINE: &str = "a background's outline width is from 0 to 30";
+const SHAPE_OUTLINE: &str = "a background's outline width is whole pixels, from 0 to 30";
+const BOX_OPACITY: &str = "a title's background opacity is in steps of 0.01, from 0 to 1";
+const SHADOW_OPACITY: &str = "a title's shadow opacity is in steps of 0.01, from 0 to 1";
+const SHADOW_BLUR: &str = "a title's shadow blur is a whole number, from 1 to 100";
 const SCROLL_SPACED: &str = "a scroll has no line spacing, tracking or case";
 const POSITION_HANDLED: &str =
     "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
@@ -39,7 +42,11 @@ fn down(v: f64) -> bool {
 }
 
 fn zooms(z: f64) -> bool {
-    z.is_finite() && (ZOOM.0..=ZOOM.1).contains(&z)
+    z.is_finite() && (Title::ZOOM.0..=Title::ZOOM.1).contains(&z)
+}
+
+fn flat(z: [f64; 2]) -> bool {
+    z == [1.0, 1.0]
 }
 
 fn turns(r: f64) -> bool {
@@ -89,7 +96,42 @@ fn checked_keys(t: &Title) -> Result<()> {
         return Err(Error::invalid(PLACE));
     }
     all_in(&t.zoom_keys, zooms, ZOOMED)?;
+    if !t.zoom_y.iter().copied().all(zooms) {
+        return Err(Error::invalid(ZOOMED));
+    }
     all_in(&t.rotation_keys, turns, TURNED)
+}
+
+fn checked_style_keys(t: &Title) -> Result<Vec<EffectKeys>> {
+    for k in t.keys.iter().filter(|k| !k.keys.is_empty()) {
+        let name = k.value.name().replace('_', " ");
+        if !Title::KEYED.contains(&k.value) {
+            return Err(Error::invalid(format!("a title has no {name} keyframes")));
+        }
+        let Some((low, high)) = t.range_of(k.value) else {
+            return Err(Error::invalid(format!(
+                "a title's {name} keyframes need its {}",
+                Title::part_of(k.value)
+            )));
+        };
+        let steps = Title::steps_of(k.value);
+        let whole = |v: f64| steps.is_none_or(|n| (v * n - (v * n).round()).abs() < 1e-9);
+        let ys = k.y.iter().copied();
+        if !k
+            .keys
+            .iter()
+            .map(|key| key.value)
+            .chain(ys)
+            .all(|v| v.is_finite() && (low..=high).contains(&v) && whole(v))
+        {
+            return Err(Error::invalid(match steps {
+                Some(1.0) => format!("a title's {name} is a whole number, from {low} to {high}"),
+                Some(_) => format!("a title's {name} is in steps of 0.01, from {low} to {high}"),
+                None => format!("a title's {name} is from {low} to {high}"),
+            }));
+        }
+    }
+    super::picture::keys_checked(t, "title", checked)
 }
 
 pub fn checked(t: &Title) -> Result<Title> {
@@ -98,7 +140,9 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid("a lower third has two lines at the most"));
     }
     if t.kind == TitleKind::Scroll
-        && (t.zoom.is_some_and(|z| z != 1.0) || t.rotation.is_some_and(|r| r != 0.0))
+        && (t.zoom.is_some_and(|z| !flat(z))
+            || t.zoom_link == Some(false)
+            || t.rotation.is_some_and(|r| r != 0.0))
     {
         return Err(Error::invalid("a scroll has no zoom or rotation"));
     }
@@ -108,7 +152,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid(PLACE));
     }
     let zoom = match t.zoom {
-        Some(z) if zooms(z) => (z != 1.0).then_some(z),
+        Some(z) if z.iter().copied().all(zooms) => (!flat(z)).then_some(z),
         Some(_) => return Err(Error::invalid(ZOOMED)),
         None => None,
     };
@@ -159,9 +203,9 @@ pub fn checked(t: &Title) -> Result<Title> {
         case: s.case.filter(|c| *c != TitleCase::Mixed),
         color: checked_color(s.color.as_deref(), "title")?,
         outline: checked_outline(s.outline.as_ref())?,
-        background: checked_background(s.background.as_ref())?,
+        background: checked_box(s.background.as_ref())?,
         shape: checked_shape(s)?,
-        shadow: s.shadow.as_ref().map(checked_shadow).transpose()?,
+        shadow: s.shadow.as_ref().map(checked_title_shadow).transpose()?,
     };
     Ok(Title {
         kind: t.kind,
@@ -175,10 +219,39 @@ pub fn checked(t: &Title) -> Result<Title> {
         position_handles: t.position_handles.clone(),
         zoom,
         zoom_keys: t.zoom_keys.clone(),
+        zoom_y: t.zoom_y.clone(),
+        zoom_link: t.zoom_link.filter(|on| !on),
         rotation,
         rotation_keys: t.rotation_keys.clone(),
         upper,
+        keys: checked_style_keys(t)?,
     })
+}
+
+fn hundredths(o: f64) -> bool {
+    (o * 100.0 - (o * 100.0).round()).abs() < 1e-9
+}
+
+fn checked_box(b: Option<&SubtitleBackground>) -> Result<Option<SubtitleBackground>> {
+    let b = checked_background(b)?;
+    if b.as_ref()
+        .and_then(|b| b.opacity)
+        .is_some_and(|o| !hundredths(o))
+    {
+        return Err(Error::invalid(BOX_OPACITY));
+    }
+    Ok(b)
+}
+
+fn checked_title_shadow(s: &TitleShadow) -> Result<TitleShadow> {
+    let s = checked_shadow(s)?;
+    if s.opacity.is_some_and(|o| !hundredths(o)) {
+        return Err(Error::invalid(SHADOW_OPACITY));
+    }
+    if s.blur.is_some_and(|b| b.fract() != 0.0) {
+        return Err(Error::invalid(SHADOW_BLUR));
+    }
+    Ok(s)
 }
 
 fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
@@ -202,9 +275,9 @@ fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
     if !shape.corner.is_none_or(|v| within(v, 0.0, 1.0)) {
         return Err(Error::invalid(SHAPE_CORNER));
     }
-    if !shape
+    if shape
         .outline_width
-        .is_none_or(|v| within(v, 0.0, Title::BOX_MOST_OUTLINE))
+        .is_some_and(|v| v > Title::BOX_MOST_OUTLINE)
     {
         return Err(Error::invalid(SHAPE_OUTLINE));
     }
@@ -213,7 +286,7 @@ fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
         center: shape.center.filter(|c| *c != [0.0, 0.0]),
         corner: shape.corner,
         outline_color: checked_color(shape.outline_color.as_deref(), "background outline")?,
-        outline_width: shape.outline_width.filter(|v| *v > 0.0),
+        outline_width: shape.outline_width.filter(|v| *v > 0),
     }))
 }
 
@@ -356,7 +429,8 @@ pub struct TitleChange {
     pub anchor: Option<TitleAnchor>,
     pub style: Option<TitleStyle>,
     pub position: Option<Option<[f64; 2]>>,
-    pub zoom: Option<f64>,
+    pub zoom: Option<[f64; 2]>,
+    pub zoom_link: Option<bool>,
     pub rotation: Option<f64>,
     pub look: Option<TitleLook>,
     pub line: Option<LowerThirdLine>,
@@ -369,8 +443,11 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             position_y: old.position_y.clone(),
             position_handles: old.position_handles.clone(),
             zoom_keys: old.zoom_keys.clone(),
+            zoom_y: old.zoom_y.clone(),
+            zoom_link: old.zoom_link,
             rotation_keys: old.rotation_keys.clone(),
             upper: old.upper.clone(),
+            keys: old.keys.clone(),
             ..l.on(&old.text)
         },
         None => old.clone(),
@@ -393,6 +470,8 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         t.style.case = None;
         t.position_handles.clear();
         t.zoom_keys.clear();
+        t.zoom_y.clear();
+        t.zoom_link = None;
         t.rotation_keys.clear();
     }
     if let Some(a) = change.align {
@@ -413,9 +492,19 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
     if let Some(z) = change.zoom {
         t.zoom = Some(z);
     }
+    if let Some(on) = change.zoom_link {
+        t.zoom_link = (!on).then_some(false);
+    }
     if let Some(r) = change.rotation {
         t.rotation = Some(r);
     }
+    let held: Vec<EffectKeys> = t
+        .keys
+        .iter()
+        .filter(|k| t.takes(k.value))
+        .cloned()
+        .collect();
+    t.keys = held;
     t
 }
 
@@ -497,6 +586,9 @@ fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) 
         }
         next.take_picture(&picture);
     }
+    if change.style.is_some() && next.has_keys() {
+        restyled_keys(old, &mut next, frame)?;
+    }
     let t = checked(&next)?;
     let c = &mut p.tracks[ti].clips[ci];
     if let Some(l) = &change.look {
@@ -507,6 +599,24 @@ fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) 
         c.picture = super::picture::checked(&picture)?;
     }
     c.title = Some(t);
+    Ok(())
+}
+
+fn restyled_keys(old: &Title, next: &mut Title, frame: Option<i64>) -> Result<()> {
+    let was = frame.map_or_else(|| old.clone(), |f| old.adopted(f as f64));
+    let keyed: Vec<_> = next.keys.iter().map(|k| k.value).collect();
+    for v in keyed {
+        let now = next.point(v);
+        if !next.takes(v) || now == was.point(v) {
+            continue;
+        }
+        let Some(f) = frame else {
+            return Err(Error::invalid(
+                "a value with keyframes needs `at` or a playhead",
+            ));
+        };
+        next.put_point(v, f, now);
+    }
     Ok(())
 }
 

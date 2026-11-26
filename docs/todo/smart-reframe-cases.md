@@ -4,7 +4,7 @@
 
 Smart Reframe is complex behavior. Its move depends on the content and on the settings. One measurement records only what Resolve did for that input. A rule needs several files that differ in content, subject count, aspect, frame rate and resolution.
 
-The rules of [spec §8.28](../spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on shots of two files. Some lines rest on one clip or one file. Each item below names what a line rests on now, and the cases that test it.
+The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on shots of two files. Some lines rest on one clip or one file. Each item below names what a line rests on now, and the cases that test it.
 
 - **Files for each case:** the press conference (59.94 fps, 3840×2160), the film (24 fps, 1280×534), and at least two more files. Use one file at 25 or 30 fps and one with two or more people. Use one 4:3 file.
 - **Frame shapes:** 9:16 and 16:9 timelines, and one 1:1 timeline.

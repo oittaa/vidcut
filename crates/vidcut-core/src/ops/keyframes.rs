@@ -10,8 +10,8 @@ use crate::keyframes::{
     PictureValue, checked, checked_handle, checked_pan, ease_mark, ease_of, put_pair, reshape,
 };
 use crate::model::{
-    Clip, ClipAudio, Ease, Effect, Generator, Gradient, Handle, Keyframe, LowerThirdLine, Picture,
-    Project, Title, TitleKind,
+    Clip, ClipAudio, Ease, Effect, EffectValue, Generator, Gradient, Handle, Keyframe,
+    LowerThirdLine, Picture, Project, Title, TitleKind,
 };
 use crate::request::{CopiedKey, EffectParam, KeyParam, KeyPicks, KeyValue};
 use crate::validate::{GAIN, PAN};
@@ -89,10 +89,14 @@ enum Number {
     Pan,
     Center(Axis),
     Effect(EffectParam),
+    Title(EffectValue),
 }
 
 impl Number {
     fn of(param: KeyParam) -> Self {
+        if let Some(v) = param.style_value() {
+            return Self::Title(v);
+        }
         match param {
             KeyParam::Pan => Self::Pan,
             KeyParam::CenterX => Self::Center(Axis::X),
@@ -109,6 +113,7 @@ impl Number {
             Self::Center(Axis::X) => "center x".to_string(),
             Self::Center(Axis::Y) => "center y".to_string(),
             Self::Effect(q) => q.value.name().replace('_', " "),
+            Self::Title(v) => v.name().replace('_', " "),
         }
     }
 
@@ -117,6 +122,7 @@ impl Number {
             Self::Volume | Self::Pan => c.audio_range().is_some(),
             Self::Center(_) => gradient(c).is_some(),
             Self::Effect(q) => effect_of(c, q).is_some_and(|e| e.takes(q.value)),
+            Self::Title(v) => c.title.as_ref().is_some_and(|t| t.takes(v)),
         }
     }
 
@@ -125,16 +131,26 @@ impl Number {
             Self::Volume | Self::Pan => "has no sound",
             Self::Center(_) => "is not a Four Color Gradient",
             Self::Effect(_) => "has no effect with that value",
+            Self::Title(v) => match Title::part_of(v) {
+                "shadow" => "is not a title with a shadow",
+                "background" => "is not a title with a background",
+                _ => "is not a title with a background shape",
+            },
         }
     }
 
     fn pair(self) -> bool {
-        matches!(self, Self::Effect(q) if q.value.pair())
+        match self {
+            Self::Effect(q) => q.value.pair(),
+            Self::Title(v) => v.pair(),
+            _ => false,
+        }
     }
 
     fn ys(self, c: &Clip) -> &[f64] {
         match self {
             Self::Effect(q) => effect_of(c, q).map_or(&[], |e| e.y_of(q.value)),
+            Self::Title(v) => c.title.as_ref().map_or(&[], |t| t.y_of(v)),
             _ => &[],
         }
     }
@@ -142,6 +158,10 @@ impl Number {
     fn point_at(self, c: &Clip, frame: f64) -> [f64; 2] {
         match self {
             Self::Effect(q) => effect_of(c, q).map_or([0.0; 2], |e| e.point_at(q.value, frame)),
+            Self::Title(v) => c
+                .title
+                .as_ref()
+                .map_or([0.0; 2], |t| t.stepped_at(v, frame)),
             _ => [self.value_at(c, frame), 0.0],
         }
     }
@@ -157,6 +177,7 @@ impl Number {
             Self::Pan => c.audio.as_ref().map_or(&[], |a| a.pan_keys.as_slice()),
             Self::Center(axis) => gradient(c).map_or(&[], |g| g.keys(axis)),
             Self::Effect(q) => effect_of(c, q).map_or(&[], |e| e.keys_of(q.value)),
+            Self::Title(v) => c.title.as_ref().map_or(&[], |t| Keyed::keys_of(t, v)),
         }
     }
 
@@ -174,6 +195,7 @@ impl Number {
                 .effects
                 .get_mut(q.effect)?
                 .channel_mut(q.value),
+            Self::Title(v) => c.title.as_mut()?.channel_mut(v),
         }
     }
 
@@ -183,6 +205,7 @@ impl Number {
             Self::Pan => c.audio.as_ref().map_or(0.0, |a| a.pan_at(frame)),
             Self::Center(axis) => gradient(c).map_or(0.0, |g| g.center_at(axis, frame)),
             Self::Effect(q) => effect_of(c, q).map_or(0.0, |e| e.value_at(q.value, frame)),
+            Self::Title(v) => c.title.as_ref().map_or(0.0, |t| t.stepped_at(v, frame)[0]),
         }
     }
 
@@ -191,8 +214,10 @@ impl Number {
             Self::Volume => checked(value),
             Self::Pan => checked_pan(value),
             Self::Center(_) => checked_center(value),
-            Self::Effect(_) if value.is_finite() => Ok(value),
-            Self::Effect(_) => Err(Error::invalid("a keyframe's value is a finite number")),
+            Self::Effect(_) | Self::Title(_) if value.is_finite() => Ok(value),
+            Self::Effect(_) | Self::Title(_) => {
+                Err(Error::invalid("a keyframe's value is a finite number"))
+            }
         }
     }
 
@@ -203,6 +228,11 @@ impl Number {
             Self::Center(_) => (*CENTER.start(), *CENTER.end()),
             Self::Effect(q) => effect_of(c, q)
                 .and_then(|e| e.range_of(q.value))
+                .unwrap_or((value, value)),
+            Self::Title(v) => c
+                .title
+                .as_ref()
+                .and_then(|t| t.range_of(v))
                 .unwrap_or((value, value)),
         };
         value.clamp(low, high)
@@ -246,6 +276,15 @@ fn effect_of(c: &Clip, q: EffectParam) -> Option<&Effect> {
 }
 
 fn settled(p: &mut Project, ids: &[String], number: Number) -> Result<()> {
+    if let Number::Title(_) = number {
+        for id in ids {
+            let (ti, ci) = locate(p, id)?;
+            if let Some(t) = p.tracks[ti].clips[ci].title.as_mut() {
+                *t = super::titles::checked(t)?;
+            }
+        }
+        return Ok(());
+    }
     let Number::Effect(q) = number else {
         return Ok(());
     };
@@ -327,6 +366,11 @@ fn add_number(
                 Number::Volume | Number::Pan => "has sound",
                 Number::Center(_) => "is a Four Color Gradient",
                 Number::Effect(_) => "has an effect with that value",
+                Number::Title(v) => match Title::part_of(v) {
+                    "shadow" => "is a title with a shadow",
+                    "background" => "is a title with a background",
+                    _ => "is a title with a background shape",
+                },
             }
         )));
     }
@@ -451,7 +495,9 @@ pub fn set(
     if by.is_some_and(|b| !b[0].is_finite() || !b[1].is_finite()) {
         return Err(Error::invalid(match number {
             Number::Volume => "`by` needs a number of dB",
-            Number::Pan | Number::Center(_) | Number::Effect(_) => "`by` needs a number",
+            Number::Pan | Number::Center(_) | Number::Effect(_) | Number::Title(_) => {
+                "`by` needs a number"
+            }
         }));
     }
     if value.is_some() && by.is_some() {
@@ -637,6 +683,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                 (json!("center_y"), Number::Center(Axis::Y)),
             ];
             numbers.extend(effect_params(c).map(|q| (json!(q), Number::Effect(q))));
+            numbers.extend(style_params(c).map(|(param, v)| (json!(param), Number::Title(v))));
             for (param, number) in numbers {
                 let held = number.keys(c);
                 if held.is_empty() {
@@ -816,6 +863,9 @@ fn param_name(param: KeyParam) -> String {
         KeyParam::CenterX => "center_x".to_string(),
         KeyParam::CenterY => "center_y".to_string(),
         KeyParam::Effect(q) => q.value.name(),
+        styled if styled.style_value().is_some() => styled
+            .style_value()
+            .map_or_else(String::new, EffectValue::name),
         text if text.on_text() => {
             picture_param(text).map_or(String::new(), |v| format!("text_{}", v.name()))
         }
@@ -823,6 +873,13 @@ fn param_name(param: KeyParam) -> String {
             .map_or("volume", PictureValue::name)
             .to_string(),
     }
+}
+
+fn style_params(c: &Clip) -> impl Iterator<Item = (KeyParam, EffectValue)> + '_ {
+    c.title
+        .iter()
+        .flat_map(|t| t.keys.iter().filter(|k| !k.keys.is_empty()))
+        .filter_map(|k| Some((KeyParam::of_style(k.value)?, k.value)))
 }
 
 fn effect_params(c: &Clip) -> impl Iterator<Item = EffectParam> + '_ {
@@ -964,6 +1021,52 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
         .collect())
 }
 
+pub fn reverse(p: &mut Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<Value>> {
+    let whole = holder(p, id)?;
+    let times: Vec<i64> = picks
+        .iter()
+        .flat_map(|(param, frames)| {
+            let c = of_line(&whole, param.on_line().1);
+            frames
+                .iter()
+                .map(|f| c.key_time(*f).round() as i64)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let Some(at) = times.iter().copied().min() else {
+        return Err(Error::invalid(format!("{id} has no keyframes")));
+    };
+    let copied = copy(p, id, picks)?;
+    let ids = [id.to_string()];
+    for (param, frames) in picks {
+        let pick = Pick {
+            frames: Some(frames.clone()),
+            at: None,
+        };
+        on_line(p, &ids, *param, |p, param| remove(p, &ids, param, &pick))?;
+    }
+    let span = copied.iter().map(|k| k.offset).max().unwrap_or(0);
+    let flip = |h: Option<Handle>| {
+        h.map(|h| Handle {
+            frames: -h.frames,
+            ..h
+        })
+    };
+    let reversed: Vec<CopiedKey> = copied
+        .iter()
+        .map(|k| CopiedKey {
+            offset: span - k.offset,
+            ease: k.ease.map(Ease::backward),
+            in_handle: flip(k.out_handle),
+            out_handle: flip(k.in_handle),
+            in_point: k.out_point,
+            out_point: k.in_point,
+            ..*k
+        })
+        .collect();
+    paste(p, &ids, at, &reversed)
+}
+
 fn pastes_on_its_kind(c: &Clip, id: &str, k: &CopiedKey) -> Result<()> {
     let (KeyParam::Effect(q), Some(kind)) = (k.param.on_line().0, k.kind) else {
         return Ok(());
@@ -1061,7 +1164,17 @@ fn picture_param(param: KeyParam) -> Option<PictureValue> {
         KeyParam::CropBottom => Some(PictureValue::CropBottom),
         KeyParam::CropSoftness => Some(PictureValue::CropSoftness),
         KeyParam::Opacity => Some(PictureValue::Opacity),
-        KeyParam::Speed | KeyParam::Effect(_) => None,
+        KeyParam::Speed
+        | KeyParam::Effect(_)
+        | KeyParam::ShadowOffset
+        | KeyParam::ShadowBlur
+        | KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOutlineWidth
+        | KeyParam::BackgroundWidth
+        | KeyParam::BackgroundHeight
+        | KeyParam::BackgroundCornerRadius
+        | KeyParam::BackgroundCenter
+        | KeyParam::BackgroundOpacity => None,
     }
 }
 
@@ -1164,14 +1277,6 @@ fn save(p: &mut Project, id: &str, text: bool, picture: &Picture) -> Result<()> 
         c.picture = super::picture::checked(picture)?;
         return Ok(());
     };
-    if picture
-        .zoom_keys
-        .iter()
-        .zip(&picture.zoom_y)
-        .any(|(k, y)| k.value != *y)
-    {
-        return Err(Error::invalid("a title's zoom is one number"));
-    }
     t.take_picture(picture);
     c.title = Some(super::titles::checked(&t)?);
     Ok(())

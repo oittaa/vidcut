@@ -1,13 +1,16 @@
 use vidcut_core::grade::{
-    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass,
-    THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
+    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Masking, Pass as GradePass,
+    Qualifying, THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::{ByBytes, Lru};
 use vidcut_core::model::{
-    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MaskChannel, MergeEdges,
-    MergeOperator, NoiseColoring,
+    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, JoinStyle, MaskChannel,
+    MergeEdges, MergeOperator, NoiseColoring, PaintMode,
 };
-use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
+use vidcut_core::model::{
+    BlendMode, GlowOutput, KeyOutput, QUALIFIER_CHROMA, QUALIFIER_LUM_MIDDLE, QUALIFIER_LUM_SCALE,
+    QUALIFIER_LUMA, QUALIFIER_SAT_SCALE,
+};
 use vidcut_core::place::{
     Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Inking, Level, Making,
     Masks, Merging, Noising, Op, Outline, Painting, Picturing, Placing, Program, Shading, Shaping,
@@ -88,6 +91,12 @@ const MIX_SHARPEN: f64 = 2.0;
 
 const MIX_LAYER: f64 = 1.0;
 
+const MIX_SPREAD: f64 = 3.0;
+
+const MIX_TAKE: f64 = 4.0;
+
+const MIX_CLEAR: f64 = 5.0;
+
 const SHOT_TAPS: u32 = 16;
 
 pub(super) struct Pipes {
@@ -120,6 +129,8 @@ pub(super) struct Pipes {
     key_fold: wgpu::RenderPipeline,
     key_luma: wgpu::RenderPipeline,
     key_gray: wgpu::RenderPipeline,
+    key_qualify: wgpu::RenderPipeline,
+    mask_key: wgpu::RenderPipeline,
     shot: wgpu::RenderPipeline,
 }
 
@@ -226,6 +237,8 @@ impl Pipes {
             key_fold: pipeline(&plain, "fs_key_fold"),
             key_luma: pipeline(&plain, "fs_key_luma"),
             key_gray: pipeline(&plain, "fs_key_gray"),
+            key_qualify: pipeline(&plain, "fs_key_qualify"),
+            mask_key: pipeline(&of(&reading), "fs_mask_key"),
             shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
@@ -264,10 +277,20 @@ fn auto_floats(g: &Grading) -> Vec<f64> {
     let Some(a) = &g.auto else {
         return vec![0.0; 12];
     };
-    let mut floats = vec![1.0, 0.0, 0.0, 0.0];
-    floats.extend(a.lift);
-    floats.extend(a.weight);
-    floats
+    vec![
+        1.0,
+        a.exposure[0],
+        a.exposure[1],
+        a.exposure[2],
+        a.exposure[3],
+        a.exposure[4],
+        a.exposure[5],
+        0.0,
+        a.white[0],
+        a.white[1],
+        a.white[2],
+        0.0,
+    ]
 }
 
 fn grade_bytes(g: &Grading, blend: f64) -> Vec<u8> {
@@ -422,6 +445,13 @@ fn shape_bytes(shape: &Shaping, figure: &Figure, joined: bool) -> Vec<u8> {
         flag(shape.solid),
         flag(winding),
         flag(joined),
+        JoinStyle::ALL
+            .iter()
+            .position(|j| *j == shape.join)
+            .unwrap_or_default() as f64,
+        0.0,
+        0.0,
+        0.0,
     ])
 }
 
@@ -483,6 +513,10 @@ fn merge_bytes(m: &Merging, masked: bool) -> Vec<u8> {
         m.gain,
         m.burn,
         m.blend,
+        flag(m.clamp),
+        0.0,
+        0.0,
+        0.0,
     ])
 }
 
@@ -610,7 +644,11 @@ fn mask_pads(shape: &Shaping, (w, h): (u32, u32), most: u32) -> [u32; 4] {
     if !shape.beyond || reach == [0, 0] || points.is_empty() {
         return [0; 4];
     }
-    let near = shape.border.abs() + MASK_NEAR;
+    let corner = match shape.join {
+        JoinStyle::Sharp => std::f64::consts::SQRT_2,
+        _ => 1.0,
+    };
+    let near = shape.border.abs() * corner + MASK_NEAR;
     let low = |k: usize| points.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min) - near;
     let high = |k: usize| {
         points
@@ -731,11 +769,16 @@ fn mask_made<'a>(
         }
         let to = kept.map_or(0, |k| 1 - k);
         let start = kept.map_or(&room[1].view, |k| &room[k].view);
+        let paint = match kept {
+            Some(_) => shape.paint,
+            None => PaintMode::Copy,
+        };
+        let mode = PaintMode::ALL.iter().position(|m| *m == paint);
         let how = [
             shape.level,
             flag(shape.invert),
             flag(kept.is_none()),
-            0.0,
+            mode.unwrap_or_default() as f64,
             by[0],
             by[1],
             0.0,
@@ -2089,6 +2132,81 @@ fn key_fold_into(
     );
 }
 
+fn key_qualify_into(
+    gpu: &Gpu,
+    (from, to): (&Texture, &Texture),
+    how: &Qualifying,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let q = &how.qualifier;
+    let (direct, out) = match how.output {
+        Some(out) => (true, out),
+        None => (false, KeyOutput::default()),
+    };
+    let [hue, sat, lum] = [q.hue_edges(), q.sat_edges(), q.lum_edges()];
+    let [r, g, b] = QUALIFIER_LUMA;
+    let [cr, cb] = QUALIFIER_CHROMA;
+    let mut values = Vec::with_capacity(28);
+    values.extend_from_slice(&hue);
+    values.extend_from_slice(&sat);
+    values.extend_from_slice(&lum);
+    values.extend_from_slice(&[flag(q.hue), flag(q.sat), flag(q.lum), flag(q.invert)]);
+    values.extend_from_slice(&[r, g, b, QUALIFIER_LUM_SCALE]);
+    values.extend_from_slice(&[cr, cb, QUALIFIER_SAT_SCALE, QUALIFIER_LUM_MIDDLE]);
+    values.extend_from_slice(&[flag(direct), out.gain, out.offset, flag(out.invert)]);
+    let bytes = float_bytes(&values);
+    draw_step(
+        gpu,
+        (&gpu.blur().key_qualify, &bytes[..]),
+        Views::same(&from.view),
+        &to.view,
+        encoder,
+    );
+}
+
+fn mask_into(
+    gpu: &Gpu,
+    to: &Texture,
+    (masking, spot): (&Masking, &Spot),
+    scratch: &Texture,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let maps: Vec<_> = (masking.maps.iter())
+        .filter_map(|name| vidcut_core::masks::get(name))
+        .collect();
+    let mut cells: Vec<u8> = maps
+        .iter()
+        .flat_map(|m| m.iter().flat_map(|v| v.to_le_bytes()))
+        .collect();
+    if cells.is_empty() {
+        cells.extend(0f32.to_le_bytes());
+    }
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut masks"),
+        size: cells.len() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue.write_buffer(&buffer, 0, &cells);
+    let [m0, m1, m2, m3, m4, m5, m6, m7, m8] = spot.map;
+    let [w, h] = spot.frame;
+    let count = maps.len() as f64;
+    let bytes = float_bytes(&[
+        m0, m1, m2, 0.0, m3, m4, m5, 0.0, m6, m7, m8, 0.0, w, h, count, 0.0,
+    ]);
+    let views = Views {
+        cells: Some(&buffer),
+        ..Views::same(&scratch.view)
+    };
+    draw_step(
+        gpu,
+        (&gpu.blur().mask_key, &bytes[..]),
+        views,
+        &to.view,
+        encoder,
+    );
+}
+
 fn key_blur_into(
     gpu: &Gpu,
     on: &Texture,
@@ -2133,6 +2251,14 @@ fn pass_into(
             input,
             fold,
         } => key_fold_into(gpu, at[*to], (acc, input, fold), (at, &scratch[0]), encoder),
+        GradePass::Qualify {
+            from,
+            to,
+            qualifying,
+        } => key_qualify_into(gpu, (at[*from], at[*to]), qualifying, encoder),
+        GradePass::Mask { to, masking } => {
+            mask_into(gpu, at[*to], (masking, spot), &scratch[0], encoder);
+        }
         GradePass::KeyBlur { on, blur } => {
             key_blur_into(gpu, at[*on], (*blur, spot), &scratch[0], encoder);
         }
@@ -2185,6 +2311,27 @@ fn pass_into(
                 encoder,
             );
         }
+        GradePass::Spread { on, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*on], at[*on]),
+            (&scratch[0], [MIX_SPREAD, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
+        GradePass::Take { on, from, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*from], at[*on]),
+            (&scratch[0], [MIX_TAKE, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
+        GradePass::Clear { on, channel } => mix_into(
+            gpu,
+            at[*on],
+            (at[*on], at[*on]),
+            (&scratch[0], [MIX_CLEAR, f64::from(*channel), 1.0], None),
+            encoder,
+        ),
     }
 }
 

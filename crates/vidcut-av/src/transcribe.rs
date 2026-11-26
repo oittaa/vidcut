@@ -426,7 +426,8 @@ pub(crate) fn heard_plan(plan: &RenderPlan, path: &Path, started: Instant) -> Re
     let total = plan.samples().max(0);
     let channels = usize::from(plan.channels.max(1));
     let mut pcm = Vec::with_capacity(total as usize * channels);
-    let mut mix = AudioMix::new(&plan.audio, RATE, plan.channels.max(1), DECLICK_MS);
+    let mut mix =
+        AudioMix::new(&plan.audio, RATE, plan.channels.max(1), DECLICK_MS).bused(&plan.buses);
     let mut done = 0;
     while done < total {
         crate::cancel::stop()?;

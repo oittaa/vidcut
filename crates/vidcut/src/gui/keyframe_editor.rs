@@ -16,7 +16,7 @@ use vidcut_core::keyframes::{
 };
 use vidcut_core::model::{
     Clip, Ease, EffectValue, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed,
-    Title,
+    Title, TitleShadow,
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::{EffectParam, KeyParam};
@@ -484,7 +484,16 @@ fn group_of(param: KeyParam) -> Group {
         | KeyParam::UpperRotation
         | KeyParam::LowerPosition
         | KeyParam::LowerZoom
-        | KeyParam::LowerRotation => Group::Generator,
+        | KeyParam::LowerRotation
+        | KeyParam::ShadowOffset
+        | KeyParam::ShadowBlur
+        | KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOutlineWidth
+        | KeyParam::BackgroundWidth
+        | KeyParam::BackgroundHeight
+        | KeyParam::BackgroundCornerRadius
+        | KeyParam::BackgroundCenter
+        | KeyParam::BackgroundOpacity => Group::Generator,
         KeyParam::Effect(q) => Group::Effect(q.effect),
     }
 }
@@ -578,6 +587,15 @@ fn plain_lane_name(param: KeyParam) -> &'static str {
         KeyParam::Speed => "Speed",
         KeyParam::CenterX => "Center X",
         KeyParam::CenterY => "Center Y",
+        KeyParam::ShadowOffset => "Shadow Offset",
+        KeyParam::ShadowBlur => "Shadow Blur",
+        KeyParam::ShadowOpacity => "Shadow Opacity",
+        KeyParam::BackgroundOutlineWidth => "Background Outline Width",
+        KeyParam::BackgroundWidth => "Background Width",
+        KeyParam::BackgroundHeight => "Background Height",
+        KeyParam::BackgroundCornerRadius => "Background Corner Radius",
+        KeyParam::BackgroundCenter => "Background Center",
+        KeyParam::BackgroundOpacity => "Background Opacity",
     }
 }
 
@@ -605,6 +623,13 @@ fn limits(param: KeyParam) -> (f64, f64) {
         KeyParam::Opacity => (0.0, 1.0),
         KeyParam::Speed => (*Speed::RANGE.start(), *Speed::RANGE.end()),
         KeyParam::CenterX | KeyParam::CenterY => (*CENTER.start(), *CENTER.end()),
+        KeyParam::ShadowOffset | KeyParam::BackgroundCenter => (-Picture::REACH, Picture::REACH),
+        KeyParam::ShadowBlur => TitleShadow::BLURS,
+        KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOpacity
+        | KeyParam::BackgroundCornerRadius => (0.0, 1.0),
+        KeyParam::BackgroundOutlineWidth => (0.0, f64::from(Title::BOX_MOST_OUTLINE)),
+        KeyParam::BackgroundWidth | KeyParam::BackgroundHeight => (0.0, Title::BOX_MOST),
         KeyParam::Effect(_) => (f64::MIN, f64::MAX),
     }
 }
@@ -616,7 +641,10 @@ fn quantize(param: KeyParam, d: f64) -> f64 {
         | KeyParam::TextRotation
         | KeyParam::UpperRotation
         | KeyParam::LowerRotation
-        | KeyParam::CropSoftness => 2,
+        | KeyParam::CropSoftness
+        | KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOpacity => 2,
+        KeyParam::ShadowBlur | KeyParam::BackgroundOutlineWidth => 0,
         _ => 6,
     };
     let k = 10f64.powi(places);
@@ -655,12 +683,16 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::LowerPosition => (v - 0.5) * w,
         KeyParam::Anchor if y => (0.5 - v) * fh,
         KeyParam::Anchor => (v - 0.5) * fw,
+        KeyParam::ShadowOffset | KeyParam::BackgroundCenter if y => 0.0 - v * h,
+        KeyParam::ShadowOffset | KeyParam::BackgroundCenter => v * w,
         KeyParam::Zoom
         | KeyParam::TextZoom
         | KeyParam::UpperZoom
         | KeyParam::LowerZoom
         | KeyParam::Opacity
-        | KeyParam::Speed => v * 100.0,
+        | KeyParam::Speed
+        | KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOpacity => v * 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v * fw,
         KeyParam::CropTop | KeyParam::CropBottom => v * fh,
         KeyParam::Volume
@@ -674,6 +706,11 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::CropSoftness
         | KeyParam::CenterX
         | KeyParam::CenterY
+        | KeyParam::ShadowBlur
+        | KeyParam::BackgroundOutlineWidth
+        | KeyParam::BackgroundWidth
+        | KeyParam::BackgroundHeight
+        | KeyParam::BackgroundCornerRadius
         | KeyParam::Effect(_) => v,
     }
 }
@@ -695,12 +732,16 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::LowerPosition => v / w + 0.5,
         KeyParam::Anchor if y => 0.5 - v / fh,
         KeyParam::Anchor => v / fw + 0.5,
+        KeyParam::ShadowOffset | KeyParam::BackgroundCenter if y => 0.0 - v / h,
+        KeyParam::ShadowOffset | KeyParam::BackgroundCenter => v / w,
         KeyParam::Zoom
         | KeyParam::TextZoom
         | KeyParam::UpperZoom
         | KeyParam::LowerZoom
         | KeyParam::Opacity
-        | KeyParam::Speed => v / 100.0,
+        | KeyParam::Speed
+        | KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOpacity => v / 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v / fw,
         KeyParam::CropTop | KeyParam::CropBottom => v / fh,
         KeyParam::Volume
@@ -714,6 +755,11 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::CropSoftness
         | KeyParam::CenterX
         | KeyParam::CenterY
+        | KeyParam::ShadowBlur
+        | KeyParam::BackgroundOutlineWidth
+        | KeyParam::BackgroundWidth
+        | KeyParam::BackgroundHeight
+        | KeyParam::BackgroundCornerRadius
         | KeyParam::Effect(_) => v,
     }
 }
@@ -726,7 +772,9 @@ fn unit(param: KeyParam) -> &'static str {
         | KeyParam::UpperZoom
         | KeyParam::LowerZoom
         | KeyParam::Opacity
-        | KeyParam::Speed => "%",
+        | KeyParam::Speed
+        | KeyParam::ShadowOpacity
+        | KeyParam::BackgroundOpacity => "%",
         KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => "°",
         _ => "",
     }
@@ -751,6 +799,9 @@ fn places(param: KeyParam) -> usize {
         | KeyParam::Yaw
         | KeyParam::CenterX
         | KeyParam::CenterY
+        | KeyParam::BackgroundWidth
+        | KeyParam::BackgroundHeight
+        | KeyParam::BackgroundCornerRadius
         | KeyParam::Effect(_) => 3,
         _ => 0,
     }
@@ -778,6 +829,7 @@ fn tick_step(ppf: f32, fps: f64) -> i64 {
 fn paired(param: KeyParam) -> bool {
     match param {
         KeyParam::Effect(q) => q.value.pair(),
+        KeyParam::ShadowOffset | KeyParam::BackgroundCenter => true,
         _ => matches!(
             param,
             KeyParam::Position
@@ -818,7 +870,10 @@ fn limits_of(clip: &Clip, param: KeyParam, axis: Axis) -> (f64, f64) {
             .and_then(|p| p.effects.get(q.effect))
             .and_then(|e| e.range_of(q.value))
             .unwrap_or_else(|| limits(param)),
-        _ => limits(param),
+        _ => param
+            .style_value()
+            .and_then(|v| clip.title.as_ref()?.range_of(v))
+            .unwrap_or_else(|| limits(param)),
     }
 }
 
@@ -836,7 +891,8 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
         | KeyParam::UpperRotation
         | KeyParam::LowerRotation => 0.02,
         KeyParam::Opacity => 0.002,
-        KeyParam::Speed => 0.01,
+        KeyParam::Speed | KeyParam::ShadowOpacity | KeyParam::BackgroundOpacity => 0.01,
+        KeyParam::ShadowBlur | KeyParam::BackgroundOutlineWidth => 1.0,
         KeyParam::Position
         | KeyParam::TextPosition
         | KeyParam::UpperPosition
@@ -850,6 +906,11 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
         | KeyParam::CropBottom
         | KeyParam::CenterX
         | KeyParam::CenterY
+        | KeyParam::ShadowOffset
+        | KeyParam::BackgroundWidth
+        | KeyParam::BackgroundHeight
+        | KeyParam::BackgroundCornerRadius
+        | KeyParam::BackgroundCenter
         | KeyParam::Effect(_) => 0.001,
     };
     let down = matches!(
@@ -859,6 +920,8 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
             | KeyParam::UpperPosition
             | KeyParam::LowerPosition
             | KeyParam::Anchor
+            | KeyParam::ShadowOffset
+            | KeyParam::BackgroundCenter
     ) && y;
     if down { -step * sign } else { step * sign }
 }
@@ -990,12 +1053,14 @@ fn frames_of(marks: &[Mark], param: KeyParam) -> Vec<i64> {
 
 fn by_value(param: KeyParam, axis: Axis, d: f64) -> Value {
     match param {
-        KeyParam::TextZoom | KeyParam::UpperZoom | KeyParam::LowerZoom => json!(d),
         KeyParam::Position
         | KeyParam::TextPosition
         | KeyParam::UpperPosition
         | KeyParam::LowerPosition
         | KeyParam::Zoom
+        | KeyParam::TextZoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
         | KeyParam::Anchor => match axis {
             Axis::Y => json!([0.0, d]),
             _ => json!([d, 0.0]),
@@ -1307,14 +1372,21 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
             for v in PictureValue::ALL {
                 if view.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
                     let mut lane = lane_from(&picture, v);
-                    if v == PictureValue::Zoom {
-                        lane.extra.clear();
-                    }
                     if let Some(text) = KeyParam::of_text(v) {
                         lane.param = line.map_or(text, |l| text.for_line(l));
                     }
                     out.push(lane);
                 }
+            }
+        }
+        for v in Keyed::values(t) {
+            let keys = Keyed::keys_of(t, v);
+            if let Some(param) = KeyParam::of_style(v).filter(|_| !keyed_only || !keys.is_empty()) {
+                out.push(Lane {
+                    param,
+                    keys: keys.to_vec(),
+                    extra: t.y_of(v).to_vec(),
+                });
             }
         }
     }
@@ -1769,6 +1841,25 @@ impl Workspace {
             .filter(|_| self.left == LeftTab::Keyframes);
         self.key_editor.focused =
             at.is_some_and(|at| tray.into_iter().chain(panel).any(|r| r.contains(at)));
+    }
+
+    pub(super) fn select_editor_keys(&mut self, all: bool) -> bool {
+        if !self.key_editor.focused || !self.keys_in_view() {
+            return false;
+        }
+        let marks = match all {
+            false => Vec::new(),
+            true => self
+                .project_shared()
+                .and_then(|p| {
+                    let id = self.key_editor.clip.as_deref()?;
+                    p.key_holder(id)
+                })
+                .map(|clip| live_marks(&lanes_of(&clip, false), None))
+                .unwrap_or_default(),
+        };
+        self.key_editor.selected = marks;
+        true
     }
 
     pub(super) fn copy_editor_keys(&mut self, cut: bool) -> bool {
@@ -2283,6 +2374,8 @@ impl Workspace {
         let marks = self.key_editor.selected.clone();
         let (_, takes) = marks_eases(clip, lanes, &marks);
         let mut eased = None;
+        let turns = marks.iter().filter(|m| !fixed(m.param)).count() > 1;
+        let mut reverse = false;
         let editor = &mut self.key_editor;
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2317,6 +2410,11 @@ impl Workspace {
                             ui.radio_value(&mut editor.graph_scale, scale, label);
                         }
                     });
+                    let r = ui.add_enabled(turns, egui::Button::new("Reverse Keyframes"));
+                    if r.clicked() {
+                        reverse = true;
+                        ui.close();
+                    }
                 });
                 if most > 1.0 {
                     ui.spacing_mut().slider_width = ZOOM_W;
@@ -2405,6 +2503,32 @@ impl Workspace {
         if let Some(e) = eased {
             send_parts(self, ease_parts(clip, lanes, &marks, e));
         }
+        if reverse {
+            self.reverse_editor_keys(clip);
+        }
+    }
+
+    fn reverse_editor_keys(&mut self, clip: &Clip) {
+        let marks: Vec<Mark> = (self.key_editor.selected.iter().copied())
+            .filter(|m| !fixed(m.param))
+            .collect();
+        let times = marks.iter().map(|m| clip.key_time(m.frame));
+        let (lo, hi) = times.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), t| {
+            (a.min(t), b.max(t))
+        });
+        let keys: Vec<Value> = unique_params(&marks)
+            .into_iter()
+            .map(|param| json!({ "param": param, "frames": frames_of(&marks, param) }))
+            .collect();
+        for m in &mut self.key_editor.selected {
+            if !fixed(m.param) {
+                m.frame = clip.key_at(lo + hi - clip.key_time(m.frame)).round() as i64;
+            }
+        }
+        self.send(
+            "keyframes.reverse",
+            json!({ "clip": clip.id, "keys": keys }),
+        );
     }
 
     fn ruler(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, plot: Plot) {
@@ -3491,7 +3615,13 @@ impl Workspace {
             | KeyParam::TextRotation
             | KeyParam::UpperRotation
             | KeyParam::LowerRotation => 0.5,
-            KeyParam::Pitch | KeyParam::Yaw | KeyParam::CenterX | KeyParam::CenterY => 0.01,
+            KeyParam::Pitch
+            | KeyParam::Yaw
+            | KeyParam::CenterX
+            | KeyParam::CenterY
+            | KeyParam::BackgroundWidth
+            | KeyParam::BackgroundHeight
+            | KeyParam::BackgroundCornerRadius => 0.01,
             _ => 1.0,
         };
         let forward = !fixed(param) || raw > 0.0;

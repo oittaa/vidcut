@@ -122,13 +122,14 @@ pub fn inspect(
     model: &'static vidcut_core::catalog::Model,
     dir: &Path,
     download: bool,
+    gpu: bool,
 ) -> Result<Inspected> {
     let found = vidcut_core::catalog::Found::default();
     if let Some((subject, finder)) = crate::subjects::of(model.id) {
-        crate::subjects::inspect(dir, subject, finder, download)?;
-        let loaded = match finder {
-            vidcut_core::model::FindModel::Fast => "tract",
-            vidcut_core::model::FindModel::Slow => "vidcut",
+        crate::subjects::inspect(dir, (subject, finder), download, gpu)?;
+        let loaded = match crate::subjects::uses_gpu(subject, finder, gpu) {
+            true => "vidcut",
+            false => "tract",
         };
         return Ok(Inspected {
             found,

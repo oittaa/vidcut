@@ -1,15 +1,16 @@
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
+use vidcut_core::effect_keys::Keyed;
 use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{
-    Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
-    TitlePart,
+    Clip, Ease, EffectValue, Keyframe, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase,
+    TitleKind, TitleLine, TitlePart,
 };
 use vidcut_core::request::KeyParam;
 
 use super::export::Ask;
-use super::inspector::{KeyClick, key_buttons, mark, next_key};
+use super::inspector::{KeyClick, key_buttons, link_toggle, mark, next_key};
 use super::looks::{Parts, Picker, ShapeFields, TextFields, Usual, kept_plain, plain};
 use super::subtitles::{filled, font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
@@ -21,7 +22,8 @@ struct LineFields {
     anchor: Option<TitleAnchor>,
     across: String,
     down: String,
-    zoom: String,
+    zoom: [String; 2],
+    link: bool,
     rotation: String,
 }
 
@@ -75,9 +77,35 @@ impl LineFields {
             anchor: t.anchor,
             across: x.shown(t.position.map(|p| p[0])),
             down: y.shown(t.position.map(|p| p[1])),
-            zoom: percent(t.zoom),
+            zoom: [0, 1].map(|i| percent(t.zoom.map(|z| z[i]))),
+            link: t.zoom_link != Some(false),
             rotation: plain(t.rotation),
         }
+    }
+
+    fn zoom_row(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.label("Zoom");
+        let linked = self.link;
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            let axis = |ui: &mut egui::Ui, f: &mut Self, i: usize| {
+                let edit = egui::TextEdit::singleline(&mut f.zoom[i])
+                    .hint_text("100%")
+                    .desired_width(100.0);
+                let typed = ui.add(edit).changed();
+                if typed && linked {
+                    f.zoom[1 - i] = f.zoom[i].clone();
+                }
+                typed
+            };
+            changed |= axis(ui, self, 0);
+            if link_toggle(ui, linked) {
+                self.link = !linked;
+                changed = true;
+            }
+            changed |= axis(ui, self, 1);
+        });
+        changed
     }
 
     fn of_upper(t: &Title, size: [f64; 2]) -> Self {
@@ -182,7 +210,7 @@ impl TitleDialog {
         self.align = t.align();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
-        self.shape = ShapeFields::load(t.style.shape.as_ref());
+        self.shape = ShapeFields::load(t.style.shape.as_ref(), self.size);
         self.line_spacing = plain(t.style.line_spacing);
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
@@ -202,13 +230,8 @@ impl TitleDialog {
         self.shown.clone().map(|t| (self.clip.clone(), t))
     }
 
-    pub(super) fn text_mut(&mut self) -> &mut String {
-        &mut self.text
-    }
-
-    pub(super) fn typed(&mut self) {
-        self.dirty = true;
-        self.typed = true;
+    pub(super) fn text(&self) -> &str {
+        &self.text
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
@@ -247,17 +270,23 @@ fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
     t.sampled(c.content_at(at) as f64)
 }
 
+fn key_at(c: &Clip, keys: &[Keyframe], at: i64) -> Option<usize> {
+    keys.iter()
+        .position(|k| c.key_time(k.frame).round() as i64 == at)
+}
+
 fn key_eases(c: &Clip, t: &Title, v: PictureValue, at: i64) -> (Vec<Ease>, Option<Ease>) {
     let keys = t.keys_of(v);
-    let found = keys
-        .iter()
-        .position(|k| c.key_time(k.frame).round() as i64 == at);
     let path = v == PictureValue::Position;
-    match found.filter(|_| !(path && t.moves())) {
+    match key_at(c, keys, at).filter(|_| !(path && t.moves())) {
         Some(i) if path => (eases(keys, i), Some(t.position_ease(keys[i].frame))),
         Some(i) => (eases(keys, i), ease_of(keys, i)),
         None => (Vec::new(), None),
     }
+}
+
+fn style_eases(c: &Clip, keys: &[Keyframe], at: i64) -> (Vec<Ease>, Option<Ease>) {
+    key_at(c, keys, at).map_or((Vec::new(), None), |i| (eases(keys, i), ease_of(keys, i)))
 }
 
 fn kept(shown: &str, value: Option<f64>, what: &str) -> Result<Option<f64>, String> {
@@ -284,8 +313,13 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
         zoom: if scroll {
             None
         } else {
-            kept(&f.zoom, stored.zoom, "zoom")?
+            let axis = |i: usize| kept(&f.zoom[i], stored.zoom.map(|z| z[i]), "zoom");
+            match (axis(0)?, axis(1)?) {
+                (None, None) => None,
+                (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
+            }
         },
+        zoom_link: (!scroll && !f.link).then_some(false),
         rotation: if scroll {
             None
         } else if f.rotation.trim().is_empty() {
@@ -300,11 +334,18 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
     let was = Parts::of_title(&stored.style);
-    let mut style = d.fields.refilled(&was).parts(&was, None)?.title();
+    let fields = d.fields.refilled(&was);
+    let mut style = fields.parts(&was, None)?.title();
+    if let Some(b) = style.background.as_mut() {
+        b.opacity = fields.whole_opacity(was.background.as_ref().and_then(|b| b.opacity))?;
+    }
+    if let Some(h) = style.shadow.as_mut() {
+        [h.opacity, h.blur] = fields.whole_shadow(was.shadow.as_ref())?;
+    }
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
     style.case = (d.case != TitleCase::Mixed).then_some(d.case);
-    style.shape = d.shape.shape(stored.style.shape.as_ref())?;
+    style.shape = d.shape.shape(stored.style.shape.as_ref(), d.size)?;
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;
@@ -326,9 +367,12 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         position_handles: stored.position_handles.clone(),
         zoom: lower.zoom,
         zoom_keys: stored.zoom_keys.clone(),
+        zoom_y: stored.zoom_y.clone(),
+        zoom_link: lower.zoom_link,
         rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
         upper: (lines && apart).then_some(upper),
+        keys: stored.keys.clone(),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
@@ -377,12 +421,16 @@ fn line_changes(params: &mut Value, t: &Title, stored: &Title, part: TitlePart) 
     if t.zoom != stored.zoom {
         params["zoom"] = json!(t.scale());
     }
+    if t.zoom_link != stored.zoom_link {
+        params["zoom_link"] = json!(t.zoom_link != Some(false));
+    }
     if t.rotation != stored.rotation {
         params["rotation"] = json!(t.turn());
     }
     t.anchor != stored.anchor
         || t.position != stored.position
         || t.zoom != stored.zoom
+        || t.zoom_link != stored.zoom_link
         || t.rotation != stored.rotation
 }
 
@@ -464,7 +512,28 @@ impl Workspace {
             return;
         };
         let param = line.map_or(text, |l| text.for_line(l));
-        let mut body = json!({ "clips": [c.id], "param": param, "at": at });
+        let body = json!({ "clips": [c.id], "param": param, "at": at });
+        self.key_click(times, body, click, at);
+    }
+
+    fn title_style_key(&mut self, c: &Clip, t: &Title, v: EffectValue, click: KeyClick, at: i64) {
+        let Some(param) = KeyParam::of_style(v) else {
+            return;
+        };
+        let times = Keyed::keys_of(t, v)
+            .iter()
+            .map(|k| c.key_time(k.frame).round() as i64);
+        let body = json!({ "clips": [c.id], "param": param, "at": at });
+        self.key_click(times, body, click, at);
+    }
+
+    fn key_click(
+        &mut self,
+        times: impl Iterator<Item = i64>,
+        mut body: Value,
+        click: KeyClick,
+        at: i64,
+    ) {
         match click {
             KeyClick::Step(dir) => {
                 if let Some(to) = next_key(times, at, dir) {
@@ -495,8 +564,29 @@ impl Workspace {
     }
 
     pub(crate) fn open_title(&mut self, id: &str) {
+        self.show_title(id, true);
+    }
+
+    pub(super) fn show_title(&mut self, id: &str, focus: bool) {
         self.left = LeftTab::Inspector;
-        self.inspect_title(id, true);
+        self.inspect_title(id, focus);
+    }
+
+    pub(super) fn retype_title(&mut self, text: String) {
+        let Some(mut d) = self.timeline.title_dialog.take() else {
+            return;
+        };
+        d.text = text;
+        d.dirty = true;
+        d.typed = true;
+        let stored = self
+            .project()
+            .and_then(|p| p.clip(&d.clip))
+            .and_then(|c| Some(sampled_at(c, c.title.as_ref()?, d.at)));
+        if let Some(s) = stored {
+            d.shown = title_of(&d, &s).ok().filter(|t| *t != s);
+        }
+        self.timeline.title_dialog = Some(d);
     }
 
     pub(super) fn inspect_title(&mut self, id: &str, focus: bool) {
@@ -531,6 +621,44 @@ impl Workspace {
             self.send_title(sends);
             self.title_landing(&clip, &t);
         }
+    }
+
+    pub(super) fn commit_title_form(&mut self, passed: Vec<String>) {
+        let Some(mut d) = self.timeline.title_dialog.take() else {
+            return;
+        };
+        let stored = self
+            .project()
+            .and_then(|p| p.clip(&d.clip))
+            .and_then(|c| Some(sampled_at(c, c.title.as_ref()?, d.at)));
+        if d.dirty
+            && let Some(mut s) = stored
+            && let Ok(t) = title_of(&d, &s)
+        {
+            let mut sent = false;
+            for text in passed {
+                if text != s.text {
+                    let params = json!({ "clip": d.clip, "text": text, "at": d.at });
+                    self.send("titles.set", params);
+                    s.text = text;
+                    sent = true;
+                }
+            }
+            let sends = commands(&d, changes(&d.clip, &t, &s, d.at));
+            d.fade = None;
+            if !sends.is_empty() {
+                self.send_title(sends);
+                sent = true;
+            }
+            if sent {
+                self.title_landing(&d.clip, &t);
+            } else {
+                d.loaded = false;
+            }
+            d.dirty = false;
+            d.error.clear();
+        }
+        self.timeline.title_dialog = Some(d);
     }
 
     fn send_title(&mut self, mut commands: Vec<Value>) {
@@ -725,14 +853,28 @@ impl Workspace {
         let usual = Title::usual_position(d.kind, d.align);
         let size_hint = format!(
             "{}% of the picture",
-            percent(Some(Title::usual_size(d.kind)))
+            percent(Some(Title::usual_size(d.kind, p.height())))
         );
         let [x, y] = Axis::pair(d.size);
         let across_hint = x.shown(Some(usual[0]));
         let down_hint = y.shown(Some(usual[1]));
         let upper_hint = y.shown(Some(usual[1] + Title::UPPER_DROP));
         let mut clicks = Vec::new();
+        let mut style_clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
+            let mut style_keys = |ui: &mut egui::Ui, v: EffectValue| {
+                let Some((_, clip, t)) = found.filter(|(_, _, t)| t.takes(v)) else {
+                    return;
+                };
+                let keys = Keyed::keys_of(t, v);
+                let marks = mark(clip, keys, frame);
+                let (eases, now) = style_eases(clip, keys, frame);
+                ui.horizontal(|ui| {
+                    if let Some(click) = key_buttons(ui, &marks, &eases, now) {
+                        style_clicks.push((v, click));
+                    }
+                });
+            };
             changed |= d
                 .fields
                 .rows(
@@ -741,7 +883,7 @@ impl Workspace {
                     &d.families,
                     &Usual::title(&size_hint),
                     (!scroll).then_some((&mut d.tracking, &mut d.line_spacing)),
-                    Some(&mut d.shape),
+                    Some((&mut d.shape, &mut style_keys)),
                 )
                 .0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
@@ -790,7 +932,7 @@ impl Workspace {
                         };
                         moved |= row(ui, "Y", &mut f.down, hint);
                         ui.end_row();
-                        moved |= row(ui, "Zoom", &mut f.zoom, "100%");
+                        moved |= f.zoom_row(ui);
                         keys(ui, PictureValue::Zoom, line);
                         ui.end_row();
                         moved |= row(ui, "Rotation", &mut f.rotation, "0°");
@@ -847,6 +989,9 @@ impl Workspace {
         if let Some((_, clip, t)) = found {
             for (v, click) in clicks {
                 self.title_key(clip, t, v, click, frame);
+            }
+            for (v, click) in style_clicks {
+                self.title_style_key(clip, t, v, click, frame);
             }
         }
         self.timeline.title_dialog = Some(d);

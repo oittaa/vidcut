@@ -90,6 +90,13 @@ fn compound_cycle<'a>(
 
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
+    let layers = &p.settings.node_stack_layers;
+    let most = crate::ops::grade::NODE_STACK_LAYERS;
+    if layers.is_empty() || layers.len() > most || layers.iter().any(|n| n.trim().is_empty()) {
+        v.push(format!(
+            "the project needs 1 to {most} named node stack layers"
+        ));
+    }
     let pool = p.pool();
     let mut ids = HashSet::new();
     for m in &p.media {
@@ -122,6 +129,16 @@ pub fn violations(p: &Project) -> Vec<String> {
             && let Err(e) = crate::duck::checked(p, &t.id, d)
         {
             v.push(format!("track {}: {}", t.id, e.message));
+        }
+        if let Some(why) = t.dynamics.as_ref().and_then(crate::dynamics::problem) {
+            v.push(format!("track {}: {why}", t.id));
+        }
+        if let Some(why) = t
+            .equalizer
+            .as_ref()
+            .and_then(crate::equalizer::track::problem)
+        {
+            v.push(format!("track {}: {why}", t.id));
         }
         for x in &t.transitions {
             if !ids.insert(x.id.as_str()) {
@@ -444,6 +461,15 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         }
         if let Some(Err(e)) = t.grade.as_ref().map(crate::ops::grade::checked) {
             v.push(format!("timeline {}: {}", t.id, e.message));
+        }
+        if (t.grade.as_ref()).is_some_and(crate::model::Grade::is_masked) {
+            v.push(format!("the grade of timeline {} has a Magic Mask", t.id));
+        }
+        if (t.grade.as_ref()).is_some_and(|g| !g.layers.is_empty() || !g.kept_layers.is_empty()) {
+            v.push(format!(
+                "the grade of timeline {} has node stack layers",
+                t.id
+            ));
         }
         if let Some(o) = t.own {
             if o.drop_frame && !o.fps.has_drop_frame() {

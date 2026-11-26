@@ -272,6 +272,9 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
             "the frame rate and drop-frame of a timeline change only while it has no clips",
         ));
     }
+    if let Some(f) = &s.clip_filter {
+        super::clip_filter::check(f)?;
+    }
     let start = match &s.start_tc {
         Some(tc) => settings_with(p, after).start_frames(tc)?,
         None if rate_changes => {
@@ -287,6 +290,9 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
         if r.is_entire() {
             t.marks = crate::model::Marks::default();
         }
+    }
+    if let Some(f) = &s.clip_filter {
+        t.clip_filter = f.clone();
     }
     if let Some(r) = super::conform::Rates::new(before.fps, after.fps) {
         t.markers

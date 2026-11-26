@@ -137,10 +137,26 @@ pub trait Env {
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
-    fn auto_balance(&self, plan: &RenderPlan) -> Result<crate::auto_color::Balance> {
-        let _ = plan;
+    fn auto_balance(
+        &self,
+        plan: &RenderPlan,
+        legacy: bool,
+    ) -> Result<crate::auto_color::AutoResult> {
+        let _ = (plan, legacy);
         Err(Error::usage(
             "Auto Color reads the picture in the vidcut program",
+        ))
+    }
+
+    fn subject_masks(
+        &self,
+        plan: &RenderPlan,
+        subjects: &[Vec<crate::masks::Point>],
+        download: bool,
+    ) -> Result<Vec<Arc<[f32]>>> {
+        let _ = (plan, subjects, download);
+        Err(Error::usage(
+            "the Magic Mask reads the picture in the vidcut program",
         ))
     }
 
@@ -846,10 +862,8 @@ impl Editor {
             Request::HistoryUnmark { step } => return self.mark(step, None, dry_run),
             Request::HistoryRestore { branch } => return self.restore(branch, dry_run),
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
+            Request::RenderEnded { .. } => return self.recorded(&request, dry_run),
             _ => {}
-        }
-        if request.in_queue() {
-            return self.queue(&request, dry_run);
         }
         let mut working = self.project.clone();
         let mut parts = Vec::new();
@@ -1277,7 +1291,7 @@ impl Editor {
         Ok((project, history, moved))
     }
 
-    fn queue(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
+    fn recorded(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
         let mut working = self.project.clone();
         let result = ops::render::change(&mut working, request)?;
         let changes = diff(&self.project, &working);
@@ -2532,12 +2546,22 @@ fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
 }
 
+fn layer_of(timeline: bool, layer: Option<usize>) -> Result<usize> {
+    match (timeline, layer) {
+        (true, Some(_)) => Err(Error::usage(
+            "the timeline grade has no node stack layers: leave out `layer`",
+        )),
+        (_, layer) => Ok(layer.unwrap_or(1)),
+    }
+}
+
 fn grades_of(
     p: &mut Project,
     clips: &Option<OneOrMany<ClipRef>>,
-    timeline: bool,
+    (timeline, layer): (bool, Option<usize>),
     playhead: Option<i64>,
 ) -> Result<Vec<ops::grade::GradeOf>> {
+    let layer = layer_of(timeline, layer)?;
     match (clips, timeline) {
         (Some(_), true) => Err(Error::usage("give `clips` or `timeline`, not both")),
         (None, false) => Err(Error::usage(
@@ -2549,7 +2573,7 @@ fn grades_of(
         }
         (Some(refs), false) => Ok(resolve_clips(p, &refs.to_vec(), playhead)?
             .into_iter()
-            .map(ops::grade::GradeOf::Clip)
+            .map(|id| ops::grade::GradeOf::Clip(id, layer))
             .collect()),
     }
 }
@@ -2568,16 +2592,19 @@ fn time_or_playhead(
 fn grade_of(
     p: &Project,
     clip: &Option<ClipRef>,
-    timeline: bool,
+    (timeline, layer): (bool, Option<usize>),
     playhead: Option<i64>,
 ) -> Result<ops::grade::GradeOf> {
+    let layer = layer_of(timeline, layer)?;
     match (clip, timeline) {
         (Some(_), true) => Err(Error::usage("give `clip` or `timeline`, not both")),
         (None, false) => Err(Error::usage(
             "give `clip`, or `timeline` for the timeline grade",
         )),
         (None, true) => Ok(ops::grade::GradeOf::Timeline),
-        (Some(r), false) => resolve_clip(p, r, playhead).map(ops::grade::GradeOf::Clip),
+        (Some(r), false) => {
+            resolve_clip(p, r, playhead).map(|id| ops::grade::GradeOf::Clip(id, layer))
+        }
     }
 }
 
@@ -4232,6 +4259,7 @@ fn mutate(
             speed,
             ripple,
             at,
+            keyframes,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -4239,7 +4267,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            ops::change_speed(p, &ids, *speed, *ripple, at)?;
+            ops::change_speed(p, &ids, *speed, (*ripple, at), *keyframes)?;
             if *download && !dry_run {
                 ready_retimes(env, p, &ids)?;
             }
@@ -4505,6 +4533,11 @@ fn mutate(
             }
             json!({ "clip": id, "keyframes": copied })
         }
+        Request::KeyframesReverse { clip, keys } => {
+            let id = resolve_holder(p, clip, playhead)?;
+            let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
+            json!({ "clip": id, "keyframes": ops::keyframes::reverse(p, &id, &picks)? })
+        }
         Request::KeyframesPaste {
             clips,
             at,
@@ -4709,6 +4742,8 @@ fn mutate(
             voice_isolation: None,
             voice_isolation_on: None,
             duck: None,
+            dynamics: None,
+            equalizer: None,
             video_enabled: None,
             render_cache: None,
             ..
@@ -4762,6 +4797,8 @@ fn mutate(
             voice_isolation,
             voice_isolation_on,
             duck,
+            dynamics,
+            equalizer,
             download,
             video_enabled,
             render_cache,
@@ -4791,6 +4828,8 @@ fn mutate(
                 voice_isolation,
                 voice_isolation_on: *voice_isolation_on,
                 duck,
+                dynamics: dynamics.clone(),
+                equalizer: equalizer.clone(),
                 video_enabled: *video_enabled,
                 render_cache: *render_cache,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
@@ -4915,7 +4954,11 @@ fn mutate(
                     anchor: *anchor,
                     style: style.clone(),
                     position: position.map(Some),
-                    zoom: *zoom,
+                    zoom: zoom
+                        .as_ref()
+                        .map(|z| ops::picture::zoom(&z.to_vec(), "title"))
+                        .transpose()?,
+                    zoom_link: None,
                     rotation: *rotation,
                     look: None,
                     line: None,
@@ -4933,6 +4976,7 @@ fn mutate(
             style,
             position,
             zoom,
+            zoom_link,
             rotation,
             look,
             line,
@@ -4950,7 +4994,11 @@ fn mutate(
                 anchor: *anchor,
                 style: style.clone(),
                 position: position.as_deref().map(ops::titles::position).transpose()?,
-                zoom: *zoom,
+                zoom: zoom
+                    .as_ref()
+                    .map(|z| ops::picture::zoom(&z.to_vec(), "title"))
+                    .transpose()?,
+                zoom_link: *zoom_link,
                 rotation: *rotation,
                 look: look
                     .as_deref()
@@ -5043,7 +5091,7 @@ fn mutate(
                     .transpose()?,
                 zoom: zoom
                     .as_ref()
-                    .map(|z| ops::picture::zoom(&z.to_vec()))
+                    .map(|z| ops::picture::zoom(&z.to_vec(), "picture"))
                     .transpose()?,
                 rotation: *rotation,
                 anchor: anchor
@@ -5087,12 +5135,13 @@ fn mutate(
         Request::GradeSet {
             clips,
             timeline,
+            layer,
             node,
             at,
             node_change,
             change,
         } => {
-            let of = grades_of(p, clips, *timeline, playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             ops::grade::set(p, &of, node.unwrap_or(1), (change, node_change), at)?;
             Value::Null
@@ -5100,13 +5149,25 @@ fn mutate(
         Request::GradeClear {
             clips,
             timeline,
+            layer,
             node,
             keep_nodes,
+            all_layers,
             palette,
             auto_color,
             at,
         } => {
-            let of = grades_of(p, clips, *timeline, playhead)?;
+            if *all_layers {
+                if *timeline || node.is_some() || *keep_nodes || layer.is_some() || *auto_color {
+                    return Err(Error::usage(
+                        "`all_layers` goes alone: not with `timeline`, `node`, `keep_nodes`, `layer` or `auto_color`",
+                    ));
+                }
+                let of = grades_of(p, clips, (false, None), playhead)?;
+                ops::grade::clear_layers(p, &of)?;
+                return Ok(Value::Null);
+            }
+            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             match auto_color {
                 true => ops::grade::auto_color_removed(p, &of, (*node, *palette), at)?,
@@ -5117,12 +5178,13 @@ fn mutate(
         Request::GradePrinter {
             clips,
             timeline,
+            layer,
             node,
             at,
             color,
             points,
         } => {
-            let of = grades_of(p, clips, *timeline, playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
             let lights = env.printer_lights();
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let n = (node.unwrap_or(1), at);
@@ -5131,66 +5193,74 @@ fn mutate(
         }
         Request::GradeAutoColor {
             clip,
+            layer,
             node,
             at,
             tool,
         } => {
-            let of = grade_of(p, clip, false, playhead)?;
+            let of = grade_of(p, clip, (false, *layer), playhead)?;
             let n = node.unwrap_or(1);
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
-            let plan = auto_color_plan(p, &of, (n, *tool), at)?;
-            ops::grade::auto_color(p, &of, (n, at, *tool), env.auto_balance(&plan)?)?;
+            let legacy = !*tool && env.printer_lights().use_legacy_auto_color;
+            let plan = auto_color_plan(p, &of, (n, legacy), at)?;
+            ops::grade::auto_color(p, &of, (n, at), env.auto_balance(&plan, legacy)?)?;
             Value::Null
         }
         Request::GradeAdd {
             clip,
             timeline,
+            layer,
             add,
             node,
             place,
             window,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
         Request::GradeRemove {
             clip,
             timeline,
+            layer,
             node,
             extract,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::remove(p, &of, *node, *extract)?;
             Value::Null
         }
         Request::GradeConnect {
             clip,
             timeline,
+            layer,
             node,
             input,
             from,
             key,
+            output,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::connect(p, &of, (*node, *input), (*from, *key))?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            ops::grade::connect(p, &of, (*node, *input), (*from, *key, *output))?;
             Value::Null
         }
         Request::GradeInputRemove {
             clip,
             timeline,
+            layer,
             node,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::remove_input(p, &of, *node)?;
             Value::Null
         }
         Request::GradePaste {
             clips,
             timeline,
+            layer,
             node,
             settings,
         } => {
-            let of = grades_of(p, clips, *timeline, playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
             let settings = settings
                 .as_ref()
                 .ok_or_else(|| Error::usage("give `settings`: the clipboard has no node"))?;
@@ -5200,30 +5270,45 @@ fn mutate(
         Request::GradeCleanup {
             clip,
             timeline,
+            layer,
             area,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::cleanup(p, &of, *area)?;
             Value::Null
         }
         Request::GradeSwap {
             clip,
             timeline,
+            layer,
             node,
             with,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::swap(p, &of, *node, *with)?;
             Value::Null
         }
         Request::GradeKeysAdd {
             clip,
             timeline,
+            layer,
             node,
             at,
             kind,
+            edl,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            if *edl {
+                if of != ops::grade::GradeOf::Timeline {
+                    return Err(Error::usage(
+                        "`edl` marks go on the timeline grade: give `timeline`",
+                    ));
+                }
+                if at.is_some() || *kind != crate::model::GradeKeyKind::default() {
+                    return Err(Error::usage("`edl` takes no `at` or `kind`"));
+                }
+                return ops::grade_keys::add_marks(p, *node);
+            }
             let at = time_or_playhead(p, at.as_ref(), playhead)?
                 .ok_or_else(|| Error::usage("give `at`: there is no playhead"))?;
             ops::grade_keys::add(p, &of, *node, at, *kind)?
@@ -5231,6 +5316,7 @@ fn mutate(
         Request::GradeKeysSet {
             clip,
             timeline,
+            layer,
             node,
             frames,
             at,
@@ -5238,7 +5324,7 @@ fn mutate(
             start,
             end,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let change = ops::grade_keys::KindChange {
                 kind: *kind,
@@ -5251,13 +5337,14 @@ fn mutate(
         Request::GradeKeysMove {
             clip,
             timeline,
+            layer,
             node,
             frames,
             at,
             by,
             to,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::grade_keys::shift(p, &of, *node, &pick, (*by, to))?;
@@ -5266,11 +5353,20 @@ fn mutate(
         Request::GradeKeysRemove {
             clip,
             timeline,
+            layer,
             node,
             frames,
             at,
+            edl,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            if *edl {
+                if frames.is_some() || at.is_some() {
+                    return Err(Error::usage("`edl` takes no `frames` or `at`"));
+                }
+                ops::grade_keys::remove_marks(p, &of, *node)?;
+                return Ok(Value::Null);
+            }
             let pick = key_pick(p, frames, at, playhead)?;
             ops::grade_keys::remove(p, &of, *node, &pick)?;
             Value::Null
@@ -5278,16 +5374,18 @@ fn mutate(
         Request::GradeWindowAdd {
             clip,
             timeline,
+            layer,
             node,
             shape,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let window = ops::grade_windows::add(p, &of, *node, *shape)?;
             json!({ "window": window })
         }
         Request::GradeWindowSet {
             clip,
             timeline,
+            layer,
             node,
             window,
             on,
@@ -5308,7 +5406,7 @@ fn mutate(
             outer,
             at,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let change = ops::grade_windows::WindowChange {
                 on: *on,
@@ -5334,32 +5432,47 @@ fn mutate(
         Request::GradeWindowRemove {
             clip,
             timeline,
+            layer,
             node,
             window,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade_windows::remove(p, &of, *node, *window)?;
             Value::Null
         }
         Request::GradeWindowConvert {
             clip,
             timeline,
+            layer,
             node,
             window,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             json!({ "window": ops::grade_windows::convert(p, &of, *node, *window)? })
+        }
+        Request::GradeMaskClick { .. }
+        | Request::GradeMaskSet { .. }
+        | Request::GradeMaskClear { .. } => {
+            let edit = mask_edit(p, request, playhead)?;
+            if !dry_run {
+                for need in &edit.needs {
+                    mask_made(env, need)?;
+                }
+            }
+            ops::grade_masks::put(p, &edit.of, edit.n, edit.mask)?;
+            edit.out
         }
         Request::GradeWindowPaste {
             clip,
             timeline,
+            layer,
             node,
             window,
             append,
             settings,
             at,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let copied = settings.as_ref().ok_or_else(|| {
                 Error::usage("give `settings`, a window from `grade.window.copy`")
@@ -6232,6 +6345,7 @@ fn mutate(
             });
             json!({ "media": media, "stream": stream, "start": start, "end": end, "person": person })
         }
+        queued if queued.in_queue() => ops::render::change(p, queued)?,
         other => {
             return Err(Error::internal(format!(
                 "{} is not a mutation",
@@ -6936,6 +7050,7 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
                     line.move_handles(conv);
                     line.take_picture(&picture);
                 });
+                crate::effect_keys::Keyed::scale_key_times(title, &conv, &|_| ratio);
             }
             if let Some(reference) = c.generator.as_mut() {
                 otio::generators::scale_keys(reference, conv, ratio);
@@ -7138,6 +7253,7 @@ fn place_imported(
 
     let mut clips = Vec::new();
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
+    let mut links = ops::linked::Relink::new(p);
     for c in &t.clips {
         if c.is_block() {
             let (start, end) = (offset + c.start, offset + c.end());
@@ -7185,6 +7301,10 @@ fn place_imported(
                 retime: c.retime,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
+                link: c
+                    .link
+                    .filter(|_| c.compound.is_some() || c.has_no_media())
+                    .map(|l| links.of(l)),
             };
             if !clip.takes_speed() {
                 clip.speed = None;
@@ -7368,6 +7488,7 @@ fn place_imported(
             retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
+            link: None,
         });
         placed.insert(track_of(&c.track));
     }
@@ -7376,6 +7497,7 @@ fn place_imported(
             track.sort();
         }
     }
+    ops::linked::link_blocks(p, &clips);
     for x in &t.transitions {
         let side = |k: Option<usize>| match k {
             None => Some(None),
@@ -7689,7 +7811,7 @@ fn decompose(
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
     if !import {
-        for pid in otio::tied(p, id) {
+        for pid in p.tied(id) {
             if let Some((pi, _)) = p.find_clip(&pid)
                 && p.tracks[pi].locked
             {
@@ -7960,7 +8082,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 continue;
             }
             let mut gone = vec![id.clone()];
-            gone.extend(otio::tied(p, &id));
+            gone.extend(p.tied(&id));
             let made = decompose(
                 p,
                 &id,
@@ -8143,6 +8265,8 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.render_cache = s.render_cache;
                 track.name = s.name.clone();
                 track.duck = s.duck.clone();
+                track.dynamics = s.dynamics;
+                track.equalizer = s.equalizer.clone();
             }
         }
         crate::duck::tidy(p);
@@ -8427,9 +8551,15 @@ fn track_start(
 
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
-pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
+pub fn auto_color_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    use_legacy: bool,
+) -> Vec<(RenderPlan, bool)> {
     let Request::GradeAutoColor {
         clip,
+        layer,
         node,
         at,
         tool,
@@ -8437,19 +8567,20 @@ pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -
     else {
         return Vec::new();
     };
-    let of = grade_of(p, clip, false, playhead);
+    let of = grade_of(p, clip, (false, *layer), playhead);
     let at = time_or_playhead(p, at.as_ref(), playhead);
-    let plan = of.and_then(|of| auto_color_plan(p, &of, (node.unwrap_or(1), *tool), at?));
-    plan.into_iter().collect()
+    let legacy = !*tool && use_legacy;
+    let plan = of.and_then(|of| auto_color_plan(p, &of, (node.unwrap_or(1), legacy), at?));
+    plan.into_iter().map(|p| (p, legacy)).collect()
 }
 
 fn auto_color_plan(
     p: &Project,
     of: &ops::grade::GradeOf,
-    (n, tool): (u32, bool),
+    (n, legacy): (u32, bool),
     at: Option<i64>,
 ) -> Result<RenderPlan> {
-    let ops::grade::GradeOf::Clip(id) = of else {
+    let ops::grade::GradeOf::Clip(id, layer) = of else {
         return Err(Error::invalid("Auto Color works on the grade of a clip"));
     };
     let t =
@@ -8465,7 +8596,7 @@ fn auto_color_plan(
     let frame = ops::grade::frame_of(p, of, t)?;
     let mut g = ops::grade::stored(p, of)?.at(frame as f64).into_owned();
     match g.node_mut(n).map(|d| &mut d.tool) {
-        Some(crate::model::GradeTool::Corrector(c)) if tool => {
+        Some(crate::model::GradeTool::Corrector(c)) if !legacy => {
             **c = crate::model::Corrector::default();
         }
         Some(crate::model::GradeTool::Corrector(c)) => {
@@ -8476,10 +8607,24 @@ fn auto_color_plan(
         None => return Err(ops::grade::no_node(n)),
     }
     g.output = Some(crate::model::GradeLink::picture(n));
+    solo_plan(p, (id, *layer), (frame, t), g)
+}
+
+fn solo_plan(
+    p: &Project,
+    (id, layer): (&str, usize),
+    (frame, t): (i64, i64),
+    g: crate::model::Grade,
+) -> Result<RenderPlan> {
+    let size = p.frame_size();
+    let below = ops::grade::whole(p, id)?.map(|w| w.at(frame as f64).into_owned());
+    let g = below
+        .unwrap_or_else(|| crate::model::Grade::usual(size))
+        .below(layer, g, size);
     let mut solo = p.clone();
     solo.subtitles.clear();
     for track in &mut solo.tracks {
-        track.clips.retain(|k| k.id == *id);
+        track.clips.retain(|k| k.id == id);
         track.transitions.clear();
         track.video_enabled = true;
         for k in &mut track.clips {
@@ -8500,6 +8645,275 @@ fn auto_color_plan(
     let mut plan = crate::render::flatten(&solo, t, t + 1)?;
     plan.timeline_grade = None;
     Ok(plan)
+}
+
+fn mask_plan(p: &Project, of: &ops::grade::GradeOf, n: u32, t: i64) -> Result<RenderPlan> {
+    let ops::grade::GradeOf::Clip(id, layer) = of else {
+        return Err(Error::invalid(
+            "the Magic Mask works on the grade of a clip",
+        ));
+    };
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    if t < c.start || t >= c.end() {
+        return Err(Error::invalid(format!(
+            "{id} is not at frame {t}: the Magic Mask reads a frame of the clip"
+        )));
+    }
+    let frame = ops::grade::frame_of(p, of, t)?;
+    let mut g = ops::grade::stored(p, of)?.at(frame as f64).into_owned();
+    let d = g.node_mut(n).ok_or_else(|| ops::grade::no_node(n))?;
+    d.magic_mask = None;
+    let input = (d.inputs.first().copied().flatten())
+        .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
+    g.output = Some(input);
+    solo_plan(p, (id, *layer), (frame, t), g)
+}
+
+#[derive(Debug, Clone)]
+pub struct MaskNeed {
+    pub plan: RenderPlan,
+    pub subjects: Vec<(String, Vec<crate::masks::Point>)>,
+    pub download: bool,
+}
+
+struct MaskEdit {
+    of: ops::grade::GradeOf,
+    n: u32,
+    mask: crate::model::MagicMask,
+    needs: Vec<MaskNeed>,
+    out: Value,
+}
+
+fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<MaskEdit> {
+    use ops::grade_masks::{ClickChange, click_changed, click_removed, clicked, mask_of};
+    let opened = |clip: &Option<ClipRef>, layer: &Option<usize>, node: &Option<u32>| {
+        let of = grade_of(p, clip, (false, *layer), playhead)?;
+        let n = node.unwrap_or(1);
+        let mask = mask_of(p, &of, n)?;
+        Ok::<_, Error>((of, n, mask))
+    };
+    let (of, n, mut mask, touched, out, download) = match request {
+        Request::GradeMaskClick {
+            clip,
+            layer,
+            node,
+            at,
+            place,
+            negative,
+            subject,
+            download,
+        } => {
+            let (of, n, mut mask) = opened(clip, layer, node)?;
+            let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
+                Error::usage("grade.mask.click needs `at` (--at): there is no playhead")
+            })?;
+            let frame = ops::grade::frame_of(p, &of, t)?;
+            let (s, click) = clicked(&mut mask, frame, (*place, *negative), *subject)?;
+            let out = json!({ "subject": s, "click": click });
+            (of, n, mask, vec![(frame, s)], out, *download)
+        }
+        Request::GradeMaskSet {
+            clip,
+            layer,
+            node,
+            invert,
+            click,
+            on,
+            place,
+            negative,
+            download,
+        } => {
+            let (of, n, mut mask) = opened(clip, layer, node)?;
+            let change = ClickChange {
+                on: *on,
+                place: *place,
+                negative: *negative,
+            };
+            if let Some(v) = invert {
+                if mask.clicks.is_empty() {
+                    return Err(Error::invalid(format!(
+                        "the Magic Mask of node {n} has no click: click first"
+                    )));
+                }
+                mask.invert = *v;
+            }
+            let touched = match click {
+                Some(k) => vec![click_changed(&mut mask, *k, &change)?],
+                None if change != ClickChange::default() => {
+                    return Err(Error::usage("`on`, `place` and `negative` need `click`"));
+                }
+                None if invert.is_none() => {
+                    return Err(Error::usage("give `invert` or `click`"));
+                }
+                None => Vec::new(),
+            };
+            (of, n, mask, touched, Value::Null, *download)
+        }
+        Request::GradeMaskClear {
+            clip,
+            layer,
+            node,
+            click,
+            download,
+        } => {
+            let (of, n, mut mask) = opened(clip, layer, node)?;
+            let touched = match click {
+                Some(k) => vec![click_removed(&mut mask, *k)?],
+                None => {
+                    mask = crate::model::MagicMask::default();
+                    Vec::new()
+                }
+            };
+            (of, n, mask, touched, Value::Null, *download)
+        }
+        _ => return Err(Error::invalid("not a Magic Mask request")),
+    };
+    let needs = mask_maps(p, (&of, n), &mut mask, &touched, download)?;
+    Ok(MaskEdit {
+        of,
+        n,
+        mask,
+        needs,
+        out,
+    })
+}
+
+fn mask_maps(
+    p: &Project,
+    (of, n): (&ops::grade::GradeOf, u32),
+    mask: &mut crate::model::MagicMask,
+    touched: &[(i64, u32)],
+    download: bool,
+) -> Result<Vec<MaskNeed>> {
+    let mut frames: Vec<i64> = touched.iter().map(|v| v.0).collect();
+    frames.sort_unstable();
+    frames.dedup();
+    let mut needs = Vec::new();
+    for frame in frames {
+        let Ok(t) = ops::grade_masks::time_at(p, of, frame) else {
+            let gone: Vec<u32> = (touched.iter().filter(|v| v.0 == frame).map(|v| v.1)).collect();
+            mask.maps
+                .retain(|m| m.frame != frame || !gone.contains(&m.subject));
+            continue;
+        };
+        let plan = mask_plan(p, of, n, t)?;
+        let picture = crate::fingerprint::digest(&serde_json::to_vec(&plan).unwrap_or_default());
+        let mut subjects: Vec<(String, Vec<crate::masks::Point>)> = Vec::new();
+        for &(_, s) in touched.iter().filter(|v| v.0 == frame) {
+            mask.maps.retain(|m| m.frame != frame || m.subject != s);
+            let points = ops::grade_masks::points(mask, frame, s);
+            if points.is_empty() {
+                continue;
+            }
+            let name = crate::masks::name(crate::catalog::SAM21_TINY.id, &picture, &points);
+            if !crate::masks::has(&name) && !subjects.iter().any(|(v, _)| *v == name) {
+                subjects.push((name.clone(), points));
+            }
+            mask.maps.push(crate::model::MaskMap {
+                frame,
+                subject: s,
+                name,
+            });
+        }
+        if !subjects.is_empty() {
+            needs.push(MaskNeed {
+                plan,
+                subjects,
+                download,
+            });
+        }
+    }
+    mask.maps.sort_by_key(|m| (m.frame, m.subject));
+    Ok(needs)
+}
+
+pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
+    let points: Vec<Vec<crate::masks::Point>> =
+        need.subjects.iter().map(|(_, p)| p.clone()).collect();
+    let maps = env.subject_masks(&need.plan, &points, need.download)?;
+    for ((name, _), map) in need.subjects.iter().zip(maps) {
+        crate::masks::put(name, map);
+    }
+    Ok(())
+}
+
+fn played_compounds(p: &Project) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut sheets: Vec<&[crate::model::Track]> = vec![&p.tracks];
+    while let Some(tracks) = sheets.pop() {
+        let clips = tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
+        for k in clips.filter_map(|c| p.clip_compound(c)) {
+            if !found.contains(&k.id) {
+                found.push(k.id.clone());
+                sheets.push(p.compound_tracks(k));
+            }
+        }
+    }
+    found
+}
+
+pub fn mask_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
+    let mut needs = sheet_remakes(p, download);
+    for id in played_compounds(p) {
+        let mut inside = p.clone();
+        if ops::compound::open_alone(&mut inside, &id).is_ok() {
+            needs.extend(sheet_remakes(&inside, download));
+        }
+    }
+    needs
+}
+
+fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
+    let mut needs = Vec::new();
+    let clips = p.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
+    for c in clips {
+        let Some(whole) = c.picture.as_ref().and_then(|v| v.grade.as_ref()) else {
+            continue;
+        };
+        let layers = std::iter::once(whole).chain(&whole.layers);
+        for (i, g) in layers.enumerate() {
+            let of = ops::grade::GradeOf::Clip(c.id.clone(), i + 1);
+            for (k, d) in g.nodes.iter().enumerate() {
+                let Some(mask) = &d.magic_mask else {
+                    continue;
+                };
+                let missing: Vec<&crate::model::MaskMap> =
+                    (mask.maps.iter().filter(|m| !crate::masks::has(&m.name))).collect();
+                let mut frames: Vec<i64> = missing.iter().map(|m| m.frame).collect();
+                frames.sort_unstable();
+                frames.dedup();
+                for frame in frames {
+                    let Ok(t) = ops::grade_masks::time_at(p, &of, frame) else {
+                        continue;
+                    };
+                    let Ok(plan) = mask_plan(p, &of, k as u32 + 1, t) else {
+                        continue;
+                    };
+                    let mut subjects: Vec<(String, Vec<crate::masks::Point>)> = Vec::new();
+                    for m in missing.iter().filter(|m| m.frame == frame) {
+                        let points = ops::grade_masks::points(mask, frame, m.subject);
+                        if !points.is_empty() && !subjects.iter().any(|(v, _)| *v == m.name) {
+                            subjects.push((m.name.clone(), points));
+                        }
+                    }
+                    if !subjects.is_empty() {
+                        needs.push(MaskNeed {
+                            plan,
+                            subjects,
+                            download,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    needs
+}
+
+pub fn mask_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<MaskNeed> {
+    mask_edit(p, request, playhead).map_or_else(|_| Vec::new(), |e| e.needs)
 }
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {
@@ -9145,6 +9559,22 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
         }
         p.settings.dynamics_profile = profile;
     }
+    if let Some(names) = &set.node_stack_layers {
+        let most = ops::grade::NODE_STACK_LAYERS;
+        if names.is_empty() || names.len() > most {
+            return Err(Error::invalid(format!(
+                "give 1 to {most} node stack layer names"
+            )));
+        }
+        if names.iter().any(|n| n.trim().is_empty()) {
+            return Err(Error::invalid("a node stack layer needs a name"));
+        }
+        let count = names.len();
+        if count != p.settings.node_stack_layers.len() {
+            ops::grade::count_layers(p, count);
+        }
+        p.settings.node_stack_layers = names.iter().map(|n| n.trim().to_owned()).collect();
+    }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
     }
@@ -9505,24 +9935,31 @@ pub fn query(
         Request::GradeCopy {
             clip,
             timeline,
+            layer,
             node,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             json!({ "settings": ops::grade::copy(p, &of, *node)? })
         }
         Request::GradeWindowCopy {
             clip,
             timeline,
+            layer,
             node,
             window,
             at,
         } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             json!({ "settings": ops::grade_windows::copy(p, &of, (*node, *window), at)? })
         }
-        Request::GradeGet { clip, timeline, at } => {
-            let of = grade_of(p, clip, *timeline, playhead)?;
+        Request::GradeGet {
+            clip,
+            timeline,
+            layer,
+            at,
+        } => {
+            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::grade::get(p, &of, at)?
         }

@@ -5,6 +5,8 @@
 - The build is the commit and the date of the commit. `-dirty` at the end tells that the build had changes that no commit holds.
 - `vidcut --version`, the status bar, `vidcut doctor`, the report of an export and the MCP server give it.
 - `crates/vidcut/build.rs` reads the commit from git (`VIDCUT_BUILD`). A build without git gives the version alone.
+- `.cargo/config.toml` sets `VIDCUT_CHECKOUT` to the folder of the checkout. The build script runs again when this value changes.
+  - Why: worktrees that share one `CARGO_TARGET_DIR` share one output of the build script. Without the value, a build can keep the commit of another worktree.
 
 **Fixtures:** this command makes a fixture, caches it and prints its path:
 
@@ -237,12 +239,13 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - The answer names the renderer. It gives the layout and the place of each layer of the picture, from the bottom up.
 - If the player cannot make the frame, the error is the error of the player.
 
-**The scopes:** `vidcut frame scope waveform --at TIME --out F.png` renders one scope of that same picture, with no window. The others are `parade` and `vectorscope`.
+**The scopes:** `vidcut frame scope waveform --at TIME --out F.png` renders one scope of that same picture, with no window. The others are `parade`, `vectorscope`, `histogram` and `chromaticity`.
 
 - It draws the frame at the size of the timeline.
 - It reads the picture through the Scopes LUT of the project, as the scopes of the GUI do. A file that cannot be read is an error.
 - The PNG has the lines of the scale, with no text.
 - The answer names `colors`, which is the timeline color space. It gives `marks`, with the label and the place of each line of the scale.
+- The answer also gives `scale` and `video_levels`, from the preferences.
 
 **The refusals of Upscale:** `scripts/upscale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
 
@@ -281,11 +284,16 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNN-a.npy` and `NNNN-b.npy`: the two source frames, at the size of the made frame.
   - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
   - A check against a PyTorch version of a model reads them.
+- `VIDCUT_MASK_DUMP=DIR` makes the Magic Mask model write its stages as `.npy` files into `DIR`, all float, `[H, W, C]`.
+  - `image.npy`: the input at the model size, normalized. `feat-s0.npy` and `feat-s1.npy`: the high-resolution features. `embedding.npy`: the image embedding.
+  - `masks-N.npy` and `scores-N.npy`, for each subject: the 256 × 256 logits of the four outputs, then their predicted overlaps and the object score.
+  - The scripts in the sam2 folder of the test data compare them with the official SAM 2.1 code.
 - `VIDCUT_SUBJECTS_DUMP=DIR` makes `motion.find` write what the model gets and what it finds as `.npy` files into `DIR`.
   - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
   - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
   - `content.npy`: the width and the height of the picture content, in pixels of the model input.
-  - With the slow face model, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+  - With a model on the GPU, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+    - The models on the GPU are the slow face model, and YOLOX-S with `gpu.acceleration` on.
   - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
   - A check against an ONNX runtime reads them.
 - `VIDCUT_SALIENCY_DUMP=DIR` makes `picture.reframe` write what the saliency model gets and makes as `.npy` files into `DIR`.
@@ -310,3 +318,9 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
      - Without a source, the limit is not recorded (`Source::Unrecorded`).
   4. Run `vidcut models check MODEL --download`, then the commit gate.
   5. The pull request lists each changed field: the old value, the new value and the source.
+
+- **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` from scratch.
+  - Datasets: SimpleCube++ (`train`, Zenodo record 4153431, CC BY 4.0), YouTube UGC (`ugc-*`, CC BY 4.0) and `tests/media-manifest.toml` clips.
+  - Manifest clips used: `tos-720p-mov` (CC BY 3.0), `stab-night-market` and `stab-dashcam` (CC0), and `stab-road-4k`, `stab-moto`, `stab-rally` and `stab-crowd-4k` (CC BY 4.0).
+  - Extract evenly spaced PNG frames per clip, excluding test clips, and name files `<clip>_<frame>.png`.
+  - Run `python scripts/auto-color-train.py --simplecube DIR/SimpleCube++ --frames DIR/frames --exclude-dir DIR/holdout --out crates/vidcut-av/src/auto_color.safetensors`.

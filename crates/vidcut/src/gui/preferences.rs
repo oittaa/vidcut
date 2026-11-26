@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
-use vidcut_core::shortcuts::{Action, Bindings, Combo, Group, Keys, SHORTCUTS, Shortcut};
+use vidcut_core::shortcuts::{
+    Action, Bindings, Combo, Custom, Group, Keys, Panel, SHORTCUTS, Shortcut,
+};
 
 use super::dialog;
 use super::export::{Ask, Picked, near_center};
@@ -54,6 +56,8 @@ pub(super) struct PreferencesUi {
     confirm_keys: bool,
     pub(super) keys_open: bool,
     keys_window: super::window::Tool,
+    pub(super) key_sets: super::key_sets::KeySetsUi,
+    keyboard: super::keyboard::KeyboardUi,
 }
 
 impl PreferencesUi {
@@ -236,34 +240,65 @@ fn dim(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).color(theme::colors().text_dim)
 }
 
-fn keys_set(action: Action, keys: &[Combo]) -> (&'static str, Value) {
-    ("keys.set", json!({ "action": action, "keys": keys }))
-}
-
 fn with_key(
     bindings: &Bindings,
     action: Action,
     slot: Option<usize>,
     combo: Combo,
-) -> (&'static str, Value) {
+) -> vidcut_core::Result<Custom> {
     let mut keys = bindings.keys(action).to_vec();
     match slot.and_then(|n| keys.get_mut(n)) {
         Some(key) => *key = combo,
         None => keys.push(combo),
     }
-    keys_set(action, &keys)
+    bindings.set(action, &keys)
 }
 
-fn without_key(bindings: &Bindings, action: Action, slot: usize) -> Option<(&'static str, Value)> {
+fn without_key(
+    bindings: &Bindings,
+    action: Action,
+    slot: usize,
+) -> Option<vidcut_core::Result<Custom>> {
     let mut keys = bindings.keys(action).to_vec();
     (slot < keys.len()).then(|| {
         keys.remove(slot);
-        keys_set(action, &keys)
+        bindings.set(action, &keys)
     })
 }
 
-fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) {
+fn draft_keys(ui: &egui::Ui, state: &mut PreferencesUi, in_force: &Bindings) {
+    if state.capturing() || ui.ctx().egui_wants_keyboard_input() {
+        return;
+    }
+    let (mut undo, mut redo) = (0, 0);
+    ui.input_mut(|i| {
+        i.events
+            .retain(|e| match super::shortcuts::owner(in_force, Panel::App, e) {
+                Some((Action::Undo, _)) => {
+                    undo += 1;
+                    false
+                }
+                Some((Action::Redo, _)) => {
+                    redo += 1;
+                    false
+                }
+                _ => true,
+            })
+    });
+    for _ in 0..undo {
+        state.key_sets.undo();
+    }
+    for _ in 0..redo {
+        state.key_sets.redo();
+    }
+}
+
+fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, in_force: &Bindings) -> bool {
+    draft_keys(ui, state, in_force);
+    let bindings = &state.key_sets.shown(in_force).clone();
     ui.spacing_mut().item_spacing.y = 8.0;
+    super::key_sets::bar(ui, &mut state.key_sets, in_force);
+    state.keyboard.show(ui, bindings);
     ui.add(
         egui::TextEdit::singleline(&mut state.key_search)
             .hint_text("Find an Action or a Key")
@@ -284,15 +319,29 @@ fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) 
             ui.end_row();
             for s in rows {
                 if let Keys::Own(action, _) = s.keys {
-                    dialog::tall_row(ui, s.title, |ui| key_row(ui, state, bindings, action));
+                    dialog::tall_row(ui, s.title, |ui| {
+                        key_row(ui, state, bindings, in_force, action)
+                    });
                 }
             }
         }
     });
+    let mut close = super::key_sets::close_row(ui, &mut state.key_sets);
     dialog::footer(ui, |ui| {
+        if state.key_sets.drafting() || bindings.any_custom() {
+            if dialog::main_button(ui, "Save", true) {
+                state.key_sets.save(in_force);
+            }
+            if ui.button("Cancel").clicked() {
+                close |= state.key_sets.may_close();
+            }
+        } else if ui.button("Close").clicked() {
+            close = true;
+        }
         if state.confirm_keys {
             if dialog::main_button(ui, "Reset All Keys", true) {
-                state.keyed = Some(("keys.reset", json!({})));
+                let all = bindings.reset(None);
+                state.key_sets.change(in_force, all);
                 state.capture = None;
                 state.confirm_keys = false;
             }
@@ -306,9 +355,16 @@ fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) 
             state.confirm_keys = true;
         }
     });
+    close
 }
 
-fn key_row(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings, action: Action) {
+fn key_row(
+    ui: &mut egui::Ui,
+    state: &mut PreferencesUi,
+    bindings: &Bindings,
+    in_force: &Bindings,
+    action: Action,
+) {
     let capture = state.capture.clone().filter(|c| c.action == action);
     let keys = bindings.keys(action);
     ui.horizontal_wrapped(|ui| {
@@ -328,8 +384,8 @@ fn key_row(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings, ac
                 if let Some(slot) = c.slot
                     && ui.button("Remove").clicked()
                 {
-                    if let Some(keyed) = without_key(bindings, action, slot) {
-                        state.keyed = Some(keyed);
+                    if let Some(custom) = without_key(bindings, action, slot) {
+                        state.key_sets.change(in_force, custom);
                     }
                     state.capture = None;
                 }
@@ -349,8 +405,9 @@ fn key_row(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings, ac
                     });
                 }
                 if bindings.is_custom(action) {
-                    default_keys_button(ui, state, bindings, action);
+                    default_keys_button(ui, state, bindings, in_force, action);
                 }
+                conflict_button(ui, state, bindings, action);
             }
         }
     });
@@ -359,13 +416,42 @@ fn key_row(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings, ac
     }
 }
 
-fn default_keys_button(
+fn conflict_button(
     ui: &mut egui::Ui,
     state: &mut PreferencesUi,
     bindings: &Bindings,
     action: Action,
 ) {
-    let shown: Vec<String> = action.default_keys().iter().map(Combo::shown).collect();
+    let conflicting = bindings.conflicting(action);
+    let Some(&first) = conflicting.first() else {
+        return;
+    };
+    let mut others: Vec<&str> = Vec::new();
+    for &combo in &conflicting {
+        for other in bindings.owners(action.panel(), combo) {
+            if other != action && !others.contains(&other.title()) {
+                others.push(other.title());
+            }
+        }
+    }
+    let warn = RichText::new(icon::WARNING).color(ui.visuals().warn_fg_color);
+    if ui
+        .button(warn)
+        .on_hover_text(format!("Also on {}", others.join(", ")))
+        .clicked()
+    {
+        state.keyboard.select(first);
+    }
+}
+
+fn default_keys_button(
+    ui: &mut egui::Ui,
+    state: &mut PreferencesUi,
+    bindings: &Bindings,
+    in_force: &Bindings,
+    action: Action,
+) {
+    let shown: Vec<String> = bindings.set_keys(action).iter().map(Combo::shown).collect();
     let tip = match shown.is_empty() {
         true => "Default: No Key".to_string(),
         false => format!("Default: {}", shown.join(", ")),
@@ -375,10 +461,8 @@ fn default_keys_button(
         .on_hover_text(tip)
         .clicked()
     {
-        match bindings.reset(Some(action)) {
-            Ok(_) => state.keyed = Some(("keys.reset", json!({ "action": action }))),
-            Err(e) => state.error = Some(e.message),
-        }
+        let custom = bindings.reset(Some(action));
+        state.key_sets.change(in_force, custom);
     }
 }
 
@@ -406,16 +490,20 @@ impl Workspace {
     }
 
     pub(super) fn capture_key(&mut self, ctx: &egui::Context) -> bool {
+        if self.preferences.capture.is_none() {
+            return false;
+        }
+        let in_force = self.snap.bindings.clone();
+        let bindings = self.preferences.key_sets.shown(&in_force).clone();
         let Some(capture) = &mut self.preferences.capture else {
             return false;
         };
-        let bindings = &self.snap.bindings;
         let panel = capture.action.panel();
         let caught = ctx.input_mut(|i| {
             let mut found = None;
             i.events.retain(|e| {
                 if found.is_none() {
-                    found = super::shortcuts::caught(bindings, panel, e);
+                    found = super::shortcuts::caught(&bindings, panel, e);
                 }
                 !matches!(
                     e,
@@ -431,42 +519,50 @@ impl Workspace {
         let Some((combo, owner)) = caught else {
             return true;
         };
-        if let Some(other) = owner.filter(|o| *o != capture.action) {
+        let had = bindings.keys(capture.action).contains(&combo);
+        if let Some(other) = owner.filter(|o| *o != capture.action && !had) {
             capture.taken = Some(format!("{} is used by {}", combo.shown(), other.title()));
             return true;
         }
-        let keyed = with_key(bindings, capture.action, capture.slot, combo);
-        self.preferences.keyed = Some(keyed);
+        let custom = with_key(&bindings, capture.action, capture.slot, combo);
         self.preferences.capture = None;
+        self.preferences.key_sets.change(&in_force, custom);
         true
     }
 
     pub(super) fn keys_window(&mut self, ctx: &egui::Context) {
+        if self.preferences.keys_open {
+            self.key_sets(ctx);
+        }
         let owner = self.main_window;
-        let bindings = self.snap.bindings.clone();
+        let in_force = self.snap.bindings.clone();
         let state = &mut self.preferences;
         if !state.keys_open {
             state.keys_window.close();
             state.capture = None;
             state.confirm_keys = false;
+            state.key_sets.close();
             return;
         }
         let mut window = std::mem::take(&mut state.keys_window);
         let mut open = true;
-        super::dialog::separate_window(ctx, &mut window, owner, &KEYS, &mut open, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| keys_page(ui, state, &bindings));
-        });
+        let hold = state.key_sets.drafting();
+        let (close, asked) =
+            super::dialog::held_window(ctx, &mut window, owner, &KEYS, &mut open, hold, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| keys_page(ui, state, &in_force))
+                    .inner
+            });
+        if asked {
+            state.key_sets.may_close();
+        }
+        if close == Some(true) {
+            open = false;
+            window.close();
+        }
         state.keys_window = window;
         state.keys_open = open;
-        if let Some((method, params)) = state.keyed.take() {
-            self.send(method, params);
-            if self.preferences.open {
-                self.preferences.ask =
-                    Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
-            }
-        }
     }
 
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
@@ -983,6 +1079,18 @@ fn color(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
                         }
                     });
             });
+            ui.end_row();
+            let mut legacy = p["use_legacy_auto_color"] == true;
+            label(ui, "Auto Color");
+            if ui
+                .add_enabled(
+                    !busy,
+                    egui::Checkbox::new(&mut legacy, "Use Legacy Auto Color"),
+                )
+                .changed()
+            {
+                *patch = Some(json!({ "color": { "use_legacy_auto_color": legacy } }));
+            }
             ui.end_row();
         });
         ui.add_space(10.0);
@@ -1897,7 +2005,6 @@ fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use vidcut_core::shortcuts::{Action, Bindings};
 
     use super::{about_gb, gb, mb_of, without_key};
@@ -1905,17 +2012,14 @@ mod tests {
     #[test]
     fn remove_takes_the_key_out_of_its_slot() {
         assert_eq!(
-            without_key(&Bindings::default(), Action::PlayOrStop, 0),
-            Some(("keys.set", json!({ "action": "play_or_stop", "keys": [] })))
+            without_key(&Bindings::default(), Action::PlayOrStop, 0).and_then(Result::ok),
+            Some([(Action::PlayOrStop, Vec::new())].into_iter().collect())
         );
     }
 
     #[test]
     fn remove_sends_nothing_when_the_key_is_already_gone() {
-        assert_eq!(
-            without_key(&Bindings::default(), Action::PlayOrStop, 1),
-            None
-        );
+        assert!(without_key(&Bindings::default(), Action::PlayOrStop, 1).is_none());
     }
 
     #[test]

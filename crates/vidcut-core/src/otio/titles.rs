@@ -1,13 +1,14 @@
 use serde_json::{Value, json};
 
 use super::effects::{group, handle_point, handle_value, keyed, plain, ranged, rounded};
-use super::picture::{file_curve, read_keys};
+use super::picture::{file_curve, merge, read_keys};
 use super::{EDITOR, VIDCUT};
+use crate::effect_keys::Keyed;
 use crate::model::hex;
 use crate::model::{
-    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine, TitlePart, TitleShadow, TitleShape,
-    TitleStyle, size_fits,
+    EffectValue, Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline,
+    TextStroke, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine, TitlePart,
+    TitleShadow, TitleShape, TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Shift, Span};
 
@@ -68,6 +69,104 @@ fn point_frames(t: &Title, origin: i64, file: impl Fn([f64; 2]) -> [f64; 2]) -> 
     Some(Value::Object(out))
 }
 
+const STYLE_KEYS: [(&str, &str, EffectValue); 9] = [
+    ("Drop Shadow", "shadow offset", EffectValue::ShadowOffset),
+    ("Drop Shadow", "shadow", EffectValue::ShadowBlur),
+    ("Drop Shadow", "shadow opacity", EffectValue::ShadowOpacity),
+    (
+        "Background",
+        "backgroundOutlineWidth",
+        EffectValue::BackgroundOutlineWidth,
+    ),
+    (
+        "Background",
+        "backgroundWidth",
+        EffectValue::BackgroundWidth,
+    ),
+    (
+        "Background",
+        "backgroundHeight",
+        EffectValue::BackgroundHeight,
+    ),
+    (
+        "Background",
+        "backgroundCornerRadius",
+        EffectValue::BackgroundCornerRadius,
+    ),
+    (
+        "Background",
+        "backgroundCenter",
+        EffectValue::BackgroundCenter,
+    ),
+    (
+        "Background",
+        "backgroundOpacity",
+        EffectValue::BackgroundOpacity,
+    ),
+];
+
+fn style_curve(t: &Title, v: EffectValue, origin: i64) -> Option<Value> {
+    let keys = Keyed::keys_of(t, v);
+    if v.pair() {
+        let mut out = serde_json::Map::new();
+        for (k, y) in keys.iter().zip(t.y_of(v)) {
+            let value = json!([rounded(k.value), rounded(0.0 - y)]);
+            let key = json!({ "Value": value, "Variant Type": "POINTF" });
+            out.insert((k.frame - origin).to_string(), key);
+        }
+        return (!out.is_empty()).then_some(Value::Object(out));
+    }
+    let Some(n) = Title::steps_of(v) else {
+        return file_curve(keys, None, origin, rounded, 1.0);
+    };
+    let mut frames = file_curve(keys, None, origin, |x| (x * n).round(), n)?;
+    for key in frames.as_object_mut()?.values_mut() {
+        key["Value"] = json!(key["Value"].as_f64().unwrap_or(0.0) as i64);
+        key["Variant Type"] = json!("Int");
+    }
+    Some(frames)
+}
+
+fn has_frames(g: &Value, id: &str) -> bool {
+    parameter(g, id)["Key Frames"]
+        .as_object()
+        .is_some_and(|k| !k.is_empty())
+}
+
+fn read_style_keys(t: &mut Title, all: &[&Value], origin: i64) {
+    for (group, id, v) in STYLE_KEYS {
+        let Some(g) = named(all, group).first().copied() else {
+            continue;
+        };
+        let Some((low, high)) = t.range_of(v) else {
+            continue;
+        };
+        let p = parameter(g, id);
+        let (keys, y) = match (v.pair(), Title::steps_of(v)) {
+            (true, _) => point_keys(p, origin, |[x, y]| [across(x), across(0.0 - y)]),
+            (false, steps) => {
+                let mut keys = read_keys(p, origin).unwrap_or_default();
+                let n = steps.unwrap_or(1.0);
+                if steps.is_some() {
+                    for k in &mut keys {
+                        k.value = k.value.trunc();
+                    }
+                }
+                (fitted(&keys, 1.0 / n, low, high), Vec::new())
+            }
+        };
+        if keys.is_empty() {
+            continue;
+        }
+        if let Some((held, ys)) = t.channel_mut(v) {
+            *held = keys;
+            if let Some(ys) = ys {
+                *ys = y;
+            }
+        }
+    }
+}
+
 fn fitted(keys: &[Keyframe], by: f64, low: f64, high: f64) -> Vec<Keyframe> {
     let scaled = |h: crate::model::Handle| crate::model::Handle {
         frames: h.frames,
@@ -95,11 +194,11 @@ fn point_keys(
             let [x, y] = ours(v);
             let key = Keyframe {
                 frame: (at + origin as f64).round() as i64,
-                value: across(x),
+                value: x,
                 in_handle: None,
                 out_handle: None,
             };
-            rows.push((key, down(y)));
+            rows.push((key, y));
         }
     }
     rows.sort_by_key(|(k, _)| k.frame);
@@ -186,7 +285,7 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> 
                 ranged(
                     plain(
                         "size",
-                        json!(points.round().clamp(24.0, 4096.0) as i64),
+                        json!(Title::scroll_size(points, 1.0).clamp(24.0, 4096.0) as i64),
                         json!(216),
                         "Int",
                     ),
@@ -367,17 +466,18 @@ fn rich_text(
     position: Value,
     origin: i64,
 ) -> Value {
-    let scale = rounded(t.scale());
-    let zoom = |id: &str| {
+    let [zx, zy] = t.scale().map(rounded);
+    let zoom = |id: &str, value: f64, y: Option<&[f64]>| {
         ranged(
             with_frames(
-                keyed(id, json!(scale), json!(1.0), "Double"),
-                file_curve(&t.zoom_keys, None, origin, rounded, 1.0),
+                keyed(id, json!(value), json!(1.0), "Double"),
+                file_curve(&t.zoom_keys, y, origin, rounded, 1.0),
             ),
             0.25,
             4.0,
         )
     };
+    let linked = t.zoom_link != Some(false);
     group(
         "Rich Text",
         24,
@@ -397,9 +497,9 @@ fn rich_text(
                 "UInt",
             ),
             position,
-            zoom("transformationZoomX"),
-            zoom("transformationZoomY"),
-            plain("transformationZoomLink", json!(true), json!(true), "Bool"),
+            zoom("transformationZoomX", zx, None),
+            zoom("transformationZoomY", zy, Some(&t.zoom_y)),
+            plain("transformationZoomLink", json!(linked), json!(true), "Bool"),
             ranged(
                 with_frames(
                     keyed(
@@ -431,7 +531,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         .as_deref()
         .or(drawn.family.as_deref())
         .unwrap_or(USUAL_FAMILY);
-    let size = t.text_fraction();
+    let size = t.text_fraction(height);
     let points = size * f64::from(height);
     let color = hex(t.ink());
     let line = size * Title::LINE;
@@ -503,6 +603,9 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             )
         }
     };
+    let shaded = t.style.shadow.as_ref().is_some_and(|s| !s.is_off());
+    let backed = t.backing().is_some();
+    let frames = |v: EffectValue, shown: bool| shown.then(|| style_curve(t, v, origin)).flatten();
     let (shade, shift, blur, dim) = match t.style.shadow.as_ref().filter(|s| !s.is_off()) {
         Some(s) => {
             let [dx, dy] = s.shift();
@@ -521,10 +624,23 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         1,
         vec![
             plain("shadow color", json!(shade), json!("#000000"), "Color"),
-            keyed("shadow offset", json!(shift), json!([0.0, 0.0]), "POINTF"),
-            ranged(keyed("shadow", json!(blur), json!(20), "Int"), 1.0, 100.0),
+            with_frames(
+                keyed("shadow offset", json!(shift), json!([0.0, 0.0]), "POINTF"),
+                frames(EffectValue::ShadowOffset, shaded),
+            ),
             ranged(
-                keyed("shadow opacity", json!(dim), json!(75), "Int"),
+                with_frames(
+                    keyed("shadow", json!(blur), json!(20), "Int"),
+                    frames(EffectValue::ShadowBlur, shaded),
+                ),
+                1.0,
+                100.0,
+            ),
+            ranged(
+                with_frames(
+                    keyed("shadow opacity", json!(dim), json!(75), "Int"),
+                    frames(EffectValue::ShadowOpacity, shaded),
+                ),
                 0.0,
                 100.0,
             ),
@@ -593,7 +709,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                     TitleKind::Text => y - h * down,
                     TitleKind::Scroll => y - h / 2.0,
                     TitleKind::LowerThird => {
-                        y + (1.0 - down) * t.lower_line() + Title::PADDING * size - h
+                        y + (1.0 - down) * t.lower_line(height) + Title::PADDING * size - h
                     }
                 };
                 let middle = if t.kind == TitleKind::Text {
@@ -646,38 +762,56 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 "Color",
             ),
             ranged(
-                keyed("backgroundOutlineWidth", json!(ring_width), json!(0), "Int"),
+                with_frames(
+                    keyed("backgroundOutlineWidth", json!(ring_width), json!(0), "Int"),
+                    frames(EffectValue::BackgroundOutlineWidth, backed),
+                ),
                 0.0,
                 30.0,
             ),
             ranged(
-                keyed("backgroundWidth", json!(extent[0]), json!(0.9), "Double"),
+                with_frames(
+                    keyed("backgroundWidth", json!(extent[0]), json!(0.9), "Double"),
+                    frames(EffectValue::BackgroundWidth, backed),
+                ),
                 0.0,
                 2.0,
             ),
             ranged(
-                keyed("backgroundHeight", json!(extent[1]), json!(0.0), "Double"),
+                with_frames(
+                    keyed("backgroundHeight", json!(extent[1]), json!(0.0), "Double"),
+                    frames(EffectValue::BackgroundHeight, backed),
+                ),
                 0.0,
                 2.0,
             ),
             ranged(
-                keyed(
-                    "backgroundCornerRadius",
-                    json!(corner),
-                    json!(Title::BOX_CORNER),
-                    "Double",
+                with_frames(
+                    keyed(
+                        "backgroundCornerRadius",
+                        json!(corner),
+                        json!(Title::BOX_CORNER),
+                        "Double",
+                    ),
+                    frames(EffectValue::BackgroundCornerRadius, backed),
                 ),
                 0.0,
                 1.0,
             ),
-            keyed(
-                "backgroundCenter",
-                json!(center),
-                json!([0.0, 0.0]),
-                "POINTF",
+            with_frames(
+                keyed(
+                    "backgroundCenter",
+                    json!(center),
+                    json!([0.0, 0.0]),
+                    "POINTF",
+                ),
+                frames(EffectValue::BackgroundCenter, backed),
             ),
             ranged(
-                keyed("backgroundOpacity", json!(opacity), json!(50), "Int"),
+                with_frames(
+                    keyed("backgroundOpacity", json!(opacity), json!(50), "Int"),
+                    frames(EffectValue::BackgroundOpacity, backed),
+                ),
                 0.0,
                 100.0,
             ),
@@ -964,7 +1098,9 @@ fn read_html(blob: &str) -> Read {
 fn box_size(g: &Value) -> Option<[f64; 2]> {
     let side = |name| value(g, name).as_f64().unwrap_or(0.0);
     let size = [side("backgroundWidth"), side("backgroundHeight")];
-    (size[0] > 0.0 && size[1] > 0.0).then(|| size.map(|v| rounded(v.min(Title::BOX_MOST))))
+    let keyed = has_frames(g, "backgroundWidth") || has_frames(g, "backgroundHeight");
+    (size[0] > 0.0 && size[1] > 0.0 || keyed)
+        .then(|| size.map(|v| rounded(v.clamp(0.0, Title::BOX_MOST))))
 }
 
 fn shape_of(all: &[&Value]) -> Option<TitleShape> {
@@ -974,7 +1110,7 @@ fn shape_of(all: &[&Value]) -> Option<TitleShape> {
     let width = value(g, "backgroundOutlineWidth")
         .as_f64()
         .unwrap_or(0.0)
-        .clamp(0.0, Title::BOX_MOST_OUTLINE);
+        .clamp(0.0, f64::from(Title::BOX_MOST_OUTLINE)) as u32;
     Some(TitleShape {
         size: box_size(g)?,
         center: (across != 0.0 || up != 0.0)
@@ -982,12 +1118,12 @@ fn shape_of(all: &[&Value]) -> Option<TitleShape> {
         corner: value(g, "backgroundCornerRadius")
             .as_f64()
             .map(|c| c.clamp(0.0, 1.0)),
-        outline_color: (width > 0.0)
+        outline_color: (width > 0)
             .then(|| value(g, "backgroundOutlineColor").as_str())
             .flatten()
             .filter(|c| crate::ops::subtitles::checked_color(Some(c), "outline").is_ok())
             .map(str::to_string),
-        outline_width: (width > 0.0).then_some(width),
+        outline_width: (width > 0).then_some(width),
     })
 }
 
@@ -1000,7 +1136,7 @@ fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
                 .to_string(),
             opacity: value(g, "backgroundOpacity")
                 .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+                .map(|o| (o.trunc() / 100.0).clamp(0.0, 1.0)),
             off: None,
         })
     })
@@ -1009,19 +1145,21 @@ fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
 fn shadow_of(all: &[&Value]) -> Option<TitleShadow> {
     named(all, "Drop Shadow").first().and_then(|g| {
         let [dx, dy] = point(value(g, "shadow offset"))?;
-        (dx != 0.0 || dy != 0.0).then(|| TitleShadow {
+        (dx != 0.0 || dy != 0.0 || has_frames(g, "shadow offset")).then(|| TitleShadow {
             color: value(g, "shadow color")
                 .as_str()
                 .filter(|c| crate::ops::subtitles::checked_color(Some(c), "shadow").is_ok())
                 .map(str::to_string),
             opacity: value(g, "shadow opacity")
                 .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+                .map(|o| (o.trunc() / 100.0).clamp(0.0, 1.0)),
             offset: Some([
                 rounded(dx.clamp(-Picture::REACH, Picture::REACH)),
                 rounded((-dy).clamp(-Picture::REACH, Picture::REACH)),
             ]),
-            blur: value(g, "shadow").as_f64().map(|b| b.clamp(1.0, 100.0)),
+            blur: value(g, "shadow")
+                .as_f64()
+                .map(|b| b.trunc().clamp(1.0, 100.0)),
             off: None,
         })
     })
@@ -1083,9 +1221,12 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         position_handles: Vec::new(),
         zoom: None,
         zoom_keys: Vec::new(),
+        zoom_y: Vec::new(),
+        zoom_link: None,
         rotation: None,
         rotation_keys: Vec::new(),
         upper: None,
+        keys: Vec::new(),
     };
     crate::ops::titles::checked(&title).ok()
 }
@@ -1121,7 +1262,7 @@ fn read_scroll_keys(t: &mut Title, all: &[&Value], origin: i64) {
         TitleAlign::Right => -0.5,
     };
     (t.position_keys, t.position_y) = point_keys(parameter(text, "position"), origin, |[x, y]| {
-        [x - shift, 1.0 - y]
+        [across(x - shift), down(1.0 - y)]
     });
 }
 
@@ -1135,8 +1276,9 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
     } else {
         lower
     };
-    (t.position_keys, t.position_y) =
-        point_keys(parameter(main, "position"), origin, |[x, y]| [x, 1.0 - y]);
+    (t.position_keys, t.position_y) = point_keys(parameter(main, "position"), origin, |[x, y]| {
+        [across(x), down(1.0 - y)]
+    });
     t.position_handles = point_handles(parameter(main, "position"), origin);
     read_turn_keys(t, main, origin);
     if t.kind == TitleKind::LowerThird
@@ -1145,7 +1287,9 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
     {
         let mut line = t.upper_view();
         (line.position_keys, line.position_y) =
-            point_keys(parameter(high, "position"), origin, |[x, y]| [x, 1.0 - y]);
+            point_keys(parameter(high, "position"), origin, |[x, y]| {
+                [across(x), down(1.0 - y)]
+            });
         line.position_handles = point_handles(parameter(high, "position"), origin);
         read_turn_keys(&mut line, high, origin);
         t.upper = Some(line.line()).filter(|u| *u != t.upper_with_lower());
@@ -1154,7 +1298,16 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
 
 fn read_turn_keys(t: &mut Title, g: &Value, origin: i64) {
     let keys = |id: &str| read_keys(parameter(g, id), origin).unwrap_or_default();
-    t.zoom_keys = fitted(&keys("transformationZoomX"), 1.0, 0.25, 4.0);
+    let [zx, zy] = t.scale();
+    let (x, y) = merge(
+        keys("transformationZoomX"),
+        keys("transformationZoomY"),
+        zx,
+        zy,
+    )
+    .unwrap_or_default();
+    t.zoom_keys = fitted(&x, 1.0, 0.25, 4.0);
+    t.zoom_y = y.into_iter().map(|v| rounded(v.clamp(0.25, 4.0))).collect();
     t.rotation_keys = fitted(
         &keys("transformationRotationAngle"),
         1.0,
@@ -1163,11 +1316,23 @@ fn read_turn_keys(t: &mut Title, g: &Value, origin: i64) {
     );
 }
 
-fn read_zoom(g: &Value) -> Option<f64> {
-    value(g, "transformationZoomX")
-        .as_f64()
-        .filter(|z| z.is_finite())
-        .map(|z| rounded(z.clamp(0.25, 4.0)))
+fn read_zoom(g: &Value) -> Option<[f64; 2]> {
+    let axis = |id: &str| {
+        value(g, id)
+            .as_f64()
+            .filter(|z| z.is_finite())
+            .map(|z| rounded(z.clamp(0.25, 4.0)))
+    };
+    match (axis("transformationZoomX"), axis("transformationZoomY")) {
+        (None, None) => None,
+        (x, y) => Some([x.unwrap_or(1.0), y.unwrap_or(1.0)]),
+    }
+}
+
+fn read_link(g: &Value) -> Option<bool> {
+    value(g, "transformationZoomLink")
+        .as_bool()
+        .filter(|on| !on)
 }
 
 fn read_rotation(g: &Value) -> Option<f64> {
@@ -1191,11 +1356,13 @@ pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option
     } else {
         read_rich_keys(&mut t, &all, origin);
     }
+    read_style_keys(&mut t, &all, origin);
     crate::ops::titles::checked(&t).ok()
 }
 
 pub fn with_keys_of(mut t: Title, read: &Title) -> Title {
     take_keys(&mut t, read);
+    t.keys.clone_from(&read.keys);
     if read.upper.is_some() {
         t.part_lines();
         t.swap_lines();
@@ -1211,6 +1378,7 @@ fn take_keys(t: &mut Title, read: &Title) {
     t.position_y = read.position_y.iter().map(|y| down(y + dy)).collect();
     t.position_handles.clone_from(&read.position_handles);
     t.zoom_keys.clone_from(&read.zoom_keys);
+    t.zoom_y.clone_from(&read.zoom_y);
     t.rotation_keys.clone_from(&read.rotation_keys);
 }
 
@@ -1297,6 +1465,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         }
     };
     let zoom = read_zoom(turned_by);
+    let zoom_link = read_link(turned_by);
     let rotation = read_rotation(turned_by);
     let (align, anchor) = if kind == TitleKind::Text {
         (
@@ -1359,9 +1528,12 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         position_handles: Vec::new(),
         zoom,
         zoom_keys: Vec::new(),
+        zoom_y: Vec::new(),
+        zoom_link,
         rotation,
         rotation_keys: Vec::new(),
         upper: None,
+        keys: Vec::new(),
     };
     let [x, from_bottom] = at;
     title.position = Some([across(x), down(1.0 - from_bottom)]);
@@ -1375,6 +1547,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             anchor: anchor_read(high, usual),
             position: Some([across(x), down(1.0 - from_bottom)]),
             zoom: read_zoom(high),
+            zoom_link: read_link(high),
             rotation: read_rotation(high),
             ..TitleLine::default()
         };

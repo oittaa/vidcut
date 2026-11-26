@@ -125,6 +125,7 @@ pub fn clip(p: &Project, c: &mut Clip, r: Rates) {
             line.move_handles(conv);
             line.take_picture(&picture);
         });
+        crate::effect_keys::Keyed::scale_key_times(title, &conv, &|_| ratio);
     }
     if let Some(Generator::FourColorGradient(g)) = c.generator.as_mut() {
         for axis in [crate::generators::Axis::X, crate::generators::Axis::Y] {

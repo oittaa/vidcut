@@ -99,6 +99,7 @@ pub struct Workspace {
     pub(super) inspector: super::inspector::Inspector,
     pub(super) title_thumbs: super::title_browser::Thumbs,
     pub(super) effects_tab: EffectsTab,
+    pub(super) effects_search: super::effects_search::EffectsSearch,
     pub(super) looks: super::looks::Looks,
     pub(super) scrub: Option<(PlayerId, i64)>,
     pub(super) recent: Vec<PathBuf>,
@@ -146,6 +147,8 @@ pub struct Workspace {
         Vec<vidcut_av::models::Need>,
     )>,
     pub(super) ducking: super::ducking::DuckingUi,
+    pub(super) track_dynamics: super::track_dynamics::TrackDynamicsUi,
+    pub(super) track_equalizer: super::track_equalizer::TrackEqualizerUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
     pub(super) cache_manager: super::cache_manager::CacheManager,
@@ -207,6 +210,7 @@ impl Workspace {
             inspector: Default::default(),
             title_thumbs: Default::default(),
             effects_tab: Default::default(),
+            effects_search: Default::default(),
             looks: Default::default(),
             scrub: None,
             recent: recent_projects(),
@@ -255,6 +259,8 @@ impl Workspace {
             isolation: Default::default(),
             models_asking: None,
             ducking: Default::default(),
+            track_dynamics: Default::default(),
+            track_equalizer: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
             cache_manager: Default::default(),
@@ -278,7 +284,10 @@ impl Workspace {
         if self.project().is_none()
             && matches!(
                 panel,
-                GuiPanel::QuickExport | GuiPanel::Mixer | GuiPanel::SelectTool
+                GuiPanel::QuickExport
+                    | GuiPanel::Mixer
+                    | GuiPanel::SelectTool
+                    | GuiPanel::EffectsSearch
             )
         {
             return;
@@ -320,7 +329,14 @@ impl Workspace {
             GuiPanel::ColorTool => self.show_color_tool(),
             GuiPanel::SmartReframe => self.show_reframe_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
+            GuiPanel::TitleText => {
+                if let Err(e) = self.type_title_text() {
+                    self.say(format!("Title Text: {e}"));
+                }
+            }
             GuiPanel::SelectTool => self.open_select_tool(),
+            GuiPanel::EffectsSearch => self.open_effects_search(),
+            GuiPanel::Equalizer | GuiPanel::Dynamics => {}
         }
     }
 
@@ -349,7 +365,10 @@ impl Workspace {
                 {
                     return Err("Open a project first".into());
                 }
+                live::GuiChange::Show(GuiPanel::TitleText) => self.type_title_text()?,
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
+                live::GuiChange::Equalizer(track) => self.open_track_equalizer(&track)?,
+                live::GuiChange::Dynamics(track) => self.open_track_dynamics(&track)?,
                 live::GuiChange::Close(panel) => self.close_panel(panel),
                 live::GuiChange::Page(Page::Effects | Page::Color | Page::Export)
                     if self.project().is_none() =>
@@ -358,6 +377,7 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
+                live::GuiChange::Layer(layer) => self.set_layer(layer)?,
                 live::GuiChange::Palette(palette) => {
                     self.effects_page.palette = palette;
                     self.effects_page.window_name = None;
@@ -366,6 +386,9 @@ impl Workspace {
                 live::GuiChange::Window(w) => self.effects_page.window = w,
                 live::GuiChange::QueueJobs(jobs) => self.select_queue_jobs(jobs)?,
                 live::GuiChange::JobDetails(on) => self.export.job_details = on,
+                live::GuiChange::Clips(on) => self.export.hide_clips = !on,
+                live::GuiChange::ClipLabel(label) => self.export.clip_label = label,
+                live::GuiChange::EditJob(job) => self.set_edit_job(job)?,
                 live::GuiChange::Nodes(nodes, active) => self.pick_nodes(nodes, active)?,
                 live::GuiChange::Element(e) => self.effects_page.element = e,
                 live::GuiChange::GradeNodes(nodes, current) => {
@@ -441,7 +464,11 @@ impl Workspace {
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
             GuiPanel::SmartReframe => self.timeline.picture_grab.reframe = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
+            GuiPanel::TitleText => self.stop_title_text(),
             GuiPanel::SelectTool => self.close_select_tool(),
+            GuiPanel::EffectsSearch => self.close_effects_search(),
+            GuiPanel::Equalizer => self.close_track_equalizer(),
+            GuiPanel::Dynamics => self.close_track_dynamics(),
         }
     }
 
@@ -489,13 +516,18 @@ impl Workspace {
             ),
             (GuiPanel::SmartReframe, self.reframe_shown()),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
+            (GuiPanel::TitleText, self.typing_title_text()),
             (GuiPanel::SelectTool, self.select_tool_open()),
+            (GuiPanel::EffectsSearch, self.effects_search_open()),
+            (GuiPanel::Equalizer, self.track_equalizer_open()),
+            (GuiPanel::Dynamics, self.track_dynamics_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
         live::GuiState {
             page,
             grade: self.effects_page.grading,
+            layer: self.shown_layer(),
             palette: self.effects_page.palette,
             primaries: self.effects_page.primaries,
             window: self.effects_page.window,
@@ -533,6 +565,9 @@ impl Workspace {
                 .collect(),
             jobs: self.export.selected.clone(),
             job_details: self.export.job_details,
+            clips: !self.export.hide_clips,
+            clip_label: self.export.clip_label,
+            edit_job: self.export.editing.clone(),
         }
     }
 
@@ -1132,7 +1167,6 @@ impl Workspace {
                     .silence
                     .as_ref()
                     .map(|d| (d.can_undo(), d.can_redo()));
-                let export = self.effects_page.page == Page::Export;
                 let (undo, redo) = match stripes {
                     Some((u, r)) => (
                         u.then(|| "Stripe Change".to_string()),
@@ -1142,7 +1176,7 @@ impl Workspace {
                 };
                 if ui
                     .add_enabled(
-                        undo.is_some() && !export,
+                        undo.is_some(),
                         egui::Button::new(named("Undo", &undo)).shortcut_text(
                             self.snap.bindings.first(Action::Undo).unwrap_or_default(),
                         ),
@@ -1156,7 +1190,7 @@ impl Workspace {
                 }
                 if ui
                     .add_enabled(
-                        redo.is_some() && !export,
+                        redo.is_some(),
                         egui::Button::new(named("Redo", &redo)).shortcut_text(
                             self.snap.bindings.first(Action::Redo).unwrap_or_default(),
                         ),
@@ -1168,10 +1202,11 @@ impl Workspace {
                         None => self.send("history.redo", json!({})),
                     }
                 }
-                ui.add_enabled_ui(self.snap.project.is_some() && !export, |ui| {
+                ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
                     ui.menu_button("History", |ui| self.history_menu(ui));
                 });
                 ui.separator();
+                let export = self.effects_page.page == Page::Export;
                 let clips = self.snap.selection.clips.clone();
                 let pasted = !clips.is_empty() && self.snap.copied_clip.is_some();
                 let paste = egui::Button::new("Paste Attributes…").shortcut_text(
@@ -1494,6 +1529,7 @@ impl Workspace {
             || self.sync_clips.open
             || self.preferences.capturing()
             || self.select_tool_open()
+            || self.effects_search_open()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {
@@ -1611,6 +1647,9 @@ impl Workspace {
             self.effects_keys(&fired, &input);
             self.undo_keys(&fired);
             return;
+        }
+        if fired.struck(Action::EffectsSearch) {
+            self.open_effects_search();
         }
         let viewer = self.snap.viewer;
         let id = PlayerId::of(viewer);
@@ -1833,16 +1872,14 @@ impl Workspace {
         }
         let lift = fired.pressed(Action::Lift);
         if fired.pressed(Action::Delete) || lift {
-            if self.pool_focus {
+            if self.pool_takes_keys() {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
             } else if !self.delete_editor_keys() && !self.delete_keys() {
                 self.delete_key(lift);
             }
         }
-        if self.effects_page.page != Page::Export {
-            self.undo_keys(&fired);
-        }
+        self.undo_keys(&fired);
         if fired.pressed(Action::Import) {
             self.import_media();
         }
@@ -1900,7 +1937,11 @@ impl Workspace {
         }
         let all = fired.pressed(Action::SelectAll);
         let nothing = fired.pressed(Action::SelectNothing);
-        if (all || nothing) && self.pool_focus {
+        let (all, nothing) = match (all || nothing) && self.select_editor_keys(all) {
+            true => (false, false),
+            false => (all, nothing),
+        };
+        if (all || nothing) && self.pool_takes_keys() {
             let media: Vec<String> = match self.project() {
                 Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)
                     .iter()
@@ -2265,10 +2306,13 @@ impl Workspace {
         self.models_prompt(&ctx);
         self.motion_prompt(&ctx);
         self.ducking_windows(&ctx);
+        self.track_dynamics_window(&ctx);
+        self.track_equalizer_window(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);
         self.cache_manager_window(&ctx);
         self.sync_clips_window(&ctx);
+        self.effects_search_window(&ctx);
         self.attributes_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
@@ -2362,6 +2406,15 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))
             });
+        if color && !self.export.hide_clips {
+            egui::Panel::bottom("color-clips")
+                .resizable(false)
+                .exact_size(super::thumbnail_timeline::CLIPS_HEIGHT)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.thumbnail_timeline(ui))
+                });
+        }
         if self.show_mixer {
             egui::Panel::right("mixer")
                 .resizable(true)

@@ -93,14 +93,20 @@ pub enum GuiChange {
     Target(String),
     Timeline(TimelineOptions),
     Show(GuiPanel),
+    Equalizer(String),
+    Dynamics(String),
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
+    Layer(usize),
     Palette(GradePalette),
     Primaries(PrimariesView),
     Window(usize),
     QueueJobs(Vec<String>),
     JobDetails(bool),
+    Clips(bool),
+    ClipLabel(vidcut_core::request::ClipLabel),
+    EditJob(Option<String>),
     Nodes(Vec<String>, bool),
     Element(u8),
     GradeNodes(Vec<u32>, Option<u32>),
@@ -174,6 +180,7 @@ pub struct TimelineState {
 pub struct GuiState {
     pub page: Page,
     pub grade: GradeLevel,
+    pub layer: usize,
     pub palette: GradePalette,
     pub primaries: PrimariesView,
     pub window: usize,
@@ -195,6 +202,9 @@ pub struct GuiState {
     pub windows: Vec<GuiPanel>,
     pub jobs: Vec<String>,
     pub job_details: bool,
+    pub clips: bool,
+    pub clip_label: vidcut_core::request::ClipLabel,
+    pub edit_job: Option<String>,
 }
 
 pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
@@ -358,7 +368,7 @@ pub(crate) enum Msg {
     },
     JobPlanned {
         id: String,
-        outputs: Vec<(PathBuf, i64)>,
+        outputs: Vec<JobOutput>,
     },
     JobProgress {
         id: String,
@@ -1903,11 +1913,13 @@ impl Live {
                 Err(Error::invalid(format!("{busy} renders now; stop it first"))),
             );
         }
-        if let Request::RenderAdd(params) = &envelope.request
+        if let Request::RenderAdd(params) | Request::RenderUpdate { export: params, .. } =
+            &envelope.request
             && let Some(open) = &self.project
         {
             let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
-            let files = match crate::queue::existing(open.project(), params, &proxies) {
+            let updated = crate::queue::updated(&envelope.request);
+            let files = match crate::queue::existing(open.project(), updated, params, &proxies) {
                 Ok(f) => f,
                 Err(e) => return self.finish(job, Err(e)),
             };
@@ -2116,14 +2128,33 @@ impl Live {
             }));
         }
         if let Request::GradeAutoColor { .. } = &envelope.request {
-            let looks = vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead);
+            let use_legacy =
+                crate::preferences::load().is_ok_and(|p| p.color.use_legacy_auto_color);
+            let looks =
+                vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead, use_legacy);
             if looks.is_empty() {
                 return None;
             }
             return Some(plain(move || {
                 use vidcut_core::Env;
-                for plan in &looks {
-                    AvEnv::new().auto_balance(plan)?;
+                for (plan, legacy) in &looks {
+                    AvEnv::new().auto_balance(plan, *legacy)?;
+                }
+                Ok(())
+            }));
+        }
+        if let Request::GradeMaskClick { .. }
+        | Request::GradeMaskSet { .. }
+        | Request::GradeMaskClear { .. } = &envelope.request
+        {
+            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                let env = AvEnv::new();
+                for need in &looks {
+                    vidcut_core::editor::mask_made(&env, need)?;
                 }
                 Ok(())
             }));
@@ -2283,6 +2314,7 @@ impl Live {
     fn rendering(&self, request: &Request) -> Option<String> {
         let gone = match request {
             Request::RenderRemove { jobs } => jobs.to_vec(),
+            Request::RenderUpdate { job, .. } => vec![job.clone()],
             Request::RenderClear { all } => {
                 let p = self.project.as_ref()?.project();
                 (p.queue.iter())
@@ -2575,7 +2607,7 @@ impl Live {
         }
     }
 
-    fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
+    fn job_planned(&mut self, id: String, outputs: Vec<JobOutput>) {
         if let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
             .find(|j| j.id == id)
@@ -3110,12 +3142,34 @@ impl Live {
                 parade,
                 vectorscope,
                 scale,
+                video_levels,
+                waveform_mode,
+                waveform_red,
+                waveform_green,
+                waveform_blue,
+                parade_mode,
+                skin_tone,
+                histogram,
+                histogram_mode,
+                chromaticity,
+                chromaticity_mode,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
                     parade,
                     vectorscope,
                     scale,
+                    video_levels,
+                    waveform_mode,
+                    waveform_red,
+                    waveform_green,
+                    waveform_blue,
+                    parade_mode,
+                    skin_tone,
+                    histogram,
+                    histogram_mode,
+                    chromaticity,
+                    chromaticity_mode,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {
@@ -3583,7 +3637,21 @@ impl Live {
                 self.renderer.quit();
                 Step::Now(Ok(answer(Value::Null)))
             }
-            Request::GuiShow { panel } => {
+            Request::GuiShow {
+                panel: GuiPanel::Equalizer,
+                track,
+            } => match track {
+                Some(t) => self.gui_change(vec![GuiChange::Equalizer(t)], |s| json!(s)),
+                None => Step::Now(Err(Error::usage("give the track of the equalizer"))),
+            },
+            Request::GuiShow {
+                panel: GuiPanel::Dynamics,
+                track,
+            } => match track {
+                Some(t) => self.gui_change(vec![GuiChange::Dynamics(t)], |s| json!(s)),
+                None => Step::Now(Err(Error::usage("give the track of the dynamics"))),
+            },
+            Request::GuiShow { panel, .. } => {
                 self.gui_change(vec![GuiChange::Show(panel)], |s| json!(s))
             }
             Request::GuiClose { panel } => {
@@ -3592,20 +3660,30 @@ impl Live {
             Request::GuiPage {
                 page,
                 grade,
+                layer,
                 palette,
                 primaries,
                 window,
                 jobs,
                 job_details,
+                clips,
+                clip_label,
+                edit_job,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
+                    .chain(layer.map(GuiChange::Layer))
                     .chain(palette.map(GuiChange::Palette))
                     .chain(primaries.map(GuiChange::Primaries))
                     .chain(window.map(GuiChange::Window))
                     .chain(jobs.map(GuiChange::QueueJobs))
                     .chain(job_details.map(GuiChange::JobDetails))
+                    .chain(clips.map(GuiChange::Clips))
+                    .chain(clip_label.map(GuiChange::ClipLabel))
                     .collect();
                 changes.push(GuiChange::Page(page));
+                if let Some(job) = edit_job {
+                    changes.push(GuiChange::EditJob(Some(job).filter(|j| !j.is_empty())));
+                }
                 self.gui_change(changes, |s| json!(s))
             }
             Request::GuiNodes {
@@ -3901,6 +3979,9 @@ impl Live {
             | Request::EditDetectSceneCuts { .. }
             | Request::GradeAutoColor { .. }
             | Request::EditCloseUp { .. }
+            | Request::GradeMaskClick { .. }
+            | Request::GradeMaskSet { .. }
+            | Request::GradeMaskClear { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
@@ -5993,6 +6074,9 @@ fn runs_long(r: &Request) -> bool {
         | Request::EditDetectSceneCuts { .. }
         | Request::GradeAutoColor { .. }
         | Request::MotionFind { .. }
+        | Request::GradeMaskClick { .. }
+        | Request::GradeMaskSet { .. }
+        | Request::GradeMaskClear { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
         | Request::PictureReframe { .. }

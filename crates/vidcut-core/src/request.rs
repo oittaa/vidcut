@@ -13,8 +13,8 @@ use crate::model::{
     EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType,
-    Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
+    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PictureTool, PictureTransition,
+    PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
     SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
     TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
@@ -1542,6 +1542,10 @@ pub enum Request {
         ripple: Option<bool>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Where the Transform, Crop and Composite keyframes go. Default:
+        /// `maintain`.
+        #[serde(default)]
+        keyframes: KeyTiming,
         /// Download the model of the Retime Process that the clips then use,
         /// if this computer doesn't have it yet, checked against its SHA-256.
         /// Without it, an export asks for it.
@@ -1703,7 +1707,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1742,6 +1746,26 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         duck: Option<Option<DuckSet>>,
+        /// The track's Dynamics: each field given replaces its own. A track
+        /// starts with none, and its sound plays as with each module off.
+        /// `{}` puts on the usual ones, with each module off. null takes
+        /// them off with their settings.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        dynamics: Option<Option<Box<TrackDynamicsSet>>>,
+        /// The track's equalizer: each field given replaces its own. A
+        /// track starts with none, and its sound plays as with the
+        /// equalizer off. `{}` turns it on, flat. null takes it off with
+        /// the usual values.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        equalizer: Option<Option<TrackEqualizerSet>>,
         /// Download what this computer doesn't have yet: Voice Isolation's
         /// model, or the speech detector of ducking by speech, each checked
         /// against its SHA-256. Without it, a missing file is an error that
@@ -1986,7 +2010,7 @@ pub enum Request {
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. On a
     /// title, position, zoom and rotation are those of its text, and a
-    /// scroll's text takes only position. A title's zoom is one number. The
+    /// scroll's text takes only position. The
     /// handles of its position keys bend its path. The other values of a
     /// title are those of its clip's picture. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
@@ -2106,6 +2130,18 @@ pub enum Request {
     /// `keyframes.copy` does, then remove them.
     #[serde(rename = "keyframes.cut")]
     KeyframesCut {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
+    /// Reverse Keyframes: run keyframes of `clip` backward over their span.
+    /// Each one goes as far from the last as it was from the first, with
+    /// its value. Its In and Out handles change places, and Ease In and
+    /// Ease Out too. It takes the place of a keyframe there. `keys` picks
+    /// as in `keyframes.copy`. Without `keys`, every keyframe of the clip.
+    /// Returns the `keyframes` with their clip, value and source frame.
+    #[serde(rename = "keyframes.reverse")]
+    KeyframesReverse {
         clip: ClipRef,
         #[serde(default)]
         keys: Option<Vec<KeyPicks>>,
@@ -2644,9 +2680,10 @@ pub enum Request {
         /// usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
-        /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
+        /// How much larger its text is drawn, from 1/4 to 4: one number for
+        /// both ways, or `[x, y]` across and down. Default: 1.
         #[serde(default)]
-        zoom: Option<f64>,
+        zoom: Option<OneOrMany<f64>>,
         /// Degrees turned counterclockwise. Default: 0.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2697,10 +2734,14 @@ pub enum Request {
         /// from -3 to 5 down, or `[]` for the kind's usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
-        /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
-        /// size.
+        /// How much larger its text is drawn, from 1/4 to 4: one number for
+        /// both ways, or `[x, y]` across and down. 1 for the usual size.
         #[serde(default)]
-        zoom: Option<f64>,
+        zoom: Option<OneOrMany<f64>>,
+        /// The Zoom link: on or off. Off, Zoom X and Zoom Y change apart in
+        /// the Title section. It changes no zoom.
+        #[serde(default)]
+        zoom_link: Option<bool>,
         /// Degrees turned counterclockwise; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
@@ -2708,8 +2749,8 @@ pub enum Request {
         /// opacity goes to the clip's Composite.
         #[serde(default)]
         look: Option<String>,
-        /// The line of a lower third that takes `anchor`, `position`, `zoom`
-        /// and `rotation`. The two lines then go apart. Without it, the two
+        /// The line of a lower third that takes `anchor`, `position`, `zoom`,
+        /// `zoom_link` and `rotation`. The two lines then go apart. Without it, the two
         /// lines take `position`, `zoom` and `rotation` together until they
         /// go apart, then the lower line alone. Not with `kind` or `look`.
         #[serde(default)]
@@ -3022,6 +3063,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// With `at`, each corrector gives the values that the picture gets
         /// at that time, and no keyframes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3048,6 +3093,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the node, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3066,7 +3115,7 @@ pub enum Request {
     /// does, and the nodes and their links stay. With `node` or
     /// `keep_nodes`, the keyframes stay, and the values go back where
     /// `grade.set` changes them. The palette `primaries` keeps the Auto
-    /// Color tool of the corrector.
+    /// Color tool of the corrector. Each acts on one node stack layer.
     #[serde(rename = "grade.clear")]
     GradeClear {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3074,10 +3123,19 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         keep_nodes: bool,
+        /// Reset All Node Stack Layers: each layer of the clip grade goes
+        /// back to one corrector at its usual values, with no keyframes.
+        /// Not with `timeline`, `node`, `keep_nodes` or `layer`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all_layers: bool,
         /// With `node`: only the values of this palette go back. Left out:
         /// all of them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3102,6 +3160,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3114,22 +3176,22 @@ pub enum Request {
         /// for a quarter point.
         points: f64,
     },
-    /// Auto Color: balance the blacks and the whites of a clip from one
-    /// frame. The analysis reads that frame after the corrector, with its
-    /// Lift and Gain at their usual values. Each channel gets its black
-    /// point from the darkest pixels and its white point from the brightest.
-    /// The master gets the luma of these points. New Lift and Gain of red,
-    /// green, blue and the master map them to 0 and 1, in place of all
-    /// earlier Lift and Gain values. Undo takes them back.
-    ///
-    /// With `tool`, the result goes to the Auto Color tool of the corrector
-    /// in place of its Lift and Gain, and the tool turns on. `grade.set`
-    /// with `auto_color_on` turns the tool off and on. `grade.clear` with
-    /// `auto_color` removes it.
+    /// Auto Color: balance the color and exposure of a clip from one
+    /// frame. By default it uses the neural model on the frame entering the
+    /// corrector and writes its result to the Auto Color tool, leaving
+    /// Lift and Gain untouched. With `color.use_legacy_auto_color` on and
+    /// `tool` off, it uses the earlier Lift and Gain method on the frame
+    /// after the corrector with Lift and Gain reset. Undo takes the change
+    /// back. `grade.set` with `auto_color_on` turns the Auto Color tool off
+    /// and on, and `grade.clear` with `auto_color` removes it.
     #[serde(rename = "grade.auto_color")]
     GradeAutoColor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3151,12 +3213,17 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         add: GradeAdd,
         /// The node it goes beside: for `serial`, `before`, `parallel`,
-        /// `layer` and `outside`.
+        /// `layer`, `outside` and `splitter_combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
-        /// Its place in the node editor, for `corrector`.
+        /// Its place in the node editor, for `corrector`, `key_mixer`,
+        /// `splitter` and `combiner`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
         /// The first window of this kind of the new corrector is on.
@@ -3179,6 +3246,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extract: bool,
@@ -3187,10 +3258,12 @@ pub enum Request {
     /// grade) to an input of `node` (0: the output of the grade), in place of
     /// what was there. Without `from`, the input takes nothing. Input 0 of a
     /// corrector is its RGB input, and input 1 is its key input. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. The
-    /// inputs of a key mixer are key inputs. A key on an RGB input is a gray
-    /// picture: R, G and B are the key. A picture on a key input gives its
-    /// Rec. 709 luma as the key. A link that makes a loop is an error.
+    /// an `input` one past the last, or no `input`, adds an input. A
+    /// combiner has inputs 0, 1 and 2: no `input` gives the first input with
+    /// no link. The inputs of a key mixer are key inputs. A key on an RGB
+    /// input is a gray picture: R, G and B are the key. A picture on a key
+    /// input gives its Rec. 709 luma as the key. A splitter gives no key. A
+    /// link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3198,6 +3271,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         /// The input of `node`, from 0. Left out: input 0 of a corrector or
         /// of the output, and a new input of a mixer.
@@ -3209,6 +3286,10 @@ pub enum Request {
         /// Needs `from`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
+        /// The RGB output of the splitter `from`: 0 red, 1 green, 2 blue.
+        /// Left out: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<u8>,
     },
     /// Remove one input with no link from a mixer of the grade of a clip,
     /// or with `timeline` of the timeline grade (Remove One Input). The
@@ -3221,6 +3302,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
     },
     /// Copy the settings of a corrector of the grade of a clip, or with
@@ -3235,6 +3320,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
     },
     /// Give a corrector of the grade of clips, or with `timeline` of the
@@ -3248,6 +3337,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of clips.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<CopiedNode>,
@@ -3264,6 +3357,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The area for the places of the nodes, `[[x, y], [x, y]]` from
         /// its top left to its bottom right, in node places. The columns go
         /// evenly from its left to its right, and the rows from its top to
@@ -3284,6 +3381,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         node: u32,
         with: u32,
     },
@@ -3294,7 +3395,8 @@ pub enum Request {
     /// A new keyframe holds the values that the picture gets on its frame,
     /// with the `start` and `end` of the project's `dynamics_profile`. A
     /// keyframe already on that frame takes the `kind`. Returns the `frame`
-    /// and the `nodes` that have the keyframe.
+    /// and the `nodes` that have the keyframe. With `edl`, returns the
+    /// `frames` of the marks.
     #[serde(rename = "grade.keys.add")]
     GradeKeysAdd {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3302,6 +3404,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector or the key mixer, from 1. Left out:
         /// each corrector and each key mixer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3312,6 +3418,12 @@ pub enum Request {
         /// Usual: `dynamic`.
         #[serde(default)]
         kind: GradeKeyKind,
+        /// With `timeline`, in place of `at` and `kind`: Add EDL Marks on
+        /// Tracks. A Static keyframe goes on each frame where a clip starts
+        /// or ends on a video track, after the first frame and before the
+        /// end. A node that has a keyframe on that frame keeps it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edl: bool,
     },
     /// Change the kind, the `start` or the `end` of keyframes of the grade
     /// of a clip, or with `timeline` of the timeline grade: those on the
@@ -3325,6 +3437,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3355,6 +3471,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3381,6 +3501,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3389,6 +3513,10 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<OneOrMany<TimeSpec>>,
+        /// In place of `frames` and `at`: Delete EDL Marks on Tracks. Only
+        /// the marks of `grade.keys.add` with `edl` go.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edl: bool,
     },
     /// Add a window at its usual values to a corrector of the grade of a
     /// clip, or with `timeline` of the timeline grade. It goes last in the
@@ -3400,6 +3528,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         shape: WindowKind,
@@ -3414,6 +3546,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3478,6 +3614,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3494,6 +3634,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3516,6 +3660,10 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The window that takes the copy, from 0. Needed without
@@ -3541,10 +3689,110 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
         window: usize,
+    },
+    /// Magic Mask: click on a person or a thing in the frame, to add it to
+    /// the mask of a corrector of the grade of a clip. A negative click
+    /// takes the part under it away. The model reads the picture that comes
+    /// into the corrector on that frame. A positive click outside the mask
+    /// starts a new subject. A click on the mask of a subject changes that
+    /// subject. A negative click outside the mask changes the last subject
+    /// of the frame. Returns the `subject` and the number of the `click`.
+    #[serde(rename = "grade.mask.click")]
+    GradeMaskClick {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame of the click. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The place of the click, `[x, y]`, from 0 to 1 across and down the
+        /// frame.
+        place: [f64; 2],
+        /// A negative click: it takes the part under it away from its
+        /// subject. Left out: a positive click, which adds the part.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        negative: bool,
+        /// The subject of the click, from 1, in place of the subject under
+        /// it. One more than the last subject starts a new subject.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<u32>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256. Without it, a missing
+        /// model is an error that tells its size.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Change the Magic Mask of a corrector of the grade of a clip: Invert
+    /// Mask, or one click. The masks of the changed click's subject come
+    /// again from its clicks.
+    #[serde(rename = "grade.mask.set")]
+    GradeMaskSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// Invert Mask: the mask is where the subjects are not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invert: Option<bool>,
+        /// The number of the click that changes, from 1, in the order of the
+        /// clicks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click: Option<usize>,
+        /// With `click`: the click on or off.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+        /// With `click`: the new place of the click, `[x, y]`, from 0 to 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        place: Option<[f64; 2]>,
+        /// With `click`: a negative or a positive click.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        negative: Option<bool>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Delete one click of the Magic Mask of a corrector of the grade of a
+    /// clip, or with no `click` all the clicks. The clicks after it move up.
+    /// The mask of its subject comes again from the clicks that stay.
+    #[serde(rename = "grade.mask.clear")]
+    GradeMaskClear {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The number of the click to delete, from 1. Left out: all the
+        /// clicks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click: Option<usize>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256.
+        #[serde(default)]
+        download: bool,
     },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences, compound clips and adjustment clips.
@@ -3960,10 +4208,23 @@ pub enum Request {
     /// `render.start`. The range is fixed now, in frames of the timeline.
     /// The job goes at the bottom. Returns its `id`. An output file that is
     /// there is an error, unless `overwrite`; then the render writes over it.
-    /// A change to the queue is saved in the project, but it is not an undo
-    /// step.
+    /// Each change of the queue is an undo step. The status that a render
+    /// records is not.
     #[serde(rename = "render.add")]
     RenderAdd(ExportParams),
+    /// Change a job of the render queue, as Update Job after its pencil on
+    /// the Export page does: the job gets the export and the range that
+    /// `render.add` takes, of the open timeline. It keeps its place, its
+    /// name and its status. A job that renders is refused. An output file
+    /// that is there is an error, unless `overwrite`. A dry run returns the
+    /// `existing` files.
+    #[serde(rename = "render.update")]
+    RenderUpdate {
+        /// The job, like `r1`.
+        job: String,
+        #[serde(flatten)]
+        export: ExportParams,
+    },
     /// The jobs of the render queue, from the top: the `id`, `timeline`,
     /// `export` and `status` of each.
     #[serde(rename = "render.list")]
@@ -4200,9 +4461,17 @@ pub enum Request {
     PreferencesReset {},
     /// The keyboard shortcuts in force, one action each, with a few plain
     /// words where the action's name doesn't say what it does (spec §11).
-    /// Ctrl and Alt are Cmd and Option on macOS.
+    /// Ctrl and Alt are Cmd and Option on macOS. `level` names where the
+    /// key of an action works: `app`, `transcription`, `effects` or
+    /// `color`. `conflicts` gives the keys of an action that another action
+    /// of its level also has, from an imported key file.
     #[serde(rename = "keys.list")]
-    KeysList {},
+    KeysList {
+        /// Only the actions of this key, like `Ctrl+B`, at each level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<String>")]
+        key: Option<crate::shortcuts::Combo>,
+    },
     /// Give an action other keys in place of the ones it has (spec §11). A
     /// key belongs to one action: a key that another action has is refused,
     /// and the refusal names that action. A running GUI follows at once.
@@ -4217,13 +4486,82 @@ pub enum Request {
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,
     },
-    /// Put default keys back. A default key that another action has now is
-    /// refused, and the refusal names that action.
+    /// Put the keys of the key set in force back (`keys.sets`). A key that
+    /// another action has now is refused, and the refusal names that action.
     #[serde(rename = "keys.reset")]
     KeysReset {
         /// The action, as `keys.list` names it. Without it, every action.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         action: Option<crate::shortcuts::Action>,
+    },
+    /// The key sets (spec §11): vidcut's own keys, and the sets you saved
+    /// or imported (`~/.config/vidcut/keys/NAME.toml`, on Windows in
+    /// `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`). `set` names the set that the keys in force come
+    /// from, and `changed` tells if they differ from it. Each set of yours
+    /// has a `base`: the built-in set that it changes. A set file that
+    /// can't be read is left out and listed in `refused` with why.
+    #[serde(rename = "keys.sets")]
+    KeysSets {},
+    /// Put a key set in force. Its keys replace the keys in force, with
+    /// their changes. A running GUI follows at once.
+    #[serde(rename = "keys.use")]
+    KeysUse {
+        /// The set's name, as `keys.sets` gives it; names match whatever
+        /// their case.
+        set: String,
+    },
+    /// Save the keys in force as a key set of yours. That set is then in
+    /// force. Built-in sets can't be replaced.
+    #[serde(rename = "keys.save")]
+    KeysSave {
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
+        name: String,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
+        /// The keys to save in place of the keys in force: each action whose
+        /// keys differ from vidcut's own set, with its keys, like
+        /// `{"play_forward": ["Ctrl+F12"]}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Option<std::collections::BTreeMap<String, Vec<String>>>")]
+        keys: Option<crate::shortcuts::Custom>,
+        /// The set that the keys come from, as `keys.sets` names it. Without
+        /// it, the set in force. The new set keeps that set's `base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
+    },
+    /// Delete one of your key sets. Built-in sets can't be deleted. When the
+    /// set is in force, vidcut's own set is put in force.
+    #[serde(rename = "keys.delete")]
+    KeysDelete { name: String },
+    /// Write a key set to a key file, for another computer or another
+    /// editor (`keys.import`). The first line names the set's `base`. Then
+    /// each command whose keys differ from the base has a line like
+    /// `editUndo := Ctrl+Z`. An action without such a command has a line
+    /// like `#vidcut ducking := Alt+D`. A built-in set gives only the first
+    /// line. A file at the path is replaced.
+    #[serde(rename = "keys.export")]
+    KeysExport {
+        /// The set's name, as `keys.sets` gives it.
+        set: String,
+        path: PathBuf,
+    },
+    /// Add a key set from a key file, as `keys.export` writes it, and put
+    /// it in force. The commands that vidcut does not have are listed in
+    /// `unknown_commands`. The keys that vidcut can't use, such as keypad
+    /// keys, are listed in `unusable_keys`. A file can give one key to two
+    /// actions of one level: both keep it, and `conflicts` lists it.
+    #[serde(rename = "keys.import")]
+    KeysImport {
+        path: PathBuf,
+        /// The set's name. Without it, the file's name without its
+        /// extension.
+        #[serde(default)]
+        name: Option<String>,
+        /// Replace your set of that name.
+        #[serde(default)]
+        overwrite: bool,
     },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
@@ -4430,9 +4768,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
     },
-    /// The scopes of the viewer: a waveform, a parade and a vectorscope of
-    /// its picture, in the timeline color space, and the scale of the
-    /// waveform and the parade. Stored in preferences, not the project. A
+    /// The scopes of the viewer: a waveform, a parade, a vectorscope, a
+    /// histogram and a CIE chromaticity scope of its picture, in the
+    /// timeline color space, and the scale of the waveform, the parade and
+    /// the histogram. Stored in preferences, not the project. A
     /// field that is left out stays as it is. With no fields, tells which
     /// scopes are on.
     #[serde(rename = "viewer.scopes")]
@@ -4445,6 +4784,38 @@ pub enum Request {
         vectorscope: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<crate::preferences::ScopeScale>,
+        /// Video Level Scopes: black at code 64 and white at code 940.
+        /// `false` is Data Level Scopes, the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_levels: Option<bool>,
+        /// What the Waveform shows: `y`, `cbcr` or `rgb`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_mode: Option<crate::preferences::WaveformMode>,
+        /// In RGB mode, the Waveform shows red.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_red: Option<bool>,
+        /// In RGB mode, the Waveform shows green.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_green: Option<bool>,
+        /// In RGB mode, the Waveform shows blue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform_blue: Option<bool>,
+        /// What the Parade shows side by side: `rgb`, `yrgb` or `ycbcr`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parade_mode: Option<crate::preferences::ParadeMode>,
+        /// The Vectorscope shows a line at the skin tone angle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_tone: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        histogram: Option<bool>,
+        /// The bands of the Histogram: `rgb` or `yrgb`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        histogram_mode: Option<crate::preferences::HistogramMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chromaticity: Option<bool>,
+        /// The graph of the CIE Chromaticity scope: `xy` or `uv`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chromaticity_mode: Option<crate::preferences::ChromaticityMode>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -4698,10 +5069,18 @@ pub enum Request {
     /// Color tool of node 1), the viewer's `smart_reframe` box (the
     /// `reference` that Reframe sends), `tools`, the viewer's row of
     /// Transform, Crop, Dynamic Zoom, Color, Smart Reframe and their
-    /// buttons, or `select_tool` (a tool to
-    /// add on the effects page). Answers what `gui.state` does.
+    /// buttons, `title_text` (the text of the selected title, or of the
+    /// topmost title at the playhead, to edit in place in the viewer),
+    /// `select_tool` (a tool to add on the effects page), `equalizer` (the
+    /// Equalizer window of `track`), or `dynamics` (the Dynamics window of
+    /// `track`). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
-    GuiShow { panel: GuiPanel },
+    GuiShow {
+        panel: GuiPanel,
+        /// The track of the `equalizer` or `dynamics` window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<String>,
+    },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
@@ -4715,6 +5094,10 @@ pub enum Request {
         /// The grade that the `color` page shows. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         grade: Option<GradeLevel>,
+        /// The node stack layer of the clip grade that the `color` page
+        /// shows, from 1. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The palette that the `color` page shows. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         palette: Option<GradePalette>,
@@ -4733,12 +5116,29 @@ pub enum Request {
         /// and frame rate, and the audio and the length. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_details: Option<bool>,
+        /// The Thumbnail timeline of the `export` page: a picture of each
+        /// clip of the video tracks, over the timeline. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<bool>,
+        /// The text under each picture of the Thumbnail timeline. Left out,
+        /// it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip_label: Option<ClipLabel>,
+        /// The job of the render queue that the Render Settings edit, as its
+        /// pencil does: they get the job's settings, and the timeline gets
+        /// its range. Update Job then changes the job. `""` stops, and the
+        /// job keeps its settings. A job is refused while jobs render. Left
+        /// out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edit_job: Option<String>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
     /// last one is the active node. An empty list selects none. Answers
     /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
+        /// Left out, no node is selected.
+        #[serde(default)]
         nodes: Vec<String>,
         /// False: no node is active, and the Inspector shows only the
         /// header of each node. A box select in the node editor does this.
@@ -4782,6 +5182,8 @@ pub enum Request {
     /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
+        /// Left out, the list is empty.
+        #[serde(default)]
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
         /// shows it, and a delete of the selected nodes keeps it. With an
@@ -4810,8 +5212,8 @@ pub enum Request {
     /// What only the GUI keeps: the page, the clip of the effects page, its
     /// nodes selected, its viewers and its playhead (`time`, in frames from
     /// the In), the
-    /// grade of the color page and its nodes selected (`grade_nodes`), the
-    /// edit points selected, the target track, the timeline's zoom and
+    /// grade of the color page, its node stack `layer` and its nodes
+    /// selected (`grade_nodes`), the edit points selected, the target track, the timeline's zoom and
     /// Timeline Options, the windows open, and the selected `jobs` of the
     /// render queue with `job_details`.
     #[serde(rename = "gui.state")]
@@ -5057,6 +5459,72 @@ pub struct GradeNodeChange {
     /// -1 to 1. Above 0 the blur is less high, and below 0 less wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_input_blur_ratio: Option<f64>,
+    /// The Hue Center of the HSL qualifier of a corrector, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_center: Option<f64>,
+    /// The Hue Width of the HSL qualifier, from 0 to 100. A width below half
+    /// the Hue Soft lowers the Hue Soft to 2 times the width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_width: Option<f64>,
+    /// The Hue Soft of the HSL qualifier, from 0 to 100. A soft above 2
+    /// times the Hue Width raises the Hue Width to half the soft.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_soft: Option<f64>,
+    /// The Hue Symmetry of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue_sym: Option<f64>,
+    /// The Sat Low of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_low: Option<f64>,
+    /// The Sat High of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_high: Option<f64>,
+    /// The Sat Low Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_low_soft: Option<f64>,
+    /// The Sat High Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat_high_soft: Option<f64>,
+    /// The Lum Low of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_low: Option<f64>,
+    /// The Lum High of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_high: Option<f64>,
+    /// The Lum Low Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_low_soft: Option<f64>,
+    /// The Lum High Soft of the HSL qualifier, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum_high_soft: Option<f64>,
+    /// The hue part of the HSL qualifier is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_hue: Option<bool>,
+    /// The saturation part of the HSL qualifier is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_sat: Option<bool>,
+    /// The luminance part of the HSL qualifier is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_lum: Option<bool>,
+    /// The key of the HSL qualifier is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_invert: Option<bool>,
+    /// The gain of the key of the qualifier in the key of the corrector,
+    /// from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_gain: Option<f64>,
+    /// The offset of the key of the qualifier in the key of the corrector,
+    /// from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_offset: Option<f64>,
+    /// The key of the qualifier, after its gain and offset, is turned over:
+    /// 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_key_invert: Option<bool>,
+    /// The key of the qualifier adds to the key of the windows. Off, it is
+    /// Matte: the key is where both keys are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier_mask: Option<bool>,
     /// The input of a key mixer, from 0, that the `mix_` values change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<u32>,
@@ -5077,6 +5545,10 @@ pub struct GradeNodeChange {
     /// Key Output of a corrector, and the kind and mode of a mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<bool>,
+    /// Auto-Keyframe of a corrector or a key mixer. On, a change on a frame
+    /// where the node has no keyframe first adds a Dynamic keyframe there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_key: Option<bool>,
 }
 
 /// A palette of a corrector on the Color page.
@@ -5088,8 +5560,11 @@ pub enum GradePalette {
     Primaries,
     /// The windows of the corrector.
     Window,
-    /// The Key Input and the Key Output, or the values of a key mixer.
+    /// The Key Input, the Qualifier controls and the Key Output, or the
+    /// values of a key mixer.
     Key,
+    /// The HSL qualifier of the corrector.
+    Qualifier,
 }
 
 /// How the Primaries palette shows the values of a corrector.
@@ -5143,6 +5618,14 @@ pub enum GradeAdd {
     Outside,
     /// A key mixer with two inputs that take nothing, at `place`.
     KeyMixer,
+    /// As `serial` after `node`: a splitter, a corrector on each of its
+    /// three outputs, and a combiner that joins the three correctors. The
+    /// returned `node` is the corrector of blue.
+    SplitterCombiner,
+    /// A splitter whose input takes nothing, at `place`.
+    Splitter,
+    /// A combiner whose three inputs take nothing, at `place`.
+    Combiner,
 }
 
 /// The channels of a printer point.
@@ -5163,6 +5646,17 @@ pub enum PrinterColor {
     Yellow,
     /// Red, green and blue.
     Master,
+}
+
+/// The text under each picture of the Thumbnail timeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipLabel {
+    /// The codec of the clip's video. A clip with no media shows its name.
+    #[default]
+    Codec,
+    /// The name of the clip.
+    Name,
 }
 
 /// What to export and how.
@@ -5266,6 +5760,11 @@ pub struct ExportParams {
     /// what would be downloaded.
     #[serde(default)]
     pub download: bool,
+    /// More files that the same render writes, each in a format of its own.
+    /// The first output is `output`. Not with `per_clip`,
+    /// `video.bypass_reencode` or two passes of a CPU encoder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more_outputs: Vec<crate::export::MoreOutput>,
 }
 
 /// How the speech to transcribe is found.
@@ -5342,14 +5841,16 @@ pub enum ClipAttribute {
     DialogueLeveler,
 }
 
-/// Where `clip.paste_attributes` puts the keyframes in each clip.
+/// Where `clip.paste_attributes` and `edit.change_speed` put the keyframes
+/// in each clip.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyTiming {
     /// The same frames from the start of the clip (Maintain Timing).
     #[default]
     Maintain,
-    /// The same part of the length of the clip (Stretch to Fit).
+    /// Stretch to Fit: in a paste, the same part of the length of the clip.
+    /// In a speed change, the same source frames.
     Stretch,
 }
 
@@ -5730,8 +6231,8 @@ pub enum KeyParam {
     /// lower third: both lines together, or the lower line when the lines
     /// are apart.
     TextPosition,
-    /// The zoom of a title's text, one number. On a lower third: as
-    /// `text_position`.
+    /// The zoom of a title's text, x and y, one keyframe for both. On a
+    /// lower third: as `text_position`.
     TextZoom,
     /// The rotation of a title's text in degrees. On a lower third: as
     /// `text_position`.
@@ -5754,6 +6255,35 @@ pub enum KeyParam {
     /// The Center Y of a Four Color Gradient, from -1 to 1. A number past an
     /// end takes that end.
     CenterY,
+    /// The offset of a title's shadow, x and y, one keyframe for both, as
+    /// fractions of the picture, right and down, from -4 to 4. The title needs
+    /// a `shadow`.
+    ShadowOffset,
+    /// The blur of a title's shadow, a whole number from 1 to 100. The title
+    /// needs a `shadow`.
+    ShadowBlur,
+    /// The opacity of a title's shadow, from 0 to 1 in steps of 0.01. The
+    /// title needs a `shadow`.
+    ShadowOpacity,
+    /// The outline width of a title's background, whole pixels of the
+    /// timeline from 0 to 30. The title needs a `shape`.
+    BackgroundOutlineWidth,
+    /// The width of a title's background, as a fraction of the picture width,
+    /// from 0 to 2. The title needs a `shape`.
+    BackgroundWidth,
+    /// The height of a title's background, as a fraction of the picture
+    /// height, from 0 to 2. The title needs a `shape`.
+    BackgroundHeight,
+    /// The corner radius of a title's background, as a fraction of the
+    /// picture height, from 0 to 1. The title needs a `shape`.
+    BackgroundCornerRadius,
+    /// The center of a title's background, x and y, one keyframe for both, as
+    /// fractions of the picture from the title's position, right and down,
+    /// from -4 to 4. The title needs a `shape`.
+    BackgroundCenter,
+    /// The opacity of a title's background, from 0 to 1 in steps of 0.01. The
+    /// title needs a `background`.
+    BackgroundOpacity,
     /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
     /// numbers are those of `effects.set`. One number of a color has a value
     /// of its own, for example `color_red`. A `position` or a `center` is one
@@ -5764,7 +6294,7 @@ pub enum KeyParam {
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 26] = [
+    pub const ALL: [KeyParam; 35] = [
         KeyParam::Volume,
         KeyParam::Pan,
         KeyParam::Position,
@@ -5791,7 +6321,46 @@ impl KeyParam {
         KeyParam::LowerRotation,
         KeyParam::CenterX,
         KeyParam::CenterY,
+        KeyParam::ShadowOffset,
+        KeyParam::ShadowBlur,
+        KeyParam::ShadowOpacity,
+        KeyParam::BackgroundOutlineWidth,
+        KeyParam::BackgroundWidth,
+        KeyParam::BackgroundHeight,
+        KeyParam::BackgroundCornerRadius,
+        KeyParam::BackgroundCenter,
+        KeyParam::BackgroundOpacity,
     ];
+
+    pub const STYLED: [(KeyParam, EffectValue); 9] = [
+        (KeyParam::ShadowOffset, EffectValue::ShadowOffset),
+        (KeyParam::ShadowBlur, EffectValue::ShadowBlur),
+        (KeyParam::ShadowOpacity, EffectValue::ShadowOpacity),
+        (
+            KeyParam::BackgroundOutlineWidth,
+            EffectValue::BackgroundOutlineWidth,
+        ),
+        (KeyParam::BackgroundWidth, EffectValue::BackgroundWidth),
+        (KeyParam::BackgroundHeight, EffectValue::BackgroundHeight),
+        (
+            KeyParam::BackgroundCornerRadius,
+            EffectValue::BackgroundCornerRadius,
+        ),
+        (KeyParam::BackgroundCenter, EffectValue::BackgroundCenter),
+        (KeyParam::BackgroundOpacity, EffectValue::BackgroundOpacity),
+    ];
+
+    pub fn style_value(self) -> Option<EffectValue> {
+        Self::STYLED
+            .into_iter()
+            .find_map(|(param, v)| (param == self).then_some(v))
+    }
+
+    pub fn of_style(v: EffectValue) -> Option<KeyParam> {
+        Self::STYLED
+            .into_iter()
+            .find_map(|(param, value)| (value == v).then_some(param))
+    }
 
     pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
         match self {
@@ -5867,6 +6436,9 @@ pub struct CopiedNode {
     /// As `key_input` of a grade node. Left out at its usual value.
     #[serde(default, skip_serializing_if = "crate::model::KeyInput::is_usual")]
     pub key_input: crate::model::KeyInput,
+    /// As `qualifier` of a grade node. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "crate::model::Qualifier::is_usual")]
+    pub qualifier: crate::model::Qualifier,
     /// As `windows` of a grade node. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::model::GradeWindow>,
@@ -6263,9 +6835,24 @@ pub enum GuiPanel {
     /// The viewer's Tools row: Transform, Crop, Dynamic Zoom, Color and
     /// Smart Reframe, the flips, Swap, the ease, Auto Color and Reset.
     Tools,
+    /// The text of a title, to edit in place in the viewer, with a caret at
+    /// its end: the first selected title at the playhead, else the topmost
+    /// title there. The Title section of the Inspector opens with it.
+    /// Typing changes the title as `titles.set` with `text` does, and
+    /// `gui.close` puts the change in.
+    TitleText,
     /// The Select Tool window of the effects page: it finds a tool by its
     /// name or its kind, and adds it as a click in the Effects Library does.
     SelectTool,
+    /// The Effects Search window: it finds an effect by its name or its group,
+    /// and adds it to the first selected clip with a picture.
+    EffectsSearch,
+    /// The Equalizer window of a track with sound: the switch, the Type,
+    /// the curve and the bands of its equalizer.
+    Equalizer,
+    /// The Dynamics window of a track with sound: the switch, the Make Up
+    /// gain and the Expander or Gate, Compressor and Limiter modules.
+    Dynamics,
 }
 
 /// Media tab sort orders.
@@ -6546,6 +7133,10 @@ pub struct TimelineSet {
     /// also clears its In and Out marks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::model::RenderRange>,
+    /// The clips that its Thumbnail timeline shows, e.g.
+    /// `{"kind": "clip_color", "color": "orange"}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_filter: Option<crate::model::ClipFilter>,
 }
 
 /// Settings of a timeline. The frame rate and drop-frame change only while
@@ -6672,6 +7263,12 @@ pub struct ProjectSet {
     /// from 0 to 10. Usual: 1 and 1.
     #[serde(default)]
     pub dynamics_profile: Option<crate::model::DynamicsProfile>,
+    /// The names of the node stack layers of each clip grade, layer 1
+    /// first: 1 to 8 names, which give the number of layers. A shorter
+    /// list keeps the grades of the layers that it drops. They do not act
+    /// until a longer list gives them back. Usual: `["L1"]`.
+    #[serde(default)]
+    pub node_stack_layers: Option<Vec<String>>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -6771,6 +7368,9 @@ pub struct NodeChange {
     /// How far a mask's edge moves out, from -1 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
+    /// How a mask joins its own mask with the masks on its effect mask input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_mode: Option<PaintMode>,
     /// Off, a mask is only a band about its edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<bool>,
@@ -6819,6 +7419,10 @@ pub struct NodeChange {
     /// background, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// On, a `normal` or a `screen` merge counts an alpha above 1 as 1
+    /// where the foreground covers the background.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp_coverage: Option<bool>,
     /// The width that the center of a merge is shown in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_width: Option<f64>,
@@ -6892,7 +7496,8 @@ pub struct NodeChange {
     /// the edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside_only: Option<bool>,
-    /// How the corners of the outline of the shading element are drawn.
+    /// How the corners of the outline of the shading element, or the sharp
+    /// corners of a rectangle mask whose edge moves out, are drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join_style: Option<JoinStyle>,
     /// What one border of the shading element goes around.
@@ -7638,9 +8243,10 @@ pub struct DialogueLevelerSet {
     pub output_gain_db: Option<f64>,
 }
 
-/// A change to a clip's compressor: each field given replaces its own, and
-/// the rest stay as they are. A new one is on: Threshold -15 dB, Ratio 2,
-/// Knee 0, Mix 0, Attack 1.4 ms, Hold 0, Release 93 ms and Makeup Gain 0.
+/// A change to a compressor: each field given replaces its own, and the
+/// rest stay as they are. A new one has Threshold -15 dB, Ratio 2, Knee 0,
+/// Mix 0, Attack 1.4 ms, Hold 0 and Release 93 ms. A clip's new one is on,
+/// with Makeup Gain 0. A track's new one is off.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CompressorSet {
@@ -7650,16 +8256,17 @@ pub struct CompressorSet {
     /// The level above which it compresses, in dB, from -50 to 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_db: Option<f64>,
-    /// The ratio of the input to the output, from 1 to 10.
+    /// The ratio of the input to the output, from 1.2 to 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
-    /// The width of the curve around the threshold, in dB, from 0 to 30.
+    /// How soft the curve is around the threshold, from 0 to 100.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub knee_db: Option<f64>,
-    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    pub knee: Option<f64>,
+    /// The share of the input in the result, from 0 to 100: 0 is all
+    /// compressed sound, and 100 is the input alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mix: Option<f64>,
-    /// How fast it starts to compress, in ms, from 0 to 100.
+    /// How fast it starts to compress, in ms, from 0.7 to 100.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attack_ms: Option<f64>,
     /// How long it keeps the reduction after the attack, in ms, from 0 to
@@ -7669,9 +8276,92 @@ pub struct CompressorSet {
     /// How fast it stops to compress, in ms, from 50 to 4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_ms: Option<f64>,
-    /// The gain after it, in dB, from 0 to 24.
+    /// A clip's gain of the compressed sound before the mix, in dB, from 0
+    /// to 24. A track's compressor
+    /// takes none: the Dynamics have `makeup_db`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub makeup_db: Option<f64>,
+}
+
+/// A change to a track's Dynamics: each field given replaces its own, and
+/// the rest stay as they are. New ones are on, with each module off and
+/// Make Up 0 dB.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackDynamicsSet {
+    /// The switch. Off keeps the settings, and the sound plays without
+    /// them. On brings them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The Expander or Gate, the first module.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expander: Option<ExpanderSet>,
+    /// The Compressor, after the Expander or Gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compressor: Option<CompressorSet>,
+    /// The Limiter, after the Compressor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limiter: Option<LimiterSet>,
+    /// The gain after the modules, in dB, from 0 to 20.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub makeup_db: Option<f64>,
+}
+
+/// A change to an Expander or Gate: each field given replaces its own. A
+/// new one is an expander, off, with Threshold -35 dB, Range 18 dB, Ratio
+/// 1.1, Attack 1.4 ms, Hold 0 and Release 93 ms.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExpanderSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// A gate: it lowers the level by 4 dB for each dB below the threshold,
+    /// and by 0.1 dB when it is open. False, an expander: by its ratio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<bool>,
+    /// The level below which it lowers the level, in dB, from -50 to 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
+    /// The most that it lowers the level, in dB, from 0 to 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_db: Option<f64>,
+    /// The expander's change of the output for each dB of the input below
+    /// the threshold, in dB, from 1.1 to 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f64>,
+    /// How fast it opens, in ms, from 0.5 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_ms: Option<f64>,
+    /// How long it stays open after the level falls, in ms, from 0 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// How fast it closes, in ms, from 50 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_ms: Option<f64>,
+}
+
+/// A change to a Limiter: each field given replaces its own. A new one is
+/// off, with Threshold -21 dB, Attack 0.71 ms, Hold 0 and Release 93 ms.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LimiterSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The level above which it limits, in dB, from -30 to 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
+    /// How fast it starts to limit, in ms, from 0.7 to 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_ms: Option<f64>,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// How fast it stops to limit, in ms, from 50 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_ms: Option<f64>,
 }
 
 /// A change to a clip's Noise Reduction: each field given replaces its own,
@@ -7741,22 +8431,57 @@ pub struct EqBandSet {
     /// On or off. Off keeps its values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
-    /// Its filter. Band 1 has `lo_shelf`, `bell`, `notch`, `hi_shelf` and
-    /// `hi_pass`. Band 6 has `lo_pass`, `lo_shelf`, `bell`, `notch` and
-    /// `hi_shelf`. Bands 2 to 5 have `lo_shelf`, `bell`, `notch` and
-    /// `hi_shelf`.
+    /// Its filter. On a clip, band 1 has `lo_shelf`, `bell`, `notch`,
+    /// `hi_shelf` and `hi_pass`, and band 6 has `lo_pass`, `lo_shelf`,
+    /// `bell`, `notch` and `hi_shelf`. On a track, band 1 has `lo_shelf`,
+    /// `bell`, `hi_shelf` and `hi_pass`, and band 6 has `lo_pass`,
+    /// `lo_shelf`, `bell` and `hi_shelf`. Bands 2 to 5 have `lo_shelf`,
+    /// `bell`, `notch` and `hi_shelf`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<crate::model::EqKind>,
     /// Its frequency in Hz, from 20 to 22000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freq: Option<f64>,
-    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
-    /// `hi_shelf` use it.
+    /// Its gain in dB: on a clip from -70 to 24, on a track from -20 to
+    /// 20. Only `bell`, `lo_shelf` and `hi_shelf` use it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain: Option<f64>,
-    /// Its width, from 0.3 to 100. Only `bell` uses it.
+    /// Its width: on a clip from 0.3 to 100, on a track from 0.3 to 10.3.
+    /// A track keeps the Q of its step of 1/15: 0.55 becomes 8/15.
+    /// `bell` uses it, and on a track of the `fire` type the shelves too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub q: Option<f64>,
+}
+
+/// A change to a track's equalizer: each field given replaces its own, and
+/// the rest stay as they are. A new one is flat, of the `earth` type, and
+/// on unless `on` is false. Band 1 is a `hi_pass` at 70 Hz and band 6 a
+/// `lo_pass` at 22000 Hz, both off, with slopes of 12 dB per octave. Band 2
+/// is a `lo_shelf` at 118 Hz, bands 3 and 4 are `bell` filters at 240 and
+/// 1223 Hz with Q 16/15, and band 5 is a `hi_shelf` at 6048 Hz. The shelves
+/// have Q 7/3.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackEqualizerSet {
+    /// The switch. Off keeps the bands, and the sound plays without them.
+    /// On brings them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The response curve of all the bands: `earth`, `air`, `ice` or
+    /// `fire`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<crate::model::EqType>,
+    /// The bands to change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bands: Vec<EqBandSet>,
+    /// The slope of band 1 as a `hi_pass` filter, in dB per octave: 6,
+    /// 12, 18 or 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hi_pass_slope: Option<u32>,
+    /// The slope of band 6 as a `lo_pass` filter, in dB per octave: 6,
+    /// 12, 18 or 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lo_pass_slope: Option<u32>,
 }
 
 fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -8045,9 +8770,15 @@ impl Request {
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
-                | Self::KeysList {}
+                | Self::KeysList { .. }
                 | Self::KeysSet { .. }
                 | Self::KeysReset { .. }
+                | Self::KeysSets {}
+                | Self::KeysUse { .. }
+                | Self::KeysSave { .. }
+                | Self::KeysDelete { .. }
+                | Self::KeysExport { .. }
+                | Self::KeysImport { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -8059,6 +8790,7 @@ impl Request {
         matches!(
             self,
             Self::RenderAdd(_)
+                | Self::RenderUpdate { .. }
                 | Self::RenderRemove { .. }
                 | Self::RenderMove { .. }
                 | Self::RenderRename { .. }
@@ -8140,9 +8872,15 @@ impl Request {
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
-                    | Self::KeysList {}
+                    | Self::KeysList { .. }
                     | Self::KeysSet { .. }
                     | Self::KeysReset { .. }
+                    | Self::KeysSets {}
+                    | Self::KeysUse { .. }
+                    | Self::KeysSave { .. }
+                    | Self::KeysDelete { .. }
+                    | Self::KeysExport { .. }
+                    | Self::KeysImport { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }
@@ -8159,6 +8897,8 @@ impl Request {
             }
             Self::MediaAddFolder { path, .. }
             | Self::Probe { path }
+            | Self::KeysExport { path, .. }
+            | Self::KeysImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesImport { path, .. } => path.iter_mut().collect(),
             Self::CacheClear { projects } => projects.iter_mut().collect(),
@@ -8193,7 +8933,10 @@ impl Request {
                 .chain(search.iter_mut())
                 .chain(unpack.iter_mut())
                 .collect(),
-            Self::ExportPlan(p) | Self::ExportStart(p) | Self::RenderAdd(p) => vec![&mut p.output],
+            Self::ExportPlan(p)
+            | Self::ExportStart(p)
+            | Self::RenderAdd(p)
+            | Self::RenderUpdate { export: p, .. } => vec![&mut p.output],
             Self::FrameRender { out, .. }
             | Self::FrameScope { out, .. }
             | Self::StoryboardRender { out, .. }
@@ -8407,6 +9150,7 @@ mod tests {
             request,
             Request::GuiShow {
                 panel: GuiPanel::Keyframes,
+                track: None,
             }
         );
     }

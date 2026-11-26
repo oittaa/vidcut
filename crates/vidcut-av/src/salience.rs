@@ -83,6 +83,10 @@ impl Looker for Seeing {
         let rows: Vec<f32> = found.iter().flatten().flat_map(|f| f.center).collect();
         crate::npy::write(&dir.join("points.npy"), &[rows.len() / 2, 2], &rows)
     }
+
+    fn on_gpu(&self) -> bool {
+        true
+    }
 }
 
 pub fn find(

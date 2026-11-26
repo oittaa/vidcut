@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex32;
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch};
-use vidcut_core::render::{AudioPiece, Ducking, RenderPlan};
+use vidcut_core::render::RenderPlan;
 
 use crate::decode::{Decoder, decode_stream};
 use crate::error::{Context, Error, Result};
@@ -460,15 +460,7 @@ fn decode_pictures(
 }
 
 pub fn loudness(plan: &RenderPlan) -> Result<Loudness> {
-    mix_loudness(
-        &plan.audio,
-        &plan.ducking,
-        plan.sample_rate,
-        plan.channels,
-        crate::export::DECLICK_MS,
-        plan.samples(),
-        None,
-    )
+    mix_loudness(plan, plan.channels, crate::export::DECLICK_MS, None)
 }
 
 fn stopped(cancel: Option<&AtomicBool>) -> bool {
@@ -476,20 +468,21 @@ fn stopped(cancel: Option<&AtomicBool>) -> bool {
 }
 
 pub fn mix_loudness(
-    lanes: &[Vec<AudioPiece>],
-    ducking: &[Ducking],
-    rate: u32,
+    plan: &RenderPlan,
     channels: u16,
     declick_ms: u32,
-    total: i64,
     cancel: Option<&AtomicBool>,
 ) -> Result<Loudness> {
     if stopped(cancel) {
         return Err(Error::Invalid(crate::export::CANCELLED.into()));
     }
     crate::init();
+    let rate = plan.sample_rate;
+    let total = plan.samples();
     let channels = channels.max(1);
-    let mut mix = AudioMix::new(lanes, rate, channels, declick_ms).ducked(ducking);
+    let mut mix = AudioMix::new(&plan.audio, rate, channels, declick_ms)
+        .ducked(&plan.ducking)
+        .bused(&plan.buses);
     let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
     let layout = channel_layout(channels).bits();
     let args =

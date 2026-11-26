@@ -281,7 +281,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 r.rev
             );
         }
-        "render.add" if r.dry_run => {
+        "render.add" | "render.update" if r.dry_run => {
             let files: Vec<&str> = (r.result["existing"].as_array().into_iter().flatten())
                 .filter_map(Value::as_str)
                 .collect();
@@ -305,7 +305,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
             };
             println!("ok {method}: removed {removed} (rev {})", r.rev);
         }
-        "render.move" | "render.rename" | "render.clear_status" | "render.ended" => {
+        "render.update"
+        | "render.move"
+        | "render.rename"
+        | "render.clear_status"
+        | "render.ended" => {
             println!("ok {method} (rev {})", r.rev);
         }
         "timeline.list" => {
@@ -470,6 +474,25 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 print_rounded(o);
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
+                for m in o["more"].as_array().into_iter().flatten() {
+                    let encoder = &m["video_encoder"];
+                    println!(
+                        "  and {}  video {}  audio {}",
+                        m["path"].as_str().unwrap_or_default(),
+                        match encoder["error"].as_str() {
+                            Some(e) => format!("unavailable: {e}"),
+                            None => format!(
+                                "{} ({})",
+                                encoder["name"].as_str().unwrap_or_default(),
+                                encoder["pixel"].as_str().unwrap_or_default()
+                            ),
+                        },
+                        m["settings"]["audio"]["codec"].as_str().unwrap_or("none")
+                    );
+                    print_rounded(m);
+                    print_color(&m["color"]);
+                    print_metadata(&m["metadata"]);
+                }
             }
             print_notes(&r.result["notes"]);
         }
@@ -626,9 +649,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 }
                 println!("  {}", key_line(s));
             }
+            println!();
+            println!("{}", set_line(&r.result));
         }
-        "keys.set" | "keys.reset" => {
-            let changed = r.result["changed"]
+        "keys.set" | "keys.reset" | "keys.use" => {
+            let changed = r.result["changed_keys"]
                 .as_array()
                 .map_or(&[][..], Vec::as_slice);
             if changed.is_empty() {
@@ -636,6 +661,71 @@ pub fn print(method: &str, r: &Response, json: bool) {
             }
             for s in changed {
                 println!("{}", key_line(s));
+            }
+            println!("{}", set_line(&r.result));
+        }
+        "keys.sets" => {
+            for s in r.result["sets"].as_array().into_iter().flatten() {
+                let name = s["name"].as_str().unwrap_or_default();
+                match s["path"].as_str() {
+                    Some(path) => println!("{name}  ({path})"),
+                    None => println!("{name}  (built in)"),
+                }
+            }
+            for f in r.result["refused"].as_array().into_iter().flatten() {
+                println!(
+                    "{} is left out: {}",
+                    f["path"].as_str().unwrap_or_default(),
+                    f["why"].as_str().unwrap_or_default()
+                );
+            }
+            println!("{}", set_line(&r.result));
+        }
+        "keys.save" => println!(
+            "saved key set {} ({})",
+            r.result["saved"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "keys.delete" => println!(
+            "deleted key set {} ({})",
+            r.result["deleted"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "keys.export" => println!(
+            "wrote key set {} to {}",
+            r.result["exported"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "keys.import" => {
+            println!(
+                "added key set {} and put it in force ({})",
+                r.result["imported"].as_str().unwrap_or_default(),
+                r.result["path"].as_str().unwrap_or_default()
+            );
+            let listed = |key: &str| {
+                r.result[key]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+                    .unwrap_or_default()
+            };
+            match listed("unknown_commands").len() {
+                0 => {}
+                1 => println!("left out 1 command that vidcut does not have"),
+                n => println!("left out {n} commands that vidcut does not have"),
+            }
+            for key in listed("unusable_keys") {
+                println!("left out a key that vidcut can't use: {key}");
+            }
+            for c in r.result["conflicts"].as_array().into_iter().flatten() {
+                let actions: Vec<&str> = c["actions"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                println!(
+                    "{} is on {}",
+                    c["key"].as_str().unwrap_or_default(),
+                    actions.join(" and ")
+                );
             }
         }
         "preferences.get" | "preferences.set" | "preferences.reset" => {
@@ -1950,6 +2040,14 @@ fn summary(s: &Value) {
                 .join(" "))
             .unwrap_or_default()
     );
+}
+
+fn set_line(r: &Value) -> String {
+    let set = r["set"].as_str().unwrap_or_default();
+    match r["changed"].as_bool() {
+        Some(true) => format!("in force: {set}, with changes"),
+        _ => format!("in force: {set}"),
+    }
 }
 
 fn key_line(s: &Value) -> String {

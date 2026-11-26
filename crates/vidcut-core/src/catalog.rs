@@ -899,7 +899,64 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 19] = [
+pub const SAM21_TINY_WEIGHTS: File = File {
+    name: "sam2.1/sam2.1_hiera_tiny.pt",
+    title: "SAM 2.1 tiny subject mask",
+    url: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt",
+    bytes: 156_008_466,
+    sha256: "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
+};
+
+pub static SAM21_TINY: Model = Model {
+    id: "sam2.1-tiny",
+    times: None,
+    title: "SAM 2.1 tiny",
+    files: &[SAM21_TINY_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
+pub const SAM21_BASE_PLUS_WEIGHTS: File = File {
+    name: "sam2.1/sam2.1_hiera_base_plus.pt",
+    title: "SAM 2.1 base+ subject mask",
+    url: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_base_plus.pt",
+    bytes: 323_606_802,
+    sha256: "a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5",
+};
+
+pub static SAM21_BASE_PLUS: Model = Model {
+    id: "sam2.1-base-plus",
+    times: None,
+    title: "SAM 2.1 base+",
+    files: &[SAM21_BASE_PLUS_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
+pub const SAM21_LARGE_WEIGHTS: File = File {
+    name: "sam2.1/sam2.1_hiera_large.pt",
+    title: "SAM 2.1 large subject mask",
+    url: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt",
+    bytes: 898_083_611,
+    sha256: "2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318",
+};
+
+pub static SAM21_LARGE: Model = Model {
+    id: "sam2.1-large",
+    times: None,
+    title: "SAM 2.1 large",
+    files: &[SAM21_LARGE_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
+pub static ALL: [&Model; 22] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -919,6 +976,9 @@ pub static ALL: [&Model; 19] = [
     &FLASHVSR,
     &RIFE,
     &EMA_VFI,
+    &SAM21_TINY,
+    &SAM21_BASE_PLUS,
+    &SAM21_LARGE,
 ];
 
 pub fn speech(model: SpeechModel) -> &'static Model {

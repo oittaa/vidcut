@@ -223,6 +223,44 @@ Notes:
   - The error does not say that the size is the cause. Why: the error code does not tell the cause, and the FFmpeg codec data holds no size limits.
 - [live](live.md#jobs) tells how a job collects the notes.
 
+## Additional outputs
+
+[Spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
+
+- `MoreOutput::path` gives the file: the name of `output` with the extension of its container, in the folder of `output` or in its `folder`.
+- `MoreOutput::settings` makes the `ExportSettings` of an additional output from those of output 1. It is the one place that decides them.
+  - The frame size, the use of proxies, the HDR metadata, the alpha and the frame numbers come from output 1.
+  - The HDR mode comes from output 1 when the codec carries HDR, or when output 1 is SDR. Else it is Auto.
+  - The audio of output 1 goes in when the container takes that codec (`Container::takes_audio`). Else the file has no audio.
+  - The `quality` of output 1 goes in. The encoder of the additional output applies it.
+  - With a `bitrate` on output 1, the quality and the bitrate are not set. Thus the codec gives its default quality.
+  - Why: the measurements show the audio and the quality of output 1 in each output. An output 1 with a bitrate is not measured.
+- `written_twice` finds two outputs with the same path. It compares the paths part by part, in lowercase. Why: Windows and macOS do not see the case of a name, and Windows takes both / and \ between folders.
+  - `refuse_written_twice` refuses them in `render.add` and `render.update` (`queue::existing`), and in `export.start` (`session::export_media`).
+  - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.
+- `prepare` puts the additional outputs in `Output::more`, as `export::More`.
+  - `more_outputs` refuses `per_clip`, `video.bypass_reencode` and two runs of the encoder. Why: these cases are not measured.
+  - `more_refused` holds these rules. The Export page uses it too, and shows its own short text for each `MoreRefused`.
+  - Two runs are two passes (`passes` 2, or a bitrate with no `passes`) with encoder `cpu` and H.264, H.265 or VP9.
+  - With encoder `auto`, `encode` refuses two runs when the chosen encoder makes them. NVENC makes its two passes in one run.
+- `choose_once` and `measure_outputs` choose the colors and the metadata of each additional output, as for output 1.
+- `Output::taken` and `Output::named` check the files of all outputs. Thus "Replace Existing File?", the `existing` of a dry run and `render.start` cover each file.
+
+One render writes all outputs:
+
+- `run_decoding_on` takes the additional outputs as `vidcut_av::export::More`. Each gets its own hidden file (`temp::file`), which is renamed on success.
+- `encode` opens output 1. Then `open_more` opens each additional output: its muxer, its video encoder, its audio encoder, its subtitle streams and its header.
+  - Each has its own hardware frames (`Handoff`). Why: two encoders cannot share one frames pool.
+  - An additional output encodes in one pass. `encode` refuses additional outputs when output 1 encodes two runs.
+- `VideoFrames::also` gives the `MoreOut` of each additional output to the `Drawer`. The picture is drawn once.
+- `Drawer::more_frames` then calls `Screen::encoded_in` once for each additional output, with its pixel format, its HDR target, its written size and its sink.
+  - Each output has its own `Writing`: the alpha layout, the written size, the scaled picture and the `Encoded` buffers.
+  - Why: the buffers of one output are not made again for each frame of another output.
+- `VideoFrames` keeps the dynamic metadata of all outputs. `dress` gives each frame only the HDR10+ and Dolby Vision of its own output.
+- Each output has its own `Writer` on its own `vidcut-encode` thread. The export thread sends each picture to each writer, and the samples to each writer with audio.
+- `encode` returns a `Report` for each file. `export::run` puts them all in the report of the export.
+- The job gives the files of the additional outputs in `JobOutput::more`. The job details show a Writes row for each. The other notes and details are those of output 1.
+
 ## Bypass re-encode
 
 [Spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109) gives the rule. `VideoSettings::bypass_reencode` turns it on.
@@ -437,7 +475,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 ## Sound
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
-- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
+- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` is 0.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
@@ -451,7 +489,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - Each channel has its own noise profile, which starts at the first frame of the piece.
   - The profile of a bin follows the lowest level of that bin, and it rises slowly.
 - A piece has the `compressor` of its clip when it changes the sound.
-  - `Dynamics` runs after the equalizer and before the gain and the Pan. It adds no delay.
+  - `Dynamics::clip` runs after the equalizer and before the gain and the Pan. It adds no delay.
   - Each channel gets the same gain, from the highest peak of the channels.
 - A piece has the `leveler` of its clip when the switch and a process of its Dialogue Leveler are on.
   - `Leveler` reads ahead of the piece, as `Isolator` does, so the look ahead adds no delay.
@@ -460,7 +498,21 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 - A piece has the `equalizer` of its clip when it changes the sound.
   - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
   - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
+- Each track with sound gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer and its fader.
+  - A piece carries only the gain of its clip. The fader of its track is the `gain_db` of the bus.
+  - The inner tracks of a compound clip get the track that holds it as their `host` (`Inner`).
+  - The bus of an inner track goes `into` the bus of its host. `render::bus_for` makes the bus of a host before the buses that go into it.
+  - A piece is `silent` when a fader in its chain of hosts is at the bottom (`fader_silent`).
+  - `AudioMix::bused` mixes the lanes of each bus apart. `Mixed::process` runs the `Dynamics`, then the `Filter`, then the fader on that mix.
+  - The buses run from the last to the first. Thus each bus gets the mixes of its inner tracks before it runs. A bus with no host goes into the mix of the plan.
+  - Why: the Dynamics are not linear. They must hear the mix of the track, after the faders of its inner tracks.
+  - `Dynamics::track` runs the Expander or Gate, the Compressor and the Limiter in this order, then Make Up. Each module has its own detector.
+  - The lanes of a bus get the peaks of its top bus, after its fader, for the meters.
+  - A seek clears the Dynamics and the filters. A new plan at the same sample keeps the state of a bus that did not change.
+- `Curve` gives the biquad stages of a clip equalizer and of a track equalizer (`equalizer::track`). `Filter` and `response_db` take either.
 - A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
+  - Each lane names the timeline track at the top of its chain of hosts (`LaneTrack`). A fader preview of that track goes to all its lanes.
+  - `AudioMix` applies the preview one time, at the top bus, after the Dynamics and the equalizer of that bus (`Mixed::process`).
   - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
@@ -504,16 +556,28 @@ Voice Isolation:
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
 - The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
   - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
+  - `Render::more` holds the additional outputs, and `Render::output_tab` the open tab. `more_tab` draws the rows of an additional output.
+  - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
+  - The default type of ProRes, DNxHR, TIFF and OpenEXR comes from `VideoCodec::fixed_profile`, not from the plan. Why: the label stays the same while a plan runs or fails. The encoders use the same default (`VideoSettings::named_profile`).
+  - Before Add or Update Job, `start_render` checks the paths with `written_twice`. Two equal paths show the prompt `ask_duplicate_paths`, and nothing is sent.
   - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
   - On the page, `Workspace::mark` and `Workspace::clear_marks` call `export_mark` and `export_clear_marks`. Thus the keys and the Mark In, Mark Out and Clear buttons of the viewer follow the rules of the page.
   - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
+  - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is the clip alone with its grade (`render::graded_frame`).
+  - The tile workers make the pictures (`Tiles::clip_job`). The key of a picture holds a digest of the clip, its media and the project settings. Why: a change of the grade gives a new key, and the old picture leaves the tile memory as other tiles do.
+  - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
+  - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
+  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.
+  - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
 
 The render queue:
 
 - `Project.queue` holds the jobs (`RenderJob`) in the project file. Thus a job and its status stay after a quit.
 - `render.add` keeps the open timeline and the export params of the job (`ops::render::add`). It fixes the range in frames. Why: a later change of the marks does not change a job.
+- `render.update` gives a job new export params in the same way (`ops::render::update`). `Live` and the headless session check its files as they check those of `render.add`.
+- The pencil of a job loads its params into the render settings (`Render::load_job`), the reverse of `Render::params`. `Workspace::edit_job` opens its timeline and sets its range in one `apply`.
 - Before it adds a job, `queue::existing` checks the job as `render.add` does, and finds the files that are there. `Live` and the headless session refuse them without `overwrite`. A dry run returns them, and the page asks its prompt from them.
 - `queue::plan` picks the jobs that `render.start` renders. It opens the timeline of each job in a copy of the project (`ops::render::source`).
   - It finds the files that are there with `export::prepare`, as the export does. Thus it also finds the frames of an image sequence and the subtitle files.
@@ -521,11 +585,11 @@ The render queue:
 - In a running GUI, `Live::start_queue` starts one export job for each queue job, from the top. `JobInfo::render` names the queue job.
 - When the export job ends, the core records its result with `render.ended` (`queue::status`). Without a GUI, `render.start` renders the jobs one after the other, and records each result.
 - After a job of the open timeline completes, `Live::rendered_from` gives the first frame of its range, and the timeline playhead goes there.
-- A change of the queue is not an undo step. `Editor::apply` sends each request of `Request::in_queue` to `ops::render::change`. It changes the project and its `rev`, but it adds no step.
-  - The store saves the project as it saves an edit. The history file then gets only the hash of the new project file.
-  - An undo step changes only the fields of its edit. Thus an undo keeps the queue.
-  - When another program changes the project file, `Store::load_text` copies the queue into the last saved project. Thus the queue is not in the step of that change.
-  - `apply` refuses these requests in a batch.
+- Each change of the queue is an undo step. `mutate` sends each request of `Request::in_queue` to `ops::render::change`, as it sends other edits to their ops.
+  - `render.ended` is not a step. `Editor::recorded` changes the project and its `rev`, and it adds no step. Why: a render is not an edit of the user. A step for it would clear the redo list, and Ctrl+Z after a render would take back only a status.
+  - An undo step changes only the fields of its edit. Thus an undo of a timeline edit keeps the queue, and an undo of a queue step keeps the status of the other jobs.
+  - When another program changes the project file, `Store::load_text` copies the status of each job into the last saved project. Thus the statuses are not in the step of that change.
+  - `apply` refuses these requests in a batch. Why: `Live` and the headless session check the files of `render.add` and `render.update` before the core gets them.
 
 Cancel:
 
@@ -603,6 +667,11 @@ Cancel:
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - `lay_out` takes a `Typeset`: the text, its layers and its `Rules`. `Rules::Title` gives the size, the line gap, the tracking and the seat of a title. `Rules::Plain` gives the line gap of a subtitle.
   - Why: each kind of text has its own measured rules, and one engine shapes and draws them all.
+  - A block lays out its text at its Zoom Y. A block with another Zoom X is then stretched across about its pivot, by `TitleBlock::stretch`.
+    - `turned` does the stretch and the turn in one step. It maps each pixel of the result back to the drawing.
+    - A stretch below 1 takes the mean of several samples across each pixel. Thus thin strokes do not drop out.
+    - A turned block is first cut to the part that the stretch puts in the frame (`inside`).
+    - Why: a title with equal axes draws as with one zoom.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Typeset`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
     - The `drop` field of `Typeset` brings the top of the box down to where the upper line starts.
@@ -681,7 +750,7 @@ A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compoun
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
 - `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below.
 - The sides of such a `place::Mix` take no composite mode (`MixDraw::lay`).
-- `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
+- `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`Project::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
 
 Dynamic Zoom and keyframes (D75):
@@ -804,14 +873,21 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
   - Each input holds a link (`GradeLink`): the number of a node and the output that the link leaves, RGB or key. The number 0 is the picture that comes in.
   - A link also holds the order in which it was made (`made`). Two links are the same when they leave the same output, whatever their order.
+  - A link from a splitter also holds which of its three RGB outputs it leaves (`GradeLink::output`).
   - `Grade::output` is the link that goes out.
   - Why: a key output can go to an RGB input, and an RGB output to a key input. The place of a link gives only the kind of its input.
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a key from a node with no key output, and a picture from a key mixer (`gives`).
   - It also refuses a corrector without one input and a mixer without an input.
+  - It also refuses a splitter without one input, a combiner without three inputs and a link from a splitter into a key input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
   - After `grade.add` and `grade.connect`, `stamped` gives each new link the next `made` number. After `grade.add`, `walked` numbers the nodes again, in the order of a walk from the source.
   - Why: the node numbers then follow the measured rule of the spec (§8.21).
+- A clip grade holds node stack layer 1 in its own nodes and the layers after it in `Grade::layers`. Each layer is a `Grade` of its own.
+  - `ops::grade::stored` gives one layer (`Grade::layer`), and `store` puts it back (`Grade::with_layer`). Thus each request changes one layer and numbers its nodes from 1.
+  - `with_layer` removes the usual layers at the end. Thus a clip with one changed layer stores no empty layers after it.
+  - A lower `node_stack_layers` count moves the layers above it to `Grade::kept_layers`, in each clip of the project (`ops::grade::count_layers`, `Grade::counted`). A higher count moves them back.
+  - `ops::grade::clear_layers` resets each layer for `grade.clear` with `all_layers` (`Grade::reset_layers`). It keeps `kept_layers`.
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
@@ -824,6 +900,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
+  - First `Grade::stacked` joins the node stack layers into one tree. Each layer gets the numbers after the layers under it.
+  - A link from the picture that comes into a layer becomes the `output` link of the layer under it. Thus a layer takes the result of the one before it.
+  - Why: the passes, the thumbnails and the render cache then need no case for layers.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
   - It works when something goes out, each input of a corrector has a link, and each node goes somewhere.
   - It also needs a link on each Parallel Mixer and Layer Mixer. A Key Mixer with no link gives a key of 1. A node that gives only its key goes somewhere.
@@ -845,10 +924,15 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - A gray picture reads the source for its alpha. Thus the source stays until the last `Gray` pass.
     - `grade::passed` takes a gray picture as a picture from the source. A Parallel Mixer with a gray picture on an input thus has the source as its base.
   - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
-    - A corrector folds the key of its windows first, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A corrector folds the key of its windows first, then the key of its qualifier, its Magic Mask and the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A qualifier at its usual values is no step. The Matte of the Qualifier row folds as a Matte input. The Mask of the row folds as a Mask input.
     - The last step clamps the key and applies the Key Output.
   - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
+  - A `Qualify` pass makes the key of a qualifier with `fs_key_qualify`, from the picture that comes into the node (`Qualifying`).
+    - A node with only a qualifier, with its three parts on and the Qualifier row at its usual values, keeps its one `Qualify` pass. It applies the Key Output.
+    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+  - A `Mask` pass makes the key of a Magic Mask with `fs_mask_key`, from the maps of the frame (`Masking`). A `KeyFold` always follows it ([analysis](analysis.md#subject-masks)).
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
   - `cut_off` tells if a corrector takes its key input from the key output of a corrector that is off. Its key is then 0, and it reads no key from its links.
@@ -857,6 +941,12 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - The same walk adds the reads of a picture that a luma key or a second texture (`Uses::twice`) needs. Each node then has all its readers before the walk comes to it.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
+  - A splitter has a picture slot for each output (`split_slots`). Output 0 has slot v. Output j has slot v plus j + 1 times the slot count.
+    - Thus the plan has `SLOTS` picture slots for each node: the picture, the key as a picture, green and blue.
+    - A `Spread` pass gives one channel of the input in R, G and B, for each output that a node reads. An output that no node reads costs no pass.
+    - `grade::passed` gives each output its own path. Thus the base of two outputs of one splitter is the input of the splitter.
+  - A combiner takes the texture of its first input that has a link. A `Take` pass then puts the channel of each other linked input into it.
+    - A `Clear` pass sets the channel of an input with no link to 0.
   - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
@@ -886,20 +976,21 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
   - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
 - `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `KEY_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
-- `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
+- `fs_grade_mix` makes a `Parallel`, a `Layer`, a `Spread`, a `Take` or a `Clear` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
-  - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
+- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
+  - `editor::auto_color_looks` makes the `RenderPlan` of one frame and pairs it with the legacy flag (`false` with `tool`, else `ColorPrefs::use_legacy_auto_color`).
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
-  - With `tool`, the corrector is at its usual values in that frame. Thus the analysis reads the picture that comes into it.
-  - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
-  - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
-  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`. With `tool`, it writes the `AutoColor` of the corrector.
-- The Auto Color tool (`Corrector::auto_color`) has its own Lift and Gain.
-  - `ToolGrading` gives their numbers with `wheel`, at Gamma 0. The tool has no Offset and a Lum Mix of 100.
+  - In neural mode, the corrector is at its usual values in that frame. In legacy mode, only its Lift and Gain reset.
+  - `Env::auto_balance` renders that frame in float (`still::floats_sized`). `BALANCES` keeps recent results keyed by mode and plan.
+  - Neural mode runs `auto_color::balance` in `vidcut-av` to give six `exposure` and three `white` values (`AutoResult::Neural`). With `gpu.acceleration` on, it runs in `compute::ops` and a GPU failure returns an error that names `gpu.acceleration`. With it off, the CPU runs the model.
+  - Legacy mode runs `auto_color::balance` in `vidcut-core` to give Lift and Gain (`AutoResult::Legacy`).
+  - `ops::grade::auto_color` writes the `AutoColor` tool in neural mode, or Lift and Gain in legacy mode.
+- The Auto Color tool (`Corrector::auto_color`) holds `exposure` and `white` numbers (`grade_auto`).
+  - `ToolGrading` passes `exposure` and `white_scale` directly to `fs_grade` and `fs_grade_stats`.
   - `fs_grade` applies the tool first, before step 1. `fs_grade_stats` also applies it. Thus the tone stage filters the luma that it changes.
   - A tool that is off keeps its values and does nothing. `Corrector::changes_nothing` does not count it, and the render plan uses that test.
   - `Corrector::is_usual` counts a tool that is off. Thus a keyframe that holds only such a tool keeps it in the project file.
@@ -966,7 +1057,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
 - `GradeNode::keys` holds the keyframes of a corrector or a Key Mixer (`GradeNode::takes_keyframes`), in the order of their frames.
   - The other mixers have none.
   - Each `GradeKey` holds every value of the node, its `GradeKeyKind`, and its `start` and `end`.
-  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `KeyOutput` and its windows.
+  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `Qualifier`, its `KeyOutput` and its windows.
   - The values of a Key Mixer are a `KeyMix` for each input and its `KeyOutput`.
   - The window list of each keyframe has the shapes of the window list of the node. `ops::grade::checked` refuses other lists.
   - The mix list of each keyframe has one `KeyMix` for each input of the node. `ops::grade::checked` refuses other lists.
@@ -984,6 +1075,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Why: on a circle, the radius moves in a straight line (spec §8.23).
   - On, Invert, Mask, the name, and a point list of another length keep the value of the keyframe before the frame.
 - `GradeNode::key_input_at` and `GradeNode::mix_at` give the Key Input and the mix of a Key Mixer in the same way (`KeyInput::blended`, `KeyMix::blended`).
+- `GradeNode::qualifier_at` gives the qualifier in the same way (`Qualifier::blended`). The switches and the buttons keep the value of the keyframe before the frame.
   - Invert, Mask and Matte keep the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
@@ -994,9 +1086,12 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - The player gives the viewer the timeline grade at the playhead (`Shown`).
   - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
+  - `Grade::at` also keeps only the maps of a Magic Mask on its frame (`Grade::is_masked`).
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
-  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile` (`GradeNode::key_here`).
+  - `ops::grade_keys::add_marks` puts a Static keyframe with `edl` on each edit of the video tracks (`edl_frames`). `ops::grade_keys::remove_marks` removes only those.
+  - With `GradeNode::auto_key` on, a change first adds a Dynamic keyframe on its frame (`GradeNode::auto_keyed`). `grade.set`, `grade.printer`, `grade.clear`, `grade.auto_color` and the window changes call it (`ops::grade::auto_keyed`).
 - `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
   - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
@@ -1006,6 +1101,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Each point of a polygon or a curve is one value, and so is each softness move of a curve.
   - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
 - The `key_input_` fields of `grade.set` change the Key Input in the same way (`GradeNode::change_key_input_at`, `KeyInput::carried`).
+- The `qualifier_` fields change the qualifier in the same way (`GradeNode::change_qualifier_at`, `Qualifier::carried`).
+  - A Width or a Soft alone moves the other value by the measured rule (`Qualifier::with_hue_width`, `Qualifier::with_hue_soft`).
+  - A request with both takes them as they are. Thus `ops::grade::checked` refuses a Soft above 2 times the Width.
 - The `mix_` fields change an input of a Key Mixer in the same way (`GradeNode::change_mix_at`, `KeyMix::carried`).
   - `grade.connect` and `grade.input.remove` change each mix list (`GradeNode::mix_lists_mut`).
 - All of these changes use one rule (`GradeNode::keyed_change`).
@@ -1113,6 +1211,7 @@ The draw:
   - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`. That picture is register 0.
   - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
   - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
+  - `merge_cover` stops the coverage of Normal and Screen at 1 when `Merging.clamp` is on.
   - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
   - With `Merging.replaces`, the result of `fs_merge` is the foreground that `merge_fore` reads, with no mode.
   - `made_into` draws an `Op::Make`. `fs_background` fills the register with the colors of a `Painting` as they are. The colors are not multiplied by their alpha. Thus a Merge adds them as premultiplied colors ([spec](../spec.md#the-background-tool)). The stops go to the shader in a storage buffer.
@@ -1141,14 +1240,18 @@ The masks:
   - `polygon_distance` takes the nearest side, and the winding number for the inside.
   - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
   - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
+  - `joined_distance` gives the outer edge of a rectangle by its Border Style. Miter takes the larger distance across and down, thus the corners stay square.
+  - Bevel also cuts each corner of the outer edge at 45 degrees. Round, each Corner Radius above 0 and an edge that does not move out take `box_distance`.
+  - The inner edge of the band always takes `box_distance`. Why: a join changes only the corners that the edge moves out from.
 - The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
   - Clipping Mode None also makes the mask beyond the picture. `blur::mask_pads` adds pixels at each side that the soft edge reaches from the shape.
   - The reach is the sum of the taps of the passes (`blur::soft_reach`). The added pixels are in two textures of `Worked`. `fs_mask_join` reads them at their offset.
   - Why: the replicate border then acts only beyond the reach, where no tap of a pixel of the picture goes.
   - The added pixels stop at the largest texture of the device. Beyond them, the replicate border acts.
   - A shape that is not in the reach of an edge adds no pixels. Clipping Mode Frame adds none.
-- `fs_mask_join` joins the mask to the masks before it by the Merge paint mode: n + i × (1 − c).
+- `fs_mask_join` joins the mask to the masks before it by its Paint Mode, with the forms of `PaintMode`. Merge is n + i × (1 − c).
   - c is the shape after Invert, and n is c × Level. i is the masks before it.
+  - The first mask has no masks before it. `blur::mask_made` gives it Copy, so it is its own shape n.
 - `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.
 
 The boxes:

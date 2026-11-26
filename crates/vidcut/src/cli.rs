@@ -8,8 +8,14 @@ use vidcut_core::request::{Client, ClientKind, method_names, protocol_schema, re
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
+    ("keys.list", &["key"]),
     ("keys.set", &["action", "keys"]),
     ("keys.reset", &["action"]),
+    ("keys.use", &["set"]),
+    ("keys.save", &["name"]),
+    ("keys.delete", &["name"]),
+    ("keys.export", &["set", "path"]),
+    ("keys.import", &["path"]),
     ("probe", &["path"]),
     ("schema", &["method"]),
     ("project.create", &["path"]),
@@ -71,6 +77,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("keyframes.remove", &["clips"]),
     ("keyframes.copy", &["clip"]),
     ("keyframes.cut", &["clip"]),
+    ("keyframes.reverse", &["clip"]),
     ("keyframes.paste", &["clips"]),
     ("markers.move", &["marker"]),
     ("markers.remove", &["marker"]),
@@ -120,6 +127,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.add", &["shape", "clip"]),
     ("grade.window.set", &["window", "clip"]),
     ("grade.window.remove", &["window", "clip"]),
+    ("grade.mask.click", &["clip"]),
+    ("grade.mask.set", &["clip"]),
+    ("grade.mask.clear", &["clip"]),
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
@@ -174,6 +184,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("export.start", &["output"]),
     ("export.plan", &["output"]),
     ("render.add", &["output"]),
+    ("render.update", &["job", "output"]),
     ("render.start", &["jobs"]),
     ("render.remove", &["jobs"]),
     ("render.move", &["job", "to"]),
@@ -252,6 +263,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "grade.keys",
         "Keyframes of the correctors and key mixers of a grade",
+    ),
+    (
+        "grade.mask",
+        "The Magic Mask of a corrector: the clicks that pick its subjects",
     ),
     ("grade.window", "Windows of the correctors of a grade"),
     (
@@ -396,7 +411,11 @@ const EXAMPLES: &[(&str, &str)] = &[
         "viewer.scopes",
         "vidcut viewer scopes\n  \
          vidcut viewer scopes --waveform true --vectorscope true\n  \
-         vidcut viewer scopes --scale percent\n  \
+         vidcut viewer scopes --scale percent --video-levels true\n  \
+         vidcut viewer scopes --waveform-mode rgb --waveform-blue false --parade-mode yrgb\n  \
+         vidcut viewer scopes --skin-tone true\n  \
+         vidcut viewer scopes --histogram true --histogram-mode yrgb\n  \
+         vidcut viewer scopes --chromaticity true --chromaticity-mode uv\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),
@@ -461,7 +480,9 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut track set A2 --duck '{}' --download\n  \
          vidcut track set A2 --duck '{\"sources\":[\"V1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
          vidcut track set A2 --duck '{\"on\":false}'\n  \
-         vidcut track set A2 --duck null",
+         vidcut track set A2 --duck null\n  \
+         vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \
+         vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'",
     ),
     (
         "titles.add",
@@ -684,7 +705,9 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "frame.scope",
         "vidcut frame scope waveform --at 1m --out w.png\n  \
-         vidcut frame scope vectorscope --at 1m --out v.png --width 400",
+         vidcut frame scope vectorscope --at 1m --out v.png --width 400\n  \
+         vidcut frame scope histogram --at 1m --out h.png\n  \
+         vidcut frame scope chromaticity --at 1m --out c.png",
     ),
     (
         "presets.save",
@@ -710,6 +733,16 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "keys.reset",
         "vidcut keys reset mark_in\n  vidcut keys reset   # every action",
+    ),
+    ("keys.use", "vidcut keys use \"My Keys\"\n  vidcut keys use vidcut"),
+    (
+        "keys.save",
+        "vidcut keys save \"My Keys\"\n  vidcut keys save \"My Keys\" --overwrite",
+    ),
+    ("keys.export", "vidcut keys export \"My Keys\" \"My Keys.txt\""),
+    (
+        "keys.import",
+        "vidcut keys import \"My Keys.txt\"\n  vidcut keys import \"My Keys.txt\" --name Laptop",
     ),
     ("mixer.preview", "vidcut mixer preview A1 -12"),
     ("mcp", "claude mcp add vidcut -- vidcut mcp -p talk.vidcut"),

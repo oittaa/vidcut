@@ -240,21 +240,6 @@ fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
     return sum / total;
 }
 
-fn decode(c_in: vec3<f32>, transfer: u32, scale: f32) -> vec3<f32> {
-    var c = max(c_in, vec3<f32>(0.0));
-    if transfer == 1u {
-        let e = pow(c, vec3<f32>(1.0 / 78.84375));
-        let num = max(e - vec3<f32>(0.8359375), vec3<f32>(0.0));
-        let den = max(vec3<f32>(18.8515625) - 18.6875 * e, vec3<f32>(1.17549435e-38));
-        c = pow(num / den, vec3<f32>(1.0 / 0.1593017578125));
-    } else {
-        let high = (exp((c - vec3<f32>(0.55991073)) / 0.17883277) + vec3<f32>(0.28466892)) / 12.0;
-        c = select(high, c * c / 3.0, c <= vec3<f32>(0.5));
-        c = pow(c, vec3<f32>(1.2));
-    }
-    return c * scale;
-}
-
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
     return decode(c, p.flags.x, p.matrix.w);
 }
@@ -1419,6 +1404,7 @@ struct Shape {
     middle: vec4<f32>,
     half: vec4<f32>,
     edge: vec4<f32>,
+    style: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> shaping: Shape;
@@ -1445,6 +1431,19 @@ fn ellipse_distance(q: vec2<f32>, axes: vec2<f32>) -> f32 {
 fn box_distance(q: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
     let e = abs(q) - half + r;
     return length(max(e, vec2<f32>(0.0))) + min(max(e.x, e.y), 0.0) - r;
+}
+
+fn joined_distance(q: vec2<f32>, half: vec2<f32>, r: f32, out: f32) -> f32 {
+    let join = i32(shaping.style.x + 0.5);
+    if r > 0.0 || out <= 0.0 || join == 1 {
+        return box_distance(q, half, r) - out;
+    }
+    let e = abs(q) - half;
+    let square = max(e.x, e.y) - out;
+    if join == 2 {
+        return max(square, (e.x + e.y - out) * 0.70710678);
+    }
+    return square;
 }
 
 fn polygon_distance(q: vec2<f32>) -> f32 {
@@ -1480,9 +1479,15 @@ fn polygon_distance(q: vec2<f32>) -> f32 {
 fn fs_shape(in: Out) -> @location(0) vec4<f32> {
     let at = in.position.xy;
     let kind = shaping.middle.w;
+    let border = shaping.edge.x;
+    let band = abs(border);
     var d = 0.0;
+    var solid_out = 0.0;
+    var band_out = 0.0;
     if kind > 1.5 {
         d = polygon_distance(at);
+        solid_out = d - border;
+        band_out = d - band;
     } else {
         let l = vec2<f32>(at.x - shaping.middle.x, shaping.middle.y - at.y);
         let c = cos(shaping.middle.z);
@@ -1490,15 +1495,17 @@ fn fs_shape(in: Out) -> @location(0) vec4<f32> {
         let q = vec2<f32>(c * l.x + s * l.y, c * l.y - s * l.x);
         if kind > 0.5 {
             d = box_distance(q, shaping.half.xy, shaping.half.z);
+            solid_out = joined_distance(q, shaping.half.xy, shaping.half.z, border);
+            band_out = joined_distance(q, shaping.half.xy, shaping.half.z, band);
         } else {
             d = ellipse_distance(q, shaping.half.xy);
+            solid_out = d - border;
+            band_out = d - band;
         }
     }
-    let border = shaping.edge.x;
-    let band = abs(border);
-    var cover = clamp(min(d + 0.5, band) - max(d - 0.5, -band), 0.0, 1.0);
+    var cover = clamp(min(0.5 - band_out, 1.0) + min(d + band + 0.5, 1.0) - 1.0, 0.0, 1.0);
     if shaping.edge.y > 0.5 {
-        cover = clamp(0.5 - (d - border), 0.0, 1.0);
+        cover = clamp(0.5 - solid_out, 0.0, 1.0);
     }
     if shaping.edge.w > 0.5 {
         cover = max(cover, textureLoad(blur_source, vec2<i32>(at), 0).r);
@@ -1518,9 +1525,24 @@ struct Joining {
 fn fs_mask_join(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let s = textureLoad(blur_source, px + vec2<i32>(joining.at.xy), 0).r;
-    let shape = select(s, 1.0 - s, joining.how.y > 0.5);
-    let a = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
-    return vec4<f32>(joining.how.x * shape + a * (1.0 - shape));
+    let c = select(s, 1.0 - s, joining.how.y > 0.5);
+    let n = joining.how.x * c;
+    let i = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
+    var m = n + i * (1.0 - c);
+    switch i32(joining.how.w + 0.5) {
+        case 1: { m = min(i + n, 1.0); }
+        case 2: { m = max(i - n, 0.0); }
+        case 3: { m = min(i, n); }
+        case 4: { m = max(i, n); }
+        case 5: { m = (i + n) * 0.5; }
+        case 6: { m = i * n; }
+        case 7: { m = select(i, n, n > 0.0); }
+        case 8: { m = i + n - 2.0 * i * n; }
+        case 9: { m = n; }
+        case 10: { m = i; }
+        default: {}
+    }
+    return vec4<f32>(m);
 }
 
 struct Picking {
@@ -1586,6 +1608,7 @@ struct Merging {
     y: vec4<f32>,
     how: vec4<f32>,
     slide: vec4<f32>,
+    more: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> merging: Merging;
@@ -1762,23 +1785,27 @@ fn merge_rgb(y: vec3<f32>) -> vec3<f32> {
     );
 }
 
+fn merge_cover(c: vec4<f32>) -> vec4<f32> {
+    return select(c, min(c, vec4<f32>(1.0)), merging.more.x > 0.5);
+}
+
 fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     let mode = i32(merging.how.x);
     let op = i32(merging.how.y);
     let fa = fore.a;
     let ba = back.a;
-    let keep = 1.0 - merging.slide.z;
+    let keep = select(1.0, 1.0 - merging.slide.z, mode == 0 && op == 0);
     switch mode {
         case 0: {
-            return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, op);
+            let cover = array(merge_cover(vec4<f32>(fa)), merge_cover(vec4<f32>(ba)));
+            return merge_operated(fore, back, cover, keep, op);
         }
         case 2: {
             return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, 0);
         }
         case 1: {
-            let cf = vec4<f32>(min(fore.rgb, vec3<f32>(1.0)), fa);
-            let cb = vec4<f32>(min(back.rgb, vec3<f32>(1.0)), ba);
-            return merge_operated(fore, back, array(cf, cb), keep, op);
+            let cover = array(merge_cover(fore), merge_cover(back));
+            return merge_operated(fore, back, cover, keep, op);
         }
         case 25: {
             return sqrt(fore * fore + back * back);
@@ -1879,9 +1906,11 @@ fn fs_merge(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let back = textureLoad(blur_source, px, 0);
     let taken = merge_fore(in.position.xy);
-    let fa = taken.a * merging.slide.y;
+    let gain = merging.slide.y;
+    let fa = taken.a * gain;
     let additive = merging.slide.x;
-    let fore = vec4<f32>(taken.rgb * (additive + (1.0 - additive) * fa), fa);
+    let normal = vec4<f32>(taken.rgb * (additive + (1.0 - additive) * fa), fa);
+    let fore = select(taken * gain, normal, i32(merging.how.x) == 0);
     let merged = select(merge_mode(fore, back), taken, merging.how.w > 0.5);
     var amount = merging.slide.w;
     if merging.how.z > 0.5 {
@@ -2202,8 +2231,8 @@ struct Grading {
     tone: vec4<f32>,
     curve: array<vec4<f32>, 256>,
     auto_how: vec4<f32>,
-    auto_lift: vec4<f32>,
-    auto_weight: vec4<f32>,
+    auto_tone: vec4<f32>,
+    auto_white: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> grading: Grading;
@@ -2211,8 +2240,8 @@ struct Grading {
 struct Guide {
     eps: vec4<f32>,
     auto_how: vec4<f32>,
-    auto_lift: vec4<f32>,
-    auto_weight: vec4<f32>,
+    auto_tone: vec4<f32>,
+    auto_white: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> guiding: Guide;
@@ -2223,19 +2252,34 @@ const TONE_TOP: f32 = 2.0;
 
 const TONE_GAIN: f32 = 4.0;
 
-fn grade_auto(c: vec3<f32>, how: vec4<f32>, l: vec4<f32>, w: vec4<f32>) -> vec3<f32> {
+fn grade_spow(v: f32, p: f32) -> f32 {
+    if v == 0.0 {
+        return 0.0;
+    }
+    return sign(v) * pow(abs(v), p);
+}
+
+fn grade_auto(c: vec3<f32>, how: vec4<f32>, tone: vec4<f32>, white: vec4<f32>) -> vec3<f32> {
     if how.x < 0.5 {
         return c;
     }
-    let f = w.xyz * (l.xyz + (1.0 - l.xyz) * c);
-    let y = w.w * (l.w + (1.0 - l.w) * dot(c, BT709));
-    return f + (y - dot(f, BT709));
+    var v = how.y * c + how.z;
+    v = vec3<f32>(
+        grade_spow(v.x, how.w),
+        grade_spow(v.y, how.w),
+        grade_spow(v.z, how.w),
+    );
+    let y = dot(v, vec3<f32>(0.299, 0.587, 0.114));
+    v = vec3<f32>(y) + (1.0 + tone.x) * (v - vec3<f32>(y));
+    v = tone.y * v;
+    v = tone.z + (1.0 - tone.z) * v;
+    return v * white.xyz;
 }
 
 fn grade_luma(at: vec2<i32>) -> f32 {
     let c = effect_taken(textureLoad(blur_source, at, 0), 0.0).rgb;
     let g = guiding;
-    return dot(grade_auto(c, g.auto_how, g.auto_lift, g.auto_weight), BT709);
+    return dot(grade_auto(c, g.auto_how, g.auto_tone, g.auto_white), BT709);
 }
 
 @fragment
@@ -2311,10 +2355,6 @@ fn grade_tone(px: vec2<i32>, c: vec3<f32>) -> vec3<f32> {
 const BOOST_POWER: f32 = -0.6;
 
 const LOG_KNOTS: i32 = 24;
-
-fn grade_spow(v: f32, p: f32) -> f32 {
-    return sign(v) * pow(abs(v), p);
-}
 
 fn grade_hermite(a: vec3<f32>, b: vec3<f32>, x: f32) -> f32 {
     let h = b.x - a.x;
@@ -2402,7 +2442,7 @@ fn grade_boost(v: vec3<f32>) -> vec3<f32> {
 fn fs_grade(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let was = effect_taken(textureLoad(blur_start, px, 0), 0.0);
-    let into = grade_auto(was.rgb, grading.auto_how, grading.auto_lift, grading.auto_weight);
+    let into = grade_auto(was.rgb, grading.auto_how, grading.auto_tone, grading.auto_white);
     let x = grade_boost(grade_tone(px, into));
     let v = vec3<f32>(dot(grading.temp[0].xyz, x), dot(grading.temp[1].xyz, x), dot(grading.temp[2].xyz, x));
     let l = grading.lift;
@@ -2438,6 +2478,20 @@ fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let under = textureLoad(blur_start, px, 0);
     let top = textureLoad(blur_source, px, 0);
+    let channel = u32(grade_mixing.how.y + 0.5);
+    if grade_mixing.how.x > 4.5 {
+        var out = under;
+        out[channel] = 0.0;
+        return out;
+    }
+    if grade_mixing.how.x > 3.5 {
+        var out = under;
+        out[channel] = top[channel];
+        return out;
+    }
+    if grade_mixing.how.x > 2.5 {
+        return vec4<f32>(vec3<f32>(under[channel]), under.a);
+    }
     if grade_mixing.how.x > 1.5 {
         return clamp(2.0 * top - under, vec4<f32>(0.0), vec4<f32>(1.0));
     }
@@ -2660,6 +2714,57 @@ fn fs_window_key(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(clamp(select(out, 1.0 - out, o.z > 0.5), 0.0, 1.0));
 }
 
+struct MaskKeying {
+    map0: vec4<f32>,
+    map1: vec4<f32>,
+    map2: vec4<f32>,
+    size: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> mask_keying: MaskKeying;
+@group(0) @binding(3) var<storage, read> mask_maps: array<f32>;
+
+const MASK_SIDE: u32 = 256u;
+
+fn mask_value(m: u32, u: f32, v: f32) -> f32 {
+    let last = MASK_SIDE - 1u;
+    let x0 = min(u32(u), last);
+    let y0 = min(u32(v), last);
+    let x1 = min(x0 + 1u, last);
+    let y1 = min(y0 + 1u, last);
+    let tx = u - f32(x0);
+    let ty = v - f32(y0);
+    let b = m * MASK_SIDE * MASK_SIDE;
+    let a00 = mask_maps[b + y0 * MASK_SIDE + x0];
+    let a10 = mask_maps[b + y0 * MASK_SIDE + x1];
+    let a01 = mask_maps[b + y1 * MASK_SIDE + x0];
+    let a11 = mask_maps[b + y1 * MASK_SIDE + x1];
+    let top = a00 + (a10 - a00) * tx;
+    let bottom = a01 + (a11 - a01) * tx;
+    return top + (bottom - top) * ty;
+}
+
+@fragment
+fn fs_mask_key(in: Out) -> @location(0) vec4<f32> {
+    let f = vec3<f32>(in.position.xy, 1.0);
+    let h = vec3<f32>(dot(mask_keying.map0.xyz, f), dot(mask_keying.map1.xyz, f), dot(mask_keying.map2.xyz, f));
+    if abs(h.z) < 1e-6 {
+        return vec4<f32>(0.0);
+    }
+    let q = h.xy / h.z;
+    let side = f32(MASK_SIDE);
+    let u = max(q.x / mask_keying.size.x * side - 0.5, 0.0);
+    let v = max(q.y / mask_keying.size.y * side - 0.5, 0.0);
+    let count = u32(mask_keying.size.z);
+    var key = 0.0;
+    for (var m = 0u; m < count; m++) {
+        if mask_value(m, u, v) > 0.0 {
+            key = 1.0;
+        }
+    }
+    return vec4<f32>(key);
+}
+
 struct KeyFolding {
     scale: vec4<f32>,
     flat: vec4<f32>,
@@ -2696,6 +2801,82 @@ fn fs_key_fold(in: Out) -> @location(0) vec4<f32> {
         v = clamp(v, 0.0, 1.0);
     }
     return vec4<f32>(v);
+}
+
+struct KeyQualifying {
+    hue: vec4<f32>,
+    sat: vec4<f32>,
+    lum: vec4<f32>,
+    parts: vec4<f32>,
+    luma: vec4<f32>,
+    chroma: vec4<f32>,
+    out: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> key_qualifying: KeyQualifying;
+
+fn qualify_fall(t: f32) -> f32 {
+    let s = clamp(t, 0.0, 1.0);
+    return 1.0 - s * s * (3.0 - 2.0 * s);
+}
+
+fn qualify_low(v: f32, a: f32, b: f32) -> f32 {
+    if v >= b {
+        return 1.0;
+    }
+    if v <= a {
+        return 0.0;
+    }
+    return qualify_fall((b - v) / (b - a));
+}
+
+fn qualify_high(v: f32, a: f32, b: f32) -> f32 {
+    if v <= a {
+        return 1.0;
+    }
+    if v >= b {
+        return 0.0;
+    }
+    return qualify_fall((v - a) / (b - a));
+}
+
+@fragment
+fn fs_key_qualify(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let c = effect_taken(textureLoad(blur_source, px, 0), 0.0).rgb;
+    let q = key_qualifying;
+    let w = q.luma.xyz;
+    let y = dot(c, w);
+    let cr = (w.y * (c.r - c.g) + w.z * (c.r - c.b)) / q.chroma.x;
+    let cb = (w.x * (c.b - c.r) + w.y * (c.b - c.g)) / q.chroma.y;
+    var key = 1.0;
+    if q.parts.x > 0.5 {
+        var angle = 0.0;
+        if cr != 0.0 || cb != 0.0 {
+            angle = degrees(atan2(cr, cb));
+        }
+        var d = angle - q.hue.x;
+        d = d - 360.0 * floor((d + 180.0) / 360.0);
+        let outer = select(q.hue.w, q.hue.z, d >= 0.0);
+        key *= qualify_high(abs(d), q.hue.y, outer);
+    }
+    if q.parts.y > 0.5 {
+        let s = q.chroma.z * length(vec2<f32>(cb, cr));
+        key *= qualify_low(s, q.sat.x, q.sat.y) * qualify_high(s, q.sat.z, q.sat.w);
+    }
+    if q.parts.z > 0.5 {
+        let l = q.chroma.w + y * q.luma.w;
+        key *= qualify_low(l, q.lum.x, q.lum.y) * qualify_high(l, q.lum.z, q.lum.w);
+    }
+    if q.parts.w > 0.5 {
+        key = 1.0 - key;
+    }
+    let o = q.out;
+    if o.x > 0.5 {
+        let v = o.y * clamp(key, 0.0, 1.0) + o.z;
+        key = clamp(select(v, 1.0 - v, o.w > 0.5), 0.0, 1.0);
+    }
+    return vec4<f32>(key);
 }
 
 @fragment

@@ -420,6 +420,7 @@ pub struct SpeedDialog {
     pub freeze: bool,
     pub ripple: bool,
     pub retime: ClipRetime,
+    pub stretch: bool,
 }
 
 impl SpeedDialog {
@@ -437,6 +438,7 @@ impl SpeedDialog {
             freeze: speed == 0.0,
             ripple,
             retime: ClipRetime::Project,
+            stretch: false,
         }
     }
 
@@ -455,7 +457,10 @@ impl SpeedDialog {
     }
 
     pub fn params(&self, clips: &[String]) -> Value {
-        json!({ "clips": clips, "speed": self.speed(), "ripple": self.ripple })
+        let keyframes = if self.stretch { "stretch" } else { "maintain" };
+        json!({
+            "clips": clips, "speed": self.speed(), "ripple": self.ripple, "keyframes": keyframes,
+        })
     }
 }
 
@@ -504,11 +509,11 @@ mod icon {
     pub use egui_phosphor::regular::{
         ARROWS_IN_LINE_HORIZONTAL as DYNAMIC_TRIM, ARROWS_IN_LINE_VERTICAL as SHRINK,
         ARROWS_LEFT_RIGHT as RIPPLE, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
-        BOOKMARK_SIMPLE as MARKER, DIAMONDS_FOUR as KEYFRAMES, EYE as VIDEO_ON,
-        EYE_SLASH as VIDEO_OFF, FILM_STRIP as VIDEO_ONLY, LIST_PLUS as TIMELINE_ACTIONS,
-        LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED, MAGNET as SNAP,
-        MUSIC_NOTES as AUDIO_ONLY, PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT,
-        SLIDERS_HORIZONTAL as TIMELINE_OPTIONS, SPEAKER_HIGH as AUDIO_ON,
+        BOOKMARK_SIMPLE as MARKER, CARET_DOWN as CLIP_FILTER, DIAMONDS_FOUR as KEYFRAMES,
+        EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF, FILM_STRIP as VIDEO_ONLY,
+        LIST_PLUS as TIMELINE_ACTIONS, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
+        MAGNET as SNAP, MUSIC_NOTES as AUDIO_ONLY, PENCIL_SIMPLE as EDIT_ACTIONS,
+        SCISSORS as SPLIT, SLIDERS_HORIZONTAL as TIMELINE_OPTIONS, SPEAKER_HIGH as AUDIO_ON,
         SPEAKER_SLASH as AUDIO_OFF,
     };
 }
@@ -1455,18 +1460,22 @@ impl Workspace {
 
     fn timeline_toolbar(&mut self, ui: &mut egui::Ui, p: &Project) {
         use Toolbar as T;
-        let export = self.effects_page.page == vidcut_core::request::Page::Export;
+        let page = self.effects_page.page;
+        let filter = p
+            .timeline()
+            .map(|t| t.clip_filter.clone())
+            .unwrap_or_default();
         let row = crate::gui::row::Row {
-            left: if export {
-                &[T::Title, T::Render]
-            } else {
-                &[T::Title]
+            left: match page {
+                vidcut_core::request::Page::Export => &[T::Title, T::Render, T::Clips],
+                vidcut_core::request::Page::Color => &[T::Title, T::Clips, T::Filter],
+                _ => &[T::Title],
             },
             fill: None,
             right: &[T::Marks, T::ZoomOut, T::ZoomIn, T::Summary],
             leaving: &[T::Marks, T::Summary, T::ZoomOut, T::ZoomIn],
             group: |t| match t {
-                T::Title | T::Render => 0,
+                T::Title | T::Render | T::Clips | T::Filter => 0,
                 T::Marks | T::ZoomOut | T::ZoomIn => 1,
                 T::Summary => 2,
             },
@@ -1475,6 +1484,26 @@ impl Workspace {
             self.fit_row(ui, row, |ws, ui, t| match t {
                 T::Title => ui.label(RichText::new("Timeline").strong()),
                 T::Render => ws.render_range_menu(ui),
+                T::Clips => {
+                    let r = ui.selectable_label(!ws.export.hide_clips, "Clips");
+                    if r.clicked() {
+                        ws.export.hide_clips = !ws.export.hide_clips;
+                    }
+                    if !filter.is_all() {
+                        crate::gui::clip_filter::underline(ui, &r);
+                    }
+                    r
+                }
+                T::Filter => {
+                    let mut to = None;
+                    let r = ui.menu_button(icon::CLIP_FILTER, |ui| {
+                        to = crate::gui::clip_filter::menu(ui, &filter);
+                    });
+                    if let Some(f) = to {
+                        ws.send("timeline.set", json!({ "clip_filter": f }));
+                    }
+                    r.response
+                }
                 T::Summary => ui.label(dim(format!(
                     "{} clips, {}",
                     p.tracks.iter().map(|t| t.clips.len()).sum::<usize>(),
@@ -2905,22 +2934,21 @@ impl Workspace {
             return;
         };
         let at = self.drawn_playhead();
-        let mut times: Vec<i64> = self
-            .snap
-            .selection
-            .clips
-            .iter()
-            .filter_map(|id| p.clip(id))
-            .flat_map(|c| {
-                let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
-                keys.iter()
-                    .map(|k| c.key_time(k.frame).round() as i64)
-                    .filter(|t| (c.start..c.end()).contains(t))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        times.sort_unstable();
-        times.dedup();
+        let times = self.grade_key_times().unwrap_or_else(|| {
+            let mut times: Vec<i64> = (self.snap.selection.clips.iter())
+                .filter_map(|id| p.clip(id))
+                .flat_map(|c| {
+                    let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+                    keys.iter()
+                        .map(|k| c.key_time(k.frame).round() as i64)
+                        .filter(|t| (c.start..c.end()).contains(t))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            times.sort_unstable();
+            times.dedup();
+            times
+        });
         let to = if dir < 0 {
             times.iter().rev().find(|&&t| t < at)
         } else {
@@ -3980,6 +4008,14 @@ impl Workspace {
                         });
                     });
                 }
+                super::dialog::row(ui, "Keyframes", |ui| {
+                    ui.add_enabled_ui(!d.freeze, |ui| {
+                        super::dialog::switch(ui, |ui| {
+                            ui.selectable_value(&mut d.stretch, false, "Maintain Timing");
+                            ui.selectable_value(&mut d.stretch, true, "Stretch to Fit");
+                        });
+                    });
+                });
                 super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
             super::dialog::footer(ui, |ui| {
@@ -4441,6 +4477,8 @@ fn focus(m: &crate::gui::history::Marks) -> Option<(i64, i64)> {
 enum Toolbar {
     Title,
     Render,
+    Clips,
+    Filter,
     Marks,
     ZoomOut,
     ZoomIn,
@@ -4526,6 +4564,7 @@ mod tests {
             retime: vidcut_core::model::ClipRetime::Project,
             color: None,
             render_cache: vidcut_core::model::ClipCache::Auto,
+            link: None,
         }
     }
 

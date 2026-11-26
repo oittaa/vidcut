@@ -51,7 +51,7 @@ classDiagram
     kind: Video or Audio
     locked, muted, solo, volume_db
     video_enabled, voice_isolation, duck
-    render_cache
+    equalizer, render_cache
   }
   class Clip {
     id, name, color
@@ -572,24 +572,29 @@ Writing:
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
   - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../spec.md#12-decisions-on-gaps-and-contradictions))
-  - `position_keys` with `position_y`, `zoom_keys` and `rotation_keys`: `Keyframe`s on source frames, beside the plain values
+  - `position_keys` with `position_y`, `zoom_keys` with `zoom_y`, and `rotation_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
+  - `keys`: one `EffectKeys` for each value of the shadow and the background with keyframes (`Title::KEYED`)
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - The `Picture` of the clip places the picture that the text is drawn on ([pictures](#pictures)). Its opacity is the opacity of the title.
 - `KeyParam::on_text` tells which values of the `keyframes` requests are those of the text: its position, zoom and rotation, and those of each line. The other values are those of the clip's `Picture`, as on every clip.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
+- `Title` is `Keyed` for the values of its shadow and background, as an `Effect` is. `Title::steps_of` names the values that stay whole. `Title::stepped_at` rounds them for `Keyed::adopted` and for a new key.
+  - `KeyParam::style_value` names these values in the `keyframes` requests. `ops::keyframes` works on them through `Keyed`.
+  - Why: then the keyframe work of the effects serves them, and their numbers stay those of `TitleStyle`.
 - The upper line of a lower third can go apart from its lower line:
   - `Title::upper` holds a `TitleLine`: the anchor, place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
   - Without `Title::upper`, the two lines go together. The point of the upper line is then `Title::UPPER_DROP` below the point of the lower line (`Title::upper_with_lower`).
   - `Title::swap_lines` swaps the values of the two lines, and `Title::upper_view` gives a title with the upper line's values in the fields of the title. Thus `ops::keyframes`, `ops::titles` and `otio::titles` have one code for the two lines.
   - `Title::part_lines` puts the values of `Title::upper_with_lower` into a `TitleLine`. `ops::titles::on_line` parts and swaps the lines around one edit.
   - `Title::each_line` makes one change on each line.
-- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, its anchor, the edge of its text, its zoom and its rotation:
+- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, its anchor, the edge of its text, its zoom across and down, and its rotation:
   - A Text title or a scroll is one `TitlePart::Whole`.
   - A lower third is a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background. Each line has its own point, as in the file.
   - `Title::block_text` gives the text of a block.
-- A title's zoom is one number.
+- A title's zoom has an X and a Y, as the zoom of a `Picture`: `zoom`, `zoom_keys` and `zoom_y`. `Title::scale` gives both.
+- `zoom_link` is the Zoom link of the title, and of each `TitleLine`. It is a stored switch, because the link stays on when Zoom X and Zoom Y are different.
 - A handle of a title's position key is a point in the picture, not frames and a value. Thus it is not a `Handle` of the `Keyframe`:
   - `Title::place_at` gives the point on the path. It uses the same `cubic` as the other curves, at one speed along the length.
   - `Title::as_picture` leaves the handles out. `Title::take_picture` keeps the handles of the keys that stay.
@@ -658,8 +663,10 @@ Writing:
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
   - `position_keys` holds X, and `position_y` holds Y, one number for each keyframe. Zoom and the anchor point do the same.
   - A handle `value` moves X. Y keeps the handle `frames`, with a value offset of 0 (`value_paired`).
+  - The keyframes of a compound clip count the frames of the compound clip.
+  - An import at another rate moves the keyframes to the frames of the project (`at_project_rate`, `Picture::scale_times`), as it moves the volume keyframes.
 - `ops::picture` holds the edits:
-  - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
+  - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It checks each keyframe as it checks the plain value.
   - `ops::picture::has_picture` tells which clips take a picture: not sound or generators that do not draw.
   - `ops::picture::takes_effects` tells which of them take effects: not generators and not titles ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
@@ -747,7 +754,7 @@ Writing:
   - Why: the names in the request are then those of the model. Each name has one field, and thus one text in the schema and in `--help`.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
 - The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
-  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.
+  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect`, a `Node` and a `Title`: read, write, sample, split, hold, scale, retime and retarget.
   - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
   - The functions of `Picture` that work on keyframes do not change the keys of the nodes. Why: the keys are on frames of the file, and a trim or a speed change keeps those frames.
 - `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.
@@ -801,6 +808,25 @@ Writing:
 - An OTIO file carries the `Duck` in the `vidcut` metadata of its track. An import drops the sources that its tracks do not have (`duck::tidy`).
 - [export](export.md#sound) tells how the ducking plays.
 
+## Track equalizer
+
+- A track can carry a `TrackEqualizer`. It holds `on`, the `EqType`, six `EqBand` values as a clip equalizer has, and the slopes of the pass filters.
+- `track.set` takes a `TrackEqualizerSet`. Its fields replace their own (`equalizer::track::patched`).
+- A Q goes to a whole step, and the band keeps the Q of that step (`equalizer::track::stepped`). `patched` and the Equalizer window both use it.
+- `equalizer::track::problem` is the check that `validate::violations` and the import of an OTIO file share.
+- An OTIO file carries the `TrackEqualizer` in the `vidcut` metadata of its track.
+- [export](export.md#sound) tells how it plays.
+
+## Track Dynamics
+
+- A track can carry `TrackDynamics`. They hold `on`, an `Expander`, a `Compressor`, a `Limiter` and `makeup_db`.
+- `Expander` is an Expander or, with `gate`, a Gate.
+- The compressor of a clip is a `ClipCompressor`: a `Compressor` and the `makeup_db` of the clip.
+- `track.set` takes a `TrackDynamicsSet`. Its fields replace their own (`dynamics::patched`).
+- `dynamics::problem` is the check that `validate::violations` and the import of an OTIO file share.
+- An OTIO file carries the `TrackDynamics` in the `vidcut` metadata of its track.
+- [export](export.md#sound) tells how they play.
+
 ## Looks
 
 - Looks are named styles ([spec D71](../spec.md#12-decisions-on-gaps-and-contradictions)). They are not in the project.
@@ -851,7 +877,7 @@ flowchart LR
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../spec.md#817-generators-p-766)) |
-| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same kept link, start and length stay in one link group (`no_media_ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
+| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Linked clips get one `Link Group ID` (`ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -863,13 +889,22 @@ The metadata:
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
-| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`compound_links`) |
+| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`ties`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
 | `Resolve_OTIO` on markers | `Note` |
 
 - Other editors read the `Resolve_OTIO` metadata.
 - An import extracts `ClipRetime` on non-block video clips (`picture::take_retime` into `ImportedClip`), and reads placed effects as `Picture` (`picture::take`) by the shape of the probed source.
   - This occurs when the clip has no `vidcut` picture, and the parameters and keys fit the model.
+  - A Resolve effect is an OTIO `Effect.1` with the `effect_name` `Resolve Effect`. Its `Resolve_OTIO` metadata holds `Effect Name`, `Name`, `Type`, `Enabled`, `Display Type` and `Parameters`.
+  - A parameter has `Parameter ID`, `Parameter Value`, `Default Parameter Value` and `Variant Type`. It can have `minValue`, `maxValue` and `Key Frames`.
+  - `Key Frames` maps each keyframe time, a frame count as a string, to its `Value` and `Variant Type`, and optional `InBez` and `OutBez`.
+  - `effects::read` keeps an effect that is on when a parameter or a keyframe is off its default (`in_use`). It keeps a Dynamic Zoom that is on.
+  - `picture::read_keys` reads the keys of one parameter. When the X and the Y of the zoom or of the position both have keys, the keys must be on the same frames (`merge`).
+  - `picture::read_point_keys` reads the anchor point, a `POINTF`. Keys with Bezier handles do not fit.
+  - The center and the scale of Dynamic Zoom need exactly two keys (`ends`). The earlier key is the start box.
+  - The export writes the keys of each keyed value in the `Key Frames` of its parameter, and the anchor point keys without handles.
+  - `Effects::written` moves the times of the kept effects by `Effects::from` less the first source frame of the written item.
 - The notes of an export name a clip that moved past the reach of these parameters (`otio::out_of_reach`).
 
 Import:
@@ -884,18 +919,24 @@ Import:
 - Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.
 - A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
-- `otio::tied` finds the other parts of a clip with no media or of a compound clip. It uses the rules of `no_media_tie` and `compound_links`. The model holds no link field, because the parts of a block are separate clips only while they have one place.
+- `Project::tied` finds the other parts of a clip (`Clip::tied_with`): the clips with the same `Clip::link`, start, length, source start and speed.
+  - A link group joins the picture and the sound of a compound clip, and the parts of a clip with no media.
+  - The parts must also have one place and one source. Why: an edit that writes on one track can move one part away. A split gives both halves the link. Then the parts are separate clips.
+  - `Project::free_link` gives a number that no clip of the timeline has.
+  - `linked::Relink` gives new numbers to the links of pasted, spread and imported clips. Thus they do not join a group of the timeline.
+  - An import keeps the link groups of the file for compound clips and clips with no media.
+  - `linked::link_blocks` links the picture and the sound of a compound clip from a file with no link groups. They need the same sequence, start, length, source start and speed.
 - `ops::linked` makes an edit act on each part ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `linked::parts` selects one part as the lead: the part on V1, else the part that the request names.
   - `linked::take` removes the other parts before the edit, so `follow::follow` does not move them.
-  - `linked::put` writes them back at the place of the lead.
+  - `linked::put` writes them back. Each part moves and changes by the same amount as the lead.
   - `linked::split_main` splits each part before an insert on V1, so that the sound keeps its place under the picture.
   - The GUI sends one lead for a selection that holds two parts (`linked::leads`, `edits::Plan::new`), because each part acts on the other parts.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
 - `ops::compound::nest` stores one `Compound` in `Project::compounds` and puts picture and sound blocks that refer to it by `Clip::compound`.
-  - `compound_links` ties those blocks on export. Every placement across timelines shares one canonical source of tracks, markers and format.
+  - `with_sound` and `build` give the two blocks one link group. Every placement across timelines shares one canonical source of tracks, markers and format.
   - `stack_for` builds and memoizes an OTIO `Stack` on export from `Project::compound_tracks`. It keeps foreign metadata or offline contents in `Compound::kept_otio`.
   - `Compound::tracks` holds all tracks together. `picture_tracks` takes video tracks, and `sound_tracks` takes sounds (`sound_part`) at each clip's sound length.
   - Each track keeps its dissolves. `render::expanded` conforms cross-rate compounds first and plays those tracks (`inner_layout`).
@@ -969,7 +1010,7 @@ Kept data:
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound` in `Project::compounds`, referenced by `Clip::compound` id; `edit.decompose` breaks it up |
-| multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). Its `channels` and `link` stay in the reference (`keep_ties`). On an audio track, `Clip::is_sound_block` is true |
+| multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). It keeps its `channels` (`keep_channels`) and its `Clip::link`. On an audio track, `Clip::is_sound_block` is true |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |
 
@@ -988,10 +1029,11 @@ The file:
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services, viewer and keys ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
-- `Preferences.keys` holds the keys of each `Action` that the user changed.
-  - An action that is not in the section has its default keys.
+- `Preferences.keys` holds the keys in force of each `Action` whose keys are different from the table.
+  - An action that is not in the section has its default keys, less the keys that an action of the section has. Why: a new default key of a later version does not make the file fail (spec §11).
   - An action with an empty list has no key.
-  - A file that gives one key to two actions fails to load.
+  - A file that gives one key to two actions of the section fails to load.
+- `Preferences.key_set` names the key set that the keys in force come from. It is left out for vidcut's own set (`key_sets::OWN`).
 - No key of a service is ever in the file.
 
 Requests:
@@ -1002,6 +1044,25 @@ Requests:
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
+- The key set requests are projectless too:
+  - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
+  - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
+  - A set file holds one table, `keys`, in the form of `Preferences.keys`.
+  - A set file also holds `base`, the built-in set that it changes (`KeySet::base`). The file leaves it out for vidcut's own set.
+    - `keys.save` gives the new set the base of the set in its `from`. An import gives the base of the set that the file names.
+  - `keys.export` and `keys.import` use the key file of other editors (`key_file`). `key_file::text` writes it, and `key_file::parse` reads it.
+    - `key_file::text` names the base, and writes only the commands whose keys differ from the base. Why: the other editor then keeps the keys of that base for the commands that vidcut does not have.
+    - `key_file` has a table of the commands of the other editor and the action of each. An action with two commands splits its keys by the default keys of each command.
+    - An action that has no command is in a comment line of vidcut. Why: the other editor skips comments, and vidcut keeps all keys of its own files.
+    - `key_file::parse` starts from the set that the file names, applies the listed commands, and keeps only the changes from the table.
+    - An action with a command and no line keeps the keys of that set, also a key that a line gives to another action. Then the set lists both actions, and `Bindings::conflicts` gives the key.
+    - The actions without a command follow the free-key rule of the set. Why: the other editor does not know them, as a later version of vidcut adds actions.
+    - A file that names no set starts with no key for each command. Thus an export of a built-in preset gives the same keys as the built-in set.
+    - The Avid Media Composer file is the one exception. It gives V to two commands, and the import keeps V on both.
+  - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
+  - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
+  - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.
+  - Why a copy in the preferences: the keys in force do not depend on a file that the user can delete or edit.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).

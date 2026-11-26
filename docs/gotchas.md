@@ -238,6 +238,12 @@ This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut
   - If the handle stays open, it keeps the memory after `vkFreeMemory`.
   - `hw::vulkan` exports each memory object of FFmpeg once. It closes the handle when FFmpeg frees the frames context.
   - FFmpeg's own copy of a frame to CUDA exports the same handle, and closes it with the frame.
+- **NVIDIA's JPEG decoder gives the picture before on a stream that does not wait for the default stream** (Windows driver 621.24, RTX 4080 SUPER).
+  - FFmpeg 9.0.1 maps each NVDEC picture on the stream of its CUDA device (`output_stream` of `cuvidMapVideoFrame`).
+  - On a stream made with `CU_STREAM_NON_BLOCKING`, 15 to 33 of 46 JPEG pictures hold the picture before. The frames change from run to run.
+  - Image sequences and MJPEG files fail the same way. H.264 on the same stream is correct.
+  - On a stream made with `CU_STREAM_DEFAULT`, each JPEG picture is correct, in 8 runs of 4 clips. So is each picture on the default stream itself.
+  - Thus the streams of `GpuDecoder::own` wait for the default stream (`cuda::share::Waits`). The player's decoder uses the default stream.
 - **FFmpeg's Vulkan ProRes decoder crashes on AMD's Windows driver** (9.0.2, Radeon iGPU, on one thread too).
   - vidcut decodes on Vulkan only on NVIDIA's GPUs (`GpuDecoder::why_not`).
   - A crash cannot be caught. Thus each other vendor needs its own check first.
@@ -471,6 +477,10 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - `dynamicZoomCenter` (POINTF) is the middle of a box. It is from the middle of the picture, in fractions of the picture, y up.
   - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
   - Resolve writes two keys for each, at −s and 1000 − s. s is the first source frame of the clip, in media without a timecode.
+  - It writes them on a clip with Dynamic Zoom on or off.
+  - A title has an s of 0. Thus its keys are at `0` and `1000`, also on a title later in the timeline.
+    - The six titles of `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` show this, at 24 fps and g = 86400. Each has a source start of 0 and Dynamic Zoom off.
+    - The `dynamicZoomScale` of the first title has the keys 0.8 and 1.0, the default 1.0, and the range 0.01 to 100.
   - For a still, Resolve writes them at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - In media with a timecode, s still counts from the first frame of the media, not from its timecode.
     - A clip from frame 90 of media at 10:00:00:00 has its keys at −90 and 910. Its `source_range` starts at 1080090.
@@ -478,6 +488,33 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
   - Thus `otio::picture` reads and writes the box as it is, with any `scale`.
+- **Resolve's scripting API has no keyframe calls** (Resolve Studio 21.1.1).
+  - No call adds, reads or removes the keyframes of a clip.
+  - A scripted value on a parameter with keyframes changes nothing that Resolve shows or plays.
+  - A script can change the speed, with or without a stretch of the keyframes, and can export and import OTIO.
+  - Thus a measurement sets keyframes in the Inspector and reads them from an OTIO export.
+- **A time in `Key Frames` is a whole frame of the clip** (Resolve Studio 21.1.1, on a 1920×1080 timeline at 30 fps that starts at 01:00:00:00).
+  - It counts the timeline frames from the first frame of the clip.
+  - At speed 1, it is the source frame less the start of the clip's `source_range`.
+  - This is so in media with a timecode too. A key on the second frame of a clip is at `1`.
+  - At any speed, the source frame is the first frame that the clip shows, plus the time times the speed.
+    - At 50%, a key 30 source frames into the clip is at `60`. At 200%, it is at `15`.
+  - A clip that plays backward shows its highest source frame first. Frame f shows that frame less f.
+    - A render of a clip with numbered frames showed this. vidcut plays a reversed clip in the same way.
+    - Thus a key on source frame 239 of a clip that shows 388 first is at `149`.
+    - The time of the file runs against the source. Thus `InBez` and `OutBez` change places.
+  - A speed change that stretches the keyframes keeps each key on its source frame.
+    - On a clip that plays backward, the stretch moves each key by one source frame. This is a bug in Resolve.
+    - vidcut keeps each key on its source frame, also on a clip that plays backward.
+  - A speed change that does not stretch keeps the numbers in the file. Thus each key stays on its frame of the clip, over another source frame.
+  - Resolve reads a file as written. Times, values and eases come back in its Inspector and in its next export.
+- **X and Y have keyframes of their own** (Resolve Studio 21.1.1).
+  - `transformationZoomX` and `transformationZoomY` each have their own `Key Frames`. So do Pan and Tilt.
+  - A keyframe on Position keys X and Y. A later change of X alone adds a keyframe to X only.
+  - vidcut keys X and Y together. When both axes have keys, `otio::picture` reads them only on the same frames.
+- **With keyframes, `Parameter Value` is not a value of the curve.**
+  - It is not the value at the playhead, and not the value of the last keyframe.
+  - An import reads the keyframes.
 - **Resolve reads a Bezier handle of a keyframe only in its own form.**
   - It writes `"OutBez": {"OutBez": [20.0, 0.0], "Variant Type": "POINTF"}`, and `InBez` in the same way.
   - The first number is the time from the keyframe in frames. The second is a value in the units of the parameter.
@@ -654,12 +691,30 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Use Legacy Auto Color is on. Two clicks on the A button of the Primaries palette, then one Ctrl+Z, take back both results.
   - Ctrl+Shift+Z then gives nothing back. The Edit menu shows Redo.
   - vidcut: each run of Auto Color is one undo step, and Redo gives it back.
+- **Undo does not take back Reset All Node Stack Layers.**
+  - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
+  - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
+  - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- **A typed Soft of the HSL qualifier shows 0.1 more.**
+  - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
+  - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
+  - The renders use the typed value. A render with a typed Soft 20 at Width 10 matches Soft 20 within 2e-4.
+  - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+- **Two eases do not stay on the Center and the Offset of a title.**
+  - The Center of the Background and the Offset of the Drop Shadow are `POINTF` values.
+  - On them, Ease Out on the first key and Ease In on the last key do not stay set.
+  - On the other values of these two groups, the same items write `OutBez` and `InBez`.
+  - vidcut does not copy this fault. Each ease stays on Center and Offset too ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
 
 - **Close Up leaves the Out frame out.**
   - With a timeline Out at frame 200 alone, the copy ends before frame 200.
   - With an In at 220 and an Out at 260, the copy covers frames 220 to 259.
   - The other edits put the Out frame in the clip (spec D16).
   - vidcut puts the Out frame in the copy, as in the other edits ([spec §7.2](spec.md#72-edit-functions)).
+- **The render queue of the Deliver page has no undo.**
+  - On the Deliver page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
+  - Add to Render Queue, the X of a job, a drag in the queue, Clear Rendered and Clear All are not undo steps.
+  - vidcut: each change of the render queue is an undo step, and Undo works on the Export page ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 - **Paste Attributes puts each keyframe one frame early.**
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
@@ -668,7 +723,38 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Seven clips of one film have a shot change inside. The move of no clip jumps at the cut. Other files are not measured.
   - On four clips, the picture pans from the subject of one shot to that of the next, over 22 to 45 frames.
   - Thus the frames near the cut show the wrong part of each shot. On the other three clips, the move near the cut is small.
-  - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.28](spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- **While jobs render, the pencils of the other jobs look active.**
+  - On the Deliver page, the pencil of the job that renders is dim. The pencils of the other jobs stay white.
+  - A click on a white pencil does nothing.
+  - vidcut greys all pencils while jobs render ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+- **Delete removes only one of the selected points of a curve window.**
+  - The manual says that a Shift drag box selects points to delete them all at once (p. 3274).
+  - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.
+  - Two runs gave the same result.
+  - vidcut does not copy this fault. Delete removes each selected point ([spec §8.23](spec.md#823-windows-pp-32653279)).
+- **The outline of a title edit stays after the title leaves the viewer.**
+  - A Text title was in the edit state. The playhead then moved to another clip, and the outline stayed in the viewer.
+  - A click in the viewer removed it.
+  - vidcut ends the edit when the title leaves the viewer, and puts the change in ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **The first edit of a title can put the caret at the start of the line.**
+  - In 3 of 12 double-clicks, the caret went to the start of the line, not to the pointer.
+  - These were the first edit of the first Text title and the first edit of each line of a Left Lower Third. The cause was not found.
+  - vidcut always puts the caret at the letter boundary nearest to the pointer.
+- **Esc does not end the edit of a title.**
+  - In the edit of a Text title, Esc kept the change and moved the caret to the start of the text. The edit stayed open.
+  - Only a click outside the title ended the edit. Thus no key ends it.
+  - vidcut does not copy this fault. Esc keeps the change and ends the edit, as in most editors ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+
+## Resolve's scopes
+
+These facts come from measurements in Resolve Studio 21.2, on the floating Scopes window.
+
+- **Percentage with Video Level Scopes adds four dashed lines.**
+  - They are at 38.0, 58.1, 75.0 and 83.0 %. These are the PQ places of 26, 203, 1000 and 2000 nits.
+  - Two runs showed them: a 10-step chart in one scope, and SMPTE bars in four scopes.
+  - Data Level Scopes, 10-bit and mV do not show them.
+  - vidcut does not copy this fault. Percentage has no dashed lines (`dashed`).
 
 ## Resolve's renders
 
@@ -693,6 +779,13 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The ramp of Inside and Outside fits best at (x − 0.5, y − 0.5).
   - Thus the edge and the ramp are half a pixel apart in x, and one pixel apart in y.
   - vidcut reads both at (x, y + 0.5) (`CURVE_SAMPLE`, `window_curve`).
+- **Step 21 of a track equalizer Q shows 0.8.**
+  - The Equalizer window of a track shows the step n of a Q as (n − 10) / 15, with one decimal.
+  - Step 21 is 0.733, but the window shows 0.8. Earth, Ice and Fire show the same.
+  - Steps 36 and 51 are 1.733 and 2.733, and the window shows 1.7 and 2.7.
+  - A typed 0.7 goes to step 21. Thus the window shows 0.8 after a typed 0.7.
+  - In renders, the Earth bell of step 21 has the width 21/30 = 0.7.
+  - vidcut does not copy this fault. Step 21 shows 0.7 ([spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
 - **A circle window that Resolve makes with Toggle Display Mode on has no radius.**
   - With the viewer hidden, the grade of a new circle has no base radius.
   - The circle then renders about 30 pixels wide. The viewer draws the usual oval.
@@ -723,6 +816,29 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
   - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
   - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+- **A title with only the family name Bahnschrift draws a narrow face of the font.**
+  - Bahnschrift is a variable font. At weight 300, 350 and 400, the title draws Bahnschrift SemiLight SemiCondensed. At weight 200, it draws Bahnschrift Light SemiCondensed.
+  - The Inspector does the same. The family Bahnschrift with the face Normal draws SemiLight SemiCondensed, the same in every pixel.
+  - The other faces of that family, such as Bold and Light, cannot be picked. A click on one keeps Normal.
+  - At size 96, the ink of "Bahnschrift HHH" is 601 pixels wide. The faces Light, SemiLight and SemiBold give 704 pixels.
+  - At weight 600 and 700, the title draws a false bold of a SemiCondensed face, 628 pixels wide.
+  - Windows gives the Regular face for the family name "Bahnschrift" at weight 300 to 400.
+  - vidcut does not copy this fault. It draws the Regular face, as Windows does. The ink of "Bahnschrift HHH" is then 704 pixels wide.
+- **Arial picked in a Scroll draws Arial Black.**
+  - The Inspector shows the face Regular. Its other faces, such as Bold and Black, cannot be picked.
+  - The file writes the font `Arial,8.25,-1,5,127,0,0,0,0,0,Regular`.
+  - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
+  - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
+  - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+
+## Resolve's key files
+
+These facts come from measurements in Resolve Studio 21.2 on Windows.
+
+- **An exported key file has CR CR LF line ends.**
+  - Export Preset wrote three lines, with CR CR LF after the first two. The last line has no line end.
+  - Resolve reads key files with LF line ends.
+  - vidcut writes LF line ends. It reads each line without its CR characters ([spec §11](spec.md#11-keyboard-shortcuts)).
 
 ## Resolve's Fusion page
 
@@ -732,7 +848,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand.
   - Replace gives the same mask as Copy in each read.
   - Where the new mask is 0 and the input mask is 1, Replace gives 0.
   - The manual says that the areas that are zero in the new mask do not change the input mask (p. 2465).
-  - vidcut has no Paint Mode yet. The [todo](todo/effects-page.md) follows the manual ([spec §8.19](spec.md#the-masks)).
+  - vidcut follows the manual: Replace gives n where n is above 0, else the input mask ([spec §8.19](spec.md#the-masks)).
 - **The Luminance and the Hue channels of an effect mask swap red and blue.**
   - Luminance gives 0.114 × R + 0.587 × G + 0.299 × B. These are the Rec. 601 weights with red and blue swapped.
   - Hue gives the hue of (B, G, R). Thus red gives 240° and blue gives 0°.

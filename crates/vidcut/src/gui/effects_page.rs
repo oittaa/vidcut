@@ -33,6 +33,7 @@ use super::workspace::{Workspace, dim, fit};
 use crate::live::{Answer, PageClock, PageTime, PlayerId};
 
 const GRIP: f32 = 9.0;
+const GRADE_PITCH: Vec2 = vec2(1.5, 1.25);
 const GRADIENT_POINT: Color32 = Color32::from_rgb(230, 60, 60);
 const GRADIENT_LINE: Color32 = Color32::from_rgb(80, 200, 80);
 const DASH: f32 = 4.0;
@@ -140,12 +141,14 @@ pub(super) struct EffectsPage {
     held: Option<Held>,
     pub(super) graded: Option<super::color_page::Graded>,
     pub(super) grading: GradeLevel,
+    pub(super) layer: usize,
     pub(super) palette: GradePalette,
     pub(super) primaries: PrimariesView,
     pub(super) window: usize,
     pub(super) window_name: Option<super::color_page::WindowName>,
     pub(super) window_grab: Option<super::window_overlay::WindowGrab>,
     pub(super) window_drawing: Option<super::window_overlay::Drawing>,
+    pub(super) window_points: Option<super::window_overlay::PointPick>,
     pub(super) grade_nodes: Vec<u32>,
     pub(super) grade_loose: bool,
     pub(super) grade_seen: Option<(String, GradeOf, Option<String>)>,
@@ -187,18 +190,20 @@ impl Default for EffectsPage {
             held: None,
             graded: None,
             grading: GradeLevel::Clip,
+            layer: 1,
             palette: GradePalette::default(),
             primaries: PrimariesView::default(),
             window: super::grade_windows::first_of(vidcut_core::model::WindowKind::Circle),
             window_name: None,
             window_grab: None,
             window_drawing: None,
+            window_points: None,
             grade_nodes: Vec::new(),
             grade_loose: false,
             grade_seen: None,
             grade_left: Lru::new(),
             grade_coming: None,
-            grade_view: NodeView::default(),
+            grade_view: NodeView::pitched(GRADE_PITCH),
             grade_list: false,
             grade_wide: false,
             grade_spot: None,
