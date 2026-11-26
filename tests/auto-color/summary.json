@@ -723,5 +723,17 @@
       "name": "common-canvas/commoncatalog-cc-by (4 shards)"
     }
   ],
+  "train_environment": {
+    "commoncatalog_cache_sha256": "f86fd0e8acbc266496aed8fd14dbf127edbcfc7f55ce8a8a3b069a658b3113fb",
+    "cuda": "12.8",
+    "cudnn": 91900,
+    "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+    "numpy": "2.5.4",
+    "opencv": "5.1.0",
+    "pillow": "13.0.0",
+    "pyarrow": "26.0.1",
+    "rgb2raw_cache_sha256": "1797c4e79a67f6047648a2908ac6bc59bfd602db378fcbf6217f8cbe32c1f86f",
+    "torch": "2.11.0+cu128"
+  },
   "train_script": "scripts/auto-color-train.py"
 }

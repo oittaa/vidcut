@@ -289,8 +289,9 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 - **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` deterministically.
   - Run `python scripts/auto-color-train.py`.
-  - The script downloads and verifies three datasets into `$VIDCUT_TEST_DATA/auto-color/` when absent:
+  - When absent, the script downloads and verifies about 11.6 GB of data into `$VIDCUT_TEST_DATA/auto-color/`:
     - SimpleCube++ `train` (`CC BY 4.0`, Zenodo record 4153431).
     - `marcosv/rgb2raw` (`MIT`).
     - Four `CommonCatalog CC-BY` shards (`CC BY 4.0`).
+  - Exact weights match only on the same GPU and library versions (recorded with the SHA-256 in `tests/auto-color/summary.json`).
   - Benchmark tables and DaVinci Resolve 21.2 baselines live in `tests/auto-color/summary.json`, `tests/auto-color/simplecube-test.tsv`, `tests/auto-color/intel-tau-225.tsv`, and `tests/auto-color/resolve-compare-100.tsv`.

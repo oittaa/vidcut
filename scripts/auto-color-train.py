@@ -19,6 +19,8 @@ import zipfile
 
 import cv2
 import numpy as np
+import PIL
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 import torch.nn as nn
@@ -32,6 +34,8 @@ SIMPLECUBE_MD5 = "d3438223e5b4ca27be874db690bef822"
 RGB2RAW_URL = "https://huggingface.co/datasets/marcosv/rgb2raw/resolve/91a105e8532f082a955b799c15dea0ada9e3caed/train_rgb2raw.zip"
 RGB2RAW_SIZE = 8731825651
 RGB2RAW_SHA256 = "eaf4d2d5dd60a9d04b96f59a8f85ac1f2e55c9d8639aa4f44c6548d9278fe354"
+RGB2RAW_CACHE_SHA256 = "1797c4e79a67f6047648a2908ac6bc59bfd602db378fcbf6217f8cbe32c1f86f"
+CC_CACHE_SHA256 = "f86fd0e8acbc266496aed8fd14dbf127edbcfc7f55ce8a8a3b069a658b3113fb"
 
 CC_SHARDS = [
     (
@@ -107,6 +111,25 @@ def download_verified(dest, url, expected_size, digest_algo, expected_digest):
             f"{os.path.basename(dest)} verification failed: size={got}/{expected_size}, {digest_algo}={digest}/{expected_digest}"
         )
     os.replace(part, dest)
+
+
+def save_cache_atomic(obj, cache_path, expected_sha):
+    os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
+    part = cache_path + ".part"
+    try:
+        torch.save(obj, part)
+        os.replace(part, cache_path)
+    except Exception:
+        if os.path.exists(part):
+            os.remove(part)
+        raise
+    got = file_digest(cache_path, "sha256")
+    if got != expected_sha:
+        print(
+            f"Warning: {os.path.basename(cache_path)} sha256={got} != expected {expected_sha} "
+            "(OpenCV/Pillow/PyTorch versions differ)",
+            flush=True,
+        )
 
 
 def ensure_simplecube(data_dir):
@@ -187,8 +210,10 @@ def ensure_and_load_rgb2raw(data_dir, device):
     rdir = os.path.join(data_dir, "rgb2raw")
     cache_path = os.path.join(rdir, "cache_clean_160_v1.pt")
     if os.path.isfile(cache_path):
-        d = torch.load(cache_path, map_location="cpu", weights_only=True)
-        return _filter_rgb2raw(d["raw"], d["isp"], d["cam_wb"], d["day_wb"], d["ccm"], device)
+        if file_digest(cache_path, "sha256") == RGB2RAW_CACHE_SHA256:
+            d = torch.load(cache_path, map_location="cpu", weights_only=True)
+            return _filter_rgb2raw(d["raw"], d["isp"], d["cam_wb"], d["day_wb"], d["ccm"], device)
+        print(f"Cache {os.path.basename(cache_path)} SHA-256 mismatch; rebuilding...", flush=True)
     zip_path = os.path.join(rdir, "train_rgb2raw.zip")
     download_verified(zip_path, RGB2RAW_URL, RGB2RAW_SIZE, "sha256", RGB2RAW_SHA256)
     print("Building deterministic 160x160 cache for marcosv/rgb2raw (MIT)...", flush=True)
@@ -236,9 +261,10 @@ def ensure_and_load_rgb2raw(data_dir, device):
     cam_t = torch.from_numpy(np.stack(cam_wbs))
     day_t = torch.from_numpy(np.stack(day_wbs))
     ccm_t = torch.from_numpy(np.stack(ccms))
-    torch.save(
+    save_cache_atomic(
         {"raw": raw_t, "isp": isp_t, "cam_wb": cam_t, "day_wb": day_t, "ccm": ccm_t},
         cache_path,
+        RGB2RAW_CACHE_SHA256,
     )
     return _filter_rgb2raw(raw_t, isp_t, cam_t, day_t, ccm_t, device)
 
@@ -247,8 +273,10 @@ def ensure_and_load_commoncatalog(data_dir, device):
     cdir = os.path.join(data_dir, "commoncatalog")
     cache_path = os.path.join(cdir, "cache_natural_160_v2.pt")
     if os.path.isfile(cache_path):
-        d = torch.load(cache_path, map_location="cpu", weights_only=True)
-        return d["imgs"].to(device=device)
+        if file_digest(cache_path, "sha256") == CC_CACHE_SHA256:
+            d = torch.load(cache_path, map_location="cpu", weights_only=True)
+            return d["imgs"].to(device=device)
+        print(f"Cache {os.path.basename(cache_path)} SHA-256 mismatch; rebuilding...", flush=True)
 
     for fname, url, size, sha in CC_SHARDS:
         download_verified(os.path.join(cdir, fname), url, size, "sha256", sha)
@@ -291,7 +319,7 @@ def ensure_and_load_commoncatalog(data_dir, device):
         imgs.append(im160)
 
     imgs_t = torch.from_numpy(np.stack(imgs)).permute(0, 3, 1, 2)
-    torch.save({"imgs": imgs_t}, cache_path)
+    save_cache_atomic({"imgs": imgs_t}, cache_path, CC_CACHE_SHA256)
     print(f"  CommonCatalog filtered natural photos cached: {len(imgs)}/{len(rows)}", flush=True)
     return imgs_t.to(device=device)
 
@@ -971,8 +999,16 @@ def main():
     ema.eval()
 
     export_safetensors(ema, args.out)
-    sha = hashlib.sha256(open(args.out, "rb").read()).hexdigest()
+    sha = file_digest(args.out, "sha256")
     print(f"wrote {args.out} ({os.path.getsize(args.out):,} bytes, sha256={sha})", flush=True)
+    gpu = torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu"
+    cudnn = torch.backends.cudnn.version() if device.type == "cuda" else None
+    print(
+        f"env gpu={gpu!r} torch={torch.__version__} cuda={torch.version.cuda} "
+        f"cudnn={cudnn} cv2={cv2.__version__} pillow={PIL.__version__} "
+        f"numpy={np.__version__} pyarrow={pa.__version__}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
