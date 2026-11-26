@@ -825,6 +825,19 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
   - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **Stretch makes a file with pixels that are not square too wide.**
+  - Stretch scales the stored pixels to the frame. Then the pixel aspect ratio makes the picture wider again.
+  - Thus the picture is W × PAR wide, and it goes out of the frame at the left and the right.
+  - This is measured on files with pixels of 4:3, 2:1 and 10:9. The 4:3 file is 1706.67 px wide in 1280 x 720 and in 1280 x 960.
+  - vidcut does not copy this fault. Stretch fills the frame on each axis (`place::mapped`, [spec](spec.md#input-scaling-pp-292293)).
+- **On pixels that are not square, the anchor point moves in a Rotation.**
+  - The picture turns about its middle by the turn of those pixels. A move then puts the anchor back, but that move uses a plain turn.
+  - The two turns are not the same on these files. Thus the point at the anchor moves. On a file with square pixels, it stays.
+  - Example: the 2:1 file in 1280 x 720, with Anchor Point X 200, Y 100 and Rotation 30. The point at the anchor moves 63.3 px right and 40.5 px up.
+  - 15 cases on the square, 4:3 and 2:1 files fit P′ = c + M Z (P − c) + D (I − R Z) D⁻¹ d, within 0.42 px.
+    - c is the middle of the frame, and d is the offset of the anchor point. Z is the Zoom.
+    - M is the turn of those pixels, R is the plain turn, and D is diag(PAR, 1).
+  - vidcut does not copy this fault. The picture turns about the anchor point, and that point stays (`Placing::new`, [spec D75](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **The crop of a file with a rotation cuts other sides of the picture.**
   - The files have a rotation of 90, 180 or 270 in the `tkhd` matrix. The timeline shows them upright.
   - One 1280 x 720 file was measured at each angle.
