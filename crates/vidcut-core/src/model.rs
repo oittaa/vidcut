@@ -4991,7 +4991,8 @@ pub struct MagicMask {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
     /// One map for each subject on each frame that has clicks of it that
-    /// are on. Left out when there is none.
+    /// are on, and on each frame that a track of it reached. Left out when
+    /// there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub maps: Vec<MaskMap>,
 }
@@ -5028,6 +5029,10 @@ pub struct MaskMap {
     pub subject: u32,
     /// The name of the map in the mask store of the cache folder.
     pub name: String,
+    /// The frame of the clicks that a track carried to this frame. Left
+    /// out for a map of the clicks on its own frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<i64>,
 }
 
 /// How the key input of a corrector takes the key that comes in. The key

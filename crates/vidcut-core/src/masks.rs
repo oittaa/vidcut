@@ -9,6 +9,19 @@ pub const CELLS: usize = SIDE * SIDE;
 pub const MAPS_BYTES: usize = 256 << 20;
 pub const MOST_CLICKS: usize = 64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rules {
+    pub joins: bool,
+    pub clicked_stays: bool,
+    pub clicks_drop_tracked: bool,
+}
+
+pub const RULES: Rules = Rules {
+    joins: true,
+    clicked_stays: true,
+    clicks_drop_tracked: true,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
     pub at: [f64; 2],

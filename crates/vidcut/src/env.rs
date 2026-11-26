@@ -586,9 +586,58 @@ impl Env for AvEnv {
                     .collect()
             })
             .collect();
+        let model = (size, crate::preferences::gpu_acceleration());
         let found =
-            vidcut_av::mask::find(&dir, size, (w, h, &pixels), &clicks).map_err(av_error)?;
+            vidcut_av::mask::find(&dir, model, (w, h, &pixels), &clicks).map_err(av_error)?;
         Ok(found.into_iter().map(|f| f.logits.into()).collect())
+    }
+
+    fn subject_tracks(
+        &self,
+        need: &vidcut_core::editor::TrackNeed,
+        each: &mut dyn FnMut(i64, Vec<Arc<[f32]>>) -> Result<()>,
+    ) -> Result<()> {
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the picture changed while the Magic Mask tracked it; track again",
+            ));
+        }
+        let dir = paths::models_dir();
+        let size = vidcut_av::mask::Size::Tiny;
+        vidcut_av::mask::get_ready(&dir, size, need.download).map_err(av_error)?;
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let run = vidcut_av::mask::Run {
+            plan: &need.plan,
+            source: &need.source,
+            at: need.at,
+            backward: need.backward,
+            forward: need.forward,
+            decoder: decoder.as_ref(),
+        };
+        let subjects: Vec<Vec<vidcut_av::mask::Click>> = (need.subjects.iter())
+            .map(|points| {
+                (points.iter())
+                    .map(|p| vidcut_av::mask::Click {
+                        at: p.at,
+                        positive: !p.negative,
+                    })
+                    .collect()
+            })
+            .collect();
+        let model = (size, crate::preferences::gpu_acceleration());
+        let mut failed = None;
+        let tracked = vidcut_av::mask::track(&dir, model, &run, &subjects, |f, found| {
+            let maps = found.into_iter().map(|v| v.logits.into()).collect();
+            each(f, maps).map_err(|e| {
+                let text = e.to_string();
+                failed = Some(e);
+                vidcut_av::Error::Invalid(text)
+            })
+        });
+        match (tracked, failed) {
+            (_, Some(e)) => Err(e),
+            (r, None) => r.map_err(av_error),
+        }
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
