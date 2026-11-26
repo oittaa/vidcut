@@ -859,7 +859,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - These tracks ripple only where there is no Track 1 video under them (p. 721; D22).
   - Clips on these tracks sit freely, with gaps.
 - **Audio tracks:**
-  - A1, A2, … are below the video tracks. They hold sound alone, for example music.
+  - A1, A2, … are below the video tracks. They hold all the sound. A clip on a video track has picture only (pp. 646–647).
+  - The sound of a picture on Vn goes on An. A second sound stream goes on the next audio track (D24).
   - Media without video go there by default (D26).
 - **Track header** (p. 647):
   - A click makes the track the target (D3).
@@ -867,9 +868,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - **Overlapping video:**
   - The highest enabled track is visible (p. 647).
   - A disabled clip, or a track with its video off, shows what is under it.
-- **Linking:**
-  - The video and audio of a clip are one combined clip.
-  - Trims move both, but a J/L cut moves only the audio edit (§8.7).
+- **Linking** (pp. 913–916):
+  - A picture clip and its sound clips are linked. They are one link group.
+  - An edit of one clip of a group acts on each clip of the group (p. 3875): move, trim, roll, slip, slide, split, join, delete, speed and paste.
+  - Each clip of a group moves and trims by the same amount. Thus a J/L cut stays (§8.7).
+  - The Cut page shows the sound clips on their audio tracks, as the Edit page does ([deviation X177](deviations.md#x177-the-cut-page-shows-sound-clips-on-their-audio-tracks)).
   - The Cut page has no link/unlink.
 
 ## 7. Edit functions (pp. 696–701)
@@ -1244,7 +1247,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
-  - **Lower audio band at an edit: audio-only roll**, a J/L cut (§8.7).
+  - **The edge of a linked sound clip on an audio track: audio-only roll**, a J/L cut (§8.7).
 - **Safe Edit** (option, p. 732):
   - A trim stops at the neighbor clip, with a small timer on the cursor.
   - Continue the drag to overwrite the neighbor.
@@ -1310,11 +1313,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - W again deselects the edit.
 
 ### 8.7 J/L cuts (p. 728)
-- Hover over the lower audio part of a clip at an edit until the cursor shows a note. Then drag.
-- Only the audio edit moves, as an audio roll.
+- A J or L cut is a linked sound clip that starts or ends at a different time than its picture clip.
+- Hover over the edge of a linked sound clip on an audio track until the cursor shows a note. Then drag.
+- Only the sound edit moves, as a roll on the audio track. The picture clips do not change.
 - A click selects that audio edit, and `,` / `.` move it (D20).
 - The edit needs sound on one side only.
-  - With sound on the outgoing side only, the sound goes on past the picture. It goes into a gap, or under a clip with no sound.
+  - With sound on the outgoing side only, the sound goes on past the picture, into a gap of the audio track.
   - With sound on the incoming side only, the sound starts before the picture.
   - vidcut stops the edit at the nearest sound on the track, at the timeline's start and where the media runs out.
 
@@ -1692,7 +1696,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In the GUI, a question that gives their size comes before the download.
   - The dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
   - The model list gives the languages of each model, how it times the words, and its size or price.
-  - A box for each track with sound is ticked when playback hears that track.
+  - A box for each audio track is ticked when playback hears that track.
   - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
   - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
 - **Paid speech models** (vidcut):
@@ -2853,9 +2857,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Insert and Smart Insert move other tracks by the rules of D23.
     - The tracks inside go on the track that the edit picks, and on the tracks above it.
     - `inner_tracks` of an edit puts a track inside on a track of the timeline. `null` leaves that track out.
-    - The sound of a picture track inside moves with it.
-    - `null` on a picture track inside leaves out only its picture.
-      - Its sound goes on the first audio track from its own that no other track inside takes.
+    - A track inside that `inner_tracks` does not name goes on the track of its kind that the edit picks, plus its number minus 1.
     - Two tracks inside on one track of the timeline are refused.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
@@ -5050,7 +5052,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
 - **Mixer** (pp. 649–650):
-  - It has a channel strip for each track with sound: name, meter, fader in dB, mute and solo.
+  - It has a channel strip for each audio track: name, meter, fader in dB, mute and solo.
   - D27 has the law and the ticks of the fader.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
@@ -5428,6 +5430,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Ducking, Ripple Delete Silence and the meters follow the keyframes (D84). The keys are in D85.
 - **Ripple Delete Silence** (p. 773):
   - Clip > Audio Operations > Ripple Delete Silence works on the selected clips.
+  - vidcut: a selected picture clip gives the sound of its linked sound clips. Remove cuts each clip of the link group.
   - vidcut: it is also in the right-click menu of the clip and in Timeline Actions.
   - Settings: threshold (dB), pre-head, post-tail, minimum to trip.
   - vidcut adds Detect: Sound level or Speech.
@@ -5457,7 +5460,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It sets the volume of the selected clips so that their level reaches a target. It applies no dynamics.
   - Normalization Mode: several loudness standards, Sample Peak or True Peak.
   - Set Level: Relative treats the clips as one clip. Independent gives each clip its own change.
-  - vidcut: `clip.normalize`, in Audio Operations of the right-click menu, acts on the selected clips with sound.
+  - vidcut: `clip.normalize`, in Audio Operations of the right-click menu, acts on the selected clips with sound. A selected picture clip gives its linked sound clips.
     - Normalize in the header of the Inspector's Audio section opens the same window for the clips of the section.
     - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
     - A short message tells how many clips stopped at the volume limit or at the peak limit.
@@ -6161,11 +6164,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Keys that the Cut chapters do not give come from the Edit page.
   - §11 marks them with †.
 - **D14. J/L cuts at an edit point.**
-  - Between two touching clips with sound, a J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
-  - An edit that gives such a clip another neighbor with sound there resets the J/L cut to a straight cut.
-  - The edit also resets the other cut of the clip, if the clip would have no sound of its own.
-  - With a gap or a clip with no sound there, the `head` or `tail` stays. It gets shorter when it would overlap other sound.
-  - Reason: sound does not overlap on a track.
+  - A J/L cut (§8.7) is a roll of the edit between two sound clips on an audio track. The picture cut stays.
+  - With a gap on one side, the sound clip on the other side moves its edge alone. It stops at the nearest sound on the track.
+  - Reason: the clips on a track do not overlap.
 - **D15. Playhead after an edit function.**
   - After Smart Insert, Append, Overwrite, Ripple Overwrite, Close Up or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).
@@ -6197,6 +6198,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - On a J/L handle, they move the audio edit, and leave the picture cut (D36).
 - **D21. Following Track 1** (pp. 649, 727).
   - A clip on another track is attached to the Track 1 picture under its first frame.
+  - A clip that is linked to a Track 1 clip is attached to that clip instead. Thus the sound of a J/L cut moves with its picture.
   - It moves with that picture, split parts included.
   - When that Track 1 clip is deleted, the attached clip goes where Track 1 closed up.
   - A trim of the tail of that Track 1 clip past the attached clip deletes the attached clip (p. 727).
@@ -6225,6 +6227,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D24. Where Place On Top goes** (pp. 699–700).
   - It goes onto the video track above the highest track with clips in the incoming span. It makes that track if necessary.
   - It goes onto Track 1 only if no track has clips there (D10 applies).
+  - The sound of a picture on Vn goes on An, linked to it (p. 646). A second sound stream goes on the next audio track. Each sound clip writes over what is there.
   - Sound alone goes to the first audio track with room.
 - **D25. Moving clips between tracks.**
   - A move gives positions as they are before the move.
@@ -6434,13 +6437,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The timeline shows it red, and the viewer shows Media Offline for a clip on a video track.
     - An import warning names the clip.
     - An OTIO export writes a `Clip` with a `MissingReference` on its track.
-    - Clips with the same place and the same link group in the file stay in one link group.
+    - Clips with the same link group in the file stay in one link group.
     - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media.
-  - **The linked parts of a clip with no media or of a compound clip.** Each part is a clip on its track. The parts act together, as linked clips do in Resolve:
-    - Clips with no media are parts of one clip when they have the same link group, start, length, source start and speed.
-    - A picture and a sound of a compound clip are one clip when they have the same link group, start, length, source start and speed.
-      - The edit that makes a compound clip gives the two one link group.
-      - An import keeps the link groups of the file. In a file with no link groups, the two need the same sequence, start, length, source start and speed.
+  - **Linked clips.** Each part is a clip on its track. The clips of one link group act together, as linked clips do in Resolve:
+    - An edit of a clip with picture and sound gives the picture clip and its sound clips one link group.
+    - The edit that makes a compound clip gives its picture and its sound one link group.
+    - An import keeps the link groups of the file. In a file with no link groups, a sound clip links to the picture clip of the same media at the same place.
+      - The picture and the sound of a compound clip need the same sequence, start, length, source start and speed.
     - A request that names one part acts on each part: `edit.delete`, `edit.cut`, `edit.copy`, `edit.move`, `edit.replace`, `edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, `edit.split`, `edit.join`, `edit.change_duration` and `edit.change_speed`.
     - The part on V1 leads. The rules of V1 apply to it. The other parts move and change by the same amount.
     - An insert into such a clip on V1 splits each part at that frame.
@@ -6448,7 +6451,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move of a sound part to another audio track moves its picture to the new place on the picture's own track.
     - A part on a locked track refuses the edit.
     - An edit that writes on one track does not write on the other parts: `edit.overwrite`, `edit.ripple_overwrite`, `edit.place_on_top`, `edit.source_overwrite` and `edit.paste`.
-    - After such an edit the parts can differ in place or length. Then they are separate clips, and an export gives them no link group.
+    - After such an edit the parts can differ in place or length. They stay in their link group.
     - A timeline drag shows only the part under the pointer. The other parts move when the drag ends.
     - Resolve was not measured for a locked part, or for a move to another track.
 - **D41. Proxies** (the proxy chapters, pp. 207–218, are outside the Cut page).
@@ -7780,8 +7783,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `track.set` refuses a value outside its range, and changes no value (X69).
     - The project file keeps only the values that are not the usual ones.
   - **Sources:**
-    - A new ducking has every other track with sound as its sources (X69).
-    - A source is a video or audio track. Only its sound counts. A track cannot duck under itself.
+    - A new ducking has every other audio track as its sources (X69).
+    - A source is an audio track. A track cannot duck under itself.
     - When a track is removed, it leaves the sources. The other sources follow their new numbers.
   - Each change is one undo step.
   - **Mixer:**
@@ -7812,7 +7815,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The two sides have the same slope at 0 dB. Thus a drag across 0 dB keeps its speed.
   - **Drag:**
     - Within 4 px of the line, the pointer becomes an up-down arrow.
-    - The trim handles at the ends of a clip, and at the sound edit of a J or L cut, come before the line.
+    - The trim handles at the ends of a clip come before the line.
     - The line comes before the slip handle of the clip.
     - A drag moves the line as far as the pointer moves. With Shift, it moves the line a tenth as far.
     - Shift can go on or off during the drag. The line does not jump.
@@ -7873,7 +7876,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Range** (measured in Resolve Studio 21.1.2):
     - A loudness target is from −30 to 0 LUFS. The export's loudness setting takes the same range.
     - A peak target and a peak limit are from −20 to 0 dB.
-  - **Measured part:** the sound that the clip plays, with its J or L cut and at its speed.
+  - **Measured part:** the sound that the sound clip plays, at its speed.
     - The clip is measured alone, without its volume, mute and Voice Isolation, and without transitions.
     - Its track's volume, mute, solo, Voice Isolation and ducking do not apply.
     - Thus the mixer does not change the result. A muted clip is measured too.

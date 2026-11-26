@@ -445,6 +445,17 @@ impl Fixture {
             .unwrap_or_default()
     }
 
+    pub fn sound(&self, id: &str) -> Option<(i64, i64)> {
+        let p = self.editor.project();
+        std::iter::once(id.to_string())
+            .chain(p.tied(id))
+            .filter_map(|x| p.find_clip(&x))
+            .filter(|&(ti, _)| p.tracks[ti].kind == crate::model::TrackKind::Audio)
+            .map(|(ti, ci)| p.tracks[ti].clips[ci].clone())
+            .map(|c| (c.start, c.end()))
+            .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+    }
+
     pub fn append(&mut self, media: &str, a: i64, b: i64) -> String {
         let r = self.ok(json!({"method": "edit.append", "params": {"media": media, "range": format!("{a}f..{b}f")}}));
         r.result["clip"].as_str().unwrap().to_string()

@@ -125,8 +125,7 @@ impl Rows {
         };
         let share = |t: &'_ Track| match t.kind {
             TrackKind::Audio => 1.0,
-            TrackKind::Video if t.id == MAIN => 0.32,
-            TrackKind::Video => 0.3,
+            TrackKind::Video => 0.0,
         };
         order.extend(
             p.tracks_of(TrackKind::Video)
@@ -264,7 +263,7 @@ impl Rows {
                 pos2(self.area.right(), bottom + NEW_TRACK_STRIP),
             )
         };
-        TrackRect::new(rect, if track.starts_with('A') { 1.0 } else { 0.3 })
+        TrackRect::new(rect, if track.starts_with('A') { 1.0 } else { 0.0 })
     }
 
     pub fn rect_of(&self, track: &str) -> TrackRect {
@@ -336,14 +335,11 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
     );
     let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
     let clips = &track.clips[range];
-    let banded = tr.audio_top > tr.rect.top();
-    let audio = banded && tr.in_audio(pos.y);
-
-    if audio {
+    if track.kind == TrackKind::Audio {
         let near = clips
             .iter()
-            .filter_map(|c| c.audio_range().map(|r| (c, r)))
-            .flat_map(|(c, (a, b))| [(c, Edge::Tail, b), (c, Edge::Head, a)])
+            .filter(|c| c.audio.is_some() && c.link.is_some())
+            .flat_map(|c| [(c, Edge::Tail, c.end()), (c, Edge::Head, c.start)])
             .map(|(c, edge, at)| (c, edge, (pos.x - scale.xf(at)).abs()))
             .filter(|&(.., away)| away <= AUDIO_EDIT)
             .min_by(|x, y| x.2.total_cmp(&y.2));
@@ -364,7 +360,7 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
             .min((scale.xf(a.end()) - scale.xf(a.start)) / 3.0)
             .max(ROLL + 1.0);
         let d = pos.x - x;
-        if d.abs() <= ROLL && !audio {
+        if d.abs() <= ROLL {
             return Hit::Roll {
                 outgoing: a.id.clone(),
                 incoming: b.id.clone(),
@@ -410,7 +406,8 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
 }
 
 pub fn sound_band(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
-    let (ra, rb) = c.audio_range()?;
+    c.audio.as_ref()?;
+    let (ra, rb) = (c.start, c.end());
     let (a0, a1) = (scale.xf(ra), scale.xf(rb).max(scale.xf(ra) + 1.0));
     Some(Rect::from_x_y_ranges(
         a0..=a1,
@@ -625,7 +622,7 @@ pub fn picture_transition<'a>(p: &Project, track: &'a Track, at: i64) -> Option<
     track
         .transitions
         .iter()
-        .find(|x| !x.sound && cuts.place(p, x) == Some(at))
+        .find(|x| track.kind == TrackKind::Video && cuts.place(p, x) == Some(at))
 }
 
 pub fn fade_edge_at(
@@ -635,12 +632,11 @@ pub fn fade_edge_at(
     tr: &TrackRect,
     pos: Pos2,
 ) -> Option<(i64, bool)> {
-    let banded = tr.audio_top > tr.rect.top();
-    if !tr.rect.contains(pos) || (banded && tr.in_audio(pos.y)) {
+    if !tr.rect.contains(pos) || track.kind != TrackKind::Video {
         return None;
     }
     let cuts = Cuts::of(p, track);
-    track.transitions.iter().filter(|x| !x.sound).find_map(|x| {
+    track.transitions.iter().find_map(|x| {
         let at = cuts.place(p, x)?;
         if (pos.x - scale.xf(at)).abs() <= ROLL {
             return None;
@@ -663,16 +659,18 @@ pub fn transition_at(
     tr: &TrackRect,
     pos: Pos2,
 ) -> Option<i64> {
-    let banded = tr.audio_top > tr.rect.top();
-    if !tr.rect.contains(pos) || (banded && tr.in_audio(pos.y)) {
+    if !tr.rect.contains(pos) || track.kind != TrackKind::Video {
         return None;
     }
     transition_over(p, track, scale, pos.x).filter(|&at| (pos.x - scale.xf(at)).abs() > ROLL)
 }
 
 pub fn transition_over(p: &Project, track: &Track, scale: &Scale, x: f32) -> Option<i64> {
+    if track.kind != TrackKind::Video {
+        return None;
+    }
     let cuts = Cuts::of(p, track);
-    track.transitions.iter().filter(|t| !t.sound).find_map(|t| {
+    track.transitions.iter().find_map(|t| {
         let at = cuts.place(p, t)?;
         (scale.xf(at - t.before) <= x && x <= scale.xf(at + t.after)).then_some(at)
     })
@@ -683,7 +681,7 @@ pub fn transition_span(p: &Project, track: &Track, at: i64) -> Option<(i64, i64)
     track
         .transitions
         .iter()
-        .filter(|x| !x.sound)
+        .filter(|_| track.kind == TrackKind::Video)
         .find(|x| cuts.place(p, x) == Some(at))
         .map(|x| (at - x.before, at + x.after))
 }
@@ -804,11 +802,11 @@ impl Snap {
 #[cfg(test)]
 mod tests {
     use eframe::egui::{pos2, vec2};
-    use vidcut_core::model::{ClipAudio, TrackKind};
+    use vidcut_core::model::TrackKind;
 
     use super::*;
 
-    fn clip(id: &str, start: i64, duration: i64, audio: Option<(i64, i64)>) -> Clip {
+    fn clip(id: &str, start: i64, duration: i64) -> Clip {
         Clip {
             id: id.into(),
             media: "m1".into(),
@@ -817,23 +815,7 @@ mod tests {
             source_in: 0,
             phase: 0.0,
             video: true,
-            audio: audio.map(|(head, tail)| ClipAudio {
-                stream: 0,
-                head,
-                tail,
-                gain_db: 0.0,
-                gain_keys: Vec::new(),
-                muted: false,
-                pan: 0.0,
-                pan_on: true,
-                pan_keys: Vec::new(),
-                equalizer: None,
-                dialogue_leveler: None,
-                compressor: None,
-                noise_reduction: None,
-                effects: None,
-                voice_isolation: None,
-            }),
+            audio: None,
             enabled: true,
             name: None,
             effects: None,
@@ -873,9 +855,9 @@ mod tests {
     fn track() -> Track {
         Track {
             clips: vec![
-                clip("c1", 0, 100, Some((0, 10))),
-                clip("c2", 100, 50, Some((10, 0))),
-                clip("c3", 200, 100, None),
+                clip("c1", 0, 100),
+                clip("c2", 100, 50),
+                clip("c3", 200, 100),
             ],
             ..Track::new("V1", TrackKind::Video)
         }

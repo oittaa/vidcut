@@ -145,10 +145,18 @@ pub fn checked(p: &Project, target: &str, d: &Duck) -> Result<()> {
         if s == target {
             return Err(Error::invalid(format!("{target} can't duck under itself")));
         }
-        if p.track(s).is_none() {
-            return Err(Error::not_found(format!(
-                "no track {s} to duck {target} under"
-            )));
+        match p.track(s) {
+            None => {
+                return Err(Error::not_found(format!(
+                    "no track {s} to duck {target} under"
+                )));
+            }
+            Some(t) if !t.has_sound() => {
+                return Err(Error::invalid(format!(
+                    "{s} is not an audio track: {target} can't duck under it"
+                )));
+            }
+            Some(_) => {}
         }
         if d.sources[..i].contains(s) {
             return Err(Error::invalid(format!("{s} is a source of {target} twice")));
@@ -304,10 +312,7 @@ fn ducking_of(
             if c.is_block() || c.is_frozen() {
                 continue;
             }
-            let Some((ra, rb)) = c.audio_range() else {
-                continue;
-            };
-            let (x0, x1) = (ra.max(from), rb.min(to));
+            let (x0, x1) = (c.start.max(from), c.end().min(to));
             if x1 <= x0 {
                 continue;
             }

@@ -63,7 +63,7 @@ pub fn placed(p: &Project) -> Placed {
                 .enumerate()
                 .filter_map(|(i, x)| Some((cuts.place(p, x)?, i)))
                 .collect();
-            placed.sort_by_key(|&(at, i)| (t.transitions[i].sound, at));
+            placed.sort_by_key(|&(at, _)| at);
             (t.id.clone(), placed)
         })
         .collect()
@@ -293,9 +293,7 @@ pub fn track(
     };
     for (k, &(at, i)) in placed.iter().enumerate() {
         let x = &t.transitions[i];
-        let next = placed
-            .get(k + 1)
-            .filter(|&&(_, j)| t.transitions[j].sound == x.sound);
+        let next = placed.get(k + 1);
         if at + x.after >= a
             && at - x.before <= b
             && !covered(scale, reach(&(at, i)), next.map(reach))
@@ -567,11 +565,7 @@ fn parted(r: Rect) -> Rect {
 
 fn transition(painter: &Painter, tr: &TrackRect, scale: &Scale, at: i64, x: &Transition) {
     let rect = tr.rect;
-    let band = if x.sound {
-        tr.audio_top..=rect.bottom()
-    } else {
-        rect.top()..=tr.audio_top - 1.0
-    };
+    let band = rect.top()..=rect.bottom();
     let (x0, x1) = (scale.xf(at - x.before), scale.xf(at + x.after));
     let r = Rect::from_x_y_ranges(
         x0.min(scale.xf(at) - 2.0)..=x1.max(scale.xf(at) + 2.0),

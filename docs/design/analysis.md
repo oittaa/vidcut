@@ -28,7 +28,7 @@ flowchart TD
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
 | `analyze.ducking` | `Env::audio_levels` of the sources of the ducking; with `detect: speech`, also `Env::voice_activity` | `duck::graph`: `Heard::peak` and `Dip::gain_db` at each point |
-| `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`), without its volume keyframes | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
+| `clip.normalize` | `Env::loudness` of each sound clip alone (`render::sound_alone`), without its volume keyframes. A picture clip gives its linked sound clips (`linked::sounds`) | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 | `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
 | `motion.track` | `Env::tracked`: the box of one thing on each picture of the track, with a score | `motion::followed`; the edit then calls `ops::motion::tracked` |
@@ -39,6 +39,7 @@ flowchart TD
 ## Speech
 
 - Ripple Delete Silence with `detect: speech` cuts what is not speech.
+- A picture clip in `edit.ripple_delete_silence` and `analyze.silence` gives its linked sound clips (`linked::sounds`). `ops::remove_parts` cuts each clip of the link group.
 - `transcribe::voice_activity` mixes one audio stream into one channel at 16 kHz through `AudioMix`, as transcription listens (`listen`). It feeds the mix to Silero VAD on the CPU.
 - `VoiceActivity` keeps the speech probability of each frame of the VAD.
 - `analysis::non_speech` finds the speech in the frames that the clip covers, by the rule of Silero that transcribe.cpp ports:
@@ -372,7 +373,7 @@ How it hears:
   - `clip_speech` reads the transcript of the file of each heard clip, as `media.transcribe` keeps it.
   - It transcribes a transcript that is missing, or that another model or language made (`Asked::made`).
 - `hear: transcript`: it takes the transcript that each file has, whatever made it. It transcribes only a file with no transcript.
-- For `media` and `transcript`, it places the words through the sound of each clip, J and L cuts too (`analysis::words_between`).
+- For `media` and `transcript`, it places the words through each sound clip (`analysis::words_between`).
   - Where two tracks have the same word at the same time, the word of the first track stays (`first_heard`).
   - The cues get one `Speech`, in the times of the range. The words of Re-time come in the same way.
 

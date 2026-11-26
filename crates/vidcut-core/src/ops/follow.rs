@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::model::{Clip, Project, TrackKind};
 
-use super::{MAIN, fix_audio, tracks};
+use super::{MAIN, tracks};
 
 pub(crate) struct Before {
     main: Vec<Clip>,
@@ -155,6 +155,11 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
         all,
         edit,
     };
+    let shift: HashMap<u32, i64> = before
+        .main
+        .iter()
+        .filter_map(|b| Some((b.link?, mapper.main.get(b.id.as_str())?.start - b.start)))
+        .collect();
     let mut moved = HashSet::new();
     let mut landings = Vec::new();
     for (ti, track) in p.tracks.iter_mut().enumerate() {
@@ -170,6 +175,13 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
         }
         for c in &mut track.clips {
             if edit.placed.contains(&c.id) {
+                continue;
+            }
+            if let Some(&d) = c.link.and_then(|l| shift.get(&l)) {
+                if d != 0 {
+                    c.start = (c.start + d).max(0);
+                    moved.insert(c.id.clone());
+                }
                 continue;
             }
             if (new_end..old_end).contains(&c.start) {
@@ -202,11 +214,6 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
         move_later_markers(p, new_end, old_end);
     }
     settle(p, &moved);
-    for ti in 0..p.tracks.len() {
-        if ti != main_index {
-            fix_audio(p, ti);
-        }
-    }
 }
 
 fn move_later_markers(p: &mut Project, new_end: i64, old_end: i64) {

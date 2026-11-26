@@ -128,7 +128,10 @@ fn a_ripple_delete_takes_place_where_the_clip_was() {
     let step = steps(&f).undo().cloned().unwrap();
     assert_eq!(
         serde_json::to_value(&step.spans).unwrap(),
-        json!([{"track": "V1", "from": 0, "to": 50}])
+        json!([
+            {"track": "A1", "from": 0, "to": 50},
+            {"track": "V1", "from": 0, "to": 50}
+        ])
     );
 }
 
@@ -137,9 +140,9 @@ fn a_moved_clip_is_where_its_step_happened() {
     let mut f = trimmed();
     f.ok(req(
         "edit.move",
-        json!({"clips": "c2", "to": 200, "mode": "overwrite"}),
+        json!({"clips": "c3", "to": 200, "mode": "overwrite"}),
     ));
-    assert_eq!(steps(&f).undo().unwrap().clips, ["c2"]);
+    assert_eq!(steps(&f).undo().unwrap().clips, ["c3", "c4"]);
 }
 
 #[test]

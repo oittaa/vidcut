@@ -80,8 +80,8 @@ pub(crate) fn repaint_in(ctx: &egui::Context, wait: Duration) {
 }
 
 pub(crate) fn audio_edge(c: &Clip, edge: Edge) -> Option<i64> {
-    let (a, b) = c.audio_range()?;
-    Some(if edge == Edge::Tail { b } else { a })
+    c.audio.as_ref()?;
+    Some(if edge == Edge::Tail { c.end() } else { c.start })
 }
 
 pub(crate) fn audio_edit_at(t: &Track, at: i64) -> Option<(String, Edge)> {
@@ -117,12 +117,10 @@ pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
 }
 
 fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
-    t.clips.iter().flat_map(|c| {
-        c.audio_range()
-            .map(|(a, b)| [(c.start, a), (c.end(), b)])
-            .into_iter()
-            .flatten()
-    })
+    t.clips
+        .iter()
+        .filter(|c| c.audio.is_some())
+        .flat_map(|c| [(c.start, c.start), (c.end(), c.end())])
 }
 
 pub(crate) fn nearest_edit(t: &Track, near: i64, side: Side) -> Option<i64> {
@@ -1820,7 +1818,9 @@ impl Workspace {
         if shown.is_none() {
             super::dialog::why(ui, "the shown subtitle track has no subtitles");
         }
-        let sound = with(|c| c.audio.is_some());
+        let sound = vidcut_core::ops::linked::sounds(p, &selected)
+            .iter()
+            .any(|id| p.clip(id).is_some_and(|c| c.audio.is_some()));
         if ui
             .add_enabled(sound, egui::Button::new("Ripple Delete Silence…"))
             .clicked()
@@ -2094,27 +2094,23 @@ impl Workspace {
             } else {
                 icon::UNLOCKED
             };
-            let sound = if t.muted {
-                icon::AUDIO_OFF
-            } else {
-                icon::AUDIO_ON
-            };
-            let mut buttons = vec![
-                (
-                    "Lock",
-                    "Lock Track",
-                    t.locked,
-                    lock,
-                    json!({ "track": t.id, "locked": !t.locked }),
-                ),
-                (
-                    "Audio",
-                    "Mute",
-                    t.muted,
-                    sound,
-                    json!({ "track": t.id, "muted": !t.muted }),
-                ),
-            ];
+            let mut buttons = vec![(
+                "Lock",
+                "Lock Track",
+                t.locked,
+                lock,
+                json!({ "track": t.id, "locked": !t.locked }),
+                parts.icons[1],
+            )];
+            if t.has_sound() {
+                let sound = if t.muted {
+                    icon::AUDIO_OFF
+                } else {
+                    icon::AUDIO_ON
+                };
+                let change = json!({ "track": t.id, "muted": !t.muted });
+                buttons.push(("Audio", "Mute", t.muted, sound, change, parts.icons[3]));
+            }
             if t.kind == vidcut_core::model::TrackKind::Video {
                 let picture = if t.video_enabled {
                     icon::VIDEO_ON
@@ -2122,10 +2118,16 @@ impl Workspace {
                     icon::VIDEO_OFF
                 };
                 let change = json!({ "track": t.id, "video_enabled": !t.video_enabled });
-                buttons.push(("Video", "Disable Video", !t.video_enabled, picture, change));
+                buttons.push((
+                    "Video",
+                    "Disable Video",
+                    !t.video_enabled,
+                    picture,
+                    change,
+                    parts.icons[4],
+                ));
             }
-            let columns = [parts.icons[1], parts.icons[3], parts.icons[4]];
-            for ((what, tip, lit, glyph, change), at) in buttons.into_iter().zip(columns) {
+            for (what, tip, lit, glyph, change, at) in buttons {
                 let name = format!("{what} {}", t.id);
                 if header_button(&mut child, at, glyph, &name, lit)
                     .on_hover_text(tip)
@@ -2187,10 +2189,7 @@ impl Workspace {
             let t = p.track(&r.track)?;
             let (at, end) = geometry::fade_edge_at(p, t, &scale, &r.rect, press)?;
             let x = geometry::picture_transition(p, t, at)?;
-            let sound = t
-                .transitions
-                .iter()
-                .any(|y| y.sound && y.from == x.from && y.to == x.to);
+            let sound = ops::sound_paired(p, x.from.as_deref(), x.to.as_deref());
             Some((r.track.clone(), at, end, x.clone(), sound))
         }) {
             if let Some(t) = TrackRef::of(&track) {
@@ -3005,13 +3004,16 @@ impl Workspace {
         let sounding: Vec<String> = self
             .project()
             .map(|p| {
-                clips
-                    .iter()
+                vidcut_core::ops::linked::sounds(p, &clips)
+                    .into_iter()
                     .filter(|id| p.clip(id).is_some_and(|x| x.audio.is_some()))
-                    .cloned()
                     .collect()
             })
             .unwrap_or_default();
+        let muted = self.project().and_then(|p| {
+            let first = p.clip(sounding.first()?)?;
+            first.audio.as_ref().map(|a| a.muted)
+        });
         if c.title.is_some() && ui.button("Edit Title…").clicked() {
             self.open_title(&c.id);
             ui.close();
@@ -3040,12 +3042,12 @@ impl Workspace {
             "clip.set",
             json!({ "clips": clips, "enabled": !c.enabled }),
         );
-        if let Some(a) = &c.audio {
+        if let Some(muted) = muted {
             item(
                 ui,
-                if a.muted { "Unmute" } else { "Mute" },
+                if muted { "Unmute" } else { "Mute" },
                 "clip.set",
-                json!({ "clips": sounding, "muted": !a.muted }),
+                json!({ "clips": sounding, "muted": !muted }),
             );
         }
         let current = self.project().and_then(|p| {
@@ -3186,10 +3188,10 @@ impl Workspace {
                 ui.close();
             }
         }
-        if c.audio.is_some() {
+        if let Some(first) = sounding.first() {
             let heard = self
                 .project()
-                .and_then(|p| super::isolation::heard(p, &c.id))
+                .and_then(|p| super::isolation::heard(p, first))
                 .flatten();
             let on = super::isolation::Isolate::Clips(sounding.clone());
             let label = bindings.named("Voice Isolation", Action::VoiceIsolation);
@@ -4526,7 +4528,7 @@ mod tests {
         assert_eq!(delays[2], Duration::from_millis(16), "{delays:?}");
     }
 
-    fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
+    fn clip(id: &str, start: i64, duration: i64, sound: bool) -> Clip {
         Clip {
             id: id.into(),
             media: "m1".into(),
@@ -4534,24 +4536,8 @@ mod tests {
             duration,
             source_in: 0,
             phase: 0.0,
-            video: true,
-            audio: tail.map(|tail| ClipAudio {
-                stream: 0,
-                head: 0,
-                tail,
-                gain_db: 0.0,
-                gain_keys: Vec::new(),
-                muted: false,
-                pan: 0.0,
-                pan_on: true,
-                pan_keys: Vec::new(),
-                equalizer: None,
-                dialogue_leveler: None,
-                compressor: None,
-                noise_reduction: None,
-                effects: None,
-                voice_isolation: None,
-            }),
+            video: false,
+            audio: sound.then(|| ClipAudio::of(0)),
             enabled: true,
             name: None,
             effects: None,
@@ -4572,11 +4558,11 @@ mod tests {
     fn the_nearest_audio_edit_is_that_of_the_nearest_cut_with_sound() {
         let t = Track {
             clips: vec![
-                clip("c1", 0, 60, Some(8)),
-                clip("c2", 60, 60, None),
-                clip("c3", 120, 60, None),
+                clip("c1", 0, 68, true),
+                clip("c2", 68, 52, false),
+                clip("c3", 120, 60, false),
             ],
-            ..Track::new("V1", TrackKind::Video)
+            ..Track::new("A1", TrackKind::Audio)
         };
         assert_eq!(nearest_edit(&t, 110, Side::Audio), Some(68));
     }

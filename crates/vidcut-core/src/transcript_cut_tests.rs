@@ -114,8 +114,8 @@ fn cutting_words_closes_the_gap_with_ripple_off() {
         f.v1(),
         vec![
             row("c1", 0, 10, 0),
-            row("c5", 10, 20, 30),
-            row("c3", 30, 40, 60)
+            row("c8", 10, 20, 30),
+            row("c4", 30, 40, 60)
         ]
     );
     assert!(!f.editor.project().settings.ripple_on);
