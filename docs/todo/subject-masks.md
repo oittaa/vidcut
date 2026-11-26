@@ -14,7 +14,7 @@ A subject mask is the Magic Mask palette of the Color page. Clicks on a person o
 The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 
 - **Versions:**
-  - Version 2 is the usual palette. Only Resolve Studio has it (p. 3281).
+  - Version 2 replaces version 1 (p. 3288). Only Resolve Studio has version 2 (p. 3281).
   - Version 1 stays for older projects, under Legacy Object Mask in the options menu (pp. 3287–3288).
   - vidcut builds version 2 only ([AGENTS.md](../../AGENTS.md), rule 13).
   - Version 2 has no Person mode and no Object mode. One tool masks people and things (p. 3281).
@@ -26,7 +26,7 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
   - The timeline of the Click list shows the tracked frames and a mark at the reference frame (p. 3286).
 - **Tracking:**
   - The track buttons track all clicks at once. Each click follows the picture around it (p. 3283).
-  - The mask of each frame comes from the clicks on that frame. A change of a click changes the mask at once (p. 3283).
+  - After a track of the clicks, each frame of the shot gets its mask. A change of a click changes the mask at once (p. 3283).
   - The buttons are Go To Reference Frame, the first and the last tracked frame, and one frame back or forward (p. 3285).
   - Track Reverse, Track Forward, Track Forward and Reverse, and Stop Tracking track the rest of the clip (p. 3285).
   - The tracking bar shows the tracked frames in blue (p. 3283).
@@ -42,7 +42,7 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 - **Consistency** smooths the edges of the mask over time. It is 0 at first. It needs clicks of a few tracked frames (p. 3287).
 - **Render in Place Magic Mask** writes the mask frames to a folder that the user selects. It adds an external matte node with them (pp. 3287–3288).
 - **The key of the node:**
-  - In one node, the Magic Mask, a qualifier key and the windows give their intersection (p. 3289, version 1 text).
+  - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289, version 1 text).
   - The manual shows no Magic Mask row in the Key palette (p. 3436).
 - **Use Fast Tracking** in the options menu tracks faster and less exactly (p. 3303, version 1 text).
 - **Alpha Output:** a key on the Alpha Output of the Node Editor makes the clip transparent (pp. 3390, 3427, 3446–3447).

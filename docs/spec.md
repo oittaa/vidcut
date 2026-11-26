@@ -5017,13 +5017,14 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 ### 8.29 Magic Mask (pp. 3281–3289, 3292, 3296–3297)
 
 - The manual:
-  - The Magic Mask palette makes a mask of a person or a thing. Version 2 is the usual palette, and only Resolve Studio has it (p. 3281).
+  - The Magic Mask palette makes a mask of a person, a thing or a part of a person. Only Resolve Studio has version 2 (p. 3281).
+  - Version 2 replaces version 1. Version 1 stays for older projects (p. 3288).
   - A positive click adds the person or thing under it. A negative click takes a part away (p. 3282).
   - A click on a part of a person gives that part, for example the face or the hair (p. 3281).
-  - The mask of each frame comes from the clicks on that frame. A change of a click changes the mask at once (p. 3283).
+  - After a track of the clicks, each frame of the shot gets its mask. A change of a click changes the mask at once (p. 3283).
   - Invert Mask inverts the mask (p. 3286).
   - The mask of a node is the union of its subjects (p. 3296).
-  - In one node, the Magic Mask, a qualifier key and the windows give their intersection (p. 3289).
+  - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
   - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
 - vidcut:
   - The Magic Mask is a part of a corrector of the grade of a clip. SAM 2.1 tiny makes the mask ([design](design/analysis.md#subject-masks)).
@@ -5033,8 +5034,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A negative click outside the mask goes to the last subject of its frame.
   - For each subject on each frame, the model gives 256 by 256 values over the frame. The values scale to the frame size, bilinear.
   - The mask is 1 where the value of a subject is above 0, and 0 elsewhere.
-  - On a frame with no clicks, the mask is empty. Tracking comes later ([todo](todo/subject-masks.md)).
+  - The mask of a frame comes from the clicks on that frame. On a frame with no clicks, the mask is empty. Tracking comes later ([todo](todo/subject-masks.md)).
   - The mask folds into the key of the corrector after the windows and the qualifier, with Matte when a window or a qualifier is on.
+    - With a window and a qualifier, the key is the intersection of all three. The manual names two at a time ([todo](todo/subject-masks.md)).
   - Invert Mask inverts the mask before the fold.
   - A locked node keeps its Magic Mask. Undo takes back each request.
   - `grade.clear` of a node, or of all nodes with `keep_nodes`, also deletes the Magic Mask.
