@@ -369,8 +369,12 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - `masks::get` reads the memory cache first, then the disk. The memory cache is a `lru::ByBytes` with the limit `MAPS_BYTES`.
 - The disk cache limit can remove a map. Before an export, `editor::mask_remakes` lists the maps that the store does not have. The export makes them again.
   - It makes one plan for each frame, with all the missing subjects of that frame.
-  - For tracked maps, it makes one `TrackNeed` for each frame of clicks. Its frames go from the first to the last map of that track.
   - It skips a clip that is off, a frame outside the clip and a node with no input. Such a map does not show.
+  - For tracked maps, `track_remake` makes one `TrackNeed` for each frame of clicks that has a missing map in the clip.
+    - Its frames go from the first to the last map of that track, with the frame of the clicks. These are the frames of the first track.
+    - Why: the model takes fewer object pointers on a track of fewer than 16 frames. A shorter track gives other maps.
+    - A trim can take some of these frames out of the clip. Thus the plan reads a copy of the clip that covers them (`widened`, `Clip::walk`).
+    - The track runs again from the frame of the clicks, because each tracked map needs the memory of the frames before it.
   - It also reads each compound clip that the export plays, opened alone in a copy of the project (`ops::compound::open_alone`).
 - A split gives each part all the clicks and maps. A frame outside a part gets no new map (`mask_maps`).
 - `grade_masks::checked` lets a map name be only a digest. Thus a name from a project file stays in the `masks` folder.

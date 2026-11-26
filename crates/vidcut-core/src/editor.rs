@@ -9072,51 +9072,50 @@ fn track_remake(
     let ops::grade::GradeOf::Clip(id, _) = of else {
         return None;
     };
-    let c = p.clip(id)?;
     let ours: Vec<&crate::model::MaskMap> =
         (mask.maps.iter().filter(|m| m.from == Some(from))).collect();
-    let t = ops::grade_masks::time_at(p, of, from).ok()?;
-    let times: Vec<i64> = (ours.iter())
-        .filter_map(|m| ops::grade_masks::time_at(p, of, m.frame).ok())
+    let missing: Vec<&crate::model::MaskMap> = (ours.iter().copied())
+        .filter(|m| !crate::masks::has(&m.name))
         .collect();
-    let t0 = times.iter().copied().chain([t]).min()?.max(c.start);
-    let t1 = (times.iter().copied().chain([t]).max()? + 1).min(c.end());
-    let plan = mask_track_plan(p, of, n, (t0, t1)).ok()?;
+    if !(missing.iter()).any(|m| ops::grade_masks::time_at(p, of, m.frame).is_ok()) {
+        return None;
+    }
+    let lo = ours.iter().map(|m| m.frame).chain([from]).min()?;
+    let hi = ours.iter().map(|m| m.frame).chain([from]).max()?;
+    let wide = widened(p, id, (lo, hi))?;
+    let c = wide.clip(id)?;
+    let plan = mask_track_plan(&wide, of, n, (c.start, c.end())).ok()?;
     let subjects = ops::grade_masks::clicked_subjects(mask, from);
     let clicked: Vec<Vec<crate::masks::Point>> = (subjects.iter())
         .map(|s| ops::grade_masks::points(mask, from, *s))
         .collect();
-    let mut names = Vec::new();
-    for u in t0..t1 {
-        let Ok(f) = ops::grade::frame_of(p, of, u) else {
-            continue;
-        };
-        for m in ours
-            .iter()
-            .filter(|m| m.frame == f && !crate::masks::has(&m.name))
-        {
-            let Some(k) = subjects.iter().position(|s| *s == m.subject) else {
-                continue;
-            };
-            if !names
-                .iter()
-                .any(|(_, _, v): &(i64, usize, String)| *v == m.name)
-            {
-                names.push((u - t0, k, m.name.clone()));
-            }
-        }
-    }
+    let names: Vec<(i64, usize, String)> = (missing.iter())
+        .filter_map(|m| {
+            let k = subjects.iter().position(|s| *s == m.subject)?;
+            Some((m.frame - lo, k, m.name.clone()))
+        })
+        .collect();
     let source = (p.media(&c.media).map(|m| m.path.clone())).unwrap_or_default();
-    (!names.is_empty()).then(|| TrackNeed {
+    Some(TrackNeed {
         plan,
         source,
-        at: t - t0,
-        backward: t0 < t,
-        forward: t + 1 < t1,
+        at: from - lo,
+        backward: lo < from,
+        forward: from < hi,
         subjects: clicked,
         names,
         download,
     })
+}
+
+fn widened(p: &Project, id: &str, (lo, hi): (i64, i64)) -> Option<Project> {
+    let mut wide = p.clone();
+    let c = (wide.tracks.iter_mut())
+        .flat_map(|t| t.clips.iter_mut())
+        .find(|c| c.id == id)?;
+    c.walk(lo - c.content_at(c.start));
+    c.duration = hi - lo + 1;
+    Some(wide)
 }
 
 fn sheet_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
