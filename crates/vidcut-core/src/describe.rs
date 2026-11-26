@@ -682,7 +682,7 @@ pub fn describe_at(
                     .all(|k| params[*k].is_null()) =>
         {
             match d.list("thumbnails").is_empty() {
-                true => "Select no thumbnails".into(),
+                true => "Select only the current thumbnail".into(),
                 false => format!("Select thumbnails {}", d.clips("thumbnails")),
             }
         }

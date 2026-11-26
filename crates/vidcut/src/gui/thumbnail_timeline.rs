@@ -108,10 +108,7 @@ impl Workspace {
         };
         let (p, list) = (&*strip.project, &strip.thumbs);
         let at = self.snap.timeline.position;
-        let current = (list.iter())
-            .filter(|t| t.start <= at && at < t.end)
-            .max_by_key(|t| t.track[1..].parse::<usize>().unwrap_or(0))
-            .map(|t| t.number);
+        let current = top_at(list, at);
         let label = self.export.clip_label;
         let colors = theme::colors();
         let selected = &self.snap.selection.thumbnails;
@@ -147,19 +144,23 @@ impl Workspace {
                                 let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                                 painter.image(texture, shown, uv, egui::Color32::WHITE);
                             }
-                            let outline = match current == Some(t.number) {
-                                true => Some(colors.accent),
-                                false => selected.contains(&t.clip).then_some(colors.error),
-                            };
-                            if let Some(color) = outline {
-                                let stroke = egui::Stroke::new(2.0, color);
+                            if selected.contains(&t.clip) {
+                                let stroke = egui::Stroke::new(2.0, colors.error);
                                 painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                            }
+                            if current == Some(i) {
+                                let inset = match selected.contains(&t.clip) {
+                                    true => rect.shrink(2.0),
+                                    false => rect,
+                                };
+                                let stroke = egui::Stroke::new(2.0, colors.accent);
+                                painter.rect_stroke(inset, 2.0, stroke, egui::StrokeKind::Inside);
                             }
                             let text = match (label, &t.codec) {
                                 (ClipLabel::Codec, Some(codec)) => codec.as_str(),
                                 _ => t.name.as_str(),
                             };
-                            let shade = match current == Some(t.number) {
+                            let shade = match current == Some(i) {
                                 true => colors.text,
                                 false => colors.text_dim,
                             };
@@ -195,11 +196,7 @@ impl Workspace {
                     }
                 });
             });
-        let anchor = self.export.thumb_anchor.as_deref();
-        let pick = picked.map(|(i, mods)| pick(list, selected, anchor, i, mods));
-        if let Some((i, _)) = picked {
-            self.export.thumb_anchor = Some(list[i].clip.clone());
-        }
+        let pick = picked.and_then(|(i, mods)| pick(list, selected, current, at, i, mods));
         self.export.strip = Some(strip);
         if cycle {
             self.export.clip_label = match label {
@@ -264,42 +261,55 @@ struct Pick {
     seek: Option<i64>,
 }
 
+fn top_at(list: &[Thumb], at: i64) -> Option<usize> {
+    (list.iter().enumerate())
+        .filter(|(_, t)| t.start <= at && at < t.end)
+        .max_by_key(|(_, t)| t.track[1..].parse::<usize>().unwrap_or(0))
+        .map(|(i, _)| i)
+}
+
 fn pick(
     list: &[Thumb],
     selected: &[String],
-    anchor: Option<&str>,
+    current: Option<usize>,
+    at: i64,
     i: usize,
     mods: egui::Modifiers,
-) -> Pick {
+) -> Option<Pick> {
     let t = &list[i];
-    if mods.command {
-        let mut clips = selected.to_vec();
-        match clips.iter().position(|c| *c == t.clip) {
-            Some(k) => {
-                clips.remove(k);
-            }
-            None => clips.push(t.clip.clone()),
+    let pick = match (mods.command, mods.shift) {
+        (true, true) => return None,
+        (true, false) => {
+            let clips = (list.iter())
+                .filter(|o| selected.contains(&o.clip) != (o.clip == t.clip))
+                .map(|o| o.clip.clone())
+                .collect();
+            Pick { clips, seek: None }
         }
-        return Pick { clips, seek: None };
-    }
-    let place = |c: &str| list.iter().position(|o| o.clip == c);
-    let from = (anchor.and_then(place)).or_else(|| selected.last().and_then(|c| place(c)));
-    if mods.shift
-        && let Some(from) = from
-    {
-        let mut clips: Vec<String> = list[from.min(i)..=from.max(i)]
-            .iter()
-            .map(|o| o.clip.clone())
-            .collect();
-        if i < from {
-            clips.reverse();
+        (false, true) => {
+            let marked = (list.iter().enumerate())
+                .filter(|(_, o)| selected.contains(&o.clip))
+                .map(|(k, _)| k);
+            let ends: Vec<usize> = marked.chain(current).chain([i]).collect();
+            let (lo, hi) = (ends.iter().min(), ends.iter().max());
+            let clips = (lo.zip(hi).map(|(a, b)| &list[*a..=*b]).unwrap_or_default())
+                .iter()
+                .map(|o| o.clip.clone())
+                .collect();
+            Pick { clips, seek: None }
         }
-        return Pick { clips, seek: None };
-    }
-    Pick {
-        clips: vec![t.clip.clone()],
-        seek: Some(t.start),
-    }
+        _ => {
+            let inside = t.start <= at && at < t.end;
+            let land = if inside { at } else { t.start };
+            let clips = match top_at(list, land) == Some(i) {
+                true => Vec::new(),
+                false => vec![t.clip.clone()],
+            };
+            let seek = (!inside).then_some(t.start);
+            Pick { clips, seek }
+        }
+    };
+    Some(pick)
 }
 
 fn fit(aspect: f32) -> egui::Vec2 {

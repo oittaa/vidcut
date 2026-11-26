@@ -4839,8 +4839,10 @@ pub enum Request {
         #[serde(default)]
         media: Option<OneOrMany<String>>,
         /// The clips selected in the Thumbnail timeline of the Color and
-        /// Deliver pages. This selection is apart from `clips`, the
-        /// selection of the timeline.
+        /// Deliver pages, in the order of the strip. The clip at the
+        /// playhead is selected too, also when this list leaves it out.
+        /// This selection is apart from `clips`, the selection of the
+        /// timeline.
         #[serde(default)]
         thumbnails: Option<OneOrMany<ClipRef>>,
         /// Select the edit point of `track` nearest this time, as V does

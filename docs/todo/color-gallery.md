@@ -194,8 +194,13 @@ The pages are of the DaVinci Resolve 21.1 manual.
 - `grade.copy` and `grade.paste` copy the settings of one corrector. A pasted keyframe keeps its distance from the start of the clip.
 - `clip.paste_attributes` with `grade` gives clips the whole grade of a copied clip ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
 - The Thumbnail timeline of the Color page (`thumbnail_timeline.rs`):
-  - A click, a Ctrl-click and a Shift-click select clips ([spec](../spec.md)). The Color and Deliver pages share the selection.
-  - These rules come from one sequence of Resolve clicks. The Selection run tests them.
+  - A click, a Ctrl-click and a Shift-click select clips, as measured on four timelines ([spec](../spec.md)). The Color and Deliver pages share the selection.
+  - The measured cases do not settle these. Each has one case or none:
+    - A click on the clip that holds the playhead: in one case, the playhead stayed. vidcut does the same.
+    - A Ctrl+Shift-click: in one case, it acted as a click. vidcut does nothing on it.
+    - A move of the playhead when the current clip has the red tint: not measured. vidcut keeps that clip selected.
+    - A filter that hides a selected clip: not measured. vidcut keeps the clip selected.
+    - In one Shift-click case of 30, the notes show no red tint on the current clip.
   - It has no grade items in its menu.
 - The clip filter greys Grouped (`ClipFilter`). Switch to Node Layer greys Group Pre Clip and Group Post Clip.
 - The viewer has no wipe and no split screen.
@@ -219,7 +224,9 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
   - It changes the grade of the mode of the Node Editor.
   - Apply Grades Using sets the keyframes. The Rules run tests the three modes on more grades before this step.
   - No Keyframes gives the grade at the frame of the still, as p. 3340 says. gotchas.md records what Resolve does.
-- In one Resolve case, a click on a clip under a clip of a higher track made it the current clip. The Rules run tests more cases first.
+- A click on a clip under a clip of a higher track makes it the current clip. Resolve did this in three cases.
+  - The Rules run tests what playback and the arrow keys then do.
+- Apply Grade goes to the selected clips, with the clip at the playhead. The Rules run tests if the red tint of that clip changes this.
 - Grab Still and Delete Selected are undo steps. gotchas.md records that Resolve has no undo for them.
 - Delete Selected, Change Label and the selection of stills.
 - Requests: `gallery.grab`, `gallery.apply`, `gallery.set`, `gallery.remove` and `gallery.get`.
@@ -330,12 +337,9 @@ These cases use at least three timelines that differ in size, frame rate, media 
 - **Groups rest** ([script] and [window], 15 min): the place of the Pre-Clip grade against an effect of the Edit page, in a render.
   - Also Post Group Node Stack Layer, Ripple Node Changes to Current Group and the Grouped filter.
 - **Labels** ([window], 5 min): the Change Label dialog and its undo.
-- **Selection run** ([window], 100 min): the selection of the Thumbnail timeline on four timelines of 4, 5, 7 and 9 clips.
-  - Clicks: a click inside a selection, and a Ctrl-click on the last clip and on the current clip.
-  - Shift-clicks: forward, backward, twice in a row, after a Ctrl-click that removes, across tracks, and with the current clip outside the range.
-  - Pages: Edit to Color and back with other Edit selections and playheads, Color and Deliver in several orders, and a timeline switch.
 - **Rules run** ([script] and [window], about 4 h in two or three parts). It adds cases for each other behavior above that rests on one or two cases.
   - Current clip: playback, arrow keys and three tracks after a click on a covered clip.
+  - Thumbnail selection: a click in the clip at the playhead, a Ctrl+Shift-click, a move of the playhead with the red tint, and a filter.
   - The default of Apply Grades Using in a new project. This is a default value, so one check is enough.
   - Still IDs: ties, a clip put in before, two clips in turn, two albums, a delete in the middle and grade version 2.
   - No Keyframes: Static keys, a grab on a key, two nodes with other keys, window and sizing keys, and an eased key.
