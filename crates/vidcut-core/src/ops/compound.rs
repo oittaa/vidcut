@@ -305,8 +305,12 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
         unlocked(p, ai)?;
         clear_range(p, ai, sound.start, sound.end());
         fix_audio(p, ai);
+        let link = p.free_link();
+        let (ti, ci) = locate(p, id)?;
+        p.tracks[ti].clips[ci].link = Some(link);
         sound.id = p.alloc_clip_id();
         sound.video = false;
+        sound.link = Some(link);
         out.push(sound.id.clone());
         p.tracks[ai].clips.push(sound);
         p.tracks[ai].sort();
@@ -527,10 +531,12 @@ fn build(
         "tracks": whole,
     }));
     let mut clips = Vec::new();
+    let link = (!picture.is_empty() && !sound.is_empty()).then(|| p.free_link());
     let mut put = |p: &mut Project, track: String, video: bool| {
         let mut host = block_clip(p.alloc_clip_id(), (span.0, frames), None, None, false);
         host.video = video;
         host.compound = Some(cid.clone());
+        host.link = link;
         clips.push(host.id.clone());
         let t = p.track_mut(&track).expect("a track of the project");
         t.clips.push(host);
@@ -574,7 +580,7 @@ pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
     for id in ids {
         let compound = p.clip(id).is_some_and(|c| c.compound.is_some());
-        if compound && otio::tied(p, id).iter().any(|x| kept.contains(x)) {
+        if compound && p.tied(id).iter().any(|x| kept.contains(x)) {
             continue;
         }
         kept.push(id.clone());
@@ -706,9 +712,7 @@ pub(crate) fn unnest(
     lay: Lay,
     warnings: &mut Vec<String>,
 ) -> Result<(Clip, Vec<String>)> {
-    let parts: Vec<String> = std::iter::once(id.to_string())
-        .chain(otio::tied(p, id))
-        .collect();
+    let parts: Vec<String> = std::iter::once(id.to_string()).chain(p.tied(id)).collect();
     for x in &parts {
         locate(p, x)?;
     }
@@ -798,6 +802,12 @@ fn spread(
         }
         let ti = target(p, TrackKind::Audio, n, span, lay)?;
         lay_down(p, (ti, lay), track, &parts, &mut made);
+    }
+    let mut links = linked::Relink::new(p);
+    for id in &made {
+        if let Some((ti, ci)) = p.find_clip(id) {
+            links.clip(&mut p.tracks[ti].clips[ci]);
+        }
     }
     Ok(made)
 }
@@ -1242,7 +1252,7 @@ pub fn open_clip(p: &mut Project, id: &str) -> Result<Value> {
         return Err(Error::invalid(format!("{id} isn't a compound clip")));
     }
     let mut all_ids = vec![id.to_string()];
-    all_ids.extend(otio::tied(p, id));
+    all_ids.extend(p.tied(id));
     let lead_id = all_ids
         .iter()
         .find(|cid| p.clip(cid).is_some_and(|c| c.video))

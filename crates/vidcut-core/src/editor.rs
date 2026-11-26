@@ -7214,6 +7214,7 @@ fn place_imported(
 
     let mut clips = Vec::new();
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
+    let mut links = ops::linked::Relink::new(p);
     for c in &t.clips {
         if c.is_block() {
             let (start, end) = (offset + c.start, offset + c.end());
@@ -7261,6 +7262,10 @@ fn place_imported(
                 retime: c.retime,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
+                link: c
+                    .link
+                    .filter(|_| c.compound.is_some() || c.has_no_media())
+                    .map(|l| links.of(l)),
             };
             if !clip.takes_speed() {
                 clip.speed = None;
@@ -7444,6 +7449,7 @@ fn place_imported(
             retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
+            link: None,
         });
         placed.insert(track_of(&c.track));
     }
@@ -7452,6 +7458,7 @@ fn place_imported(
             track.sort();
         }
     }
+    ops::linked::link_blocks(p, &clips);
     for x in &t.transitions {
         let side = |k: Option<usize>| match k {
             None => Some(None),
@@ -7765,7 +7772,7 @@ fn decompose(
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
     if !import {
-        for pid in otio::tied(p, id) {
+        for pid in p.tied(id) {
             if let Some((pi, _)) = p.find_clip(&pid)
                 && p.tracks[pi].locked
             {
@@ -8036,7 +8043,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 continue;
             }
             let mut gone = vec![id.clone()];
-            gone.extend(otio::tied(p, &id));
+            gone.extend(p.tied(&id));
             let made = decompose(
                 p,
                 &id,

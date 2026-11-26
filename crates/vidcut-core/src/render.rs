@@ -2482,7 +2482,7 @@ fn edge_fades(p: &Project) -> HashMap<String, Vec<Fading>> {
                     continue;
                 };
                 let blocks = match c.video {
-                    true => crate::otio::tied(p, &c.id),
+                    true => p.tied(&c.id),
                     false => vec![c.id.clone()],
                 };
                 let fading = Fading {

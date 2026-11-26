@@ -750,7 +750,7 @@ A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compoun
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
 - `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below.
 - The sides of such a `place::Mix` take no composite mode (`MixDraw::lay`).
-- `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
+- `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`Project::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
 
 Dynamic Zoom and keyframes (D75):

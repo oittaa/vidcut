@@ -2382,6 +2382,12 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
+    /// Its link group. The clips of a group with the same start, length,
+    /// source start and speed act as one clip in an edit: the picture and
+    /// the sound of a compound clip, or the parts of a clip with no media.
+    /// Left out when the clip has no link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<u32>,
 }
 
 /// The motion path of a pattern of a tracker: where its thing is on the
@@ -9224,6 +9230,13 @@ impl VoiceIsolation {
 }
 
 impl Clip {
+    pub fn tied_with(&self, o: &Clip) -> bool {
+        self.link.is_some()
+            && self.link == o.link
+            && (self.start, self.duration, self.source_in) == (o.start, o.duration, o.source_in)
+            && self.pace() == o.pace()
+    }
+
     pub const ADJUSTMENT_CLIP: &str = "Adjustment Clip";
 
     pub fn shown_color<'a>(&'a self, media: Option<&'a Media>) -> Option<&'a str> {
@@ -10090,6 +10103,7 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
+            link: None,
         }
     }
 
@@ -10727,6 +10741,30 @@ impl Project {
 
     pub fn clip(&self, id: &str) -> Option<&Clip> {
         self.find_clip(id).map(|(t, c)| &self.tracks[t].clips[c])
+    }
+
+    pub fn tied(&self, id: &str) -> Vec<String> {
+        let Some(c) = self.clip(id) else {
+            return Vec::new();
+        };
+        if c.link.is_none() {
+            return Vec::new();
+        }
+        self.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(|o| o.id != id && o.tied_with(c))
+            .map(|o| o.id.clone())
+            .collect()
+    }
+
+    pub fn free_link(&self) -> u32 {
+        self.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter_map(|c| c.link)
+            .max()
+            .map_or(1, |n| n + 1)
     }
 
     pub fn clip_color<'a>(&'a self, c: &'a Clip) -> Option<&'a str> {

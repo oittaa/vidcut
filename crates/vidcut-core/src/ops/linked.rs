@@ -1,9 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{clear_range, fix_audio, locate, main_index, place, split_at, tracks};
 use crate::error::Result;
 use crate::model::{Clip, Project};
-use crate::otio::tied;
 
 #[derive(Debug, Default)]
 pub(super) struct Parts {
@@ -17,6 +16,32 @@ pub(super) struct Taken {
     pub lead: String,
 }
 
+pub(crate) struct Relink {
+    next: u32,
+    given: HashMap<i64, u32>,
+}
+
+impl Relink {
+    pub fn new(p: &Project) -> Self {
+        Self {
+            next: p.free_link(),
+            given: HashMap::new(),
+        }
+    }
+
+    pub fn of(&mut self, old: i64) -> u32 {
+        let next = &mut self.next;
+        *self.given.entry(old).or_insert_with(|| {
+            *next += 1;
+            *next - 1
+        })
+    }
+
+    pub fn clip(&mut self, c: &mut Clip) {
+        c.link = c.link.map(|l| self.of(i64::from(l)));
+    }
+}
+
 pub(super) fn parts(p: &Project, ids: &[String]) -> Parts {
     let main = main_index(p);
     let on_main = |id: &&String| p.find_clip(id).is_some_and(|(ti, _)| ti == main);
@@ -26,7 +51,7 @@ pub(super) fn parts(p: &Project, ids: &[String]) -> Parts {
         if !seen.insert(id.clone()) {
             continue;
         }
-        let others = tied(p, id);
+        let others = p.tied(id);
         let lead = others.iter().find(on_main).unwrap_or(id).clone();
         for x in std::iter::once(id).chain(&others) {
             seen.insert(x.clone());
@@ -39,6 +64,36 @@ pub(super) fn parts(p: &Project, ids: &[String]) -> Parts {
     parts
 }
 
+pub(crate) fn link_blocks(p: &mut Project, ids: &[String]) {
+    let loose = |p: &Project, picture: bool| -> Vec<(usize, usize)> {
+        ids.iter()
+            .filter_map(|id| p.find_clip(id))
+            .filter(|&(ti, ci)| {
+                let c = &p.tracks[ti].clips[ci];
+                c.link.is_none() && c.compound.is_some() && c.video == picture
+            })
+            .collect()
+    };
+    let sounds = loose(p, false);
+    let mut taken = HashSet::new();
+    for (ti, ci) in loose(p, true) {
+        let c = &p.tracks[ti].clips[ci];
+        let Some(&(si, sj)) = sounds.iter().find(|&&(si, sj)| {
+            let s = &p.tracks[si].clips[sj];
+            !taken.contains(&(si, sj))
+                && (s.start, s.duration, s.source_in) == (c.start, c.duration, c.source_in)
+                && s.pace() == c.pace()
+                && s.compound == c.compound
+        }) else {
+            continue;
+        };
+        taken.insert((si, sj));
+        let link = p.free_link();
+        p.tracks[ti].clips[ci].link = Some(link);
+        p.tracks[si].clips[sj].link = Some(link);
+    }
+}
+
 pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     parts(p, ids).leads
 }
@@ -47,7 +102,7 @@ pub fn with_ties(p: &Project, ids: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut all = Vec::new();
     for id in ids {
-        for x in std::iter::once(id.clone()).chain(tied(p, id)) {
+        for x in std::iter::once(id.clone()).chain(p.tied(id)) {
             if seen.insert(x.clone()) {
                 all.push(x);
             }
@@ -57,7 +112,7 @@ pub fn with_ties(p: &Project, ids: &[String]) -> Vec<String> {
 }
 
 pub(super) fn tied_to(p: &Project, id: &str) -> Vec<(String, String)> {
-    tied(p, id)
+    p.tied(id)
         .into_iter()
         .map(|x| (x, id.to_string()))
         .collect()
@@ -85,7 +140,7 @@ pub(super) fn split_main(p: &mut Project, t: i64, moving: &[String]) {
     else {
         return;
     };
-    let others = tied(p, &c.id);
+    let others = p.tied(&c.id);
     if others.is_empty() {
         return;
     }
