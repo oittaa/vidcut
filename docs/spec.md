@@ -4574,7 +4574,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The same shot gives the same keyframes in 1080×1920 and in 2160×3840, as fractions of the picture.
   - Reframe replaces the Position keyframes that were on the clip. A start position that is not 0 does not change the move.
   - Auto gives keyframes at 0 on an axis with no room.
-  - With a zoom of 1.5, the move across is 1.5 times as large. Tilt holds the top limit for the first 60 frames.
+  - With a zoom of 1.5, the move across is 1.5 times as large.
+  - With a zoom of 1.5, Tilt moves with the subject too, from the top limit to 0.22 of the picture's height down. On shots of a person, the head stays near the top of the frame. On 7 of 15 shots, Tilt is at the top limit for some frames.
   - With a rotation of 10°, the move is that of the clip with no rotation, turned by 10°. Pan is that move × cos 10°, and Tilt gets the part × sin 10°.
   - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of the box at that frame.
   - With a speed change, the move follows the source frames that show.
@@ -4594,6 +4595,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With `pan` or `tilt`, the axis that does not move keeps its value at each frame.
   - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
     - Why: the head of a person is at the top of the box.
+    - The point that stands out goes to the middle of the frame too. Why: on 14 shots with a zoom of 1.5, a view higher than the point does not come nearer to the Tilt of Resolve.
   - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
   - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds. The usual value is 0.5 s.
   - Then the picture covers the frame on each axis where it is larger than the frame.
