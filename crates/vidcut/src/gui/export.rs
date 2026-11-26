@@ -2512,17 +2512,17 @@ fn plan_view(ui: &mut egui::Ui, d: &Render) -> Option<Vec<String>> {
                     ));
                 }
             }
-            let outputs = plan["outputs"].as_array().cloned().unwrap_or_default();
+            let outputs: &[Value] = plan["outputs"].as_array().map_or(&[], Vec::as_slice);
             if let Some(line) = outputs
                 .iter()
                 .find_map(|o| o["rounded"]["message"].as_str())
             {
                 ui.label(dim(line));
             }
-            if let Some(line) = color_line(&outputs) {
+            if let Some(line) = color_line(outputs) {
                 ui.label(line.0);
             }
-            if let Some(line) = metadata_line(&outputs) {
+            if let Some(line) = metadata_line(outputs) {
                 ui.label(dim(line.0));
             }
             let files: Vec<(&Value, &Value)> = (outputs.iter())
@@ -2533,7 +2533,7 @@ fn plan_view(ui: &mut egui::Ui, d: &Render) -> Option<Vec<String>> {
                 .collect();
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
             ui.label(format!("{} file(s), {frames} frames", files.len()));
-            if let Some(line) = bypass_line(&outputs) {
+            if let Some(line) = bypass_line(outputs) {
                 ui.label(dim(line));
             }
             for (f, frames) in files.iter().take(4) {
