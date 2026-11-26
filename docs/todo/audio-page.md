@@ -164,7 +164,8 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 
 **Edits of linked clips:**
 
-- `otio::tied`, `compound_links` and `no_media_ties` go. `ops::linked` finds the parts of an edit by `link`.
+- `Project::tied` finds the parts of an edit by `link` alone. Until then, the parts must also have one place.
+- A split gives the right halves one new link group. Paste, spread and import already give copies new groups.
 - Select, move, trim, roll, slip, slide, split, join, delete, speed and paste act on each clip of a group (p. 3875).
 - Each part moves and trims by the same amount as the lead. Today `move_clips` and `trim` give each part the place of the lead, and that erases a J or L cut.
 - A J or L cut (spec §8.7) is a roll of the edit between two sound clips on the audio track. The picture clips do not change.
@@ -213,8 +214,8 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 
 **The pull requests.** Each leaves vidcut working:
 
-1. **Link groups.** `Clip::link` takes the place of the ties by place for compound clips and offline blocks. `ops::linked` moves each part by the delta of the lead. OpenTimelineIO writes and reads the link groups. The behavior does not change.
-2. **Sound clips.** The sound moves to the audio tracks, in each part above but the Cut page drawing. The Cut page shows the sound clips on their audio tracks, as the Edit page does. The spec, the deviations and the design docs change.
+1. **Link groups** (#1411). `Clip::link` holds the groups of compound clips and clips with no media. The parts still need one place. Each part moves by the change of the lead. The behavior does not change.
+2. **Sound clips.** The sound moves to the audio tracks, in each part above but the Cut page drawing. The parts of a group no longer need one place. The Cut page shows the sound clips on their audio tracks, as the Edit page does. The spec, the deviations and the design docs change.
 3. **Cut page items.** The Cut page draws a linked pair as one item, with the band, the header mute, the J/L drag and the sync offset.
 4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914) and the fixes for a group out of sync (p. 915). The fixes are Slip into place, Move into place, Slip others into place and Move others into place. Resync Clip on the Cut page (p. 646).
 
