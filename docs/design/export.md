@@ -567,6 +567,11 @@ Voice Isolation:
   - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
   - `Workspace::thumbnail_timeline` draws the Thumbnail timeline. Each picture is the clip alone with its grade (`render::graded_frame`).
   - The tile workers make the pictures (`Tiles::clip_job`). The key of a picture holds a digest of the clip, its media and the project settings. Why: a change of the grade gives a new key, and the old picture leaves the tile memory as other tiles do.
+  - The session's `Selection` holds the clips selected in the strip in `thumbnails`, apart from its `clips`. Why: the Color and Deliver pages share one selection, and the timeline has another (measured).
+  - The clip at the playhead is selected too. `thumbnails` holds it only after a Ctrl-click or a Shift-click on it.
+    - Why: a move of the playhead then needs no request. The former clip leaves the selection and the new clip comes in, as measured.
+  - `pick` gives the `thumbnails` of a click. A plain click gives an empty list and seeks the timeline player when the playhead is not in the clip.
+  - `top_at` gives the clip of the top track at a frame. A plain click on a clip under another clip keeps that clip in `thumbnails`. Why: the outline stays on the top clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
   - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.

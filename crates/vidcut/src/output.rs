@@ -1549,10 +1549,11 @@ fn live(method: &str, r: &Response) -> Option<()> {
                     .unwrap_or_else(|| "-".into())
             };
             println!(
-                "clips {}  cues {}  media {}  edit {}",
+                "clips {}  cues {}  media {}  thumbnails {}  edit {}",
                 ids("clips"),
                 ids("cues"),
                 ids("media"),
+                ids("thumbnails"),
                 edit_point(&v["edit"])
             );
             println!("edits {}", edit_points(&v["edits"]));

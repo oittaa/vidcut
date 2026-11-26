@@ -5721,6 +5721,25 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: the codec is the Video Codec of the media pool, like "H.264 High L4.0" or "Apple ProRes 422". An EXR sequence shows "EXR", and a compound clip "Compound Clip".
   - A click on a thumbnail moves the playhead to the first frame of the clip. The clip at the playhead has an orange outline (p. 3106).
   - Measured: of the clips at the playhead, the clip of the top track has the outline. Its text is white, and the text of the others is grey.
+  - A Command-click or a Shift-click selects more clips. The selected clips are red (p. 3364).
+  - Measured in Resolve Studio 21.2 on four timelines of 4, 5, 7 and 9 clips, with one to three tracks (`fixtures/color/NOTES.md`):
+    - A click, over 50 cases: the clip became the current clip, and the selection became that clip alone.
+    - In each of these cases with the playhead outside the clip, the playhead moved to the first frame of the clip.
+    - In one case, the playhead was in the clicked clip, under a clip of a higher track. The playhead stayed there.
+    - A click on a clip under a clip of a higher track made it the current clip, in three cases.
+    - A Ctrl-click on a clip that was not current, about 45 cases: it added the clip or took it out. The playhead and the current clip stayed.
+    - A Ctrl-click on the current clip, six cases: the scripting API kept the clip in the selection. A red tint on the clip came on or went off.
+    - A Shift-click, about 30 cases. The selection became the span from the first to the last of these: the selected clips, the current clip and the clicked clip.
+    - The span included the clips between them. A Shift-click inside the span changed nothing. The playhead stayed.
+    - A Ctrl+Shift-click, one case: the same as a click.
+    - The scripting API listed the selected clips in the order of the strip. It always listed the current clip.
+    - The current clip had the red tint after a Ctrl-click on it and after a Shift-click. It had no tint after a click.
+    - The Deliver page, eight sequences: it showed the selection of the Color page, and its clicks changed it. Its scripting API listed no clips.
+    - The Edit page, twelve cases: the Color page did not take the selection of the Edit page.
+    - In these cases, a script moved the playhead to another clip on the Edit page. The current clip had no red tint.
+    - Then on the Color page, the former current clip left the selection, and the new current clip came in. The other selected clips stayed.
+    - The Edit page and back with no move of the playhead, two cases: the selection stayed.
+    - A switch to another timeline and back, over ten cases: only the current clip stayed selected.
   - The clips of a disabled track are not in the Thumbnail timeline (p. 3107; measured).
   - The right-click menu of a thumbnail has Mark In and Mark Out (p. 4129).
   - It also has Render This Clip. An orange bar on the ruler then shows the clip as the range to render (p. 4129).
@@ -5899,7 +5918,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The codec is the one that the media pool shows. A compound clip shows "Compound Clip".
   - The clip at the playhead has an orange outline. Of two clips there, the clip of the top track has it.
   - The text under the clip at the playhead is white. The text under the other clips is grey.
-  - A click on a picture moves the playhead to the first frame of the clip.
+  - The clip at the playhead is always selected. Other clips are selected with it.
+  - A click on a picture selects that clip alone. When the playhead is not in the clip, it moves to the first frame of the clip.
+  - The outline stays on the clip of the top track at the playhead, also after a click on a clip under it ([todo](todo/color-gallery.md)). Both clips are then selected.
+  - A Ctrl-click adds a clip to the selection or takes it out. On the clip at the playhead, it only shows or hides its red outline.
+  - A Shift-click selects the span from the first to the last of these: the selected clips, the clip at the playhead and the clicked clip.
+  - A Ctrl-click and a Shift-click do not move the playhead. A Ctrl+Shift-click does nothing ([todo](todo/color-gallery.md)).
+  - The clip at the playhead has the orange outline. The other selected clips have a red outline. A Ctrl-click or a Shift-click can give the clip at the playhead both.
+  - A move of the playhead to another clip keeps the clips with a red outline selected.
+  - The Color page and the Deliver page share this selection. The timeline of the Cut and Edit pages has its own selection.
+  - `thumbnails` of `selection.set` sets the clips with a red outline, and `selection.get` gives them. A change of the open timeline clears them.
   - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.

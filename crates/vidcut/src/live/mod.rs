@@ -3472,6 +3472,7 @@ impl Live {
                 clips,
                 cues,
                 media,
+                thumbnails,
                 edit,
                 track,
                 side,
@@ -3529,7 +3530,7 @@ impl Live {
                     None if clear => Some(OneOrMany::Many(Vec::new())),
                     c => c,
                 };
-                if let Err(e) = self.set_selection(clips, cues, media) {
+                if let Err(e) = self.set_selection(clips, cues, media, thumbnails) {
                     return Step::Now(Err(e));
                 }
                 if changes.is_empty() {
@@ -4453,6 +4454,7 @@ impl Live {
         let media: HashSet<String> = p.pool_media().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
+        self.selection.thumbnails.retain(|c| p.clip(c).is_some());
         self.selection.cues.retain(|c| p.cue(c).is_some());
         self.selection.keep_order();
         if self
@@ -4513,6 +4515,7 @@ impl Live {
         }
         if same_project {
             self.selection.clips.clear();
+            self.selection.thumbnails.clear();
             self.selection.cues.clear();
         }
         let Some((_, id)) = now else { return };
@@ -5617,18 +5620,22 @@ impl Live {
         clips: Option<OneOrMany<String>>,
         cues: Option<OneOrMany<String>>,
         media: Option<OneOrMany<String>>,
+        thumbnails: Option<OneOrMany<String>>,
     ) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
         let playhead = Some(self.player.position(TIMELINE));
-        let clips = clips
-            .map(|c| {
+        let resolve = |refs: Option<OneOrMany<String>>| {
+            refs.map(|c| {
                 c.to_vec()
                     .iter()
                     .map(|r| resolve_clip(p, r, playhead))
                     .collect::<Result<Vec<_>>>()
             })
-            .transpose()?;
+            .transpose()
+        };
+        let clips = resolve(clips)?;
+        let thumbnails = resolve(thumbnails)?;
         let cues = cues
             .map(|c| {
                 c.to_vec()
@@ -5653,6 +5660,11 @@ impl Live {
         }
         if let Some(m) = media {
             self.selection.media = m.to_vec();
+        }
+        if let Some(mut t) = thumbnails {
+            let mut seen = HashSet::new();
+            t.retain(|c| seen.insert(c.clone()));
+            self.selection.thumbnails = t;
         }
         self.selection.keep_order();
         Ok(())
