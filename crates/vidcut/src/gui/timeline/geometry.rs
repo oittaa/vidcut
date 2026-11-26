@@ -178,6 +178,10 @@ pub fn band<'a>(p: &'a Project, t: &'a Track) -> Vec<Banded<'a>> {
         .collect()
 }
 
+pub fn sounds(c: &Clip) -> bool {
+    c.audio.is_some() || c.is_sound_block()
+}
+
 pub fn heard_on(p: &Project, t: &Track) -> Vec<String> {
     if t.kind != TrackKind::Video {
         return Vec::new();
@@ -467,7 +471,7 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
     if track.kind == TrackKind::Audio {
         let near = clips
             .iter()
-            .filter(|c| c.audio.is_some() && c.link.is_some())
+            .filter(|c| sounds(c) && c.link.is_some())
             .flat_map(|c| [(c, Edge::Tail, c.end()), (c, Edge::Head, c.start)])
             .map(|(c, edge, at)| (c, edge, (pos.x - scale.xf(at)).abs()))
             .filter(|&(.., away)| away <= AUDIO_EDIT)

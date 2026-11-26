@@ -159,7 +159,9 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 - An edit of a clip with picture and sound makes a link group. The picture goes on the video track, and the sound goes on an audio track.
 - The sound of a picture on Vn goes on An, and stream k goes on A(n+k). The Link run measured this on V1 with 7 files (p. 646).
 - Open: in Resolve, a stream of more than 2 channels gives one sound clip for each channel. vidcut gives one sound clip for each stream. The Link run measured this with 7 files.
-- Open: in Resolve, a used audio track cuts the new sound to its free part, and the sound does not go to another track. vidcut writes the new sound over the clip there. The Link run measured this with 7 files.
+- Open: the Link run added clips with the script call that appends a clip at a record frame. In 3 cases on one layout, a used audio track cut the new sound to its free part.
+  - vidcut writes the new sound over the clip there, as Overwrite writes over the target track (spec §7.2).
+  - Batch 2 measures Overwrite, Place On Top and Append over a used audio track. The rule changes only if the edit functions also cut.
 - An edit of sound alone goes to an audio track (p. 648). The Link run measures which one. D26 changes to that rule.
 - Video Only makes the picture clip alone. Audio Only makes the sound clip alone (p. 694).
 - `close_up` and `compound::with_sound` add the audio tracks that the sound needs.

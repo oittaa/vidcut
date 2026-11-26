@@ -13,8 +13,8 @@ use vidcut_core::render_cache::Part;
 use vidcut_core::time::Rational;
 
 use super::geometry::{
-    Bands, Rows, Scale, TrackRect, band, chosen_on, clips_in, covered, curve_y, handle_point,
-    key_point, sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
+    Banded, Bands, Rows, Scale, TrackRect, band, chosen_on, clips_in, covered, curve_y,
+    handle_point, key_point, sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
 };
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
@@ -284,15 +284,18 @@ pub fn track(
         .collect();
     let span = |c: &Clip| (c.start, c.end());
     let picked = |c: &Clip| selected.contains(c.id.as_str());
+    let banded = band(p, t);
+    let heard: HashSet<&str> = banded.iter().map(|x| x.picture.id.as_str()).collect();
+    if tr.audio_top > rect.top() {
+        sound_band_of(painter, tr, scale, p, &banded, assets, look, (a, b));
+    }
     for (i, &c) in shown.iter().enumerate() {
         let next = shown.get(i + 1).copied();
         if covered(scale, span(c), next.map(span)) && (!picked(c) || next.is_some_and(picked)) {
             continue;
         }
-        clip(painter, tr, scale, p, t, c, picked(c), assets, look, fps);
-    }
-    if tr.audio_top > rect.top() {
-        sound_band_of(painter, tr, scale, p, t, assets, look, (a, b));
+        let looks = (picked(c), heard.contains(c.id.as_str()));
+        clip(painter, tr, scale, p, t, c, looks, assets, look, fps);
     }
     let placed: Vec<(i64, usize)> = placed
         .iter()
@@ -331,20 +334,27 @@ fn sound_band_of(
     tr: &TrackRect,
     scale: &Scale,
     p: &Project,
-    t: &Track,
+    banded: &[Banded],
     assets: &Assets,
     look: Look,
     (a, b): (i64, i64),
 ) {
     let fps = p.fps();
     let rect = tr.rect;
-    let banded = band(p, t);
     for x in banded
         .iter()
         .filter(|x| x.sound.end() >= a && x.sound.start <= b)
     {
+        let opened = [&x.picture.id, &x.sound.id]
+            .into_iter()
+            .any(|id| assets.audio_trim.contains(id));
+        let tr = &TrackRect {
+            rect,
+            audio_top: if opened { rect.top() } else { tr.audio_top },
+        };
+        let how = (false, opened);
         sound(
-            painter, tr, scale, p, x.track, x.sound, assets, look, fps, false,
+            painter, tr, scale, p, x.track, x.sound, assets, look, fps, how,
         );
     }
     let ids: HashSet<&str> = banded.iter().map(|x| x.sound.id.as_str()).collect();
@@ -384,17 +394,27 @@ fn sound(
     assets: &Assets,
     look: Look,
     fps: Rational,
-    line: bool,
+    (line, sound_only): (bool, bool),
 ) {
-    let Some(audio) = sound_band(tr, scale, c) else {
-        return;
-    };
     let media = assets.pool.get(c.media.as_str()).copied();
     let offline =
         assets.missing.contains(&c.media) || media.is_some_and(|m| m.removed) || c.is_offline();
     let tint = c.shown_color(media).and_then(theme::clip_color);
-    let sound_only = assets.audio_trim.contains(&c.id);
     let corners = theme::clip_corners();
+    if c.is_sound_block() {
+        let (x0, x1) = (
+            scale.xf(c.start),
+            scale.xf(c.end()).max(scale.xf(c.start) + 1.0),
+        );
+        let block = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=tr.rect.bottom());
+        let fill = clip_fill(c, c.enabled && t.video_enabled, offline, tint);
+        painter
+            .with_clip_rect(tr.rect.intersect(block.expand(1.0)))
+            .rect_filled(parted(block), corners, fill);
+    }
+    let Some(audio) = sound_band(tr, scale, c) else {
+        return;
+    };
     let muted = c.audio.as_ref().is_some_and(|x| x.muted) || t.muted;
     let color = if offline {
         theme::colors().offline
@@ -437,6 +457,24 @@ fn sound(
     }
 }
 
+fn clip_fill(c: &Clip, enabled: bool, offline: bool, tint: Option<Color32>) -> Color32 {
+    if offline {
+        theme::colors().offline
+    } else if !enabled {
+        theme::colors().clip_disabled
+    } else if let Some(t) = tint {
+        t
+    } else if c.adjustment {
+        theme::colors().adjustment
+    } else if c.is_generator() {
+        theme::colors().generator
+    } else if c.compound.is_some() {
+        theme::colors().compound
+    } else {
+        theme::colors().clip
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn clip(
     painter: &Painter,
@@ -445,13 +483,13 @@ fn clip(
     p: &Project,
     t: &Track,
     c: &Clip,
-    selected: bool,
+    (selected, heard): (bool, bool),
     assets: &Assets,
     look: Look,
     fps: Rational,
 ) {
     let rect = tr.rect;
-    let sound_only = c.audio.is_some() && assets.audio_trim.contains(&c.id);
+    let sound_only = (c.audio.is_some() || heard) && assets.audio_trim.contains(&c.id);
     let tr = &TrackRect {
         rect,
         audio_top: if sound_only { rect.top() } else { tr.audio_top },
@@ -471,21 +509,7 @@ fn clip(
     let offline =
         assets.missing.contains(&c.media) || media.is_some_and(|m| m.removed) || c.is_offline();
     let tint = c.shown_color(media).and_then(theme::clip_color);
-    let fill = if offline {
-        theme::colors().offline
-    } else if !enabled {
-        theme::colors().clip_disabled
-    } else if let Some(t) = tint {
-        t
-    } else if c.adjustment {
-        theme::colors().adjustment
-    } else if c.is_generator() {
-        theme::colors().generator
-    } else if c.compound.is_some() {
-        theme::colors().compound
-    } else {
-        theme::colors().clip
-    };
+    let fill = clip_fill(c, enabled, offline, tint);
     let has_picture = c.video && video.height() > 2.0;
     let corners = theme::clip_corners();
     if has_picture {
@@ -522,11 +546,8 @@ fn clip(
             );
         }
     }
-    if c.is_sound_block() {
-        let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
-        painter.rect_filled(parted(band), corners, fill);
-    }
-    sound(track_painter, tr, scale, p, t, c, assets, look, fps, true);
+    let how = (true, sound_only);
+    sound(track_painter, tr, scale, p, t, c, assets, look, fps, how);
     let strip = speed_strip(tr, scale, c);
     if let Some(strip) = strip {
         let bottom = if c.audio.is_some() {

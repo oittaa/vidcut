@@ -82,7 +82,7 @@ pub(crate) fn repaint_in(ctx: &egui::Context, wait: Duration) {
 
 pub(crate) fn audio_edge(p: &Project, id: &str, edge: Edge) -> Option<i64> {
     let c = p.clip(id)?;
-    let s = if c.audio.is_some() {
+    let s = if geometry::sounds(c) {
         c
     } else {
         let link = c.link?;
@@ -103,7 +103,7 @@ pub(crate) fn audio_edit_at(p: &Project, t: &Track, at: i64) -> Option<(String, 
     } else {
         t.clips
             .iter()
-            .filter(|c| c.audio.is_some())
+            .filter(|c| geometry::sounds(c))
             .map(|c| (c, c.start, c.end()))
             .collect()
     };
@@ -157,7 +157,7 @@ pub(crate) fn audio_points(p: &Project, t: &Track) -> Vec<(i64, i64)> {
 fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
     t.clips
         .iter()
-        .filter(|c| c.audio.is_some())
+        .filter(|c| geometry::sounds(c))
         .flat_map(|c| [(c.start, c.start), (c.end(), c.end())])
 }
 
@@ -2160,11 +2160,22 @@ impl Workspace {
                 };
                 let commands: Vec<Value> = heard
                     .iter()
-                    .map(|id| {
-                        json!({ "method": "track.set", "params": { "track": id, "muted": !muted } })
-                    })
+                    .map(|id| json!({ "track": id, "muted": !muted }))
                     .collect();
-                let change = json!({ "commands": commands });
+                let change = match commands.as_slice() {
+                    [one] => one.clone(),
+                    _ => json!({
+                        "commands": commands
+                            .iter()
+                            .map(|c| json!({ "method": "track.set", "params": c }))
+                            .collect::<Vec<_>>(),
+                        "label": format!(
+                            "{} {}",
+                            if muted { "Unmute" } else { "Mute" },
+                            heard.join(", ")
+                        ),
+                    }),
+                };
                 buttons.push(("Audio", "Mute", muted, sound, change, parts.icons[3]));
             }
             if t.kind == vidcut_core::model::TrackKind::Video {
