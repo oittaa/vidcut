@@ -1,6 +1,6 @@
 # The audio page
 
-**When:** the steps come in the order below. The Page step starts when the owner answers the questions at the end.
+**When:** the steps come in the order below. Sound on audio tracks comes first, before the Page step.
 
 The audio page is a page for sound, beside the Cut, Effects, Color and Export pages. It shows the tracks with sound as tall rows, the Mixer and the meters together. vidcut names its pages in plain words, so the page is "Audio".
 
@@ -127,19 +127,98 @@ The page numbers are those of the 21.1 manual. The Fairlight chapters are pp. 37
 
 vidcut keeps the sound of a clip on a video track in that clip ([spec §6](../spec.md#6-track-model-pp-647-649-716-721-727)). Resolve keeps that sound on an audio track of its own. Its Fairlight page shows the audio tracks, with a lane for each channel (p. 3801). Short video tracks can show above them for reference (p. 3765).
 
-- **A:** a row for each track with sound, as the Mixer has a strip for each. The rows are V1, V2, then A1, A2. The model does not change.
-- **B:** the sound of each video track becomes an audio track of its own, on all pages. This changes the model and the Cut page.
+The owner chose to keep sound as Resolve does: on audio tracks, on all pages. The step [Sound on audio tracks](#sound-on-audio-tracks) makes this change before the Page step. Then the rows of the page are the audio tracks.
 
-A is the pick of this plan. It is a deviation, so it needs the owner's OK. An OpenTimelineIO export already writes the sound of a video track as an audio track.
+The strips, the track equalizer, the Dynamics, the buses and the automation are also for each audio track.
 
 ## Rules for each step
 
-- Each step is one pull request. The steps come in the order below, by their value for the use cases.
+- Each step is one pull request, but Sound on audio tracks has four. The steps come in the order below, by their value for the use cases.
 - Each step adds its requests to the CLI, IPC and MCP. Each request that changes the project is one undo step.
 - A step does its Resolve run first, then the code. The run measures the defaults, the ranges and the sound.
 - A step that adds a setting tells what an OpenTimelineIO export writes for it, as the run shows.
 
 ## Steps
+
+### Sound on audio tracks
+
+The sound of a clip on a video track moves to a clip of its own on an audio track. The two clips are linked, as in Resolve (pp. 646–647, 913–916). The Cut page still shows a linked pair as one item (p. 646).
+
+**The model:**
+
+- A clip on a video track has picture only. `Clip::audio` is set only on the clips of audio tracks.
+- `ClipAudio` loses `head` and `tail`. A J or L cut is a sound clip that starts or ends at a different time than its picture.
+- `Clip` gets `link`, a link group number. The clips of one group act as one clip in an edit (pp. 916, 3875). A group can have any number of clips.
+- A video track loses `muted`, `solo`, `volume_db`, `voice_isolation`, `duck`, `equalizer` and `dynamics`. An audio track keeps them.
+- The sound transitions of a video track move to the `transitions` of the audio track.
+- `validate` refuses sound on a clip of a video track, and a sound setting on a video track.
+- A project, a history or a saved version in the old form does not load (rule 13). There is no migration.
+
+**Where the sound goes:**
+
+- An edit of a clip with picture and sound makes a link group. The picture goes on the video track, and the sound goes on an audio track.
+- The Link run measures which audio track that is, and where a second sound stream goes. The expected track is the one with the same number (p. 646).
+- An edit of sound alone goes to an audio track (p. 648). The Link run measures which one. D26 changes to that rule.
+- Video Only makes the picture clip alone. Audio Only makes the sound clip alone (p. 694).
+- `close_up` and `compound::with_sound` add the audio tracks that the sound needs.
+
+**Edits of linked clips:**
+
+- `otio::tied`, `compound_links` and `no_media_ties` go. `ops::linked` finds the parts of an edit by `link`.
+- Select, move, trim, roll, slip, slide, split, join, delete, speed and paste act on each clip of a group (p. 3875).
+- Each part moves and trims by the same amount as the lead. Today `move_clips` and `trim` give each part the place of the lead, and that erases a J or L cut.
+- A J or L cut (spec §8.7) is a roll of the edit between two sound clips on the audio track. The picture clips do not change.
+- `fix_audio`, `audio_roll`, `audio_roll_room` and the J/L rules of `split_at` and `joined` work on the audio track. The overlap rule of `validate` for sound goes, since clips on a track never overlap.
+- `follow` moves a clip that is linked to a Track 1 clip with its group, not by its In point. `settle` does not move such a clip to another track. D21 applies to the other clips.
+- A speed change acts on each clip of the group. The sound clip keeps the speed of its own span, as `compound::sound_part` does now.
+- The sound effects of a clip stay on the sound clip: volume, pan, equalizer, Dialogue Leveler, compressor, noise reduction, Voice Isolation and audio effects.
+
+**The Cut page (pp. 646–648, 679):**
+
+- A main track shows the clips of its video track and the sound clips linked to them as one item. The sound shows as the band along the bottom (p. 647), as now.
+- The Link run measures which audio tracks the Cut page shows apart (p. 648). It also measures what the Cut page shows for a pair on tracks of different numbers.
+- The mute of a main track header mutes the sound of its linked audio track (p. 647). The Link run checks this.
+- A J/L drag on the band rolls the edit of the linked sound clips.
+- The Audio part of the Inspector edits the linked sound clips of the selected item.
+- A group out of sync shows its offset, as on the Edit page (pp. 915, 3878). An OpenTimelineIO import can bring such a group.
+
+**Compound clips:**
+
+- `compound::with_sound` and `spread_blocks` give the picture block and the sound block one link group.
+- The tracks inside a compound clip use the same model. `picture_tracks`, `sounds`, `fit_sound`, `spread` and `render::expanded` read sound only from audio tracks.
+
+**Playback and export:**
+
+- `render::planned_audio` reads sound only from audio tracks. Each audio track has one `Bus`, as now.
+- The Mixer, the track equalizer and the track Dynamics have a strip for each audio track. `Track::has_sound` is true only for audio tracks.
+- The sources of ducking are audio tracks. `duck::default_sources` lists the audio tracks.
+- Transcription, silence detection, Normalize and Voice Isolation read the sound clips.
+
+**OpenTimelineIO:**
+
+- Each track of vidcut is one track of the file, in its order.
+- The clips of a link group get one `Link Group ID`, as Resolve writes it.
+- The import keeps each `Link Group ID` as a link group. It no longer merges an audio clip into the sound of a video clip.
+- A file without link groups links a sound clip to the picture clip of the same media at the same place.
+- A file with no audio tracks gives each picture clip a linked sound clip, as it gives the clip its sound now.
+
+**Requests and the schema:**
+
+- The schema loses `head`, `tail` and the sound settings of video tracks. It gets `link`.
+- `clip.set`, `clip.normalize`, `clip.paste_attributes`, `clip.remove_attributes`, the `keyframes` requests with Volume or Pan, `analyze.words` and `analyze.silence` on a picture clip act on its linked sound clips. The Inspector does the same. With no linked sound clip, they give an error.
+- `track.set` with a sound setting on a video track gives an error.
+- The clips in the `timeline` output show `link`. Their `audio` loses `head` and `tail`.
+- `clip.link` and `clip.unlink` link and unlink clips (pp. 916, 3875). A setting turns Linked Selection on and off (pp. 913–914).
+- Each of these edits is one undo step.
+
+**The pull requests.** Each leaves vidcut working:
+
+1. **Link groups.** `Clip::link` takes the place of the ties by place for compound clips and offline blocks. `ops::linked` moves each part by the delta of the lead. OpenTimelineIO writes and reads the link groups. The behavior does not change.
+2. **Sound clips.** The sound moves to the audio tracks, in each part above but the Cut page drawing. The Cut page shows the sound clips on their audio tracks, as the Edit page does. The spec, the deviations and the design docs change.
+3. **Cut page items.** The Cut page draws a linked pair as one item, with the band, the header mute, the J/L drag and the sync offset.
+4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914) and the fixes for a group out of sync (p. 915). The fixes are Slip into place, Move into place, Slip others into place and Move others into place. Resync Clip on the Cut page (p. 646).
+
+Each pull request changes the existing tests to the new model. It adds no tests.
 
 ### Page
 
@@ -301,6 +380,7 @@ All runs are in the project "vidcut measure", in Resolve Studio 21.2.
 
 | Run | Step | Time |
 |---|---|---|
+| Link | Sound on audio tracks | 40 min |
 | Layout | Page | 30 min |
 | Loudness | Loudness meter | 45 min |
 | Fades | Clip fades | 45 min |
@@ -316,10 +396,37 @@ All runs are in the project "vidcut measure", in Resolve Studio 21.2.
 
 The runs go in three batches. Each batch measures before the code of its steps:
 
-- Layout, Loudness, Fades and Pan: about 2 h 35 min.
+- Link, Layout, Loudness, Fades and Pan: about 3 h 15 min.
 - Main bus, Automation, Equalizer and Dynamics: about 2 h 55 min.
 - Bus, Track menu, Range and Layers: about 2 h 15 min.
 - An insert FX run takes about 20 min. It goes in the batch before its pull request.
+
+The steps of a batch go in this order:
+
+1. The script setup that the window steps need, and no more.
+2. The window steps of all runs, one after the other, while the owner is at the computer. Window steps do not work with the screen locked.
+3. The script steps: script runs, renders, fits and notes. Scripts work with the screen locked.
+
+### Link run
+
+Window steps, about 25 min:
+
+- On the Cut page, edit a stereo video clip, a clip with two sound streams and a clip with mono channels. On the Edit page, write the track of each sound clip.
+- On the Cut page, edit a music file with no picture, with a sound clip on A1 and with none. Write its track.
+- Put music on A1 where V1 has no clip, and on A3. Write which audio tracks the Cut page shows apart.
+- On the Edit page, move the sound of a V1 clip to A2. Write what the Cut page shows.
+- On the Edit page, Option-drag a sound clip out of sync. Write what the Cut page shows, and the result of Resync Clip.
+- Unlink a pair on the Edit page. Write what the Cut page shows.
+- Mute a main track on the Cut page. Write which tracks the Edit page shows muted.
+- Make a J cut on the Cut page. Write the ends of each clip on the Edit page.
+- Trim the In of a linked pair with a J cut on the Edit page. Write the change of each clip.
+- Select a clip with two sound clips on the Cut page. Write what the Inspector shows.
+
+Script steps, about 15 min:
+
+- Read `GetLinkedItems` for each case above.
+- Export OpenTimelineIO for each case. Write the `Link Group ID` and the source ranges of each clip.
+- Import each export into a new timeline. Write the links that it gets.
 
 ### Layout run
 
@@ -414,8 +521,3 @@ The runs go in three batches. Each batch measures before the code of its steps:
 - Turn on Layered Audio Editing. Drop a clip over a part of another clip, and render.
 - Show Audio Track Layers. Delete the top clip, and write what plays. Flatten the layers, and write the result.
 - Export OpenTimelineIO and AAF with layers. Compare them with a flat timeline.
-
-## Questions for the owner
-
-- **Rows:** A or B of [the rows of the page](#the-rows-of-the-page). The pick is A, with a deviation.
-- **Runs:** computer use on Resolve for the first batch, about 2 h 35 min.
