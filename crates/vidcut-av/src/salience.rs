@@ -25,11 +25,11 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     models::ready(dir, &FILE, download)
 }
 
-pub fn inspect(dir: &Path, download: bool) -> Result<()> {
+pub fn inspect(dir: &Path, download: bool, on_gpu: bool) -> Result<()> {
     get_ready(dir, download)?;
     models::verify(dir, &[FILE])?;
     let size = unisal::sized(16, 9);
-    unisal::Model::load(&dir.join(FILE.name), FILE.title, size).map(drop)
+    unisal::Model::load(&dir.join(FILE.name), FILE.title, size, on_gpu).map(drop)
 }
 
 struct Seeing {
@@ -85,14 +85,14 @@ impl Looker for Seeing {
     }
 
     fn on_gpu(&self) -> bool {
-        true
+        self.model.on_gpu()
     }
 }
 
 pub fn find(
     source: &Input,
     look: Look,
-    gpu: Option<&crate::hw::GpuDecoder>,
+    (gpu, on_gpu): (Option<&crate::hw::GpuDecoder>, bool),
     dir: &Path,
 ) -> Result<Detections> {
     crate::cancel::stop()?;
@@ -103,7 +103,7 @@ pub fn find(
     subjects::looked(source, look, (gpu, batch), |first, turn| {
         let (w, h) = subjects::fitted(first, turn, u32::MAX >> 8);
         Ok(Seeing {
-            model: unisal::Model::load(&weights, FILE.title, unisal::sized(w, h))?,
+            model: unisal::Model::load(&weights, FILE.title, unisal::sized(w, h), on_gpu)?,
             turn,
             scaler: None,
             scenes: Scenes::default(),

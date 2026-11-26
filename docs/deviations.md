@@ -1536,3 +1536,15 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
 - **Why:**
   - Not built yet ([todo](todo/export-file-tab.md)).
+
+## X176. Auto Smart Reframe follows the published UNISAL saliency model
+
+- **Resolve:**
+  - With Object of Interest Auto, the Neural Engine analyzes the clip and chooses its most representative object (pp. 735, 920).
+  - The manual does not name the model. The model is not published.
+- **vidcut:**
+  - Without `reference` and `subject`, `picture.reframe` follows the mean place of the map of the UNISAL saliency model, with its weights for DHF1K ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - The shots are 14 shots of two files, in a 1080×1920 timeline at 24 fps.
+  - On them, the position of vidcut is a median of 103 pixels and a mean of 286 pixels from that of Resolve.
+- **Why:**
+  - The owner chose the published UNISAL model. A published model cannot give the move of the model of Resolve.

@@ -521,7 +521,8 @@ impl Env for AvEnv {
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
                 let input = vidcut_av::decode::Input::of_media(media);
-                vidcut_av::salience::find(&input, look, decoder.as_ref(), &dir)
+                let gpu = (decoder.as_ref(), crate::preferences::gpu_acceleration());
+                vidcut_av::salience::find(&input, look, gpu, &dir)
             },
             Detections::to_bytes,
             Detections::from_bytes,

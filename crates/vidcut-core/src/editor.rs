@@ -9272,6 +9272,16 @@ fn reframe_plans(
         return Err(Error::invalid("not a picture.reframe request"));
     };
     let rules = reframe_rules(request)?;
+    if reference.is_some() && subject.is_some() {
+        return Err(Error::usage(
+            "give a reference box (--reference) or a subject (--subject), not both",
+        ));
+    }
+    if at.is_some() && reference.is_none() {
+        return Err(Error::usage(
+            "a frame (--at) goes with a reference box (--reference)",
+        ));
+    }
     match subject {
         Some(subject) => finder_checked(*model, *subject, *size)?,
         None if size.is_some() || *model != crate::model::FindModel::Fast => {
@@ -9282,7 +9292,8 @@ fn reframe_plans(
         None => {}
     }
     let mut ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-    ids.dedup();
+    let mut seen = HashSet::new();
+    ids.retain(|id| seen.insert(id.clone()));
     if reference.is_some() && ids.len() != 1 {
         return Err(Error::usage(
             "a reference box (--reference) frames one clip",

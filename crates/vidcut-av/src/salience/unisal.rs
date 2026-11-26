@@ -7,6 +7,8 @@ use crate::compute::{self, Gpu};
 use crate::error::{Error, Result};
 use crate::weights::Torch;
 
+mod cpu;
+
 pub(super) const WHAT: &str = "saliency";
 pub(super) const FRAMES: u32 = 5;
 const EPS: f32 = 1e-5;
@@ -134,47 +136,77 @@ pub(super) fn centroid(map: &[f32], (w, h): (u32, u32)) -> Found {
     }
 }
 
+trait Make {
+    type Conv;
+    type Dw;
+    type Taps;
+    fn conv(&self, s: Shape, w: &[f32], b: &[f32], act: Act) -> Self::Conv;
+    fn dw(&self, w: &[f32], b: &[f32]) -> Self::Dw;
+    fn taps(&self, w: &[f32]) -> Self::Taps;
+}
+
 struct Dw {
     w: wgpu::Buffer,
     b: wgpu::Buffer,
 }
 
-struct Block {
-    expand: Option<Conv>,
-    dw: Dw,
-    project: Conv,
+impl Make for Gpu {
+    type Conv = Conv;
+    type Dw = Dw;
+    type Taps = wgpu::Buffer;
+
+    fn conv(&self, s: Shape, w: &[f32], b: &[f32], act: Act) -> Conv {
+        ops::conv(self, s, w, Some(b), act, None)
+    }
+
+    fn dw(&self, w: &[f32], b: &[f32]) -> Dw {
+        Dw {
+            w: self.upload(&compute::bytes(w)),
+            b: self.upload(&compute::bytes(b)),
+        }
+    }
+
+    fn taps(&self, w: &[f32]) -> wgpu::Buffer {
+        self.upload(&compute::bytes(w))
+    }
+}
+
+struct Block<M: Make> {
+    expand: Option<M::Conv>,
+    dw: M::Dw,
+    project: M::Conv,
     res: bool,
     down: bool,
     hidden: u32,
     cout: u32,
 }
 
-struct Skip {
-    expand: Conv,
-    reduce: Conv,
+struct Skip<M: Make> {
+    expand: M::Conv,
+    reduce: M::Conv,
     wide: u32,
 }
 
-struct Gru {
-    x: [Dw; 3],
-    h: [Dw; 3],
-    xs: [Conv; 3],
-    hs: [Conv; 3],
+struct Gru<M: Make> {
+    x: [M::Dw; 3],
+    h: [M::Dw; 3],
+    xs: [M::Conv; 3],
+    hs: [M::Conv; 3],
 }
 
-struct Net {
-    stem: Conv,
-    blocks: Vec<Block>,
-    last: Conv,
-    post: Block,
-    gru: Gru,
-    after: Conv,
-    skip2: Skip,
-    skip4: Skip,
-    up2: Block,
-    post2: Block,
-    adapt: Conv,
-    smooth: wgpu::Buffer,
+struct Net<M: Make> {
+    stem: M::Conv,
+    blocks: Vec<Block<M>>,
+    last: M::Conv,
+    post: Block<M>,
+    gru: Gru<M>,
+    after: M::Conv,
+    skip2: Skip<M>,
+    skip4: Skip<M>,
+    up2: Block<M>,
+    post2: Block<M>,
+    adapt: M::Conv,
+    smooth: M::Taps,
     gaussians: Vec<f32>,
 }
 
@@ -188,12 +220,12 @@ fn scaled(w: &mut [f32], b: &mut [f32], scale: &[f32], shift: &[f32]) {
     }
 }
 
-struct Read<'a> {
+struct Read<'a, M> {
     t: &'a Torch,
-    gpu: &'a Gpu,
+    make: &'a M,
 }
 
-impl Read<'_> {
+impl<M: Make> Read<'_, M> {
     fn floats(&self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
         self.t.floats(name, shape)
     }
@@ -213,7 +245,14 @@ impl Read<'_> {
         Ok((scale, shift))
     }
 
-    fn conv(&self, conv: &str, norm: Option<&str>, s: Shape, bias: bool, act: Act) -> Result<Conv> {
+    fn conv(
+        &self,
+        conv: &str,
+        norm: Option<&str>,
+        s: Shape,
+        bias: bool,
+        act: Act,
+    ) -> Result<M::Conv> {
         let (kh, kw) = s.k;
         let cout = s.cout as usize;
         let shape = [cout, s.cin as usize, kh as usize, kw as usize];
@@ -226,18 +265,15 @@ impl Read<'_> {
             let (scale, shift) = self.norm(norm, s.cout)?;
             scaled(&mut w, &mut b, &scale, &shift);
         }
-        Ok(ops::conv(self.gpu, s, &w, Some(&b), act, None))
+        Ok(self.make.conv(s, &w, &b, act))
     }
 
-    fn dw(&self, conv: &str, norm: &str, c: u32) -> Result<Dw> {
+    fn dw(&self, conv: &str, norm: &str, c: u32) -> Result<M::Dw> {
         let mut w = self.floats(&format!("{conv}.weight"), &[c as usize, 1, 3, 3])?;
         let mut b = vec![0.0; c as usize];
         let (scale, shift) = self.norm(norm, c)?;
         scaled(&mut w, &mut b, &scale, &shift);
-        Ok(Dw {
-            w: self.gpu.upload(&compute::bytes(&w)),
-            b: self.gpu.upload(&compute::bytes(&b)),
-        })
+        Ok(self.make.dw(&w, &b))
     }
 
     fn block(
@@ -246,7 +282,7 @@ impl Read<'_> {
         (cin, cout, t): (u32, u32, u32),
         domain: bool,
         (res, down): (bool, bool),
-    ) -> Result<Block> {
+    ) -> Result<Block<M>> {
         let hidden = cin * t;
         let conv = |i: usize| format!("{at}.conv.{i}");
         let norm = |i: usize| match domain {
@@ -273,7 +309,7 @@ impl Read<'_> {
         })
     }
 
-    fn skip(&self, at: &str, cin: u32, cout: u32) -> Result<Skip> {
+    fn skip(&self, at: &str, cin: u32, cout: u32) -> Result<Skip<M>> {
         let wide = cin * 2;
         let norm = |part: &str| format!("{at}.{part}.1.bn_{SOURCE}");
         let s = Shape::square(cin, wide, 1, 1, 0);
@@ -304,7 +340,7 @@ impl Read<'_> {
         (branch, norm, affine): (&str, &str, &str),
         bias: Option<&str>,
         act: Act,
-    ) -> Result<Conv> {
+    ) -> Result<M::Conv> {
         let c = HIDDEN as usize;
         let mut w = self.floats(&format!("{CELL}.{branch}.conv_sep.weight"), &[c, c, 1, 1])?;
         let mut b = vec![0.0; c];
@@ -318,10 +354,10 @@ impl Read<'_> {
             b.iter_mut().zip(extra).for_each(|(b, e)| *b += e);
         }
         let s = Shape::square(HIDDEN, HIDDEN, 1, 1, 0);
-        Ok(ops::conv(self.gpu, s, &w, Some(&b), act, None))
+        Ok(self.make.conv(s, &w, &b, act))
     }
 
-    fn gru(&self) -> Result<Gru> {
+    fn gru(&self) -> Result<Gru<M>> {
         let dw = |branch: &str| {
             let norm = format!("{CELL}.{branch}.sep_bn.bn_{SOURCE}");
             self.dw(&format!("{CELL}.{branch}.conv_dw"), &norm, HIDDEN)
@@ -342,7 +378,7 @@ impl Read<'_> {
         })
     }
 
-    fn net(&self) -> Result<Net> {
+    fn net(&self) -> Result<Net<M>> {
         let s = Shape::square(3, STEM, 3, 2, 1);
         let stem = self.conv(
             "cnn.features.0.0",
@@ -396,10 +432,10 @@ impl Read<'_> {
                 true,
                 Act::None,
             )?,
-            smooth: self.gpu.upload(&compute::bytes(&self.floats(
+            smooth: self.make.taps(&self.floats(
                 &format!("smoothing_{}.weight", SOURCE.to_lowercase()),
                 &[1, 1, SMOOTH as usize, SMOOTH as usize],
-            )?)),
+            )?),
             gaussians: self.floats(
                 &format!("coarse_gaussians_{}", SOURCE.to_lowercase()),
                 &[PRIORS as usize, 2, 2],
@@ -455,7 +491,7 @@ struct Work {
     map: View,
 }
 
-fn work(gpu: &Gpu, net: &Net, (w, h): (u32, u32)) -> Work {
+fn work(gpu: &Gpu, net: &Net<Gpu>, (w, h): (u32, u32)) -> Work {
     let px = |div: u32| (h / div) * (w / div);
     let (mut io, mut hidden, mut div) = (STEM * px(2), 0, 2);
     for b in &net.blocks {
@@ -513,22 +549,62 @@ fn work(gpu: &Gpu, net: &Net, (w, h): (u32, u32)) -> Work {
     }
 }
 
+enum Run {
+    Gpu(Box<OnGpu>),
+    Cpu(Box<cpu::Model>),
+}
+
 pub(super) struct Model {
+    run: Run,
+    size: (u32, u32),
+}
+
+impl Model {
+    pub(super) fn load(
+        path: &Path,
+        title: &'static str,
+        size: (u32, u32),
+        on_gpu: bool,
+    ) -> Result<Self> {
+        let t = Torch::open(path, title)?;
+        let run = match on_gpu {
+            true => Run::Gpu(Box::new(OnGpu::load(&t, size)?)),
+            false => Run::Cpu(Box::new(cpu::Model::load(&t, size)?)),
+        };
+        Ok(Self { run, size })
+    }
+
+    pub(super) fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    pub(super) fn on_gpu(&self) -> bool {
+        matches!(self.run, Run::Gpu(_))
+    }
+
+    pub(super) fn maps(&mut self, pictures: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
+        match &mut self.run {
+            Run::Gpu(gpu) => gpu.maps(pictures),
+            Run::Cpu(cpu) => Ok(cpu.maps(pictures)),
+        }
+    }
+}
+
+struct OnGpu {
     gpu: Gpu,
     kernels: Kernels,
-    net: Net,
+    net: Net<Gpu>,
     work: Work,
     size: (u32, u32),
     gru: wgpu::ComputePipeline,
     smooth: wgpu::ComputePipeline,
 }
 
-impl Model {
-    pub(super) fn load(path: &Path, title: &'static str, size: (u32, u32)) -> Result<Self> {
-        let t = Torch::open(path, title)?;
+impl OnGpu {
+    fn load(t: &Torch, size: (u32, u32)) -> Result<Self> {
         let gpu = Gpu::start(WHAT, ops::SHARED).map_err(Error::Invalid)?;
         let made = compute::checked(&gpu.device, WHAT, || {
-            let net = Read { t: &t, gpu: &gpu }.net()?;
+            let net = Read { t, make: &gpu }.net()?;
             let work = work(&gpu, &net, size);
             let gru = gpu.pipe("unisal-gru", || format!("{}{GRU}", ops::HEADER));
             let smooth = gpu.pipe("unisal-smooth", || format!("{}{SMOOTHING}", ops::HEADER));
@@ -546,16 +622,12 @@ impl Model {
         })
     }
 
-    pub(super) fn size(&self) -> (u32, u32) {
-        self.size
-    }
-
     fn shaped(&self, v: &View, n: u32, div: u32, c: u32) -> View {
         let (w, h) = self.size;
         v.shaped(n, h / div, w / div, c)
     }
 
-    fn block(&self, o: &mut Ops, b: &Block, (x, y): (&View, &View), div: u32) {
+    fn block(&self, o: &mut Ops, b: &Block<Gpu>, (x, y): (&View, &View), div: u32) {
         let d = self.shaped(&self.work.d, x.n, div, b.hidden);
         match &b.expand {
             Some(expand) => {
@@ -572,7 +644,7 @@ impl Model {
         o.conv(&b.project, &d, y, res);
     }
 
-    fn skip(&self, o: &mut Ops, s: &Skip, (x, y): (&View, &View), div: u32) {
+    fn skip(&self, o: &mut Ops, s: &Skip<Gpu>, (x, y): (&View, &View), div: u32) {
         let e = self.shaped(&self.work.e, x.n, div, s.wide);
         o.conv(&s.expand, x, &e, Res::None);
         o.conv(&s.reduce, &e, y, Res::None);
@@ -663,7 +735,7 @@ impl Model {
         );
     }
 
-    pub(super) fn maps(&self, pictures: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
+    fn maps(&self, pictures: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
         let gpu = &self.gpu;
         let (w, h) = self.size;
         let plane = (w * h) as usize;

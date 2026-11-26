@@ -251,6 +251,11 @@ impl Workspace {
             self.inspector.reframing.held = None;
             return false;
         }
+        let sized = picture.width() > 0.0 && picture.height() > 0.0;
+        if !sized {
+            self.inspector.reframing.held = None;
+            return true;
+        }
         let back = |p: Pos2| {
             [
                 f64::from((p.x - picture.min.x) / picture.width()),

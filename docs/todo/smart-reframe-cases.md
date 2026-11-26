@@ -30,13 +30,20 @@ The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-95
   - Test: 50 %, 200 % and a speed ramp, on files at 24, 30 and 59.94 fps.
 - **Reference Point.** Now: one clip with the box moved to the right, and one walk-out clip with a large box.
   - On the walk-out clip, the tracker of vidcut follows the background in the large box. After the man leaves, the track moves to another thing. Resolve follows the man and then holds.
+  - This is a fault of vidcut, not a deviation (the owner's decision). Fix the tracker when the test shows the fault on more clips.
   - Test: a tight box and a large box on subjects that walk out, on four files. Use a box on two people, a box on a thing that is not a person, and boxes on the first, middle and last frame.
-- **Shot changes.** Now: seven clips of the film.
+- **Shot changes.** Now: seven clips of the film. The pan of Resolve across a cut is a bug of Resolve (the owner's decision, [gotchas](../gotchas.md#resolves-edits)). vidcut keeps its move at the cut.
   - Test: clips with a cut from the press conference (camera changes) and from two more files, at different frame rates.
 - **The size of the tolerance.** Now: the same keyframes at 1080×1920 and 2160×3840, on 9:16 timelines only. vidcut uses a frame 1080 pixels on its short side.
   - Test: 9:16 clips that move, at 1920×1080 and 3840×2160, and one shot at 1080×1080. That shows if the tolerance follows the short side, the long side or the width.
 - **The first box.** Now: one 9:16 timeline.
   - Test: the first box on a 16:9 and a 1:1 timeline.
+
+## Not measured
+
+- **A short gap in the path of the main subject.** With `subject`, a frame where the main path has no box takes the box of the next path of the shot (`reframe::found`). Thus a short gap moves the view to another thing and back. Resolve has no case of this yet.
+  - Test: shots where the main person is hidden for a few frames, or leaves and comes back, with other people in the frame. Use four files.
+  - The crowd shots of SR2 (P 0, P 250, M 1200, M 2200, C 400) have such gaps. Compare the Auto move of Resolve with `subject` `person` of vidcut.
 
 ## Two files
 

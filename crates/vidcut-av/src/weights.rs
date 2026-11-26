@@ -467,12 +467,17 @@ fn legacy(data: &[u8], bad: &dyn Fn(&dyn std::fmt::Display) -> Error) -> Result<
             return Err(bad(&"a storage key"));
         };
         let dtype = dtypes.get(key.as_str()).ok_or_else(|| bad(&key))?;
-        let count = data.get(at..at + 8).ok_or_else(|| bad(&"the end"))?;
+        let start = at.checked_add(8).ok_or_else(|| bad(&"the end"))?;
+        let count = data.get(at..start).ok_or_else(|| bad(&"the end"))?;
         let count = u64::from_le_bytes(count.try_into().map_err(|_| bad(&"the end"))?);
-        let len = usize::try_from(count).map_err(|e| bad(&e))? * dtype.size();
-        let bytes = data.get(at + 8..at + 8 + len).ok_or_else(|| bad(&key))?;
+        let len = usize::try_from(count)
+            .ok()
+            .and_then(|n| n.checked_mul(dtype.size()))
+            .ok_or_else(|| bad(&key))?;
+        let end = start.checked_add(len).ok_or_else(|| bad(&key))?;
+        let bytes = data.get(start..end).ok_or_else(|| bad(&key))?;
         storages.insert(key, bytes.to_vec());
-        at += 8 + len;
+        at = end;
     }
     Ok((tensors, storages))
 }
@@ -517,9 +522,13 @@ impl Torch {
         }
         let size = t.dtype.size();
         let bytes = &self.storages[&t.storage];
-        let from = t.offset * size;
-        let raw = bytes
-            .get(from..from + step * size)
+        let span = t.offset.checked_mul(size).and_then(|from| {
+            step.checked_mul(size)
+                .and_then(|len| from.checked_add(len))
+                .map(|to| from..to)
+        });
+        let raw = span
+            .and_then(|span| bytes.get(span))
             .ok_or_else(|| bad(&self.path, self.title, name))?;
         Ok(match t.dtype {
             Dtype::F32 => raw

@@ -190,12 +190,15 @@ flowchart TD
 - `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
 - It reads the frames as `subjects::find` does. `subjects::looked` decodes, seeks and measures the scene scores and the `SEED` pictures for both.
   - The `Looker` trait is the part that is different. `Looking` finds boxes. `Seeing` makes saliency maps.
-- The model is UNISAL (`unisal`), with its weights for DHF1K, on the GPU (`compute::ops`).
+- The model is UNISAL (`unisal`), with its weights for DHF1K.
+  - With `gpu.acceleration` on, it runs in the GPU kernels of vidcut (`compute::ops`).
+  - With `gpu.acceleration` off, `unisal::cpu` runs the same steps on the CPU, one row of each output on each slice of the pool (`pool::run`). Why: the GPU works only where the user lets it ([AGENTS.md](../../AGENTS.md), rule 9).
+  - One reader gives the weights to both paths. A `Make` gives the layers of each path.
   - Its picture has from 100 to 120 cells of 32 pixels. Of these sizes, it has the one with the aspect nearest to the source (`unisal::sized`). Why: the code of the authors selects its size so.
   - `Seeing::picture` scales with a Lanczos filter. `unisal::input` then normalizes red, green and blue by the mean and the spread of ImageNet.
   - The model keeps a hidden state from picture to picture (a convolutional GRU). It has five states, and picture n uses state n mod 5 (`unisal::FRAMES`).
     - Why: the model learned on each fifth frame of DHF1K, and the code of the authors runs so.
-  - `unisal::Model::maps` runs five pictures in one pass, and reads back the five maps.
+  - `unisal::Model::maps` runs five pictures in one pass, and gives the five maps.
   - `unisal::centroid` gives the point: the mean of the places of the map, weighted by the softmax of the map. Its `Found` has that point as its center, a size of 0 and the highest value of the map as its score.
     - Why the softmax: the model learned the map as the log of the share of the looks at each place. The point is then the mean place of the looks.
     - Why not the highest place: on 16 shots of two files that Resolve reframed, the mean place comes nearer to the move of Resolve.
@@ -203,6 +206,7 @@ flowchart TD
 - `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights and the rules (`salience::name`) and the `Look`.
 - The model file is `catalog::UNISAL_WEIGHTS`, at one commit of the repository of the authors. `salience::get_ready` fetches it when the request has `download`.
 - `VIDCUT_SALIENCY_DUMP` and `scripts/saliency-check.py` compare the maps with the code of the authors ([tools](../tools.md)).
+- `models.check` loads UNISAL with the GPU setting of the preferences. Its `loaded` names the device.
 
 ## Tracks
 

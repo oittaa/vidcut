@@ -137,10 +137,14 @@ pub fn inspect(
         });
     }
     if model.id == vidcut_core::catalog::UNISAL.id {
-        crate::salience::inspect(dir, download)?;
+        crate::salience::inspect(dir, download, gpu)?;
+        let loaded = match gpu {
+            true => "vidcut, on the GPU",
+            false => "vidcut, on the CPU",
+        };
         return Ok(Inspected {
             found,
-            loaded: Some("vidcut, on the GPU"),
+            loaded: Some(loaded),
         });
     }
     if model.id == vidcut_core::catalog::VITTRACK.id {
