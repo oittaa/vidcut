@@ -8772,7 +8772,12 @@ fn mask_maps(
     frames.dedup();
     let mut needs = Vec::new();
     for frame in frames {
-        let t = ops::grade_masks::time_at(p, of, frame)?;
+        let Ok(t) = ops::grade_masks::time_at(p, of, frame) else {
+            let gone: Vec<u32> = (touched.iter().filter(|v| v.0 == frame).map(|v| v.1)).collect();
+            mask.maps
+                .retain(|m| m.frame != frame || !gone.contains(&m.subject));
+            continue;
+        };
         let plan = mask_plan(p, of, n, t)?;
         let picture = crate::fingerprint::digest(&serde_json::to_vec(&plan).unwrap_or_default());
         let mut subjects: Vec<(String, Vec<crate::masks::Point>)> = Vec::new();
@@ -8814,9 +8819,9 @@ pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
     Ok(())
 }
 
-pub fn mask_remakes(p: &Project, download: bool) -> Result<Vec<MaskNeed>> {
+pub fn mask_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
     let mut needs = Vec::new();
-    let clips = p.tracks.iter().flat_map(|t| &t.clips);
+    let clips = p.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
     for c in clips {
         let Some(whole) = c.picture.as_ref().and_then(|v| v.grade.as_ref()) else {
             continue;
@@ -8828,19 +8833,37 @@ pub fn mask_remakes(p: &Project, download: bool) -> Result<Vec<MaskNeed>> {
                 let Some(mask) = &d.magic_mask else {
                     continue;
                 };
-                for m in mask.maps.iter().filter(|m| !crate::masks::has(&m.name)) {
-                    let t = ops::grade_masks::time_at(p, &of, m.frame)?;
-                    let points = ops::grade_masks::points(mask, m.frame, m.subject);
-                    needs.push(MaskNeed {
-                        plan: mask_plan(p, &of, k as u32 + 1, t)?,
-                        subjects: vec![(m.name.clone(), points)],
-                        download,
-                    });
+                let missing: Vec<&crate::model::MaskMap> =
+                    (mask.maps.iter().filter(|m| !crate::masks::has(&m.name))).collect();
+                let mut frames: Vec<i64> = missing.iter().map(|m| m.frame).collect();
+                frames.sort_unstable();
+                frames.dedup();
+                for frame in frames {
+                    let Ok(t) = ops::grade_masks::time_at(p, &of, frame) else {
+                        continue;
+                    };
+                    let Ok(plan) = mask_plan(p, &of, k as u32 + 1, t) else {
+                        continue;
+                    };
+                    let mut subjects: Vec<(String, Vec<crate::masks::Point>)> = Vec::new();
+                    for m in missing.iter().filter(|m| m.frame == frame) {
+                        let points = ops::grade_masks::points(mask, frame, m.subject);
+                        if !points.is_empty() && !subjects.iter().any(|(v, _)| *v == m.name) {
+                            subjects.push((m.name.clone(), points));
+                        }
+                    }
+                    if !subjects.is_empty() {
+                        needs.push(MaskNeed {
+                            plan,
+                            subjects,
+                            download,
+                        });
+                    }
                 }
             }
         }
     }
-    Ok(needs)
+    needs
 }
 
 pub fn mask_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<MaskNeed> {

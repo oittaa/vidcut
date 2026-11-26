@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::error::{Error, Result};
 use crate::masks::{self, MOST_CLICKS, Point};
 use crate::model::{GradeTool, MagicMask, MaskClick, Project};
@@ -63,6 +65,46 @@ pub fn placed(at: [f64; 2]) -> Result<[f64; 2]> {
             "a Magic Mask click is from 0 to 1 across and down the frame",
         )),
     }
+}
+
+fn is_name(name: &str) -> bool {
+    name.len() == 32 && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+pub fn checked(mask: &MagicMask) -> Result<()> {
+    if mask.clicks.is_empty() {
+        return Err(Error::invalid("a Magic Mask has one click at least"));
+    }
+    let mut counts: BTreeMap<(i64, u32), usize> = BTreeMap::new();
+    for c in &mask.clicks {
+        placed(c.at)?;
+        if c.subject == 0 {
+            return Err(Error::invalid("the subjects of a Magic Mask start at 1"));
+        }
+        let n = counts.entry((c.frame, c.subject)).or_default();
+        *n += 1;
+        if *n > MOST_CLICKS {
+            return Err(Error::invalid(format!(
+                "a subject takes {MOST_CLICKS} clicks on a frame at most"
+            )));
+        }
+    }
+    let mut seen = BTreeSet::new();
+    for m in &mask.maps {
+        if !is_name(&m.name) {
+            return Err(Error::invalid(format!(
+                "{:?} is not the name of a Magic Mask map",
+                m.name
+            )));
+        }
+        if !counts.contains_key(&(m.frame, m.subject)) || !seen.insert((m.frame, m.subject)) {
+            return Err(Error::invalid(format!(
+                "the Magic Mask has one map of subject {} on frame {} at most, and only with a click there",
+                m.subject, m.frame
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn points(mask: &MagicMask, frame: i64, subject: u32) -> Vec<Point> {

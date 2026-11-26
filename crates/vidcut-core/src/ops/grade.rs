@@ -471,6 +471,14 @@ pub fn checked(g: &Grade) -> Result<()> {
         for w in &n.windows {
             super::grade_windows::checked(w)?;
         }
+        if let Some(m) = &n.magic_mask {
+            if !matches!(n.tool, GradeTool::Corrector(_)) {
+                return Err(Error::invalid(format!(
+                    "node {k} is not a corrector, which has no Magic Mask"
+                )));
+            }
+            super::grade_masks::checked(m)?;
+        }
     }
     if crate::grade::order(g).is_none() {
         return Err(Error::invalid("the links of the grade make a loop"));
@@ -603,6 +611,9 @@ fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
             }
             if !p.compound_path.is_empty() {
                 return Err(Error::invalid("a compound clip has no timeline grade"));
+            }
+            if grade.is_masked() {
+                return Err(Error::invalid("the timeline grade has no Magic Mask"));
             }
             let grade = (!grade.is_usual(frame)).then(|| grade.clone());
             p.timeline_mut().ok_or_else(no_timeline)?.grade = grade;
@@ -998,6 +1009,9 @@ fn cleared(
                 ..GradeWindow::new(w.shape.kind(), size)
             });
         }
+    }
+    if palette.is_none() {
+        g.node_mut(n).ok_or_else(|| no_node(n))?.magic_mask = None;
     }
     Ok(())
 }

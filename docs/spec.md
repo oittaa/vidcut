@@ -5037,6 +5037,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The mask folds into the key of the corrector after the windows and the qualifier, with Matte when a window or a qualifier is on.
   - Invert Mask inverts the mask before the fold.
   - A locked node keeps its Magic Mask. Undo takes back each request.
+  - `grade.clear` of a node, or of all nodes with `keep_nodes`, also deletes the Magic Mask.
+  - Only a corrector of the grade of a clip has a Magic Mask. Each click is from 0 to 1 across and down the frame.
+  - A click on a frame outside the clip, for example after a split, makes no mask. An export skips it.
   - The palette, Quality, tracking, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
