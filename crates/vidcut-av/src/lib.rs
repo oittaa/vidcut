@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod auto_color;
 pub mod barcode;
 pub mod beep;
+pub(crate) mod bicubic;
 pub(crate) mod buffers;
 pub mod burn;
 pub mod cancel;
@@ -29,6 +30,7 @@ pub mod isolate;
 #[cfg(target_os = "macos")]
 pub(crate) mod lanczos;
 pub mod light;
+pub mod mask;
 #[cfg(target_os = "macos")]
 pub(crate) mod metal;
 pub mod models;

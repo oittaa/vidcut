@@ -2714,6 +2714,57 @@ fn fs_window_key(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(clamp(select(out, 1.0 - out, o.z > 0.5), 0.0, 1.0));
 }
 
+struct MaskKeying {
+    map0: vec4<f32>,
+    map1: vec4<f32>,
+    map2: vec4<f32>,
+    size: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> mask_keying: MaskKeying;
+@group(0) @binding(3) var<storage, read> mask_maps: array<f32>;
+
+const MASK_SIDE: u32 = 256u;
+
+fn mask_value(m: u32, u: f32, v: f32) -> f32 {
+    let last = MASK_SIDE - 1u;
+    let x0 = min(u32(u), last);
+    let y0 = min(u32(v), last);
+    let x1 = min(x0 + 1u, last);
+    let y1 = min(y0 + 1u, last);
+    let tx = u - f32(x0);
+    let ty = v - f32(y0);
+    let b = m * MASK_SIDE * MASK_SIDE;
+    let a00 = mask_maps[b + y0 * MASK_SIDE + x0];
+    let a10 = mask_maps[b + y0 * MASK_SIDE + x1];
+    let a01 = mask_maps[b + y1 * MASK_SIDE + x0];
+    let a11 = mask_maps[b + y1 * MASK_SIDE + x1];
+    let top = a00 + (a10 - a00) * tx;
+    let bottom = a01 + (a11 - a01) * tx;
+    return top + (bottom - top) * ty;
+}
+
+@fragment
+fn fs_mask_key(in: Out) -> @location(0) vec4<f32> {
+    let f = vec3<f32>(in.position.xy, 1.0);
+    let h = vec3<f32>(dot(mask_keying.map0.xyz, f), dot(mask_keying.map1.xyz, f), dot(mask_keying.map2.xyz, f));
+    if abs(h.z) < 1e-6 {
+        return vec4<f32>(0.0);
+    }
+    let q = h.xy / h.z;
+    let side = f32(MASK_SIDE);
+    let u = max(q.x / mask_keying.size.x * side - 0.5, 0.0);
+    let v = max(q.y / mask_keying.size.y * side - 0.5, 0.0);
+    let count = u32(mask_keying.size.z);
+    var key = 0.0;
+    for (var m = 0u; m < count; m++) {
+        if mask_value(m, u, v) > 0.0 {
+            key = 1.0;
+        }
+    }
+    return vec4<f32>(key);
+}
+
 struct KeyFolding {
     scale: vec4<f32>,
     flat: vec4<f32>,

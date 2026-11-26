@@ -306,7 +306,7 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 
 ## GPU layers
 
-`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model, the model of people and vehicles ([analysis](analysis.md#subjects)) and Auto Color (`auto_color::balance`, [export](export.md)).
+`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut. They are the frame interpolation, the slow face model, the model of people and vehicles ([analysis](analysis.md#subjects)), Auto Color (`auto_color::balance`, [export](export.md)) and the Magic Mask ([analysis](analysis.md#subject-masks)).
 
 - A `View` is a part of a buffer of 32-bit floats. The channels of a pixel are next to each other.
 - `Ops::conv` is a convolution as a matrix multiply. The bias, a residual and the activation are in the same pass.
@@ -324,6 +324,7 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 - `ops::arena` plans the work buffers of a network. It refuses a buffer that is larger than the GPU takes.
 - `Kernels` compiles the shaders once for each `compute::Gpu`. The device must have the workgroup memory of `ops::SHARED`.
 - A layer never reads and writes one buffer in one pass. Why: wgpu refuses a buffer that is bound as read-only and as writable in one dispatch.
+- `Ops::conv_shuffled` gives a transposed convolution with a stride of 2 as a 1×1 convolution and a pixel shuffle. The Magic Mask uses it.
 
 ## Deinterlacing and HDR
 

@@ -126,6 +126,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.add", &["shape", "clip"]),
     ("grade.window.set", &["window", "clip"]),
     ("grade.window.remove", &["window", "clip"]),
+    ("grade.mask.click", &["clip"]),
+    ("grade.mask.set", &["clip"]),
+    ("grade.mask.clear", &["clip"]),
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
@@ -259,6 +262,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "grade.keys",
         "Keyframes of the correctors and key mixers of a grade",
+    ),
+    (
+        "grade.mask",
+        "The Magic Mask of a corrector: the clicks that pick its subjects",
     ),
     ("grade.window", "Windows of the correctors of a grade"),
     (

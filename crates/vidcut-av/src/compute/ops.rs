@@ -2036,6 +2036,10 @@ impl Ops<'_, '_> {
             .dispatch(self.pass, &self.k.wino_out, param, &bufs, groups(items));
     }
 
+    pub(crate) fn conv_shuffled(&mut self, c: &Conv, src: &View, dst: &View, res: Res, r: u32) {
+        self.conv_mapped(c, src, dst, res, (src.h, src.w), (1, 0, 1, 0), r);
+    }
+
     pub(crate) fn deconv(&mut self, d: &Deconv, src: &View, dst: &View, shuffle: u32) {
         for (i, c) in d.parts.iter().enumerate() {
             let (py, px) = ((i / 2) as u32, (i % 2) as u32);

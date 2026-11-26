@@ -1,6 +1,6 @@
 use vidcut_core::grade::{
-    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass, Qualifying,
-    THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
+    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Masking, Pass as GradePass,
+    Qualifying, THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::{ByBytes, Lru};
 use vidcut_core::model::{
@@ -130,6 +130,7 @@ pub(super) struct Pipes {
     key_luma: wgpu::RenderPipeline,
     key_gray: wgpu::RenderPipeline,
     key_qualify: wgpu::RenderPipeline,
+    mask_key: wgpu::RenderPipeline,
     shot: wgpu::RenderPipeline,
 }
 
@@ -237,6 +238,7 @@ impl Pipes {
             key_luma: pipeline(&plain, "fs_key_luma"),
             key_gray: pipeline(&plain, "fs_key_gray"),
             key_qualify: pipeline(&plain, "fs_key_qualify"),
+            mask_key: pipeline(&of(&reading), "fs_mask_key"),
             shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
@@ -2162,6 +2164,49 @@ fn key_qualify_into(
     );
 }
 
+fn mask_into(
+    gpu: &Gpu,
+    to: &Texture,
+    (masking, spot): (&Masking, &Spot),
+    scratch: &Texture,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let maps: Vec<_> = (masking.maps.iter())
+        .filter_map(|name| vidcut_core::masks::get(name))
+        .collect();
+    let mut cells: Vec<u8> = maps
+        .iter()
+        .flat_map(|m| m.iter().flat_map(|v| v.to_le_bytes()))
+        .collect();
+    if cells.is_empty() {
+        cells.extend(0f32.to_le_bytes());
+    }
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut masks"),
+        size: cells.len() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue.write_buffer(&buffer, 0, &cells);
+    let [m0, m1, m2, m3, m4, m5, m6, m7, m8] = spot.map;
+    let [w, h] = spot.frame;
+    let count = maps.len() as f64;
+    let bytes = float_bytes(&[
+        m0, m1, m2, 0.0, m3, m4, m5, 0.0, m6, m7, m8, 0.0, w, h, count, 0.0,
+    ]);
+    let views = Views {
+        cells: Some(&buffer),
+        ..Views::same(&scratch.view)
+    };
+    draw_step(
+        gpu,
+        (&gpu.blur().mask_key, &bytes[..]),
+        views,
+        &to.view,
+        encoder,
+    );
+}
+
 fn key_blur_into(
     gpu: &Gpu,
     on: &Texture,
@@ -2211,6 +2256,9 @@ fn pass_into(
             to,
             qualifying,
         } => key_qualify_into(gpu, (at[*from], at[*to]), qualifying, encoder),
+        GradePass::Mask { to, masking } => {
+            mask_into(gpu, at[*to], (masking, spot), &scratch[0], encoder);
+        }
         GradePass::KeyBlur { on, blur } => {
             key_blur_into(gpu, at[*on], (*blur, spot), &scratch[0], encoder);
         }

@@ -924,7 +924,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - A gray picture reads the source for its alpha. Thus the source stays until the last `Gray` pass.
     - `grade::passed` takes a gray picture as a picture from the source. A Parallel Mixer with a gray picture on an input thus has the source as its base.
   - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
-    - A corrector folds the key of its windows first, then the key of its qualifier, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - A corrector folds the key of its windows first, then the key of its qualifier, its Magic Mask and the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
     - A qualifier at its usual values is no step. The Matte of the Qualifier row folds as a Matte input. The Mask of the row folds as a Mask input.
     - The last step clamps the key and applies the Key Output.
   - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
@@ -932,6 +932,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A `Qualify` pass makes the key of a qualifier with `fs_key_qualify`, from the picture that comes into the node (`Qualifying`).
     - A node with only a qualifier, with its three parts on and the Qualifier row at its usual values, keeps its one `Qualify` pass. It applies the Key Output.
     - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+  - A `Mask` pass makes the key of a Magic Mask with `fs_mask_key`, from the maps of the frame (`Masking`). A `KeyFold` always follows it ([analysis](analysis.md#subject-masks)).
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
   - `cut_off` tells if a corrector takes its key input from the key output of a corrector that is off. Its key is then 0, and it reads no key from its links.
@@ -1085,6 +1086,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - The player gives the viewer the timeline grade at the playhead (`Shown`).
   - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
+  - `Grade::at` also keeps only the maps of a Magic Mask on its frame (`Grade::is_masked`).
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
   - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile` (`GradeNode::key_here`).

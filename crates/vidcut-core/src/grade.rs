@@ -546,6 +546,7 @@ impl KeyFold {
 enum KeySource {
     Windows,
     Qualifier,
+    Mask,
     Link(GradeLink),
 }
 
@@ -587,6 +588,12 @@ fn key_steps(node: &GradeNode, off: &[bool]) -> Vec<(KeySource, KeyFold)> {
             if !q.is_usual() {
                 let how = fold((q.gain, q.offset, q.key_invert), windows && !q.mask);
                 steps.push((KeySource::Qualifier, how));
+            }
+            if let Some(m) = &node.magic_mask
+                && m.clicks.iter().any(|c| c.on)
+            {
+                let how = fold((1.0, 0.0, m.invert), !steps.is_empty());
+                steps.push((KeySource::Mask, how));
             }
             if let Some(from) = node.key_from {
                 let i = node.key_input;
@@ -657,7 +664,7 @@ fn shape_of(node: &GradeNode, shapes: &[Shape], off: &[bool], count: usize) -> S
                 Shape::Flat(x) => acc = fold.of(acc, x),
                 Shape::Map => return Shape::Map,
             },
-            KeySource::Windows | KeySource::Qualifier => return Shape::Map,
+            KeySource::Windows | KeySource::Qualifier | KeySource::Mask => return Shape::Map,
         }
     }
     Shape::Flat(acc)
@@ -730,6 +737,15 @@ pub enum Pass {
         to: usize,
         qualifying: Box<Qualifying>,
     },
+    Mask {
+        to: usize,
+        masking: Box<Masking>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Masking {
+    pub maps: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1021,6 +1037,15 @@ impl Uses {
                     });
                     Key::Map(to)
                 }
+                KeySource::Mask => {
+                    let to = r.kept(1);
+                    let maps = (node.magic_mask.iter())
+                        .flat_map(|m| m.maps.iter().map(|v| v.name.clone()))
+                        .collect();
+                    let masking = Box::new(Masking { maps });
+                    passes.push(Pass::Mask { to, masking });
+                    Key::Map(to)
+                }
                 KeySource::Link(l) => self.source((node, l), r, passes),
             };
             acc = match (&acc, &input) {
@@ -1182,6 +1207,7 @@ fn keys_only(p: &Pass) -> bool {
             | Pass::KeySharpen { .. }
             | Pass::Luma { .. }
             | Pass::Qualify { .. }
+            | Pass::Mask { .. }
     )
 }
 

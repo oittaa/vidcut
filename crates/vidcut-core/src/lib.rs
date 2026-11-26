@@ -28,6 +28,7 @@ pub mod leveler;
 pub mod looks;
 pub mod lru;
 pub mod luts;
+pub mod masks;
 pub mod model;
 pub mod motion;
 pub mod multicam;

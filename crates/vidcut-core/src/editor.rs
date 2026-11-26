@@ -148,6 +148,18 @@ pub trait Env {
         ))
     }
 
+    fn subject_masks(
+        &self,
+        plan: &RenderPlan,
+        subjects: &[Vec<crate::masks::Point>],
+        download: bool,
+    ) -> Result<Vec<Arc<[f32]>>> {
+        let _ = (plan, subjects, download);
+        Err(Error::usage(
+            "the Magic Mask reads the picture in the vidcut program",
+        ))
+    }
+
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
 
     fn transcribe(&self, plan: &RenderPlan, asked: &transcript::Asked) -> Result<Arc<Speech>> {
@@ -5423,6 +5435,18 @@ fn mutate(
             let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             json!({ "window": ops::grade_windows::convert(p, &of, *node, *window)? })
         }
+        Request::GradeMaskClick { .. }
+        | Request::GradeMaskSet { .. }
+        | Request::GradeMaskClear { .. } => {
+            let edit = mask_edit(p, request, playhead)?;
+            if !dry_run {
+                for need in &edit.needs {
+                    mask_made(env, need)?;
+                }
+            }
+            ops::grade_masks::put(p, &edit.of, edit.n, edit.mask)?;
+            edit.out
+        }
         Request::GradeWindowPaste {
             clip,
             timeline,
@@ -8568,15 +8592,24 @@ fn auto_color_plan(
         None => return Err(ops::grade::no_node(n)),
     }
     g.output = Some(crate::model::GradeLink::picture(n));
+    solo_plan(p, (id, *layer), (frame, t), g)
+}
+
+fn solo_plan(
+    p: &Project,
+    (id, layer): (&str, usize),
+    (frame, t): (i64, i64),
+    g: crate::model::Grade,
+) -> Result<RenderPlan> {
     let size = p.frame_size();
     let below = ops::grade::whole(p, id)?.map(|w| w.at(frame as f64).into_owned());
     let g = below
         .unwrap_or_else(|| crate::model::Grade::usual(size))
-        .below(*layer, g, size);
+        .below(layer, g, size);
     let mut solo = p.clone();
     solo.subtitles.clear();
     for track in &mut solo.tracks {
-        track.clips.retain(|k| k.id == *id);
+        track.clips.retain(|k| k.id == id);
         track.transitions.clear();
         track.video_enabled = true;
         for k in &mut track.clips {
@@ -8597,6 +8630,221 @@ fn auto_color_plan(
     let mut plan = crate::render::flatten(&solo, t, t + 1)?;
     plan.timeline_grade = None;
     Ok(plan)
+}
+
+fn mask_plan(p: &Project, of: &ops::grade::GradeOf, n: u32, t: i64) -> Result<RenderPlan> {
+    let ops::grade::GradeOf::Clip(id, layer) = of else {
+        return Err(Error::invalid(
+            "the Magic Mask works on the grade of a clip",
+        ));
+    };
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    if t < c.start || t >= c.end() {
+        return Err(Error::invalid(format!(
+            "{id} is not at frame {t}: the Magic Mask reads a frame of the clip"
+        )));
+    }
+    let frame = ops::grade::frame_of(p, of, t)?;
+    let mut g = ops::grade::stored(p, of)?.at(frame as f64).into_owned();
+    let d = g.node_mut(n).ok_or_else(|| ops::grade::no_node(n))?;
+    d.magic_mask = None;
+    let input = (d.inputs.first().copied().flatten())
+        .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
+    g.output = Some(input);
+    solo_plan(p, (id, *layer), (frame, t), g)
+}
+
+#[derive(Debug, Clone)]
+pub struct MaskNeed {
+    pub plan: RenderPlan,
+    pub subjects: Vec<(String, Vec<crate::masks::Point>)>,
+    pub download: bool,
+}
+
+struct MaskEdit {
+    of: ops::grade::GradeOf,
+    n: u32,
+    mask: crate::model::MagicMask,
+    needs: Vec<MaskNeed>,
+    out: Value,
+}
+
+fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<MaskEdit> {
+    use ops::grade_masks::{ClickChange, click_changed, click_removed, clicked, mask_of};
+    let opened = |clip: &Option<ClipRef>, layer: &Option<usize>, node: &Option<u32>| {
+        let of = grade_of(p, clip, (false, *layer), playhead)?;
+        let n = node.unwrap_or(1);
+        let mask = mask_of(p, &of, n)?;
+        Ok::<_, Error>((of, n, mask))
+    };
+    let (of, n, mut mask, touched, out, download) = match request {
+        Request::GradeMaskClick {
+            clip,
+            layer,
+            node,
+            at,
+            place,
+            negative,
+            subject,
+            download,
+        } => {
+            let (of, n, mut mask) = opened(clip, layer, node)?;
+            let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
+                Error::usage("grade.mask.click needs `at` (--at): there is no playhead")
+            })?;
+            let frame = ops::grade::frame_of(p, &of, t)?;
+            let (s, click) = clicked(&mut mask, frame, (*place, *negative), *subject)?;
+            let out = json!({ "subject": s, "click": click });
+            (of, n, mask, vec![(frame, s)], out, *download)
+        }
+        Request::GradeMaskSet {
+            clip,
+            layer,
+            node,
+            invert,
+            click,
+            on,
+            place,
+            negative,
+            download,
+        } => {
+            let (of, n, mut mask) = opened(clip, layer, node)?;
+            let change = ClickChange {
+                on: *on,
+                place: *place,
+                negative: *negative,
+            };
+            if let Some(v) = invert {
+                mask.invert = *v;
+            }
+            let touched = match click {
+                Some(k) => vec![click_changed(&mut mask, *k, &change)?],
+                None if change != ClickChange::default() => {
+                    return Err(Error::usage("`on`, `place` and `negative` need `click`"));
+                }
+                None if invert.is_none() => {
+                    return Err(Error::usage("give `invert` or `click`"));
+                }
+                None => Vec::new(),
+            };
+            (of, n, mask, touched, Value::Null, *download)
+        }
+        Request::GradeMaskClear {
+            clip,
+            layer,
+            node,
+            click,
+            download,
+        } => {
+            let (of, n, mut mask) = opened(clip, layer, node)?;
+            let touched = match click {
+                Some(k) => vec![click_removed(&mut mask, *k)?],
+                None => {
+                    mask = crate::model::MagicMask::default();
+                    Vec::new()
+                }
+            };
+            (of, n, mask, touched, Value::Null, *download)
+        }
+        _ => return Err(Error::invalid("not a Magic Mask request")),
+    };
+    let needs = mask_maps(p, (&of, n), &mut mask, &touched, download)?;
+    Ok(MaskEdit {
+        of,
+        n,
+        mask,
+        needs,
+        out,
+    })
+}
+
+fn mask_maps(
+    p: &Project,
+    (of, n): (&ops::grade::GradeOf, u32),
+    mask: &mut crate::model::MagicMask,
+    touched: &[(i64, u32)],
+    download: bool,
+) -> Result<Vec<MaskNeed>> {
+    let mut frames: Vec<i64> = touched.iter().map(|v| v.0).collect();
+    frames.sort_unstable();
+    frames.dedup();
+    let mut needs = Vec::new();
+    for frame in frames {
+        let t = ops::grade_masks::time_at(p, of, frame)?;
+        let plan = mask_plan(p, of, n, t)?;
+        let picture = crate::fingerprint::digest(&serde_json::to_vec(&plan).unwrap_or_default());
+        let mut subjects: Vec<(String, Vec<crate::masks::Point>)> = Vec::new();
+        for &(_, s) in touched.iter().filter(|v| v.0 == frame) {
+            mask.maps.retain(|m| m.frame != frame || m.subject != s);
+            let points = ops::grade_masks::points(mask, frame, s);
+            if points.is_empty() {
+                continue;
+            }
+            let name = crate::masks::name(crate::catalog::SAM21_TINY.id, &picture, &points);
+            if !crate::masks::has(&name) && !subjects.iter().any(|(v, _)| *v == name) {
+                subjects.push((name.clone(), points));
+            }
+            mask.maps.push(crate::model::MaskMap {
+                frame,
+                subject: s,
+                name,
+            });
+        }
+        if !subjects.is_empty() {
+            needs.push(MaskNeed {
+                plan,
+                subjects,
+                download,
+            });
+        }
+    }
+    mask.maps.sort_by_key(|m| (m.frame, m.subject));
+    Ok(needs)
+}
+
+pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
+    let points: Vec<Vec<crate::masks::Point>> =
+        need.subjects.iter().map(|(_, p)| p.clone()).collect();
+    let maps = env.subject_masks(&need.plan, &points, need.download)?;
+    for ((name, _), map) in need.subjects.iter().zip(maps) {
+        crate::masks::put(name, map);
+    }
+    Ok(())
+}
+
+pub fn mask_remakes(p: &Project, download: bool) -> Result<Vec<MaskNeed>> {
+    let mut needs = Vec::new();
+    let clips = p.tracks.iter().flat_map(|t| &t.clips);
+    for c in clips {
+        let Some(whole) = c.picture.as_ref().and_then(|v| v.grade.as_ref()) else {
+            continue;
+        };
+        let layers = std::iter::once(whole).chain(&whole.layers);
+        for (i, g) in layers.enumerate() {
+            let of = ops::grade::GradeOf::Clip(c.id.clone(), i + 1);
+            for (k, d) in g.nodes.iter().enumerate() {
+                let Some(mask) = &d.magic_mask else {
+                    continue;
+                };
+                for m in mask.maps.iter().filter(|m| !crate::masks::has(&m.name)) {
+                    let t = ops::grade_masks::time_at(p, &of, m.frame)?;
+                    let points = ops::grade_masks::points(mask, m.frame, m.subject);
+                    needs.push(MaskNeed {
+                        plan: mask_plan(p, &of, k as u32 + 1, t)?,
+                        subjects: vec![(m.name.clone(), points)],
+                        download,
+                    });
+                }
+            }
+        }
+    }
+    Ok(needs)
+}
+
+pub fn mask_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<MaskNeed> {
+    mask_edit(p, request, playhead).map_or_else(|_| Vec::new(), |e| e.needs)
 }
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {

@@ -54,9 +54,12 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 - A corrector has windows, a qualifier and a key input. `key_steps` folds them on the GPU in 32-bit float (`crates/vidcut-core/src/grade.rs`).
 - The Color page has no palette that tracks. It has no Tracker palette ([motion tracking](motion-tracking.md)).
 - `motion.track` follows a box with VitTrack, in tract on the CPU. `motion.find` finds people with YOLOX-S.
-- The analysis cache keeps boxes on disk under one limit (`disk_cache::Kind::Analysis`). No store keeps a picture for each frame.
+- A corrector has a Magic Mask with clicks on one frame, Invert Mask and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
+  - SAM 2.1 tiny makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set` and `grade.mask.clear`.
+  - The mask store keeps the maps in memory and in the disk cache (`disk_cache::Kind::Masks`). An export makes a missing map again.
+  - The viewer shows no mask on a frame whose map is missing.
 - The catalog downloads each model on first use, after an ask, and checks its SHA-256 (`catalog.rs`, `models.rs`).
-- RetinaFace, NanoVSR and FlashVSR run in vidcut's own GPU kernels. The other ONNX models run in tract on the CPU.
+- RetinaFace, NanoVSR, FlashVSR and SAM 2.1 run in vidcut's own GPU kernels. The other ONNX models run in tract on the CPU.
 - The Node Editor has no Alpha Output. A clip with its own alpha composites over the tracks below.
 
 ## The models
@@ -127,11 +130,9 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
 
 Each step is one pull request.
 
-- **Still mask:** the tiny model in vidcut's kernels, in picture mode.
-  - The Magic Mask of a corrector, with clicks on one frame, Invert and the key in the node.
-  - The requests, undo, and the catalog entries of the three models with their SHA-256.
 - **Palette:** the Magic Mask palette, the click tools, the Click list, Mask Overlay and Quality.
-- **Tracking:** the video memory, the track buttons, the mask store and the timeline of the Click list.
+- **Tracking:** the video memory, the track buttons, `grade.mask.track` and the timeline of the Click list.
+  - The viewer makes a missing map again, as the export does.
 - **Alpha Output:** the Alpha Output of the Node Editor. The mask then makes the clip transparent over the tracks below.
 - **Smart Refine and Consistency.**
 - **Matte Finesse:** one set of controls for the qualifier and the Magic Mask ([Color page](color-page.md)).
@@ -142,7 +143,7 @@ Each step is one pull request.
 
 ## Measurements
 
-vidcut's runs need downloads. They wait for the owner's OK of the downloads.
+The owner approved the downloads of vidcut's runs.
 
 - The files go to `sam2` in the test data folder, never into git.
 - DAVIS 2017 states no license. Its pages ask for a citation. The set is only for these runs.
@@ -154,6 +155,9 @@ These are vidcut's runs:
   - The same clicks go on the first frame of each video, for each of the three models.
   - The overlap of vidcut's mask with the official mask on each frame: the mean and the worst. Higher is better. The aim is 0.99.
   - J&F of both against the true masks of DAVIS.
+  - The official J&F with one click on the first frame: tiny 68.0, base+ 68.7, large 76.7.
+  - The first frames are done for tiny. On the same input, vidcut and the official network overlap 0.9999 on average, and 0.9993 at worst.
+  - The tracked frames wait for the Tracking step.
 - **M2, cost:** 10 s each of tos-720p-mov, pedestrian-area, stab-crowd-4k, stab-dashcam and stab-rally.
   - One click, a track forward, each model, GPU decoding on.
   - Seconds per minute of video, CPU time, GPU use and peak GPU memory.

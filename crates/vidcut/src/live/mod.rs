@@ -2143,6 +2143,22 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::GradeMaskClick { .. }
+        | Request::GradeMaskSet { .. }
+        | Request::GradeMaskClear { .. } = &envelope.request
+        {
+            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                let env = AvEnv::new();
+                for need in &looks {
+                    vidcut_core::editor::mask_made(&env, need)?;
+                }
+                Ok(())
+            }));
+        }
         if let Request::PictureStabilize { .. } = &envelope.request {
             let looks = vidcut_core::editor::stabilize_looks(p, &envelope.request, playhead);
             if looks.is_empty() {
@@ -3922,6 +3938,9 @@ impl Live {
             | Request::EditDetectSceneCuts { .. }
             | Request::GradeAutoColor { .. }
             | Request::EditCloseUp { .. }
+            | Request::GradeMaskClick { .. }
+            | Request::GradeMaskSet { .. }
+            | Request::GradeMaskClear { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
@@ -6013,6 +6032,9 @@ fn runs_long(r: &Request) -> bool {
         | Request::EditDetectSceneCuts { .. }
         | Request::GradeAutoColor { .. }
         | Request::MotionFind { .. }
+        | Request::GradeMaskClick { .. }
+        | Request::GradeMaskSet { .. }
+        | Request::GradeMaskClear { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }

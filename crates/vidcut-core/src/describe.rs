@@ -487,7 +487,10 @@ pub fn describe_at(
         | "grade.window.set"
         | "grade.window.remove"
         | "grade.window.convert"
-        | "grade.window.paste" => format!(
+        | "grade.window.paste"
+        | "grade.mask.click"
+        | "grade.mask.set"
+        | "grade.mask.clear" => format!(
             "{} {}",
             match method {
                 "grade.keys.add" if d.flag("edl") => "Add EDL marks to",
@@ -506,6 +509,13 @@ pub fn describe_at(
                 "grade.window.remove" => "Remove a window from",
                 "grade.window.convert" => "Turn a window into a curve in",
                 "grade.window.paste" => "Paste a window into",
+                "grade.mask.click" if d.flag("negative") =>
+                    "Take a part away from the Magic Mask of",
+                "grade.mask.click" => "Add to the Magic Mask of",
+                "grade.mask.set" => "Change the Magic Mask of",
+                "grade.mask.clear" if d.params.get("click").is_some() =>
+                    "Delete a Magic Mask click of",
+                "grade.mask.clear" => "Clear the Magic Mask of",
                 _ => "Link the nodes of",
             },
             match d.flag("timeline") {
