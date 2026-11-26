@@ -517,6 +517,17 @@ impl Workspace {
             if self.path_menu(ui) {
                 return;
             }
+            if self.effects_page.page == Page::Color && mode == ViewerMode::Timeline {
+                let key = (self.snap.bindings.first(Action::GrabStill)).unwrap_or_default();
+                if ui
+                    .add(egui::Button::new("Grab Still").shortcut_text(key))
+                    .clicked()
+                {
+                    self.grab_still();
+                    ui.close();
+                }
+                ui.separator();
+            }
             let mut shown = self.snap.stats;
             if ui.checkbox(&mut shown, "Stats for Nerds").clicked() {
                 self.send("player.stats", json!({ "show": shown }));

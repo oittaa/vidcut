@@ -449,6 +449,7 @@ Ranges and resolution:
 | cue | q1, q2 … | `Project::alloc_cue_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 | subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
+| still | s1, s2 … | `Project::alloc_still_id` |
 
 - The counters are in `NextIds`. Each alloc call adds one.
 - Undo restores `next_id` with the project. Thus an id of an undone edit can come again.
@@ -461,6 +462,7 @@ Ranges and resolution:
   - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut`, `color_viewer_lut` and `scopes_lut` of the settings.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
+- The picture of a still is stored by its file name (`Still::picture`), and found in the stills folder (`Env::stills_dir`).
 - A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
 - `Store::transact`, `Store::compact` and `OpenProject::apply` hold the lock file of the project (`Store::lock`). `Store::create` and `Store::replace` write a new file without the lock.
 - A load runs `validate::violations`, and refuses an inconsistent file.

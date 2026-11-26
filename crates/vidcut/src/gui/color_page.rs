@@ -9,7 +9,6 @@ use vidcut_core::model::{
     KeyOutput, Picture, Project, Qualifier, Settings, WindowKind,
 };
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
-use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
 use vidcut_core::request::{
     GradeAdd, GradeLevel, GradeMixer, GradePalette, NodeZoom, Page, PrimariesView, PrinterColor,
@@ -2005,7 +2004,7 @@ impl Workspace {
 
     pub(super) fn color_clip(&self) -> Option<String> {
         let p = self.project()?;
-        super::placing::topmost_by(p, self.snap.timeline.position, takes_effects)
+        vidcut_core::ops::gallery::color_clip(p, self.snap.timeline.position)
     }
 
     fn palette(&mut self, ui: &mut Ui) -> bool {
@@ -2576,6 +2575,12 @@ impl Workspace {
             self.grade_keys_struck(&[Action::AutoColor]);
             ui.close();
         }
+        let key = (self.snap.bindings.first(Action::GrabStill)).unwrap_or_default();
+        let grab = egui::Button::new("Grab Still").shortcut_text(key);
+        if ui.add_enabled(page, grab).clicked() {
+            self.grab_still();
+            ui.close();
+        }
         ui.separator();
         for (menu, size) in [
             ("Full Printer Light", 1.0),
@@ -2794,6 +2799,9 @@ impl Workspace {
         }
         if struck(Action::AddStaticKeyframe) {
             self.add_grade_key(vidcut_core::model::GradeKeyKind::Static);
+        }
+        if struck(Action::GrabStill) {
+            self.grab_still();
         }
         let Some((of, _, g)) = self.grade_shown() else {
             return;

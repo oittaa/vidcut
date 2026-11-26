@@ -1013,20 +1013,22 @@ pub struct Proxies {
     pub codec: ProxyCodec,
 }
 
-/// Where this computer keeps the files that it makes for a project to play:
-/// proxies and the render cache.
+/// Where this computer keeps the files that it makes for a project: the
+/// proxies and the render cache that it plays, and the pictures of the
+/// Gallery's stills.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct PlaybackFiles {
     /// A folder in the project's folder, or an absolute path. Empty, the
-    /// default, is the project's folder. Proxies go to `proxies` in it, and
-    /// the render cache to `render-cache`. Every project shares an absolute
-    /// one, so a file or a part used in several projects is made once; with
-    /// a project on a network drive, they can stay on a local disk. A
-    /// project names its proxies by file, and each computer looks for them
-    /// in its own folder: after a change, move the files there or let them
-    /// be made again. Outside the cache dir, these files do not count in
-    /// `cache`.
+    /// default, is the project's folder. Proxies go to `proxies` in it, the
+    /// render cache to `render-cache`, and the pictures of stills to
+    /// `stills`. Every project shares an absolute one, so a file or a part
+    /// used in several projects is made once; with a project on a network
+    /// drive, they can stay on a local disk. A project names its proxies
+    /// and the pictures of its stills by file, and each computer looks for
+    /// them in its own folder: after a change, move the files there. Proxies
+    /// can also be made again. Outside the cache dir, these files do not
+    /// count in `cache`.
     pub folder: PathBuf,
     /// The folder of the render cache: a folder in the project's folder, or
     /// an absolute path. Empty, the default, is `render-cache` in `folder`.
@@ -1035,10 +1037,15 @@ pub struct PlaybackFiles {
 
 pub const PROXIES_FOLDER: &str = "proxies";
 pub const RENDER_CACHE_FOLDER: &str = "render-cache";
+pub const STILLS_FOLDER: &str = "stills";
 
 impl PlaybackFiles {
     pub fn proxies_in(&self, project_dir: &Path) -> PathBuf {
         project_dir.join(&self.folder).join(PROXIES_FOLDER)
+    }
+
+    pub fn stills_in(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(&self.folder).join(STILLS_FOLDER)
     }
 
     pub fn render_cache_in(&self, project_dir: &Path) -> PathBuf {

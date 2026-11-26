@@ -6,7 +6,9 @@ The Gallery of the Color page keeps stills of graded frames. A still holds a pic
 
 A group gives a set of clips two shared grades: one before their clip grades and one after them.
 
-vidcut has none of these. This file tells what Resolve does, what vidcut has, the build steps in order of value, and the Resolve runs of each step.
+vidcut has the Gallery with stills, Delete Selected and Apply Grade. It has no albums, memories, wipes or groups.
+
+This file tells what Resolve does, what vidcut has, the build steps in order of value, and the Resolve runs of each step.
 
 ## What Resolve does
 
@@ -42,7 +44,7 @@ The pages are of the DaVinci Resolve 21.1 manual.
   - After one more grab of that clip, the new still showed 1.1.1 and the others 1.1.2 to 1.1.5. After its delete, they showed 1.1.1 to 1.1.4.
   - A still grabbed in the Timeline mode showed 1.3.1.T. A still grabbed in the Group Pre Clip mode showed 1.1.1.PRE. One case each.
   - The new stills of the run had no label. The picture had the size of the timeline, at 1920x1080 and at 588x260.
-  - Ctrl+Z after one grab kept the still. Delete Selected of one still asked nothing, and Ctrl+Z did not bring it back. One case each.
+  - Undo of Grab Still and of Delete Selected: one case each ([gotchas](../gotchas.md#resolves-edits)).
   - The menu of the empty Gallery also had the Copy Grade items and Copy Grade From Current Project Still.
 
 ### Albums and Memories (pp. 3341–3343, 3347–3348, 3364–3365, 3401)
@@ -202,6 +204,16 @@ The pages are of the DaVinci Resolve 21.1 manual.
     - A filter that hides a selected clip: not measured. vidcut keeps the clip selected.
     - In one Shift-click case of 30, the notes show no red tint on the current clip.
   - It has no grade items in its menu.
+- The Gallery of the Color page ([spec §8.30](../spec.md#830-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+  - `gallery.grab` grabs a still: Color > Grab Still, Ctrl+Alt+G and the menu of the viewer.
+  - A still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
+  - Its picture is a 32-bit float OpenEXR file in the stills folder, beside the proxies.
+  - The ID of a still is `s1`, `s2` and so on. A still has no label yet.
+  - A click and a Ctrl-click select stills. `gallery.remove` and Delete Selected delete them.
+  - `gallery.apply`, Apply Grade and a middle-click give the grade of a still, in the mode of the Node Editor.
+    - In the Clip mode, the targets are the clips selected in the Thumbnail timeline and the clip at the playhead.
+    - A still whose grade has keyframes does not apply.
+  - `gallery.get` lists the stills. Each grab, delete and apply is one undo step.
 - The clip filter greys Grouped (`ClipFilter`). Switch to Node Layer greys Group Pre Clip and Group Post Clip.
 - The viewer has no wipe and no split screen.
 - `Project.groups` holds the synced groups of the Media tab. Thus color groups need another name.
@@ -215,25 +227,22 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 ### Stills and Apply Grade
 
-- A Gallery panel at the left of the viewer, with the stills of one album.
-- Grab Still (Ctrl+Alt+G, and the menu of the viewer) saves a still of the frame at the playhead.
-  - The still holds all node stack layers of the clip grade, the timeline grade and their keyframes.
-  - It also holds its ID, the clip, the timeline, the frame, the timecodes and the time of the grab.
-  - The version in the ID is 1, because vidcut has no versions ([versions.md](versions.md)).
-- Apply Grade gives the selected clips the grade of a still: its menu, a middle-click, or a drag into the viewer.
-  - It changes the grade of the mode of the Node Editor.
-  - Apply Grades Using sets the keyframes. The Rules run tests the three modes on more grades before this step.
+The Gallery panel, Grab Still, Delete Selected, the selection of stills and Apply Grade of a still with no keyframes are built. These items are still to do:
+
+- The ID of a still is Track.Shot.Version. The version is 1, because vidcut has no versions ([versions.md](versions.md)).
+  - The Rules run tests the IDs before this item.
+- Change Label, or a double-click under the ID, gives a still a label. The request is `gallery.set`.
+  - The Labels run tests the dialog and its undo.
+- Apply Grades Using sets the keyframes that Apply Grade gives. With it, a still whose grade has keyframes applies.
+  - The Rules run tests the three modes on more grades before this item.
   - No Keyframes gives the grade at the frame of the still, as p. 3340 says. gotchas.md records what Resolve does.
+  - It removes the line of the keyframes of a still from [gaps.md](gaps.md).
+- Apply Active Layer gives only the shown node stack layer.
+- A drag of a still into the viewer applies its grade to the clip at the playhead only, as measured.
 - A click on a clip under a clip of a higher track makes it the current clip. Resolve did this in three cases.
   - The Rules run tests what playback and the arrow keys then do.
-- Apply Grade goes to the selected clips, with the clip at the playhead. The Rules run tests if the red tint of that clip changes this.
-- Grab Still and Delete Selected are undo steps. gotchas.md records that Resolve has no undo for them.
-- Delete Selected, Change Label and the selection of stills.
-- Requests: `gallery.grab`, `gallery.apply`, `gallery.set`, `gallery.remove` and `gallery.get`.
-- The project holds the stills. Each picture is a 32-bit float OpenEXR file in a folder next to the project file.
-  - This file is the storage of vidcut, as the project file is. Thus it keeps the values of the picture exactly.
-  - Export of stills writes the picture formats of Resolve ([Import and export](#import-and-export)).
-- It removes two lines from [gaps.md](gaps.md): the keyframes of a still, and the node stack layers of a still.
+  - The Rules run also tests if the red tint of the clip at the playhead changes the targets of Apply Grade.
+- Export of stills writes the picture formats of Resolve ([Import and export](#import-and-export)).
 - Runs: the stills run and the Gallery menus run.
 
 ### Albums and Memories
@@ -312,6 +321,7 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 ### Gallery tools
 
 - Automatic labels, Sort Stills, List View, Search, Still Size and Properties.
+  - Properties and Sort Stills need the timecodes and the time of the grab in each still.
 - Grab All Stills, Grab Missing Stills, Trace Timeline, One Still Per Scene and Show Current Timeline Only.
 - Runs: the later run.
 
@@ -349,7 +359,7 @@ These cases use at least three timelines that differ in size, frame rate, media 
   - Append Node Graph: a target on another source range, parallel nodes, and each keyframe mode.
   - Clip prior: three tracks with ties, the first clip, a filter and a disabled track.
   - Ripple Node Changes: two values, a value set back, a missing node, a keyframed value, L2, curves and windows.
-  - Undo: three clips, the group modes, the group items, a ripple, a memory load and the albums.
+  - Undo: three clips, the group modes, the group items, a ripple, a memory load, the albums, Grab Still and Delete Selected.
   - Groups: a timeline grade, PRE stills in other modes, Collapse with two layers and two groups.
   - Memories and layers: a save from each layer, a load into another layer, the Timeline mode and a full memory.
 - **Wipes run** ([window], 15 min): the wipe styles, the drag, Invert Wipe and the picture of the still side.

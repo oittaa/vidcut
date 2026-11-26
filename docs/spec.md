@@ -5046,6 +5046,39 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a frame outside the clip, for example after a split, makes no mask. An export skips it.
   - The palette, Quality, tracking, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
 
+### 8.30 Gallery and Apply Grade (pp. 3050, 3332–3341, 3361–3366, 3400, 3405)
+
+- The manual:
+  - The Gallery is at the left of the viewer on the Color page (p. 3050).
+  - A still holds a picture of the frame, the clip grade and the timeline grade (pp. 3332, 3362, 3405).
+  - A still holds all node stack layers of the clip (p. 3400).
+  - Color > Stills > Grab Still (Option-Command-G) and the menu of the viewer grab a still (p. 3333).
+  - Delete Selected in the menu of a still deletes the selected stills (p. 3334).
+  - Apply Grade in the menu of a still, or a middle-click on it, gives the grade to the selected clips (pp. 3364–3365).
+  - The mode of the Node Editor selects the grade that changes: Clip or Timeline (pp. 3362, 3405).
+  - The grade replaces the grade of each target clip (p. 3365).
+- [The todo](todo/color-gallery.md#what-resolve-does) has the other items of the Gallery and the measured results.
+- vidcut:
+  - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
+  - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
+    - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
+    - The still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
+    - The picture is the frame of the timeline with all grades and the output LUT, at the size of the timeline.
+    - The picture has no display LUT. It is a 32-bit float OpenEXR file ([design](design/export.md#the-gallery)).
+    - The ID of a still is `s1`, `s2` and so on. A new still has no label.
+    - An open compound clip stops a grab.
+  - A click selects one still. A Ctrl-click adds a still to the selection or takes it out. `selection.set` with `stills` does the same.
+  - `gallery.remove` deletes stills. Delete Selected in the menu of a still does it, with no prompt.
+  - `gallery.apply` gives the grade of a still. Apply Grade in the menu of a still, or a middle-click, does it.
+    - The mode of the Node Editor (`grade`) selects the grade: Clip or Timeline.
+    - In the Clip mode, the targets are the clips selected in the Thumbnail timeline and the clip at the playhead.
+    - The grade of the still replaces the whole grade of each target. A still with no clip grade gives the usual grade.
+    - In the Timeline mode, the timeline grade of the still replaces the timeline grade.
+    - A still whose grade has keyframes does not apply. The request gives an error.
+  - `gallery.get` gives each still, with the path of its picture.
+  - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
+  - Still IDs of the form Track.Shot.Version, labels, keyframe modes and the drag into the viewer come later ([todo](todo/color-gallery.md)).
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -6083,6 +6116,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |
+| Ctrl+Alt+G | Color page: Grab Still ([§8.30](#830-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |

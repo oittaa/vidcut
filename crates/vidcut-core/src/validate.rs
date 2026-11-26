@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
+use std::path::Path;
 
 use crate::model::{Generator, Media, Project, TrackKind};
 
@@ -433,7 +435,45 @@ pub fn violations(p: &Project) -> Vec<String> {
         v.push(format!("tape In {i} is not before Out {o}"));
     }
     timelines(p, &mut v);
+    stills(p, &mut v);
     v
+}
+
+fn stills(p: &Project, v: &mut Vec<String>) {
+    let mut ids = HashSet::new();
+    for s in &p.stills {
+        if !ids.insert(s.id.as_str()) {
+            v.push(format!("duplicate still {}", s.id));
+        }
+        let n = s.id.strip_prefix('s').and_then(|n| n.parse::<u64>().ok());
+        if n.is_none_or(|n| n == 0 || n >= p.next_id.still) {
+            v.push(format!(
+                "still id {} is not s1 to s{}",
+                s.id,
+                p.next_id.still.saturating_sub(1)
+            ));
+        }
+        let named = Path::new(&s.picture).file_name() == Some(OsStr::new(&s.picture));
+        if s.picture.is_empty() || !named {
+            v.push(format!("still {} has no file name: {:?}", s.id, s.picture));
+        }
+        for (which, g) in [("clip", &s.grade), ("timeline", &s.timeline_grade)] {
+            if let Some(Err(e)) = g.as_ref().map(crate::ops::grade::checked) {
+                v.push(format!(
+                    "the {which} grade of still {}: {}",
+                    s.id, e.message
+                ));
+            }
+        }
+        if (s.timeline_grade.as_ref())
+            .is_some_and(|g| g.is_masked() || !g.layers.is_empty() || !g.kept_layers.is_empty())
+        {
+            v.push(format!(
+                "the timeline grade of still {} has layers or a Magic Mask",
+                s.id
+            ));
+        }
+    }
 }
 
 fn timelines(p: &Project, v: &mut Vec<String>) {

@@ -132,6 +132,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
+    ("gallery.remove", &["stills"]),
+    ("gallery.apply", &["still", "clips"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -253,6 +255,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Export the timeline: a video, audio, frames per clip, or OpenTimelineIO",
     ),
     ("frame", "Single frames as PNG"),
+    (
+        "gallery",
+        "Stills of the Color page: pictures of frames, with their grades",
+    ),
     ("generators", "Pictures made with no file"),
     (
         "grade",
