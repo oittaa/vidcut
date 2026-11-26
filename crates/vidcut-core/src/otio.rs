@@ -897,8 +897,8 @@ fn export_with(
             let shows = c.video && e > s;
             let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
             let sounds = sounds.filter(|(s, e)| e > s);
-            let group = match tie_of(c).filter(|k| ties.get(k).is_some_and(|&n| n > 1)) {
-                Some(k) => Some(*tied.entry(k).or_insert_with(|| {
+            let group = match ties.get(c.id.as_str()) {
+                Some(&k) => Some(*tied.entry(k).or_insert_with(|| {
                     groups += 1;
                     groups
                 })),
@@ -1491,22 +1491,29 @@ fn plain_reference(item: &Value) -> Option<Value> {
     Some(plain)
 }
 
-type Tie = (u32, i64, i64);
-
-fn tie_of(c: &Clip) -> Option<Tie> {
-    Some((c.link?, c.start, c.duration))
-}
-
-fn ties(p: &Project, a: i64, b: i64) -> HashMap<Tie, usize> {
-    let mut ties = HashMap::new();
+fn ties(p: &Project, a: i64, b: i64) -> HashMap<&str, &str> {
+    let mut by_link: HashMap<u32, Vec<&Clip>> = HashMap::new();
     for c in p
         .tracks
         .iter()
         .flat_map(|t| &t.clips)
         .filter(|c| exported(c, a, b))
     {
-        if let Some(tie) = tie_of(c) {
-            *ties.entry(tie).or_insert(0) += 1;
+        if let Some(l) = c.link {
+            by_link.entry(l).or_default().push(c);
+        }
+    }
+    let mut ties = HashMap::new();
+    for list in by_link.values() {
+        for c in list {
+            let group: Vec<&str> = list
+                .iter()
+                .filter(|o| o.tied_with(c))
+                .map(|o| o.id.as_str())
+                .collect();
+            if let Some(&first) = group.iter().min().filter(|_| group.len() > 1) {
+                ties.insert(c.id.as_str(), first);
+            }
         }
     }
     ties

@@ -6376,8 +6376,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Clips with the same place and the same link group in the file stay in one link group.
     - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media.
   - **The linked parts of a clip with no media or of a compound clip.** Each part is a clip on its track. The parts act together, as linked clips do in Resolve:
-    - Clips with no media are parts of one clip when they have the same link group, start and length.
-    - A picture and a sound of a compound clip are one clip when they have the same link group, start and length.
+    - Clips with no media are parts of one clip when they have the same link group, start, length, source start and speed.
+    - A picture and a sound of a compound clip are one clip when they have the same link group, start, length, source start and speed.
       - The edit that makes a compound clip gives the two one link group.
       - An import keeps the link groups of the file. In a file with no link groups, the two need the same sequence, start, length, source start and speed.
     - A request that names one part acts on each part: `edit.delete`, `edit.cut`, `edit.copy`, `edit.move`, `edit.replace`, `edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, `edit.split`, `edit.join`, `edit.change_duration` and `edit.change_speed`.

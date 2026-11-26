@@ -91,6 +91,7 @@ pub fn close_up(p: &mut Project, mut clip: Clip, framing: Framing) -> Result<Pla
     let (start, end) = (clip.start, clip.end());
     clip.audio = None;
     clip.effects = None;
+    clip.link = None;
     clip.picture = super::picture::checked(&Picture {
         zoom: Some([framing.zoom; 2]),
         position: Some(framing.position),

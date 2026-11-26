@@ -2382,10 +2382,10 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// Its link group. The clips of a group with the same start and length
-    /// act as one clip in an edit: the picture and the sound of a compound
-    /// clip, or the parts of a clip with no media. Left out when the clip
-    /// has no link.
+    /// Its link group. The clips of a group with the same start, length,
+    /// source start and speed act as one clip in an edit: the picture and
+    /// the sound of a compound clip, or the parts of a clip with no media.
+    /// Left out when the clip has no link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<u32>,
 }
@@ -9230,6 +9230,13 @@ impl VoiceIsolation {
 }
 
 impl Clip {
+    pub fn tied_with(&self, o: &Clip) -> bool {
+        self.link.is_some()
+            && self.link == o.link
+            && (self.start, self.duration, self.source_in) == (o.start, o.duration, o.source_in)
+            && self.pace() == o.pace()
+    }
+
     pub const ADJUSTMENT_CLIP: &str = "Adjustment Clip";
 
     pub fn shown_color<'a>(&'a self, media: Option<&'a Media>) -> Option<&'a str> {
@@ -10740,15 +10747,13 @@ impl Project {
         let Some(c) = self.clip(id) else {
             return Vec::new();
         };
-        let Some(link) = c.link else {
+        if c.link.is_none() {
             return Vec::new();
-        };
+        }
         self.tracks
             .iter()
             .flat_map(|t| &t.clips)
-            .filter(|o| {
-                o.id != id && o.link == Some(link) && (o.start, o.duration) == (c.start, c.duration)
-            })
+            .filter(|o| o.id != id && o.tied_with(c))
             .map(|o| o.id.clone())
             .collect()
     }

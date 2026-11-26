@@ -877,7 +877,7 @@ flowchart LR
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../spec.md#817-generators-p-766)) |
-| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same link group, start and length get one `Link Group ID` (`tie_of`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
+| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Linked clips get one `Link Group ID` (`ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -889,7 +889,7 @@ The metadata:
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
-| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`tie_of`) |
+| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`ties`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
 | `Resolve_OTIO` on markers | `Note` |
 
@@ -919,9 +919,9 @@ Import:
 - Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.
 - A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
-- `Project::tied` finds the other parts of a clip: the clips with the same `Clip::link`, start and length.
+- `Project::tied` finds the other parts of a clip (`Clip::tied_with`): the clips with the same `Clip::link`, start, length, source start and speed.
   - A link group joins the picture and the sound of a compound clip, and the parts of a clip with no media.
-  - The parts must also have one place. Why: an edit that writes on one track can move one part away. Then the parts are separate clips.
+  - The parts must also have one place and one source. Why: an edit that writes on one track can move one part away. A split gives both halves the link. Then the parts are separate clips.
   - `Project::free_link` gives a number that no clip of the timeline has.
   - `linked::Relink` gives new numbers to the links of pasted, spread and imported clips. Thus they do not join a group of the timeline.
   - An import keeps the link groups of the file for compound clips and clips with no media.
