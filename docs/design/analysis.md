@@ -180,7 +180,7 @@ flowchart TD
   - `unisal::Model::maps` runs five pictures in one pass, and reads back the five maps.
   - `unisal::centroid` gives the point: the mean of the places of the map, weighted by the softmax of the map. Its `Found` has that point as its center, a size of 0 and the highest value of the map as its score.
     - Why the softmax: the model learned the map as the log of the share of the looks at each place. The point is then the mean place of the looks.
-    - Why not the highest place: on 16 shots that Resolve reframed, the mean place comes nearer to the move of Resolve.
+    - Why not the highest place: on 16 shots of two files that Resolve reframed, the mean place comes nearer to the move of Resolve.
 - `weights::Torch` reads the weights from the PyTorch file of the authors, also in the legacy form of that file. `unisal::Model::load` then puts each batch norm into its convolution.
 - `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights and the rules (`salience::name`) and the `Look`.
 - The model file is `catalog::UNISAL_WEIGHTS`, at one commit of the repository of the authors. `salience::get_ready` fetches it when the request has `download`.

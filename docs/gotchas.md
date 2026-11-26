@@ -665,7 +665,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - The first frame of that clip then reads 1.001, not 1.000.
   - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
 - **Smart Reframe pans across a shot change.**
-  - Seven clips have a shot change inside. The move of no clip jumps at the cut.
+  - Seven clips of one film have a shot change inside. The move of no clip jumps at the cut. Other files are not measured.
   - On four clips, the picture pans from the subject of one shot to that of the next, over 22 to 45 frames.
   - Thus the frames near the cut show the wrong part of each shot. On the other three clips, the move near the cut is small.
   - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.28](spec.md#828-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).

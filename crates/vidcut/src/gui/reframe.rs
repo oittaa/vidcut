@@ -19,7 +19,7 @@ const SUBJECTS: [(Option<Subject>, &str); 5] = [
 ];
 const AREA: ReframeBox = ReframeBox {
     center: [0.5, 0.5],
-    size: [0.25, 0.5],
+    size: [0.3, 0.75],
 };
 const LEAST: f64 = 0.02;
 const GRAB: f32 = 6.0;

@@ -4562,26 +4562,36 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - Measured:
   - The Edit page Inspector shows the section as "AI Smart Reframe", in the Video tab. Both menus are at Auto first.
   - The Target icon is grey with Auto. With Reference Point and the viewer control on, the viewer shows a box with four corner handles and a center dot.
+  - The first box is at the middle of the frame. It has 0.3 of the width of the frame and 0.75 of its height. Then the box stays where the user left it, also on other clips and timelines.
   - With two clips selected, Object of Interest is grey at Auto. Reframe reframes each clip.
   - Reframe of a 5 s clip takes less than 1 s. No progress window shows.
+  - The shots of the rules below come from two files: a 3840×2160 press conference at 59.94 fps, and a 1280×534 film at 24 fps.
+    - A rule rests on several shots of both files. A line that names one clip or one file records only that measurement.
+    - [todo](todo/smart-reframe-cases.md) lists the cases that test each line on more files.
   - Reframe sets Position keyframes. The zoom stays, with no keyframes.
   - The picture moves only on an axis where it is larger than the frame. It always covers the frame on that axis.
-    - A 16:9 clip in a 9:16 timeline moves across only. Tilt Only then gives keyframes at 0.
-    - A 9:16 clip in a 16:9 timeline moves up and down only.
-    - A 3840×2160 clip at Crop in a 1080×1920 timeline moves across, and down by 120 pixels.
-    - A clip at Fit in a 1080×1920 timeline is not larger than the frame. Its keyframes are all 0.
+    - 16:9 and 2.39:1 clips in a 9:16 timeline move across only.
+    - On two clips of the film, Tilt Only gives keyframes at 0. One of them starts at Tilt 50.
+    - Two 9:16 clips in a 16:9 timeline move up and down only. On one of them, Pan Only from Pan 100 gives keyframes at 0.
+    - On one 3840×2160 clip at Crop in a 1080×1920 timeline, the picture moves across, and down by 120 pixels.
+    - On one clip at Fit in a 1080×1920 timeline, the picture is not larger than the frame. Its keyframes are all 0.
   - The keyframes are at the frames where the move bends, not on a fixed grid. A 119-frame clip gets 5 to 23 keyframes.
-  - The same shot gives the same keyframes in 1080×1920 and in 2160×3840, as fractions of the picture.
-  - Reframe replaces the Position keyframes that were on the clip. A start position that is not 0 does not change the move.
-  - Auto gives keyframes at 0 on an axis with no room.
-  - With a zoom of 1.5, the move across is 1.5 times as large.
-  - With a zoom of 1.5, Tilt moves with the subject too, from the top limit to 0.22 of the picture's height down. On shots of a person, the head stays near the top of the frame. On 7 of 15 shots, Tilt is at the top limit for some frames.
-  - With a rotation of 10°, the move is that of the clip with no rotation, turned by 10°. Pan is that move × cos 10°, and Tilt gets the part × sin 10°.
-  - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of the box at that frame.
-  - With a speed change, the move follows the source frames that show.
-  - Shots with no face move too. On a shot of a logo, the picture moves by up to 0.06 of its width.
-  - With Reference Point and the box moved to the right, the move follows the box.
-  - No clip with a shot change jumps at the cut. On four of seven clips, the picture pans across the cut over 22 to 45 frames ([gotchas](gotchas.md#resolves-edits)).
+  - In 9:16 timelines, the same shot gives the same keyframes at 1080×1920 and at 2160×3840, as fractions of the picture. Other shapes of the frame are not measured.
+  - Reframe replaces the Position keyframes that were on the clip.
+  - On one clip of the film, a start Pan of 100 does not change the move.
+  - Auto gives keyframes at 0 on an axis with no room. On one clip of the film, this is also so from Tilt 50.
+  - With a zoom of 1.5, the move across is 1.5 times as large, on 13 shots.
+  - With a zoom of 1.5, Tilt moves with the subject too, from the top limit to 0.22 of the picture's height down. On 7 of 15 shots, Tilt is at the top limit for some frames.
+    - On four shots of the press conference, the head of the person stays near the top of the frame.
+  - On one clip with a rotation of 10°, the move is that of the clip with no rotation, turned by 10°. Pan is that move × cos 10°, and Tilt gets the part × sin 10°.
+  - One clip has the usual Dynamic Zoom. Its move at each frame is that of a zoom of one over the size of the box at that frame.
+  - On one clip at 50 % and at 200 % speed, the move follows the source frames that show.
+  - Shots with no face move too. On one shot of a logo, the picture moves by up to 0.06 of its width.
+  - On one clip, with Reference Point and the box moved to the right, the move follows the box.
+  - On one clip, with Reference Point and a box on a man who walks out of the frame, the move follows the man. After he leaves, the move holds its last place.
+    - The box had 0.8 of the width of the frame and 0.93 of its height. Most of it showed the background.
+    - The middle of the box stayed at the same distance from the man, 0.15 of the width of the picture.
+  - On seven clips of the film with a shot change, no move jumps at the cut. On four of them, the picture pans across the cut over 22 to 45 frames ([gotchas](gotchas.md#resolves-edits)).
   - One undo removes all the keyframes of a Reframe. The name of the undo step is "Smart Reframe".
   - The record is sections R2, R8, R10, R12 and SR1 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
@@ -4595,15 +4605,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With `pan` or `tilt`, the axis that does not move keeps its value at each frame.
   - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
     - Why: the head of a person is at the top of the box.
-    - The point that stands out goes to the middle of the frame too. Why: on 14 shots with a zoom of 1.5, a view higher than the point does not come nearer to the Tilt of Resolve.
+    - The point that stands out goes to the middle of the frame too. Why: on 14 shots of two files at a zoom of 1.5, a higher view does not come nearer to the Tilt of Resolve.
   - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
   - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds. The usual value is 0.5 s.
   - Then the picture covers the frame on each axis where it is larger than the frame.
   - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
     - Why: a pan across the cut shows the wrong part of each shot ([gotchas](gotchas.md#resolves-edits)).
   - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes. The usual value is 4 pixels.
-    - The pixels are those of a frame 1080 pixels on its short side. Thus a frame of another size gets the same keyframes, as in Resolve.
-    - Why 4: on 16 shots that Resolve reframed, 4 pixels moves the picture as 1 pixel does. Its keyframe count is near that of Resolve.
+    - The pixels are those of a frame 1080 pixels on its short side. Thus a frame of another size and the same shape gets the same keyframes, as in Resolve.
+    - Why 4: on 16 shots of two files that Resolve reframed, 4 pixels moves the picture as 1 pixel does. Its keyframe count is near that of Resolve.
   - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point, the rotation, the flips and the Dynamic Zoom of each frame, and they stay.
     - With a rotation, the move is that of the picture with no rotation, turned by the angle of the rotation.
     - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of its box at that frame.
@@ -4619,9 +4629,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The box stays inside the frame.
     - With Reference Point, Reframe sends the box as `reference`, with the frame at the playhead as `at`.
     - The Tools row of the viewer has Smart Reframe too. `gui.show` with `smart_reframe` shows the box.
-    - The first box is at the middle of the frame. It has a quarter of the width of the frame and half of its height.
+    - The first box is at the middle of the frame. It has 0.3 of the width of the frame and 0.75 of its height. It stays where the user left it, also on other clips.
   - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
-  - Not measured: Pan Only and Tilt Only from a position that is not 0; a reference box whose thing leaves the frame; the first box in the viewer.
   - [design](design/analysis.md#smart-reframe) gives the method.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
