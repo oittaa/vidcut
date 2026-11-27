@@ -256,3 +256,37 @@ fn an_applys_parts_leave_out_its_queries() {
     ));
     assert_eq!(steps(&f).undo().unwrap().parts, ["New bin a"]);
 }
+
+#[test]
+fn subtitle_cue_edits_undo_and_redo_identically() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    let edits = [
+        req(
+            "subtitles.add",
+            json!({"text": "Hello", "at": "0f", "duration": "24f"}),
+        ),
+        req(
+            "subtitles.set",
+            json!({"cue": "q1", "text": "Updated", "place": "top"}),
+        ),
+        req(
+            "keyframes.add",
+            json!({"clips": "q1", "param": "opacity", "at": 0, "value": 0.8}),
+        ),
+        req("subtitles.move", json!({"cues": "q1", "by": "12f"})),
+        req("subtitles.remove", json!({"cues": "q1"})),
+    ];
+    let mut states = vec![state(&f)];
+    for edit in edits {
+        f.ok(edit);
+        states.push(state(&f));
+    }
+    for (i, want) in states.iter().enumerate().rev().skip(1) {
+        f.ok(req("history.undo", json!({})));
+        assert_eq!(&state(&f), want, "undone to state {i}");
+    }
+    for (i, want) in states.iter().enumerate().skip(1) {
+        f.ok(req("history.redo", json!({})));
+        assert_eq!(&state(&f), want, "redone to state {i}");
+    }
+}

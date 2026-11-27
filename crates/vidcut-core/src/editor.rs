@@ -16,8 +16,8 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
-    Media, MediaInfo, Picture, Project, Proxy, Subject, Timeline, Title, Track, TrackKind,
-    Transition, VideoInfo, WordsChange,
+    Media, MediaInfo, Picture, Project, Proxy, Subject, SubtitleTrack, Timeline, Title, Track,
+    TrackKind, Transition, VideoInfo, WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -27,6 +27,7 @@ use crate::request::{
     ImportMode, NewTrack, OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
 use crate::retime;
+use crate::shared::SharedVec;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode, rescale};
 use crate::transcript::{self, Speech};
@@ -1401,7 +1402,9 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     let lists = [
         (
             "media",
-            Change::of_items(&mut media.0, &mut media.1, |m| &m.id, leaf),
+            diff_vec(&mut media.0, &mut media.1, |a, b| {
+                Change::of_items(a, b, |m| &m.id, leaf)
+            }),
         ),
         (
             "timelines",
@@ -1422,11 +1425,47 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     joined(rest, lists)
 }
 
-fn listed<T: serde::Serialize>(
+fn diff_vec<T: serde::Serialize + Clone + PartialEq>(
+    a: &mut SharedVec<T>,
+    b: &mut SharedVec<T>,
+    items: impl FnOnce(&mut [T], &mut [T]) -> Option<Change>,
+) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    items(a, b)
+}
+
+fn listed<T: serde::Serialize + Clone + PartialEq>(
+    a: &mut SharedVec<T>,
+    b: &mut SharedVec<T>,
+    items: impl FnOnce(&mut SharedVec<T>, &mut SharedVec<T>) -> Option<Change>,
+) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(Change::Set {
+            before: Some(to_value(&**a)),
+            after: None,
+        }),
+        (true, false) => Some(Change::Set {
+            before: None,
+            after: Some(to_value(&**b)),
+        }),
+        (false, false) => items(a, b),
+    }
+}
+
+fn listed_vec<T: serde::Serialize + PartialEq>(
     a: &mut Vec<T>,
     b: &mut Vec<T>,
     items: impl FnOnce(&mut Vec<T>, &mut Vec<T>) -> Option<Change>,
 ) -> Option<Change> {
+    if a == b {
+        return None;
+    }
     match (a.is_empty(), b.is_empty()) {
         (true, true) => None,
         (false, true) => Some(Change::Set {
@@ -1442,8 +1481,9 @@ fn listed<T: serde::Serialize>(
 }
 
 fn tracks_markers_change(
-    tracks: (&mut Vec<Track>, &mut Vec<Track>),
+    tracks: (&mut SharedVec<Track>, &mut SharedVec<Track>),
     markers: (&mut Vec<Marker>, &mut Vec<Marker>),
+    subtitles: Option<(&mut SharedVec<SubtitleTrack>, &mut SharedVec<SubtitleTrack>)>,
     rest: Option<Change>,
     skip_empty_tracks: bool,
 ) -> Option<Change> {
@@ -1452,9 +1492,11 @@ fn tracks_markers_change(
             Change::of_items(a, b, |t| &t.id, track_change)
         })
     } else {
-        Change::of_items(tracks.0, tracks.1, |t| &t.id, track_change)
+        diff_vec(tracks.0, tracks.1, |a, b| {
+            Change::of_items(a, b, |t| &t.id, track_change)
+        })
     };
-    let markers_change = listed(markers.0, markers.1, |a, b| {
+    let markers_change = listed_vec(markers.0, markers.1, |a, b| {
         Change::of_items(
             a,
             b,
@@ -1462,7 +1504,16 @@ fn tracks_markers_change(
             |a, b| moved_only(a, b, |k| &mut k.at, "at"),
         )
     });
-    let lists = [("tracks", tracks_change), ("markers", markers_change)];
+    let subtitles_change = subtitles.and_then(|(a, b)| {
+        listed(a, b, |a, b| {
+            Change::of_items(a, b, |s| &s.id, subtitle_track_change)
+        })
+    });
+    let lists = [
+        ("tracks", tracks_change),
+        ("markers", markers_change),
+        ("subtitles", subtitles_change),
+    ];
     joined(rest, lists)
 }
 
@@ -1471,19 +1522,22 @@ fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
     if a == b {
         return None;
     }
-    let (mut tracks, mut markers) = (
+    let (mut tracks, mut markers, mut subtitles) = (
         (take(&mut a.tracks), take(&mut b.tracks)),
         (take(&mut a.markers), take(&mut b.markers)),
+        (take(&mut a.subtitles), take(&mut b.subtitles)),
     );
     let rest = Change::between(&to_value(&*a), &to_value(&*b));
     let out = tracks_markers_change(
         (&mut tracks.0, &mut tracks.1),
         (&mut markers.0, &mut markers.1),
+        Some((&mut subtitles.0, &mut subtitles.1)),
         rest,
         false,
     );
     (a.tracks, b.tracks) = tracks;
     (a.markers, b.markers) = markers;
+    (a.subtitles, b.subtitles) = subtitles;
     out
 }
 
@@ -1500,6 +1554,7 @@ fn compound_change(a: &mut Compound, b: &mut Compound) -> Option<Change> {
     let out = tracks_markers_change(
         (&mut tracks.0, &mut tracks.1),
         (&mut markers.0, &mut markers.1),
+        None,
         rest,
         true,
     );
@@ -1518,32 +1573,47 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
         (take(&mut a.transitions), take(&mut b.transitions)),
     );
     let rest = Change::between(&to_value(&*a), &to_value(&*b));
-    let transitions_change = match (transitions.0.is_empty(), transitions.1.is_empty()) {
-        (true, true) => None,
-        (false, true) => Some(Change::Set {
-            before: Some(to_value(&transitions.0)),
-            after: None,
-        }),
-        (true, false) => Some(Change::Set {
-            before: None,
-            after: Some(to_value(&transitions.1)),
-        }),
-        (false, false) => Change::of_items(&mut transitions.0, &mut transitions.1, |x| &x.id, leaf),
-    };
+    let transitions_change = listed_vec(&mut transitions.0, &mut transitions.1, |a, b| {
+        Change::of_items(a, b, |x| &x.id, leaf)
+    });
     let lists = [
         (
             "clips",
-            Change::of_items(
-                &mut clips.0,
-                &mut clips.1,
-                |c| &c.id,
-                |a, b| moved_only(a, b, |c| &mut c.start, "start"),
-            ),
+            diff_vec(&mut clips.0, &mut clips.1, |a, b| {
+                Change::of_items(
+                    a,
+                    b,
+                    |c| &c.id,
+                    |a, b| moved_only(a, b, |c| &mut c.start, "start"),
+                )
+            }),
         ),
         ("transitions", transitions_change),
     ];
     (a.clips, b.clips) = clips;
     (a.transitions, b.transitions) = transitions;
+    joined(rest, lists)
+}
+
+fn subtitle_track_change(a: &mut SubtitleTrack, b: &mut SubtitleTrack) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let mut cues = (take(&mut a.cues), take(&mut b.cues));
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    let lists = [(
+        "cues",
+        diff_vec(&mut cues.0, &mut cues.1, |a, b| {
+            Change::of_items(
+                a,
+                b,
+                |c| &c.id,
+                |a, b| moved_only(a, b, |c| &mut c.start, "start"),
+            )
+        }),
+    )];
+    (a.cues, b.cues) = cues;
     joined(rest, lists)
 }
 
@@ -1625,8 +1695,9 @@ fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Re
 }
 
 fn tracks_markers_step(
-    tracks: &mut Vec<Track>,
+    tracks: &mut SharedVec<Track>,
     markers: &mut Vec<Marker>,
+    mut subtitles: Option<&mut SharedVec<SubtitleTrack>>,
     lists: &[(&str, &Change)],
     forward: bool,
 ) -> std::result::Result<(), String> {
@@ -1634,6 +1705,11 @@ fn tracks_markers_step(
     for &(name, c) in lists {
         match name {
             "tracks" => c.apply_to_items(tracks, forward, |t| &t.id, track_step, shift_json)?,
+            "subtitles" => {
+                if let Some(subs) = subtitles.as_deref_mut() {
+                    c.apply_to_items(subs, forward, |s| &s.id, subtitle_track_step, shift_json)?;
+                }
+            }
             _ => c.apply_to_items(
                 markers,
                 forward,
@@ -1665,14 +1741,24 @@ fn timeline_step(
     let Change::Fields(fields) = change else {
         return apply_json(t, change, forward);
     };
-    let (lists, rest) = split_fields(fields, &["tracks", "markers"]);
+    let (lists, rest) = split_fields(fields, &["tracks", "markers", "subtitles"]);
     if !rest.is_empty() {
         use std::mem::take;
-        let kept = (take(&mut t.tracks), take(&mut t.markers));
+        let kept = (
+            take(&mut t.tracks),
+            take(&mut t.markers),
+            take(&mut t.subtitles),
+        );
         apply_json(t, &Change::Fields(rest), forward)?;
-        (t.tracks, t.markers) = kept;
+        (t.tracks, t.markers, t.subtitles) = kept;
     }
-    tracks_markers_step(&mut t.tracks, &mut t.markers, &lists, forward)
+    tracks_markers_step(
+        &mut t.tracks,
+        &mut t.markers,
+        Some(&mut t.subtitles),
+        &lists,
+        forward,
+    )
 }
 
 fn compound_step(
@@ -1691,7 +1777,45 @@ fn compound_step(
         apply_json(k, &Change::Fields(rest), forward)?;
         (k.tracks, k.markers) = kept;
     }
-    tracks_markers_step(&mut k.tracks, &mut k.markers, &lists, forward)
+    tracks_markers_step(&mut k.tracks, &mut k.markers, None, &lists, forward)
+}
+
+fn subtitle_track_step(
+    s: &mut SubtitleTrack,
+    change: &Change,
+    forward: bool,
+) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(s, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["cues"]);
+    if !rest.is_empty() {
+        let kept = std::mem::take(&mut s.cues);
+        apply_json(s, &Change::Fields(rest), forward)?;
+        s.cues = kept;
+    }
+    for (_, c) in lists {
+        c.apply_to_items(
+            &mut s.cues,
+            forward,
+            |c| &c.id,
+            apply_json,
+            |c, field, by| {
+                match field {
+                    "start" => {
+                        c.start = c
+                            .start
+                            .checked_add(by)
+                            .ok_or(format!("start of {} goes out of range", c.id))?
+                    }
+                    _ => shift_json(c, field, by)?,
+                }
+                Ok(())
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Result<(), String> {
@@ -7149,7 +7273,7 @@ fn register_imported_compound(
         drop_frame: ic.drop_frame,
         start_tc: ic.start_tc,
         frames,
-        tracks: Vec::new(),
+        tracks: SharedVec::new(),
         marks: Marks::default(),
         markers: ic.markers.clone(),
         kept_otio: Some(ic.stack.clone()),
@@ -7280,7 +7404,7 @@ fn place_imported(
                 }),
                 title,
                 adjustment: c.adjustment,
-                picture,
+                picture: picture.map(Into::into),
                 compound: None,
                 speed: c.speed.clone(),
                 retime: c.retime,
@@ -7467,7 +7591,7 @@ fn place_imported(
             generator: None,
             title: None,
             adjustment: false,
-            picture,
+            picture: picture.map(Into::into),
             compound: None,
             speed: c.speed.clone(),
             retime: c.retime,
@@ -7684,7 +7808,7 @@ fn unpack_compound(
         .collect();
     let inner_end = ops::compound::end_of(&tracks);
     if let Some(target) = p.compound_mut(cid) {
-        target.tracks = tracks;
+        target.tracks = tracks.into();
         target.frames = target.frames.max(inner_end);
         for m in inner.markers {
             let same = target.markers.iter().any(|x| {
@@ -8270,13 +8394,13 @@ pub fn open_otio(
     };
     let mut p = Project::new(meta.settings);
     p.next_id = meta.next_id;
-    p.media = meta.media;
+    p.media = meta.media.into();
     p.bins = meta.bins;
     p.groups = meta.groups;
     p.tape_marks = meta.tape_marks;
-    p.timelines = meta.timelines;
+    p.timelines = meta.timelines.into();
     p.recent = meta.recent;
-    p.compounds = meta.compounds;
+    p.compounds = meta.compounds.into();
     if p.timeline().is_none() {
         let name = match t.name.trim() {
             "" => p.next_timeline_name(),
@@ -8287,7 +8411,7 @@ pub fn open_otio(
         p.timelines.push(timeline);
     }
     p.check_out();
-    p.subtitles = meta.subtitles;
+    p.subtitles = meta.subtitles.into();
     p.set_start_tc(t.start_tc);
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();

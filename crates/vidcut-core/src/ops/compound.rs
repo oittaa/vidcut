@@ -70,7 +70,7 @@ fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> 
         let (moved, kept): (Vec<Clip>, Vec<Clip>) = std::mem::take(&mut track.clips)
             .into_iter()
             .partition(|c| ids.contains(&c.id));
-        track.clips = kept;
+        track.clips = kept.into();
         inner.clips = moved
             .into_iter()
             .map(|mut c| {
@@ -105,7 +105,7 @@ pub(crate) fn picture_tracks(whole: &[Track]) -> Vec<Track> {
                 })
                 .collect();
             (!clips.is_empty()).then(|| Track {
-                clips,
+                clips: clips.into(),
                 transitions: t.transitions.iter().filter(|x| !x.sound).cloned().collect(),
                 locked: t.locked,
                 video_enabled: t.video_enabled,
@@ -155,7 +155,7 @@ fn sounds(whole: &[Track]) -> Vec<(String, Track)> {
         sound.push((
             t.id.clone(),
             Track {
-                clips,
+                clips: clips.into(),
                 transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
                 locked: t.locked,
                 muted: t.muted,
@@ -563,7 +563,7 @@ fn build(
         drop_frame,
         start_tc,
         frames,
-        tracks: whole,
+        tracks: whole.into(),
         marks: Marks::default(),
         markers: Vec::new(),
         kept_otio: None,
@@ -754,7 +754,7 @@ fn spread(
     let layout = sound.map_or_else(Vec::new, |_| sounds(&k.tracks));
     let named = |tracks: Vec<Track>| tracks.into_iter().map(|t| (t.id.clone(), t)).collect();
     let source: Vec<(String, Track)> = match (picture, sound) {
-        (Some(_), Some(_)) => named(k.tracks),
+        (Some(_), Some(_)) => named(k.tracks.into_vec()),
         (Some(_), None) => named(picture_tracks(&k.tracks)),
         _ => sounds(&k.tracks),
     };
@@ -939,7 +939,7 @@ pub(crate) fn copied_compounds(p: &Project, clips: &[TrackClip]) -> Vec<Compound
             }
         }
         let mut copy = k.clone();
-        copy.tracks = sheet.tracks.to_vec();
+        copy.tracks = sheet.tracks.to_vec().into();
         copy.marks = sheet.marks.clone();
         out.push(copy);
     }
@@ -1232,9 +1232,9 @@ fn push_open(p: &mut Project, cid: String, target: CompoundTarget, missing: &str
     if k.tracks.is_empty() && k.kept_otio.as_ref().is_some_and(|s| otio_has_items(s)) {
         return Err(Error::invalid(format!("{missing}'s clips weren't found")));
     }
-    let (tracks, markers) = prepare_open_tracks(p, &cid, k.tracks, k.markers);
+    let (tracks, markers) = prepare_open_tracks(p, &cid, k.tracks.into_vec(), k.markers);
     if let Some(k) = p.compound_mut(&cid) {
-        k.tracks = tracks;
+        k.tracks = tracks.into();
         k.markers = markers;
     }
     p.check_in();
@@ -1350,10 +1350,10 @@ fn close_one(p: &mut Project) -> Result<()> {
         .checked_out_compound()
         .map(str::to_string)
         .ok_or_else(|| Error::invalid("no compound clip is open"))?;
-    let whole = normalize_tracks(std::mem::take(&mut p.tracks));
+    let whole = normalize_tracks(std::mem::take(&mut p.tracks).into_vec());
     let inner_frames = end_of(&whole);
     let empty = whole.is_empty();
-    p.tracks = whole;
+    p.tracks = whole.into();
     p.subtitles.clear();
     if let Some(k) = p.compound_mut(&cid) {
         k.frames = k.frames.max(inner_frames);

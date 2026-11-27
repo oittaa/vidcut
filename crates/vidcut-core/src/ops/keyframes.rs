@@ -1207,7 +1207,7 @@ fn holds(p: &Project, id: &str, text: bool) -> bool {
 fn picture_of(c: &Clip, text: bool) -> Option<Picture> {
     match text {
         true => c.title.as_ref().map(Title::as_picture),
-        false => c.picture.clone(),
+        false => c.picture.as_deref().cloned(),
     }
 }
 
@@ -1219,7 +1219,10 @@ fn owned_picture(p: &Project, id: &str, (v, text): Held) -> Result<(Picture, Cli
                 named((v, text))
             )));
         }
-        return Ok((q.picture.clone().unwrap_or_default(), q.as_clip()));
+        return Ok((
+            q.picture.as_deref().cloned().unwrap_or_default(),
+            q.as_clip(),
+        ));
     }
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
@@ -1240,7 +1243,7 @@ fn owned_picture(p: &Project, id: &str, (v, text): Held) -> Result<(Picture, Cli
         return Err(Error::invalid(format!("{id} has no picture")));
     }
     Ok((
-        c.picture.clone().unwrap_or_default(),
+        c.picture.as_deref().cloned().unwrap_or_default(),
         Clip {
             picture: None,
             ..c.clone()

@@ -1694,7 +1694,8 @@ mod tests {
                 clip("c1", 0, 100, 0),
                 clip("c2", 100, 50, 200),
                 clip("c3", 150, 100, 300),
-            ],
+            ]
+            .into(),
             ..Track::new("V1", TrackKind::Video)
         };
         p
@@ -1751,7 +1752,7 @@ mod tests {
             p.tracks.insert(
                 1,
                 Track {
-                    clips,
+                    clips: clips.into(),
                     ..Track::new("V2", TrackKind::Video)
                 },
             );

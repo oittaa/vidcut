@@ -4556,7 +4556,7 @@ impl Live {
     fn check_media(&mut self) {
         self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
-        let media: Vec<_> = open.project().media.clone();
+        let media: Vec<_> = open.project().media.to_vec();
         let settings = open.project().settings.clone();
         let channels = settings.channels;
         self.forget_removed(&media);
@@ -4885,7 +4885,8 @@ impl Live {
         let mut p = self.project.as_ref()?.project().clone();
         for (id, picture) in &self.free_pictures {
             if let Some((t, c)) = p.find_clip(id) {
-                p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
+                p.tracks[t].clips[c].picture =
+                    (!picture.is_usual()).then(|| picture.clone().into());
             }
         }
         if let Some((id, title)) = &self.title_preview

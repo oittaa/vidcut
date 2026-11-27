@@ -5506,7 +5506,7 @@ impl Workspace {
                 let (ti, ci) = p.find_clip(id)?;
                 let c = &p.tracks[ti].clips[ci];
                 (p.tracks[ti].kind == TrackKind::Video && has_picture(c)).then(|| {
-                    let stored = c.picture.clone().unwrap_or_default();
+                    let stored = c.picture.as_deref().cloned().unwrap_or_default();
                     let shown = wanted
                         .iter()
                         .find(|(w, _)| *w == c.id)

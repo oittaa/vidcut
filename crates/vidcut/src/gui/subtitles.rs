@@ -1159,7 +1159,7 @@ impl Workspace {
             }
             vidcut_av::player::SubtitleView {
                 style: styling.unwrap_or_else(|| t.style.clone()),
-                cues,
+                cues: cues.to_vec(),
             }
         });
         self.timeline.subtitles_sent = Some(key);

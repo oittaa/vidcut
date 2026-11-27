@@ -4575,7 +4575,8 @@ mod tests {
                 clip("c1", 0, 60, Some(8)),
                 clip("c2", 60, 60, None),
                 clip("c3", 120, 60, None),
-            ],
+            ]
+            .into(),
             ..Track::new("V1", TrackKind::Video)
         };
         assert_eq!(nearest_edit(&t, 110, Side::Audio), Some(68));
