@@ -104,13 +104,13 @@ impl HistoryDb {
         self.path.parent().unwrap_or(Path::new("/"))
     }
 
-    fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.is_none() {
-            *guard = Some(crate::store::open_conn(&self.path)?);
-        }
-        let conn = guard.as_ref().expect("connection opened");
-        f(conn)
+    fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction().map_err(|e| db_err(&self.path, e))?;
+            let out = f(&tx)?;
+            tx.commit().map_err(|e| db_err(&self.path, e))?;
+            Ok(out)
+        })
     }
 
     fn with_conn_mut<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -160,7 +160,7 @@ impl HistoryDb {
     }
 
     pub(crate) fn meta(&self) -> Result<HistoryMeta> {
-        self.with_conn(Self::read_meta_in)
+        self.read(Self::read_meta_in)
     }
 
     pub(crate) fn append_in(
@@ -365,45 +365,74 @@ impl HistoryDb {
         m: usize,
         cache: Option<&EntryCache>,
     ) -> Result<(Vec<Entry>, Vec<Entry>)> {
-        self.with_conn(|conn| {
-            let meta = Self::read_meta_in(conn)?;
-            let n = n.min(meta.undo);
-            let m = m.min(meta.redo);
-            let d = meta.undo;
-            let mut undo = Vec::with_capacity(n);
-            let mut before_seq = i64::MAX;
-            for offset in 0..n {
-                let pos = (d - offset) as i64;
+        self.read(|conn| self.top_in(conn, n, m, cache))
+    }
+
+    fn top_in(
+        &self,
+        conn: &Connection,
+        n: usize,
+        m: usize,
+        cache: Option<&EntryCache>,
+    ) -> Result<(Vec<Entry>, Vec<Entry>)> {
+        let meta = Self::read_meta_in(conn)?;
+        let n = n.min(meta.undo);
+        let m = m.min(meta.redo);
+        let d = meta.undo;
+        let mut undo = Vec::with_capacity(n);
+        let mut before_seq = i64::MAX;
+        for offset in 0..n {
+            let pos = (d - offset) as i64;
+            let seq: i64 = conn
+                .query_row(
+                    "SELECT seq FROM history_events \
+                     WHERE kind = 0 AND at_pos = ?1 AND seq < ?2 \
+                     ORDER BY seq DESC LIMIT 1",
+                    params![pos, before_seq],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| db_err(&self.path, e))?
+                .ok_or_else(|| Error::internal("fewer steps to undo than the file says"))?;
+            undo.push(read_entry_cached(
+                conn,
+                &self.path,
+                self.dir(),
+                meta.generation,
+                seq,
+                cache,
+            )?);
+            before_seq = seq;
+        }
+        let mut redo = Vec::with_capacity(m);
+        if m > 0 {
+            let first_pos = (d + 1) as i64;
+            let mut since: i64 = conn
+                .query_row(
+                    "SELECT seq FROM history_events \
+                     WHERE kind = 0 AND at_pos = ?1 \
+                     ORDER BY seq DESC LIMIT 1",
+                    params![first_pos],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| db_err(&self.path, e))?
+                .ok_or_else(|| Error::internal("fewer steps to redo than the file says"))?;
+            redo.push(read_entry_cached(
+                conn,
+                &self.path,
+                self.dir(),
+                meta.generation,
+                since,
+                cache,
+            )?);
+            for pos in d + 2..=d + m {
                 let seq: i64 = conn
                     .query_row(
                         "SELECT seq FROM history_events \
-                         WHERE kind = 0 AND at_pos = ?1 AND seq < ?2 \
+                         WHERE kind = 0 AND at_pos = ?1 AND seq > ?2 \
                          ORDER BY seq DESC LIMIT 1",
-                        params![pos, before_seq],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(|e| db_err(&self.path, e))?
-                    .ok_or_else(|| Error::internal("fewer steps to undo than the file says"))?;
-                undo.push(read_entry_cached(
-                    conn,
-                    &self.path,
-                    self.dir(),
-                    meta.generation,
-                    seq,
-                    cache,
-                )?);
-                before_seq = seq;
-            }
-            let mut redo = Vec::with_capacity(m);
-            if m > 0 {
-                let first_pos = (d + 1) as i64;
-                let mut since: i64 = conn
-                    .query_row(
-                        "SELECT seq FROM history_events \
-                         WHERE kind = 0 AND at_pos = ?1 \
-                         ORDER BY seq DESC LIMIT 1",
-                        params![first_pos],
+                        params![pos as i64, since],
                         |r| r.get(0),
                     )
                     .optional()
@@ -414,38 +443,17 @@ impl HistoryDb {
                     &self.path,
                     self.dir(),
                     meta.generation,
-                    since,
+                    seq,
                     cache,
                 )?);
-                for pos in d + 2..=d + m {
-                    let seq: i64 = conn
-                        .query_row(
-                            "SELECT seq FROM history_events \
-                             WHERE kind = 0 AND at_pos = ?1 AND seq > ?2 \
-                             ORDER BY seq DESC LIMIT 1",
-                            params![pos as i64, since],
-                            |r| r.get(0),
-                        )
-                        .optional()
-                        .map_err(|e| db_err(&self.path, e))?
-                        .ok_or_else(|| Error::internal("fewer steps to redo than the file says"))?;
-                    redo.push(read_entry_cached(
-                        conn,
-                        &self.path,
-                        self.dir(),
-                        meta.generation,
-                        seq,
-                        cache,
-                    )?);
-                    since = seq;
-                }
+                since = seq;
             }
-            Ok((undo, redo))
-        })
+        }
+        Ok((undo, redo))
     }
 
     pub(crate) fn top_labels(&self, n: usize, m: usize) -> Result<(Vec<String>, Vec<String>)> {
-        self.with_conn(|conn| {
+        self.read(|conn| {
             let meta = Self::read_meta_in(conn)?;
             let n = n.min(meta.undo);
             let m = m.min(meta.redo);
@@ -509,18 +517,20 @@ impl HistoryDb {
         hi: usize,
         cache: Option<&EntryCache>,
     ) -> Result<Vec<Entry>> {
-        let d = self.meta()?.undo;
-        if hi <= d {
-            let (undo, _) = self.top(d - lo, 0, cache)?;
-            Ok(undo.into_iter().skip(d - hi).rev().collect())
-        } else {
-            let (_, redo) = self.top(0, hi - d, cache)?;
-            Ok(redo.into_iter().skip(lo - d).collect())
-        }
+        self.read(|conn| {
+            let d = Self::read_meta_in(conn)?.undo;
+            if hi <= d {
+                let (undo, _) = self.top_in(conn, d - lo, 0, cache)?;
+                Ok(undo.into_iter().skip(d - hi).rev().collect())
+            } else {
+                let (_, redo) = self.top_in(conn, 0, hi - d, cache)?;
+                Ok(redo.into_iter().skip(lo - d).collect())
+            }
+        })
     }
 
     pub(crate) fn steps_now(&self, cache: &mut StepsCache) -> Result<bool> {
-        self.with_conn(|conn| {
+        self.read(|conn| {
             let meta = Self::read_meta_in(conn)?;
             let kept = cache.path == self.path && cache.generation == meta.generation;
             let (mut steps, after_seq) = if kept {
@@ -642,7 +652,7 @@ impl HistoryDb {
     }
 
     pub(crate) fn chain(&self, id: u64) -> Result<Option<Chain>> {
-        let mut chain: Option<Chain> = self.with_conn(|conn| {
+        let mut chain: Option<Chain> = self.read(|conn| {
             let (_, h, _) = Self::read_all_in(conn)?;
             Ok(crate::steps::chain(&h.branches, id)
                 .map(|c| c.into_iter().map(|b| (b.after, b.steps.clone())).collect()))
@@ -680,7 +690,7 @@ impl HistoryDb {
     }
 
     fn compact_to(&self, limit: usize, hook: impl FnOnce() -> Result<()>) -> Result<()> {
-        let (meta, mut base, mut h, snap_max_seq) = self.with_conn(|conn| {
+        let (meta, mut base, mut h, snap_max_seq) = self.read(|conn| {
             let meta = Self::read_meta_in(conn)?;
             if meta.external_dirty || meta.steps <= limit {
                 return Ok((meta, Value::Null, History::default(), 0));
@@ -1076,7 +1086,7 @@ mod tests {
         let db = history(dir.path(), 11);
         db.compact_to(10, || Ok(())).unwrap();
         let meta = db.meta().unwrap();
-        let (base, h, _) = db.with_conn(HistoryDb::read_all_in).unwrap();
+        let (base, h, _) = db.read(HistoryDb::read_all_in).unwrap();
         assert_eq!((meta.undo, base), (9, json!({"n": 2})));
         assert_eq!(labels(&h.undo)[0], "step 3");
     }
@@ -1283,7 +1293,7 @@ mod tests {
     fn compaction_bails_when_external_dirty_is_set() {
         let dir = tempfile::tempdir().unwrap();
         let db = history(dir.path(), 11);
-        db.with_conn(|c| {
+        db.read(|c| {
             c.execute(
                 "UPDATE history_meta SET external_dirty = 1 WHERE id = 1",
                 [],

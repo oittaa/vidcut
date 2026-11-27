@@ -38,10 +38,8 @@ impl OpenProject {
         }
         let store = Store::open(path)?;
         let opened = crate::when::now_ms();
-        let mut editor = store.load()?;
+        let (mut editor, file_id, data_version) = store.load_live()?;
         editor.opened_at(opened);
-        let file_id = store.file_id();
-        let data_version = store.data_version()?;
         let watcher = watch_project(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,

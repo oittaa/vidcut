@@ -389,6 +389,17 @@ fn query_data_version(conn: &Connection, path: &Path) -> Result<i64> {
         .map_err(|e| open_err(path, e))
 }
 
+fn read_tx<T>(
+    conn: &mut Connection,
+    path: &Path,
+    f: impl FnOnce(&Connection) -> Result<T>,
+) -> Result<T> {
+    let tx = conn.transaction().map_err(|e| sqlite_err(path, e))?;
+    let out = f(&tx)?;
+    tx.commit().map_err(|e| sqlite_err(path, e))?;
+    Ok(out)
+}
+
 fn open_err(path: &Path, e: rusqlite::Error) -> Error {
     match e.sqlite_error_code() {
         Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt) => {
@@ -498,14 +509,6 @@ impl Store {
         HistoryDb::new(self.path.clone())
     }
 
-    pub fn file_id(&self) -> Option<FileId> {
-        file_id_of(&self.path)
-    }
-
-    pub fn data_version(&self) -> Result<i64> {
-        self.with_conn(|conn| query_data_version(conn, &self.path))
-    }
-
     pub fn checkpoint(&self) {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(conn) = guard.take()
@@ -539,14 +542,28 @@ impl Store {
         if guard.is_none() {
             *guard = Some(open_conn(&self.path)?);
         }
-        let conn = guard.as_ref().expect("connection opened");
-        let dv = query_data_version(conn, &self.path)?;
-        if !replaced && dv == *last_dv {
-            return Ok(None);
-        }
-        let editor = self.load_in(conn)?;
-        *last_dv = dv;
-        Ok(Some(editor))
+        let conn = guard.as_mut().expect("connection opened");
+        let read = read_tx(conn, &self.path, |tx| {
+            let dv = query_data_version(tx, &self.path)?;
+            if !replaced && dv == *last_dv {
+                return Ok(None);
+            }
+            Ok(Some((self.load_in(tx)?, dv)))
+        })?;
+        Ok(read.map(|(editor, dv)| {
+            *last_dv = dv;
+            editor
+        }))
+    }
+
+    pub fn load_live(&self) -> Result<(Editor, Option<FileId>, i64)> {
+        let file_id = file_id_of(&self.path);
+        self.with_conn(|conn| {
+            read_tx(conn, &self.path, |tx| {
+                let dv = query_data_version(tx, &self.path)?;
+                Ok((self.load_in(tx)?, file_id, dv))
+            })
+        })
     }
 
     pub fn mutate_live<T>(
@@ -611,7 +628,7 @@ impl Store {
     }
 
     pub fn load(&self) -> Result<Editor> {
-        self.with_conn(|conn| self.load_in(conn))
+        self.with_conn(|conn| read_tx(conn, &self.path, |tx| self.load_in(tx)))
     }
 
     fn load_in(&self, conn: &Connection) -> Result<Editor> {
@@ -653,10 +670,12 @@ impl Store {
     }
 
     pub fn load_project(&self) -> Result<Editor> {
-        let conn = open_ro_or_rw(&self.path)?;
-        let project =
-            load_project_from_conn(&conn, &self.path, self.dir(), Some(&self.blob_hashes))?;
-        let meta = HistoryDb::read_meta_in(&conn)?;
+        let mut conn = open_ro_or_rw(&self.path)?;
+        let (project, meta) = read_tx(&mut conn, &self.path, |tx| {
+            let project =
+                load_project_from_conn(tx, &self.path, self.dir(), Some(&self.blob_hashes))?;
+            Ok((project, HistoryDb::read_meta_in(tx)?))
+        })?;
         Ok(Editor::on_db(
             project.clone(),
             self.history_db(),
