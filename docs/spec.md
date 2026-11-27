@@ -5121,7 +5121,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
       - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them.
       - Why 8: on 145 runs of SR2, the plain mean is a median of 231 pixels from the move of Resolve. The power 8 gives 88 pixels. Powers from 4 to 32 give 88 to 97 pixels.
     - With `subject`, it follows the main thing of that subject in each shot. That is the thing that shows largest for the longest time. The finders of `motion.find` find the things, with the same rules for their paths.
+      - Resolve has no `subject`. This rule is the rule of vidcut.
       - On a frame where the main thing has no box, it follows the next thing in that order. A gap of up to a second stays on the path of the thing.
+      - On 21 shots of SR2 (9 files), the view never goes to another thing and back.
+      - On 8 of the 21 shots, the main path starts after the shot starts or ends before it ends. There the view follows other people, for up to 41 frames.
     - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
   - `mode` selects the axes:
     - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip. On an axis with no room, the picture goes to the middle.
