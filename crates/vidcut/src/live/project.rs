@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_after_own_save_does_not_reread_and_sees_external_commit() {
+    fn reload_after_own_save_returns_false() {
         let dir = tempfile::tempdir().unwrap();
         let mut open = opened(dir.path());
         let env = crate::env::AvEnv::for_project(open.store.path());
@@ -277,13 +277,20 @@ mod tests {
         let (res, _) = open.apply(add, &env, None);
         res.unwrap();
         assert!(!open.reload().unwrap());
+    }
+
+    #[test]
+    fn reload_sees_external_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut open = opened(dir.path());
+        let env = crate::env::AvEnv::for_project(open.store.path());
         let ext = Store::open(open.store.path()).unwrap();
         let add_b =
             Envelope::from_json(serde_json::json!({"method": "bins.add", "params": {"path": "b"}}))
                 .unwrap();
         ext.transact(|ed| ed.apply(add_b, &env, None)).unwrap();
         assert!(open.reload().unwrap());
-        assert_eq!(open.project().bins, vec!["a", "b"]);
+        assert_eq!(open.project().bins, vec!["b"]);
     }
 
     #[test]

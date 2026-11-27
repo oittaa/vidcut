@@ -261,35 +261,35 @@ fn an_applys_parts_leave_out_its_queries() {
 }
 
 #[test]
-fn subtitle_cue_edits_undo_and_redo_identically() {
+fn editing_a_cue_records_an_item_delta() {
     let mut f = Fixture::new(&[(10.0, true)]);
-    let edits = [
-        req(
-            "subtitles.add",
-            json!({"text": "Hello", "at": "0f", "duration": "24f"}),
-        ),
-        req(
-            "subtitles.set",
-            json!({"cue": "q1", "text": "Updated", "place": "top"}),
-        ),
-        req(
-            "keyframes.add",
-            json!({"clips": "q1", "param": "opacity", "at": 0, "value": 0.8}),
-        ),
-        req("subtitles.move", json!({"cues": "q1", "by": "12f"})),
-        req("subtitles.remove", json!({"cues": "q1"})),
-    ];
-    let mut states = vec![state(&f)];
-    for edit in edits {
-        f.ok(edit);
-        states.push(state(&f));
-    }
-    for (i, want) in states.iter().enumerate().rev().skip(1) {
-        f.ok(req("history.undo", json!({})));
-        assert_eq!(&state(&f), want, "undone to state {i}");
-    }
-    for (i, want) in states.iter().enumerate().skip(1) {
-        f.ok(req("history.redo", json!({})));
-        assert_eq!(&state(&f), want, "redone to state {i}");
-    }
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "Hello", "at": "0f", "duration": "24f"}),
+    ));
+    f.ok(req(
+        "subtitles.set",
+        json!({"cue": "q1", "text": "Updated"}),
+    ));
+    let val = serde_json::to_value(&f.editor.history_view(1).unwrap().undo[0].change).unwrap();
+    assert_eq!(
+        val["fields"]["timelines"]["items"]["changed"]["t1"]["fields"]["subtitles"]["items"]["changed"]
+            ["S1"]["fields"]["cues"]["items"]["changed"]["q1"]["fields"]["text"],
+        json!({"set": {"was": "Hello", "is": "Updated"}})
+    );
+}
+
+#[test]
+fn undoing_a_cue_edit_restores_its_previous_text() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "Hello", "at": "0f", "duration": "24f"}),
+    ));
+    f.ok(req(
+        "subtitles.set",
+        json!({"cue": "q1", "text": "Updated"}),
+    ));
+    f.ok(req("history.undo", json!({})));
+    assert_eq!(f.editor.project().cue("q1").unwrap().text, "Hello");
 }

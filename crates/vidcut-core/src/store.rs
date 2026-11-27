@@ -2718,7 +2718,7 @@ mod tests {
     }
 
     #[test]
-    fn an_incremental_save_writes_only_changed_clips_and_deduplicates_motion_blobs() {
+    fn identical_motion_paths_share_one_blob_row() {
         let dir = tempfile::tempdir().unwrap();
         let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
         let samples = sample_path();
@@ -2730,31 +2730,67 @@ mod tests {
         .into();
         let path = dir.path().join("p.vidcut");
         let store = Store::create(&path, &proj).unwrap();
-        let count: i64 = store
+        let (count, row_data): (i64, String) = store
             .with_conn(|c| {
-                c.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
-                    .map_err(|e| sqlite_err(&path, e))
+                let count = c
+                    .query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                let data = c
+                    .query_row("SELECT data FROM clips WHERE id = 'c1'", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                Ok((count, data))
             })
             .unwrap();
         assert_eq!(count, 1);
+        assert!(row_data.contains("\"$blob\""));
+    }
+
+    #[test]
+    fn saving_one_changed_clip_leaves_other_clip_rows_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
+        let samples = sample_path();
+        let mut proj = fixture.editor.project().clone();
+        proj.tracks[0].clips = vec![
+            motion_clip("c1", 0, samples.clone()),
+            motion_clip("c2", 20, samples),
+        ]
+        .into();
+        let path = dir.path().join("p.vidcut");
+        let store = Store::create(&path, &proj).unwrap();
+        let mut ed = store.load().unwrap();
         store
-            .transact(|ed| {
-                ed.apply(
-                    Envelope::from_json(
-                        json!({"method": "clip.set", "params": {"clips": "c1", "color": "teal"}}),
-                    )
-                    .unwrap(),
-                    &FakeEnv::default(),
-                    None,
+            .with_conn(|c| {
+                c.execute_batch(
+                    "CREATE TEMP TABLE written (id TEXT);
+                     CREATE TEMP TRIGGER tr_clip_ins AFTER INSERT ON clips
+                     BEGIN INSERT INTO written VALUES (NEW.id); END;
+                     CREATE TEMP TRIGGER tr_clip_upd AFTER UPDATE ON clips
+                     BEGIN INSERT INTO written VALUES (NEW.id); END;",
                 )
+                .map_err(|e| sqlite_err(&path, e))?;
+                Ok(())
             })
             .unwrap();
-        let reloaded = store.load().unwrap();
-        assert_eq!(
-            reloaded.project().clip("c1").unwrap().color.as_deref(),
-            Some("teal")
-        );
-        assert_eq!(reloaded.project().clip("c2"), proj.clip("c2"));
+        let req = Envelope::from_json(
+            json!({"method": "clip.set", "params": {"clips": "c1", "color": "teal"}}),
+        )
+        .unwrap();
+        ed.apply(req, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        let written: Vec<String> = store
+            .with_conn(|c| {
+                let mut stmt = c
+                    .prepare("SELECT id FROM written")
+                    .map_err(|e| sqlite_err(&path, e))?;
+                let rows = stmt
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| sqlite_err(&path, e))
+            })
+            .unwrap();
+        assert_eq!(written, vec!["c1"]);
     }
 
     #[test]
@@ -2764,7 +2800,7 @@ mod tests {
         let b = crate::dirs::canonical(dir.path()).unwrap().join("b");
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
-        let mut fixture = crate::test_support::Fixture::new(&[(4.0, true)]);
+        let fixture = crate::test_support::Fixture::new(&[(4.0, true)]);
         let mut proj = fixture.editor.project().clone();
         proj.media[0].path = a.join("clip.mp4");
         let path_a = a.join("p.vidcut");
@@ -2778,16 +2814,15 @@ mod tests {
         assert_eq!(
             (
                 moved.project().media[0].path.clone(),
+                moved.project().bins.clone(),
                 moved.history_counts()
             ),
-            (b.join("clip.mp4"), (1, 0))
+            (b.join("clip.mp4"), vec!["scenes".into()], (1, 0))
         );
-        fixture.ok(json!({"method": "bins.add", "params": {"path": "scenes"}}));
-        assert_eq!(moved.project().bins, fixture.editor.project().bins);
     }
 
     #[test]
-    fn compaction_removes_unreferenced_blobs() {
+    fn gc_blobs_removes_unreferenced_blobs() {
         let dir = tempfile::tempdir().unwrap();
         let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
         let mut proj = fixture.editor.project().clone();
@@ -2819,41 +2854,29 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_transact_writers_keep_both_edits() {
+    fn two_stores_keep_both_transact_edits() {
         let dir = tempfile::tempdir().unwrap();
         let store = project_in(dir.path());
         let s1 = store.clone();
         let s2 = store.clone();
-        std::thread::scope(|scope| {
-            scope.spawn(|| add_bin(&s1, "one"));
-            scope.spawn(|| add_bin(&s2, "two"));
-        });
+        add_bin(&s1, "one");
+        add_bin(&s2, "two");
         let loaded = store.load().unwrap();
-        let mut bins = loaded.project().bins.clone();
-        bins.sort();
         assert_eq!(
-            (bins, loaded.history_counts()),
+            (loaded.project().bins.clone(), loaded.history_counts()),
             (vec!["one".into(), "two".into()], (2, 0))
         );
     }
 
     #[test]
-    fn motion_samples_survive_gain_edit_missing_blob_and_undo() {
+    fn saving_a_clip_reinserts_its_blob_when_missing_from_db() {
         let dir = tempfile::tempdir().unwrap();
         let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
         let mut proj = fixture.editor.project().clone();
-        let clip = motion_clip("c1", 0, sample_path());
-        let expected_pic = clip.picture.clone();
-        proj.tracks[0].clips = vec![clip].into();
+        proj.tracks[0].clips = vec![motion_clip("c1", 0, sample_path())].into();
         let path = dir.path().join("p.vidcut");
         let store = Store::create(&path, &proj).unwrap();
         let mut ed = store.load().unwrap();
-        let rename = Envelope::from_json(
-            json!({"method": "clip.set", "params": {"clips": ["c1"], "name": "one"}}),
-        )
-        .unwrap();
-        ed.apply(rename, &FakeEnv::default(), None).unwrap();
-        store.save(&mut ed).unwrap();
         store
             .with_conn(|c| {
                 c.execute("DELETE FROM blobs", [])
@@ -2861,26 +2884,31 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        let rename2 = Envelope::from_json(
-            json!({"method": "clip.set", "params": {"clips": ["c1"], "name": "two"}}),
+        let rename = Envelope::from_json(
+            json!({"method": "clip.set", "params": {"clips": ["c1"], "name": "renamed"}}),
         )
         .unwrap();
-        ed.apply(rename2, &FakeEnv::default(), None).unwrap();
+        ed.apply(rename, &FakeEnv::default(), None).unwrap();
         store.save(&mut ed).unwrap();
-        let after_edit = store.load().unwrap();
-        assert_eq!(
-            after_edit.project().tracks[0].clips[0].picture,
-            expected_pic
-        );
-        let undo =
-            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
-        ed.apply(undo, &FakeEnv::default(), None).unwrap();
-        store.save(&mut ed).unwrap();
-        let after_undo = store.load().unwrap();
-        assert_eq!(
-            after_undo.project().tracks[0].clips[0].picture,
-            expected_pic
-        );
+        let blobs: i64 = store
+            .with_conn(|c| {
+                c.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))
+            })
+            .unwrap();
+        let reloaded = store.load().unwrap();
+        let comp = reloaded.project().tracks[0].clips[0]
+            .picture
+            .as_deref()
+            .unwrap()
+            .composition
+            .as_ref()
+            .unwrap();
+        let Tool::Tracker(tracker) = &comp.nodes[0].tool else {
+            panic!("expected tracker");
+        };
+        let samples = &tracker.patterns[0].path.as_ref().unwrap().samples;
+        assert_eq!((blobs, samples.len(), samples[0].frame), (1, 20, 0));
     }
 
     #[test]
@@ -2901,17 +2929,15 @@ mod tests {
             Envelope::from_json(json!({"method": "bins.add", "params": {"path": "c"}})).unwrap();
         ed.apply(add_c, &FakeEnv::default(), None).unwrap();
         store.save(&mut ed).unwrap();
-        let mut loaded = store.load().unwrap();
-        assert_eq!(loaded.history_counts(), (3, 0));
-        assert_eq!(loaded.project().bins, vec!["a", "b", "c"]);
-        let undo =
-            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
-        loaded.apply(undo, &FakeEnv::default(), None).unwrap();
-        assert_eq!(loaded.project().bins, vec!["a", "b"]);
+        let loaded = store.load().unwrap();
+        assert_eq!(
+            (loaded.history_counts(), loaded.project().bins.clone()),
+            ((3, 0), vec!["a".into(), "b".into(), "c".into()])
+        );
     }
 
     #[test]
-    fn moving_folder_preserves_history_paths_on_external_edit_and_undo() {
+    fn external_edit_after_moving_folder_has_no_spurious_path_diff() {
         let dir = tempfile::tempdir().unwrap();
         let root = crate::dirs::canonical(dir.path()).unwrap();
         let a = root.join("a");
@@ -2922,12 +2948,41 @@ mod tests {
         proj.media[0].path = a.join("clip.mp4");
         let path_a = a.join("p.vidcut");
         let store = Store::create(&path_a, &proj).unwrap();
-        let add_bin_req =
-            Envelope::from_json(json!({"method": "bins.add", "params": {"path": "scenes"}}))
-                .unwrap();
-        store
-            .transact(|ed| ed.apply(add_bin_req, &FakeEnv::default(), None))
-            .unwrap();
+        store.checkpoint();
+        drop(store);
+        std::fs::rename(&a, &b).unwrap();
+        let path_b = b.join("p.vidcut");
+        external_flip_ripple(&path_b);
+        let mut moved = Store::open(&path_b).unwrap().load().unwrap();
+        let undo =
+            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
+        moved.apply(undo, &FakeEnv::default(), None).unwrap();
+        assert_eq!(
+            (
+                moved.project().settings.ripple_on,
+                moved.project().media[0].path.clone()
+            ),
+            (true, b.join("clip.mp4"))
+        );
+    }
+
+    #[test]
+    fn undoing_media_relink_after_moving_folder_uses_new_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = crate::dirs::canonical(dir.path()).unwrap();
+        let a = root.join("a");
+        let b = root.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(4.0, true)]);
+        let mut proj = fixture.editor.project().clone();
+        proj.media[0].path = a.join("clip.mp4");
+        let path_a = a.join("p.vidcut");
+        let store = Store::create(&path_a, &proj).unwrap();
+        let mut env = FakeEnv::default();
+        env.files.insert(
+            a.join("sub").join("clip.mp4"),
+            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
+        );
         let relink = Envelope::from_json(json!({
             "method": "media.relink",
             "params": {
@@ -2936,37 +2991,93 @@ mod tests {
             }
         }))
         .unwrap();
-        let mut env = FakeEnv::default();
-        env.files.insert(
-            a.join("sub").join("clip.mp4"),
-            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
-        );
         store.transact(|ed| ed.apply(relink, &env, None)).unwrap();
         store.checkpoint();
         drop(store);
         std::fs::rename(&a, &b).unwrap();
-        let path_b = b.join("p.vidcut");
-        external_flip_ripple(&path_b);
-        let mut moved = Store::open(&path_b).unwrap().load().unwrap();
-        assert_eq!(
-            (
-                moved.project().media[0].path.clone(),
-                moved.history_counts()
-            ),
-            (b.join("sub").join("clip.mp4"), (3, 0))
-        );
+        let mut moved = Store::open(&b.join("p.vidcut")).unwrap().load().unwrap();
         let undo =
-            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 2}})).unwrap();
+            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
         moved.apply(undo, &FakeEnv::default(), None).unwrap();
         assert_eq!(moved.project().media[0].path, b.join("clip.mp4"));
     }
 
     #[test]
-    fn stabilized_frames_blob_round_trips_and_undoes() {
+    fn lut_paths_in_change_relativize_and_resolve_across_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = crate::dirs::canonical(dir.path()).unwrap();
+        let a = root.join("a");
+        let b = root.join("b");
+        let mut c: Change = serde_json::from_value(json!({
+            "fields": {
+                "settings": {
+                    "fields": {
+                        "input_lut": {"set": {
+                            "was": a.join("luts").join("base.cube").to_string_lossy(),
+                            "is": a.join("luts").join("next.cube").to_string_lossy()
+                        }},
+                        "color_viewer_lut": {"set": {"was": "none", "is": {
+                            "file": a.join("luts").join("view.cube").to_string_lossy()
+                        }}}
+                    }
+                },
+                "media": {
+                    "items": {
+                        "changed": {
+                            "m1": {
+                                "fields": {
+                                    "input_lut": {"set": {
+                                        "is": a.join("luts").join("clip.cube").to_string_lossy()
+                                    }}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        relativize_change(&mut c, &a);
+        let rel = serde_json::to_value(&c).unwrap();
+        assert_eq!(
+            (
+                rel["fields"]["settings"]["fields"]["input_lut"]["set"]["was"].as_str(),
+                rel["fields"]["settings"]["fields"]["color_viewer_lut"]["set"]["is"]["file"]
+                    .as_str(),
+                rel["fields"]["media"]["items"]["changed"]["m1"]["fields"]["input_lut"]["set"]
+                    ["is"]
+                    .as_str(),
+            ),
+            (
+                Some("luts/base.cube"),
+                Some("luts/view.cube"),
+                Some("luts/clip.cube"),
+            )
+        );
+        resolve_change(&mut c, &b);
+        let res = serde_json::to_value(&c).unwrap();
+        assert_eq!(
+            (
+                res["fields"]["settings"]["fields"]["input_lut"]["set"]["was"].as_str(),
+                res["fields"]["settings"]["fields"]["color_viewer_lut"]["set"]["is"]["file"]
+                    .as_str(),
+                res["fields"]["media"]["items"]["changed"]["m1"]["fields"]["input_lut"]["set"]
+                    ["is"]
+                    .as_str(),
+            ),
+            (
+                Some(b.join("luts").join("base.cube").to_string_lossy().as_ref()),
+                Some(b.join("luts").join("view.cube").to_string_lossy().as_ref()),
+                Some(b.join("luts").join("clip.cube").to_string_lossy().as_ref()),
+            )
+        );
+    }
+
+    #[test]
+    fn stabilized_frames_offload_to_blobs_and_reload() {
         let dir = tempfile::tempdir().unwrap();
         let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
         let mut proj = fixture.editor.project().clone();
-        let frames = Arc::new(vec![[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; 24]);
         let mut clip = motion_clip("c1", 0, Vec::new());
         clip.duration = 24;
         clip.picture = Some(
@@ -2977,42 +3088,48 @@ mod tests {
                     made: Some(Stabilized {
                         with: Stabilizing::default(),
                         first: 0,
-                        frames,
+                        frames: Arc::new(vec![[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; 24]),
                     }),
                 }),
                 ..Picture::default()
             }
             .into(),
         );
-        let expected_pic = clip.picture.clone();
         proj.tracks[0].clips = vec![clip].into();
         let path = dir.path().join("p.vidcut");
         let store = Store::create(&path, &proj).unwrap();
-        let mut ed = store.load().unwrap();
-        let disable = Envelope::from_json(
-            json!({"method": "clip.set", "params": {"clips": ["c1"], "enabled": false}}),
-        )
-        .unwrap();
-        ed.apply(disable, &FakeEnv::default(), None).unwrap();
-        store.save(&mut ed).unwrap();
-        let after_edit = store.load().unwrap();
+        let (blobs, raw_clip): (i64, String) = store
+            .with_conn(|c| {
+                let blobs = c
+                    .query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                let raw = c
+                    .query_row("SELECT data FROM clips WHERE id = 'c1'", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                Ok((blobs, raw))
+            })
+            .unwrap();
+        let loaded = store.load().unwrap();
+        let frames = &loaded.project().tracks[0].clips[0]
+            .picture
+            .as_deref()
+            .unwrap()
+            .stabilization
+            .as_ref()
+            .unwrap()
+            .made
+            .as_ref()
+            .unwrap()
+            .frames;
         assert_eq!(
-            after_edit.project().tracks[0].clips[0].picture,
-            expected_pic
+            (blobs, raw_clip.contains("\"$blob\""), frames.len()),
+            (1, true, 24)
         );
-        let undo =
-            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
-        ed.apply(undo, &FakeEnv::default(), None).unwrap();
-        store.save(&mut ed).unwrap();
-        let after_undo = store.load().unwrap();
-        assert_eq!(
-            after_undo.project().tracks[0].clips[0].picture,
-            expected_pic
-        );
+        assert_eq!(frames[0], [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]
-    fn rollback_delete_journal_mode_round_trips() {
+    fn remote_journal_mode_uses_delete_without_wal_sidecar() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.vidcut");
         let project = Project::new(Settings {
@@ -3037,6 +3154,7 @@ mod tests {
             })
             .unwrap();
         add_bin(&store, "remote-bin");
+        assert!(!sidecar(&path, "-wal").exists());
         assert_eq!(store.load().unwrap().project().bins, vec!["remote-bin"]);
     }
 

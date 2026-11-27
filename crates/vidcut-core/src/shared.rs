@@ -325,9 +325,10 @@ mod tests {
     }
 
     #[test]
-    fn a_shared_vec_has_the_same_schema_as_a_vec() {
-        let shared = schemars::schema_for!(SharedVec<String>);
-        let plain = schemars::schema_for!(Vec<String>);
-        assert_eq!(shared, plain);
+    fn shared_vec_schema_is_an_array_of_its_items() {
+        let schema = schemars::schema_for!(SharedVec<String>);
+        let val = schema.as_value();
+        assert_eq!(val["type"], serde_json::json!("array"));
+        assert_eq!(val["items"], serde_json::json!({"type": "string"}));
     }
 }
