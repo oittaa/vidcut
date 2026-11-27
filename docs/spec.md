@@ -8622,7 +8622,25 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
     - Yaw in 1280 x 720 gives the same values as Pitch, at the two right corners. A 2:1 file gives the same values as the square file.
     - The top edge is at y = 3.064 at Pitch 0.01, and at y = 16.643 at Pitch 0.05. A projective lean about the middle gives 3.564 and 17.143.
     - These cases fit one reading. The gap that a lean opens is 0.5 px less than the projective lean gives, and not less than 0.
-    - Other bars add to that gap. With Zoom X 0.9997 and Pitch 0.0003, the corners read 0.808, as the bars of the Zoom alone.
+    - With Zoom X 0.9997 and Pitch 0.0003, the columns and the corners read 0.808, as the bars of the Zoom alone.
+  - The edge of a leaned picture, measured in Resolve Studio 21.2 in 29 cases at Zoom 0.5:
+    - The leans are Pitch 0.01, 0.05, 0.2 and −0.05, Yaw 0.05 and 0.2, and Pitch 0.05 with Yaw 0.05.
+    - The files have square pixels and pixels of 4:3, 2:1 and 9:8. The timelines are 1280 x 720 and 1920 x 1080.
+    - Each edge is 0.5 px farther out than the projective lean gives, along its normal. This includes the far, the near and the side edges.
+    - The 0.5 px is in frame pixels. It does not change with the lean, the Zoom, the timeline or the pixel aspect ratio.
+    - The slopes of the edges are those of the projective lean.
+    - Each edge has one partial pixel. Its value is the covered area. There is no blur.
+    - The picture inside the edges follows the projective lean. The markers fit it within 0.74 px.
+    - With Pitch 0 and Yaw 0, each edge is at its exact place.
+    - The 0.5 px also fits the corners at Pitch 0.0005 to 0.002, and the top edge at Pitch 0.01 and 0.05, at Zoom 1.
+  - Small leans, and a lean with a Rotation or a crop, measured in Resolve Studio 21.2 at Zoom 0.5:
+    - Pitch 0.0003 does not lean the picture, and its edges do not move out. The edges are where Pitch 0 puts them.
+    - Pitch 0.0005, 0.0007 and 0.001 lean the picture, and each edge is 0.5 px out. Thus the lean starts between 0.0003 and 0.0005.
+    - Zoom X 0.9997 with Pitch 0.0003, at Zoom Y 1, gives 0.808 in column 0 on each row. That is the bar of the Zoom, with no lean.
+    - Zoom X 0.9997 with Pitch 0.01 gives the lean, and the edges 0.5 px out cover the bar of the Zoom.
+    - Rotation 10 with Pitch 0.05 puts each edge 0.5 px out along its normal, on the square and the 2:1 files. Rotation 10 alone puts no edge out.
+    - Crop Left 100 with Pitch 0.05 puts the cut edge 0.5 px out too. Some rows near its ends read up to 0.27 px farther out.
+    - The cases are in sections PF, PI and PK of `fixtures/program/NOTES.md` in the test data.
   - The fit into the even size of an encoder does not use the limit. At Fill, timelines of 2001 x 1601, 3001 x 2001 and 4001 x 3001 give bars of 0.1, 0.167 and 0.125.
   - A compound clip, in 9 cases with Zoom X on the clip inside and on the compound clip:
     - The clip inside keeps the limit for its own bars.
@@ -8630,7 +8648,10 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
     - With another Zoom X inside, the compound clip shows its bar at its exact width. The 9 cases give no general rule.
 - vidcut:
   - A crop on any side and Crop Softness below 0 stop the limit, as measured. A Softness below 0 that gives no fade was not measured.
-  - It uses the same rule on the corners of a leaned picture, with the gaps of the projective lean ([todo](todo/picture-fit.md)).
+  - A Pitch or Yaw other than 0 stops the limit, as measured.
+  - A Pitch or Yaw under 0.0005 does not lean the picture. The measured change is between 0.0003 and 0.0005.
+  - It draws each edge of a leaned picture 0.5 px farther out than the projective lean gives, along its normal. The picture inside follows the lean.
+  - This includes a cut edge and the edges of a turned picture, as measured.
   - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
   - It does not use the limit in the fit for an encoder.
   - On pixels that are not square, a Rotation leaves the gaps of the turn of those pixels. Thus the limit acts at W / 2 × θ / p under 0.2, as measured.

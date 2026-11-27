@@ -274,7 +274,9 @@ The audio device:
     - `fs` covers a pixel at the edge of that place in part.
     - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
-      - It does not open it for a crop on any side, or for a Crop Softness below 0. Then each bar shows at its exact width.
+      - It does not open it for a crop on any side, for a Crop Softness below 0, or for a lean. Then each bar shows at its exact width.
+    - The `outset` of a leaned level moves each edge out along its normal, as measured. `fs` and `Placing::at` add it to the distance of the edge.
+    - A Pitch or Yaw under `LEAST_LEAN` does not lean the picture, and gives no `outset`. It still stops the limit, as measured.
     - The Inspector counts a crop and Anchor Point X in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
     - `Placing::new` turns a picture with pixels that are not square as the measured turn of those pixels ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
       - It takes the shape of one source pixel from the `Extent` and the fitted size. Thus the viewer and an export turn the picture in the same way.
