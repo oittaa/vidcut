@@ -1002,8 +1002,8 @@ impl Field {
             Field::X => (x - 0.5) * w,
             Field::Y => (0.5 - y) * h,
             Field::Rotation => p.turn(),
-            Field::AnchorX => (ax - 0.5) * fw,
-            Field::AnchorY => (0.5 - ay) * fh,
+            Field::AnchorX => (ax - 0.5) * cw,
+            Field::AnchorY => (0.5 - ay) * ch,
             Field::Pitch => p.pitch(),
             Field::Yaw => p.yaw(),
             Field::Left => c.left * cw,
@@ -1057,8 +1057,8 @@ impl Field {
             Field::X => -reach * w..=reach * w,
             Field::Y => -reach * h..=reach * h,
             Field::Rotation => -turns..=turns,
-            Field::AnchorX => -reach * fw..=reach * fw,
-            Field::AnchorY => -reach * fh..=reach * fh,
+            Field::AnchorX => -reach * s.crop[0]..=reach * s.crop[0],
+            Field::AnchorY => -reach * s.crop[1]..=reach * s.crop[1],
             Field::Pitch | Field::Yaw => -lean..=lean,
             Field::Left | Field::Right => 0.0..=s.crop[0],
             Field::Top | Field::Bottom => 0.0..=s.crop[1],
@@ -1106,8 +1106,8 @@ impl Field {
             Field::X => out.position = Some([at(0.5 + v / w), y]),
             Field::Y => out.position = Some([x, at(0.5 - v / h)]),
             Field::Rotation => out.rotation = Some(v),
-            Field::AnchorX => out.anchor = Some([at(0.5 + v / fw), ay]),
-            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / fh)]),
+            Field::AnchorX => out.anchor = Some([at(0.5 + v / s.crop[0]), ay]),
+            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / s.crop[1])]),
             Field::Pitch => out.pitch = Some(v),
             Field::Yaw => out.yaw = Some(v),
             Field::Left => out.crop.left = v / s.crop[0],
@@ -5506,7 +5506,7 @@ impl Workspace {
                 let (ti, ci) = p.find_clip(id)?;
                 let c = &p.tracks[ti].clips[ci];
                 (p.tracks[ti].kind == TrackKind::Video && has_picture(c)).then(|| {
-                    let stored = c.picture.clone().unwrap_or_default();
+                    let stored = c.picture.as_deref().cloned().unwrap_or_default();
                     let shown = wanted
                         .iter()
                         .find(|(w, _)| *w == c.id)

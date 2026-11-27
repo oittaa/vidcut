@@ -16,9 +16,11 @@ use crate::model::{
 };
 use crate::request::{DynamicZoomSet, NodeInput, StabilizationSet};
 
+use crate::shared::Shared;
+
 use super::locate;
 
-pub fn checked(p: &Picture) -> Result<Option<Picture>> {
+pub fn checked(p: &Picture) -> Result<Option<Shared<Picture>>> {
     for v in PictureValue::ALL {
         if let Some(why) = crate::keyframes::value_problem(v, crate::keyframes::plain_channel(p, v))
         {
@@ -62,7 +64,7 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         stabilization,
         ..p.clone()
     };
-    Ok((!out.is_usual()).then_some(out))
+    Ok((!out.is_usual()).then(|| Shared::new(out)))
 }
 
 pub fn ungraded_usual(mut p: Picture, frame: [f64; 2]) -> Option<Picture> {
@@ -1591,7 +1593,7 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
                 ..Picture::default()
             },
         };
-        c.picture = (!kept.is_usual()).then_some(kept);
+        c.picture = (!kept.is_usual()).then(|| Shared::new(kept));
     }
     Ok(())
 }

@@ -4467,8 +4467,8 @@ pub enum Request {
         /// The action, as `keys.list` names it.
         action: crate::shortcuts::Action,
         /// Its keys, like `Ctrl+Shift+Z`, `F5` or `+`. Cmd and Option are
-        /// other names for Ctrl and Alt. On macOS, Control is the Control
-        /// key. With no keys, the action has no key.
+        /// other names for Ctrl and Alt. On macOS, Control and Meta are the
+        /// Control key. With no keys, the action has no key.
         #[serde(default)]
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,

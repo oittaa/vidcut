@@ -16,7 +16,7 @@ impl Before {
 
     pub(crate) fn of(p: &Project) -> Self {
         Self {
-            main: p.track(MAIN).map(|t| t.clips.clone()).unwrap_or_default(),
+            main: p.track(MAIN).map(|t| t.clips.to_vec()).unwrap_or_default(),
             ids: p
                 .tracks
                 .iter()
@@ -253,7 +253,7 @@ pub(crate) fn settle(p: &mut Project, moved: &HashSet<String>) {
                     keep.insert(at, c);
                 }
             }
-            p.tracks[ti].clips = keep;
+            p.tracks[ti].clips = keep.into();
             if !bumped.is_empty() {
                 let mut n = k + 1;
                 loop {

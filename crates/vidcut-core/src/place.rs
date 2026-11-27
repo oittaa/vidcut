@@ -469,14 +469,14 @@ pub struct GlowNoise {
 }
 
 impl GlowNoise {
-    const CELL: f64 = 340.0 / (0.6 * 1440.0);
+    const CELL: f64 = 340.0 / (0.6 * 1080.0);
     const EVOLUTION: f64 = 1.8;
     const SEETHE: f64 = 0.0208;
     const SEETHE_POWER: f64 = 1.9;
     const DEPTHS: f64 = 4096.0;
 
-    fn of(g: &Glow, area: f64, frame: i64) -> Self {
-        let cell = Self::CELL * g.noise_scale() * area;
+    fn of(g: &Glow, height: f64, frame: i64) -> Self {
+        let cell = Self::CELL * g.noise_scale() * height;
         let moved = frame.max(0) as f64 * Self::SEETHE * g.noise_seethe().powf(Self::SEETHE_POWER);
         Self {
             strength: g.noise_strength(),
@@ -534,7 +534,7 @@ impl Glowing {
             second_color: g.second_color(),
             gamma: g.curve(),
             saturation: g.colorful(),
-            noise: g.atmosphere.then(|| GlowNoise::of(g, area, on.frame)),
+            noise: g.atmosphere.then(|| GlowNoise::of(g, on.size[1], on.frame)),
             seen_only: g.frames() == GlowFraming::OnlyAsSeen,
             mode: g.over(),
             opacity: g.shown(),
@@ -1717,9 +1717,11 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let [cx, cy, cw, ch] = extent.within(fitted);
     let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
+    let (gw, gh) = extent.grid;
+    let ((sin, cos), [across, down]) = turn_of(p.turn(), (cw * fw * gh) / (ch * fh * gw));
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
+    let (zx, zy) = (zx * across, zy * down);
     let [ax, ay] = p.pivot();
-    let (sin, cos) = p.turn().to_radians().sin_cos();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
     let [qx, qy] = anchored(p, frame, fitted);
@@ -1731,7 +1733,6 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
-    let (gw, gh) = extent.grid;
     let crop = [
         cx + whole_pixels(c0.left, gw) * cw,
         cy + whole_pixels(c0.top, gh) * ch,
@@ -1779,6 +1780,17 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
             }
         },
     }
+}
+
+fn turn_of(degrees: f64, aspect: f64) -> ((f64, f64), [f64; 2]) {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let p = match aspect.is_finite() && aspect > 0.0 {
+        true => aspect,
+        false => 1.0,
+    };
+    let (x, y) = (cos, sin / p);
+    let across = x.hypot(y);
+    ((y / across, x / across), [across, cos.hypot(p * sin)])
 }
 
 fn leaned(

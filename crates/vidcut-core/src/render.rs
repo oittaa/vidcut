@@ -15,6 +15,7 @@ use crate::model::{
     SmoothMode, TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
+use crate::shared::{Shared, SharedVec};
 use crate::time::Rational;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2594,10 +2595,11 @@ fn slated(clips: &mut [Clip], gone: &HashSet<&str>) {
                 .map(|p| Picture {
                     composite_mode: p.composite_mode,
                     opacity: p.opacity,
-                    opacity_keys: p.opacity_keys,
+                    opacity_keys: p.opacity_keys.clone(),
                     ..Picture::default()
                 })
-                .filter(|p| !p.is_usual());
+                .filter(|p| !p.is_usual())
+                .map(Into::into);
         }
     }
 }
@@ -2643,7 +2645,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             drop_frame,
             start_tc,
             frames,
-            tracks: Vec::new(),
+            tracks: SharedVec::new(),
             marks: Default::default(),
             markers: Vec::new(),
             kept_otio: None,
@@ -2689,7 +2691,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 }
                 host.clips.push(hollow(&out, c, &hollows));
                 opened += 1;
-                let own = c.picture.clone().unwrap_or_default();
+                let own = c.picture.as_deref().cloned().unwrap_or_default();
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
                 let smooth = edges.iter().any(|e| e.smooth);
                 let crossed = !edges.is_empty();
@@ -2798,7 +2800,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 placed.push(chains);
             }
         }
-        out.tracks = tracks;
+        out.tracks = tracks.into();
         within = placed;
     }
     Some((out, within))
@@ -2994,10 +2996,10 @@ fn flat_pieces(
     let mut clip = whole.clone();
     clip.audio = None;
     let mut track = t.clone();
-    track.clips = vec![clip];
+    track.clips = vec![clip].into();
     track.transitions.clear();
     let mut alone = p.clone();
-    alone.tracks = vec![track];
+    alone.tracks = vec![track].into();
     let (plan, _) = plan_lanes(&alone, frames.0, frames.1)?;
     Ok(plan.video.into())
 }
@@ -3022,7 +3024,7 @@ fn placed_of(
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
-    let own = Placed::at(c, own.unwrap_or_default(), run, x);
+    let own = Placed::at(c, own.map(Shared::into_inner).unwrap_or_default(), run, x);
     std::iter::once(own)
         .chain(crossed.iter().cloned())
         .chain(outer)
@@ -3055,7 +3057,7 @@ fn paced_keys(y: &mut Clip, c: &Clip, k0: i64, first_key: i64) {
     let moving: Vec<&PaceStep> = steps.iter().filter(|s| s.rate != 0.0).collect();
     let (Some(first), Some(last)) = (moving.first(), moving.last()) else {
         let held = first_key as f64;
-        y.picture = y.picture.take().map(|p| p.sampled(held));
+        y.picture = y.picture.take().map(|p| p.sampled(held).into());
         y.title = y.title.take().map(|t| t.sampled(held));
         return;
     };
@@ -3546,7 +3548,7 @@ impl VideoPlan<'_> {
     fn fills(&self, c: &Clip) -> bool {
         let (pool, s) = (&self.pool, &self.p.flat_settings());
         let media = pool.get(c.media.as_str());
-        c.picture.as_ref().is_none_or(Picture::is_usual)
+        c.picture.as_deref().is_none_or(Picture::is_usual)
             && media.is_none_or(|m| self.mapped(c, m).is_none())
             && (c.draws() || media.is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
     }
@@ -4282,15 +4284,15 @@ fn alone(p: &Project, clip: &str, input: Option<&str>) -> Result<RenderPlan> {
             x.picture = x
                 .picture
                 .take()
-                .and_then(|p| p.composition)
+                .and_then(|p| p.into_inner().composition)
                 .map(|mut composition| {
                     if let Some(input) = &input {
                         composition.cut_at(input);
                     }
-                    Picture {
+                    Shared::new(Picture {
                         composition: Some(composition),
                         ..Picture::default()
-                    }
+                    })
                 });
         }
     }
@@ -4418,10 +4420,10 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
 
 pub fn graded_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
     frame_alone(p, clip, at, |picture| {
-        Some(Picture {
-            grade: Some(picture?.grade?),
+        Some(Shared::new(Picture {
+            grade: Some(picture?.into_inner().grade?),
             ..Picture::default()
-        })
+        }))
     })
 }
 
@@ -4429,7 +4431,7 @@ fn frame_alone(
     p: &Project,
     clip: &str,
     at: i64,
-    kept: fn(Option<Picture>) -> Option<Picture>,
+    kept: fn(Option<Shared<Picture>>) -> Option<Shared<Picture>>,
 ) -> Result<VideoPiece> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
