@@ -58,10 +58,10 @@ classDiagram
     media, adjustment
     start, duration, source_in
     video, enabled, retime, render_cache
+    link
   }
   class ClipAudio {
     stream
-    head, tail
     gain_db, muted, pan, equalizer, dialogue_leveler, compressor, noise_reduction, voice_isolation
   }
   class Keyframe {
@@ -153,8 +153,10 @@ classDiagram
     - It does so only when the project stays valid with the file as it is now. Else the file comes in as a new item, and the clips stay offline.
     - Why: a file can change at the same path, and the clips can then need frames that it no longer has.
   - `join_pool` puts a removed item of the same file back in the pool, with its id.
-- `tracks` are the video tracks, then the audio tracks. Audio tracks hold sound-only clips.
-- A clip on a video track carries its picture. Its `ClipAudio` carries its sound, with J/L offsets (`head`, `tail`).
+- `tracks` are the video tracks, then the audio tracks. A video track holds pictures, and an audio track holds sound.
+- A clip on a video track carries its picture only. A clip on an audio track carries its sound in its `ClipAudio`. `validate` refuses sound on a video track.
+- A picture clip and its sound clips have one link group (`Clip::link`). A J/L cut is a sound clip that starts or ends apart from its picture.
+- Only an audio track has sound settings. `ops::tracks::set_track` refuses them on a video track.
 - `tape_marks` holds the In and Out of the source tape.
 - `MediaInfo` keeps what the probe found: streams, duration, start timecode.
 
@@ -366,7 +368,7 @@ Folders:
 - The `source_in` of a clip also counts project frames, from the first frame of its media.
 - `Clip::phase` is the part of a project frame from `source_in` to the exact start of the clip.
   - An edit of media at another frame rate starts on a frame of that media. This start can fall between two project frames.
-  - The sound of the clip starts at the same exact time.
+  - Its sound clips start at the same exact time.
   - The clip of Source Overwrite starts on a frame of its file, as each edit does.
 - A position on a pool item counts its source frames: the frames of its video, at the frame rate of the video (`Media::rate`).
   - A still or a sound file counts frames at the project's own rate, `Settings::fps`.
@@ -870,14 +872,15 @@ flowchart LR
 
 | vidcut | Written as |
 |---|---|
-| video track | a `Video` track, disabled with its video off, and an `Audio` track of its clips' sound, J/L cuts as audio edits |
+| video track | a `Video` track, disabled with its video off |
 | audio track | an `Audio` track, disabled when muted |
+| link group | one `Link Group ID`, the link number, on each clip of a group with more than one clip in the file (`ties`) |
 | clip | `Clip.2`, its source range from the media's start timecode; the start has the clip's `phase` as a fraction of a frame |
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../spec.md#817-generators-p-766)) |
-| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Linked clips get one `Link Group ID` (`ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
+| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -889,7 +892,7 @@ The metadata:
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
-| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`ties`) |
+| `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
 | `Resolve_OTIO` on markers | `Note` |
 
@@ -914,17 +917,18 @@ Import:
 - A clip of media at another frame rate keeps the fraction of its source start as its `phase` (`at_project_rate`).
   - The `phase` is a whole number of steps between the two rates, as in an edit from marks.
   - A clip in reverse or with speed keyframes gets the `phase` only from the `vidcut` metadata.
-- Video tracks become V1, V2, …. An audio clip that lines up with a video clip of the same media (and link group) becomes its sound. Other audio clips go on A1, A2, ….
+- Each track of the file is one track: the video tracks become V1, V2, …, and the audio tracks A1, A2, ….
+- A file with no audio tracks gives each picture clip its linked sound clips (`linked::with_sound`).
 - Names other than the defaults (`default_track_name`) name tracks. Markers on clips, tracks and the stack become timeline markers.
 - Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.
 - A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)).
-- A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
-- `Project::tied` finds the other parts of a clip (`Clip::tied_with`): the clips with the same `Clip::link`, start, length, source start and speed.
-  - A link group joins the picture and the sound of a compound clip, and the parts of a clip with no media.
-  - The parts must also have one place and one source. Why: an edit that writes on one track can move one part away. A split gives both halves the link. Then the parts are separate clips.
+- A clip keeps only the frames inside its media, at its speed and direction. A warning tells how many frames went.
+- `Project::tied` finds the other clips of a link group (`Clip::tied_with`): the clips with the same `Clip::link`.
+  - A link group joins a picture clip and its sound clips. It also joins the picture and the sound of a compound clip, and the parts of a clip with no media.
+  - The clips of a group can differ in place and length. Why: a J/L cut is such a group.
   - `Project::free_link` gives a number that no clip of the timeline has.
-  - `linked::Relink` gives new numbers to the links of pasted, spread and imported clips. Thus they do not join a group of the timeline.
-  - An import keeps the link groups of the file for compound clips and clips with no media.
+  - `linked::Relink` gives new numbers to the links of pasted, spread and imported clips. It keeps a number that no clip of the timeline has. Thus they do not join a group of the timeline, and a round trip keeps the numbers.
+  - An import keeps the link groups of the file. In a file with no link groups, a sound clip links to the picture clip of the same media, start and length.
   - `linked::link_blocks` links the picture and the sound of a compound clip from a file with no link groups. They need the same sequence, start, length, source start and speed.
 - `ops::linked` makes an edit act on each part ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `linked::parts` selects one part as the lead: the part on V1, else the part that the request names.
@@ -932,13 +936,16 @@ Import:
   - `linked::put` writes them back. Each part moves and changes by the same amount as the lead.
   - `linked::split_main` splits each part before an insert on V1, so that the sound keeps its place under the picture.
   - The GUI sends one lead for a selection that holds two parts (`linked::leads`, `edits::Plan::new`), because each part acts on the other parts.
+  - `linked::with_sound` puts the sound of each placed picture on the audio track of the same number, and each next stream on the next audio track. It writes over what is there, and links the clips.
+  - `linked::sounds` gives the linked sound clips of a picture clip. The sound requests, the Inspector and the clip menu use it. Why: a picture clip has no sound of its own.
+  - `follow::follow` moves a clip that is linked to a V1 clip by the change of the start of that clip. Thus a J/L cut keeps its offset.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
 - `ops::compound::nest` stores one `Compound` in `Project::compounds` and puts picture and sound blocks that refer to it by `Clip::compound`.
   - `with_sound` and `build` give the two blocks one link group. Every placement across timelines shares one canonical source of tracks, markers and format.
   - `stack_for` builds and memoizes an OTIO `Stack` on export from `Project::compound_tracks`. It keeps foreign metadata or offline contents in `Compound::kept_otio`.
-  - `Compound::tracks` holds all tracks together. `picture_tracks` takes video tracks, and `sound_tracks` takes sounds (`sound_part`) at each clip's sound length.
+  - `Compound::tracks` holds all tracks together. `picture_tracks` takes the video tracks, and `sound_tracks` takes the audio tracks.
   - Each track keeps its dissolves. `render::expanded` conforms cross-rate compounds first and plays those tracks (`inner_layout`).
   - `inner_layout` widens the compound clip to reach each dissolve that it shows a part of. `Shown` limits the track to the frames of the compound clip.
     - A stretch widens at its own speed (`at_own_speed`). Thus each stretch has both sides of a dissolve that crosses a speed change.
@@ -963,16 +970,14 @@ Import:
       - `Source::decompose` comes from the preference `editing.decompose_on_edit`, through `Env::decompose_on_edit`.
       - An edit that does not ripple gives the blocks to `spread_blocks` and does not put them on the timeline. Thus a gap inside leaves the clips under it.
       - Insert and Ripple Overwrite on V1 put the block in the space that they open. `landed` then takes the block away and calls `spread_blocks`.
-      - `Source::inner_tracks` gives the track of a track inside. The other tracks inside go on the edit's track plus their number minus 1.
+      - `Source::inner_tracks` gives the track of a track inside. The other tracks inside go on the edit's track of their kind plus their number minus 1.
       - Two tracks inside on one track are refused. The empty audio tracks that the edit made go away.
       - A track inside with no clip in the marked part gets no track (`shows`). Thus it makes no empty track and needs no unlocked track.
-      - A picture track that `inner_tracks` leaves out still gives its sound (`sounds`).
-        - It goes on the first audio track from its own that no other track inside takes. Thus it never meets an audio track inside.
-      - With sound alone, `sounds` keeps the id of each track inside. Thus `inner_tracks` names the tracks inside as the compound clip holds them.
     - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
   - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).
   - `ops::conform::clip` keeps conformed compound clips within their compound's frame limit (`fit_compound`).
   - `ops::compound::unnest` takes the blocks off the timeline. `spread` then puts all tracks for tied blocks, or only one part when alone.
+    - Each track inside goes by the block of its kind: its track, its span and its parts. Why: the sound block can start or end apart from the picture block.
   - `spread` conforms `Compound::tracks` when needed. `target` gives the track of each inner track, for a compound clip made here and for an imported one.
     - `Lay::InPlace` adds a track where a clip is in the way. `Lay::OnEdit` writes over the clips, as an edit does.
   - `ops::compound::open_clip` and `ops::compound::open_pooled` check out a compound's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.
@@ -995,7 +1000,7 @@ Modes:
     - A title, a generator and a still get no speed.
   - `at_project_rate` converts by time. The contents of a compound clip use it.
 - `new`, `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
-- An audio track that the `vidcut` metadata names stays, also with no clips. Thus an empty A1 stays in a round trip. An audio track of another editor with no clips goes: its sound is on the video clips.
+- Each audio track of the file stays, also with no clips. Thus an empty A1 stays in a round trip.
 - A file that vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
 
 Kept data:
@@ -1058,7 +1063,6 @@ Requests:
     - An action with a command and no line keeps the keys of that set, also a key that a line gives to another action. Then the set lists both actions, and `Bindings::conflicts` gives the key.
     - The actions without a command follow the free-key rule of the set. Why: the other editor does not know them, as a later version of vidcut adds actions.
     - A file that names no set starts with no key for each command. Thus an export of a built-in preset gives the same keys as the built-in set.
-    - The Avid Media Composer file is the one exception. It gives V to two commands, and the import keeps V on both.
   - `keys.use` copies the keys of a set into `Preferences.keys` and names the set in `Preferences.key_set`.
   - `keys.save` writes `Bindings::changes` into a set file and puts that set in force.
   - `Bindings::in_set` also resolves the set in force. Thus `Bindings::is_custom` tells a change from the set, and `Bindings::reset` puts back the keys of the set.
@@ -1100,7 +1104,8 @@ Reset:
 
 - unique ids
 - tracks named by place, with video before audio, and V1 present
-- clips and their sound sorted, without overlap, on each track
+- clips sorted, without overlap, on each track
+- no sound and no sound settings on a video track, and a picture on each clip of a video track
 - sources inside their media
 - known media and bins
 - gains in range

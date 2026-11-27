@@ -168,7 +168,7 @@ impl KeyboardUi {
                     held: self.held,
                     key,
                 };
-                let used = Panel::ALL.iter().any(|&p| b.owner(p, combo).is_some());
+                let used = Panel::ALL.iter().any(|&p| !b.owners(p, combo).is_empty());
                 (w, label(key).to_string(), self.key == Some(key), used)
             }
             Ctrl(w) => (w, key_name("Ctrl").to_string(), self.held.ctrl, false),

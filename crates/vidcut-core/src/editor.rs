@@ -2067,9 +2067,10 @@ fn clip_speech(
             continue;
         }
         for c in &t.clips {
-            let (Some(sound), Some((from, to))) = (&c.audio, c.audio_range()) else {
+            let Some(sound) = &c.audio else {
                 continue;
             };
+            let (from, to) = (c.start, c.end());
             if !c.enabled || sound.muted || to <= a || from >= b {
                 continue;
             }
@@ -2621,6 +2622,21 @@ fn resolve_holder(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<Str
         return resolve_cue(p, r, playhead);
     }
     resolve_clip(p, r, playhead)
+}
+
+fn key_holders(
+    p: &Project,
+    refs: &[ClipRef],
+    playhead: Option<i64>,
+    param: crate::request::KeyParam,
+) -> Result<Vec<String>> {
+    let ids = resolve_holders(p, refs, playhead)?;
+    Ok(match param {
+        crate::request::KeyParam::Volume | crate::request::KeyParam::Pan => {
+            ops::linked::sounds(p, &ids)
+        }
+        _ => ids,
+    })
 }
 
 fn resolve_holders(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
@@ -4156,7 +4172,7 @@ fn mutate(
                     )?;
                     let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
                     let mut parts = Vec::new();
-                    for id in &ids {
+                    for id in &ops::linked::sounds(p, &ids) {
                         let c = p.clip(id).expect("resolved");
                         if c.is_block() || c.is_frozen() {
                             continue;
@@ -4379,12 +4395,15 @@ fn mutate(
             ripple,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let source = match (from, copied) {
+            let source: Vec<Clip> = match (from, copied) {
                 (Some(r), None) => {
                     let id = resolve_clip(p, r, playhead)?;
-                    p.clip(&id).cloned().expect("resolved")
+                    std::iter::once(id.clone())
+                        .chain(p.tied(&id))
+                        .filter_map(|x| p.clip(&x).cloned())
+                        .collect()
                 }
-                (None, Some(t)) => t.clip.clone(),
+                (None, Some(t)) => ops::attributes::source(t),
                 (None, None) => return Err(Error::invalid("no clip is copied")),
                 (Some(_), Some(_)) => {
                     return Err(Error::usage("give `from` or `copied`, not both"));
@@ -4410,6 +4429,7 @@ fn mutate(
             relative,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = ops::linked::sounds(p, &ids);
             if ids.is_empty() {
                 return Err(Error::usage("clip.normalize needs at least one clip"));
             }
@@ -4453,7 +4473,7 @@ fn mutate(
             value,
             ease,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead
@@ -4479,7 +4499,7 @@ fn mutate(
             in_handle,
             out_handle,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let change = ops::keyframes::KeyChange {
                 value: *value,
@@ -4501,7 +4521,7 @@ fn mutate(
             by,
             to,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::keyframes::on_line(p, &ids, *param, |p, param| {
@@ -4515,7 +4535,7 @@ fn mutate(
             frames,
             at,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             ops::keyframes::on_line(p, &ids, *param, |p, param| {
                 ops::keyframes::remove(p, &ids, param, &pick)
@@ -7015,9 +7035,6 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
         };
         c.counted = otio::Counted::InItem;
         let (start, end) = (conv(c.start), conv(c.end()));
-        if let Some((h, tl)) = c.audio {
-            c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
-        }
         let plays = c.compound.is_some() || m.is_some_and(|m| !m.is_still());
         let paced = (keep && plays).then(|| faster(c.speed.as_ref(), ratio));
         let (was, now) = paced.as_ref().map_or((0, 0), |(_, was, now)| (*was, *now));
@@ -7244,19 +7261,6 @@ fn place_imported(
             list: list.iter().cloned().map(Kept::from).collect(),
         })
     };
-    let mut floors: HashMap<String, i64> = p
-        .tracks
-        .iter()
-        .map(|t| {
-            let end = t
-                .clips
-                .iter()
-                .filter(|c| c.start < offset)
-                .filter_map(|c| c.audio_range().map(|r| r.1))
-                .max();
-            (t.id.clone(), end.unwrap_or(0))
-        })
-        .collect();
 
     let mut clips = Vec::new();
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
@@ -7343,8 +7347,7 @@ fn place_imported(
         let mut start = offset + c.start;
         let end = offset + c.end();
         let mut source_in = c.source_in;
-        let sound_from = c.source_in + c.audio.map_or(0, |a| a.0);
-        let keys_from = c.key_origin() + c.audio.map_or(0, |a| a.0);
+        let keys_from = c.key_origin();
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -7380,74 +7383,50 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
-        let audio = match (c.audio, t.has_audio_tracks) {
-            (Some((h, tl)), _) => Some((
-                offset + c.start + h - start,
-                offset + c.end() + tl - (start + duration),
-            )),
-            (None, false) => Some((0, 0)),
-            (None, true) => None,
-        };
-        let audio = audio
-            .filter(|_| !m.info.audio.is_empty())
-            .and_then(|(h, tl)| {
-                let floor = floors.get(&track_of(&c.track)).copied().unwrap_or(0);
-                let h = match h {
-                    h if h < 0 => -reach(-h, |n| inside(-n)),
-                    h => h,
-                }
-                .max(floor - start);
-                let tl = match tl {
-                    tl if tl > 0 => reach(tl, |n| inside(duration + n - 1)),
-                    tl => tl,
-                };
-                (duration + tl - h >= 1).then_some(ClipAudio {
-                    stream: if (c.stream as usize) < m.info.audio.len() {
-                        c.stream
-                    } else {
-                        0
-                    },
-                    head: h,
-                    tail: tl,
-                    gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
-                    gain_keys: c
-                        .gain_keys
-                        .iter()
-                        .map(|k| crate::model::Keyframe {
-                            frame: k.frame + keys_from,
-                            ..*k
-                        })
-                        .collect(),
-                    muted: c.muted,
-                    pan: c.pan.clamp(*PAN.start(), *PAN.end()),
-                    pan_on: c.pan_on,
-                    pan_keys: c
-                        .pan_keys
-                        .iter()
-                        .map(|k| crate::model::Keyframe {
-                            frame: k.frame + keys_from,
-                            ..*k
-                        })
-                        .collect(),
-                    equalizer: c
-                        .equalizer
-                        .clone()
-                        .filter(|e| crate::equalizer::problem(e).is_none()),
-                    dialogue_leveler: c
-                        .dialogue_leveler
-                        .filter(|l| crate::leveler::problem(l).is_none()),
-                    compressor: c
-                        .compressor
-                        .filter(|k| crate::compressor::problem(k).is_none()),
-                    noise_reduction: c
-                        .noise_reduction
-                        .filter(|n| crate::noise_reduction::problem(n).is_none()),
-                    effects: carry(&c.audio_effects, sound_from),
-                    voice_isolation: c
-                        .voice_isolation
-                        .filter(|v| ops::ISOLATION.contains(&v.amount)),
+        let audio = (c.audio && !m.info.audio.is_empty()).then(|| ClipAudio {
+            stream: if (c.stream as usize) < m.info.audio.len() {
+                c.stream
+            } else {
+                0
+            },
+            gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
+            gain_keys: c
+                .gain_keys
+                .iter()
+                .map(|k| crate::model::Keyframe {
+                    frame: k.frame + keys_from,
+                    ..*k
                 })
-            });
+                .collect(),
+            muted: c.muted,
+            pan: c.pan.clamp(*PAN.start(), *PAN.end()),
+            pan_on: c.pan_on,
+            pan_keys: c
+                .pan_keys
+                .iter()
+                .map(|k| crate::model::Keyframe {
+                    frame: k.frame + keys_from,
+                    ..*k
+                })
+                .collect(),
+            equalizer: c
+                .equalizer
+                .clone()
+                .filter(|e| crate::equalizer::problem(e).is_none()),
+            dialogue_leveler: c
+                .dialogue_leveler
+                .filter(|l| crate::leveler::problem(l).is_none()),
+            compressor: c
+                .compressor
+                .filter(|k| crate::compressor::problem(k).is_none()),
+            noise_reduction: c
+                .noise_reduction
+                .filter(|n| crate::noise_reduction::problem(n).is_none()),
+            effects: carry(&c.audio_effects, c.source_in),
+            voice_isolation: c
+                .voice_isolation
+                .filter(|v| ops::ISOLATION.contains(&v.amount)),
+        });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(
                 "{label}: gain {:.1} dB set to the nearest of -100..30 dB",
@@ -7457,9 +7436,6 @@ fn place_imported(
         if !c.video && audio.is_none() {
             warnings.push(format!("{label}: {} has no audio; left out", m.name));
             continue;
-        }
-        if let Some(a) = &audio {
-            floors.insert(track_of(&c.track), start + duration + a.tail);
         }
         let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
             .then(|| c.name.clone());
@@ -7495,7 +7471,7 @@ fn place_imported(
             retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
-            link: None,
+            link: c.link.map(|l| links.of(l)),
         });
         placed.insert(track_of(&c.track));
     }
@@ -7505,6 +7481,20 @@ fn place_imported(
         }
     }
     ops::linked::link_blocks(p, &clips);
+    if !t.has_audio_tracks {
+        let pictures: Vec<String> = clips
+            .iter()
+            .filter(|id| {
+                p.find_clip(id).is_some_and(|(ti, ci)| {
+                    let c = &p.tracks[ti].clips[ci];
+                    c.video && !c.is_block()
+                })
+            })
+            .cloned()
+            .collect();
+        let sounds = ops::linked::with_sound(p, pictures.clone(), &ops::Source::default())?;
+        clips.extend(sounds.into_iter().skip(pictures.len()));
+    }
     for x in &t.transitions {
         let side = |k: Option<usize>| match k {
             None => Some(None),
@@ -7532,7 +7522,6 @@ fn place_imported(
             .transitions
             .push(Transition {
                 id,
-                sound: x.sound,
                 from: from.map(|f| f.0.clone()),
                 to: to.map(|g| g.0.clone()),
                 before: x.before,
@@ -7623,10 +7612,7 @@ fn stack_imported(
     let mut t = otio::import(&doc, base)?;
     if video == Some(true) {
         t.has_audio_tracks = true;
-        for c in &mut t.clips {
-            c.audio = None;
-            c.audio_effects.clear();
-        }
+        t.clips.retain(|c| c.video);
     }
     Ok(t)
 }
@@ -10790,18 +10776,24 @@ fn targets<'a>(
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             Ok(vec![Target::Media(m)])
         }
-        (None, Some(refs)) => resolve_clips(p, &refs.to_vec(), playhead)?
-            .iter()
-            .map(|id| {
-                let c = p.clip(id).expect("resolved");
-                if c.is_block() {
-                    return Err(Error::invalid(format!(
-                        "{id} is a block from another editor: it has no media"
-                    )));
-                }
-                Ok(Target::Clip(c))
-            })
-            .collect(),
+        (None, Some(refs)) => {
+            let ids = resolve_clips(p, &refs.to_vec(), playhead)?;
+            match audio {
+                true => ops::linked::sounds(p, &ids),
+                false => ids,
+            }
+        }
+        .iter()
+        .map(|id| {
+            let c = p.clip(id).expect("resolved");
+            if c.is_block() {
+                return Err(Error::invalid(format!(
+                    "{id} is a block from another editor: it has no media"
+                )));
+            }
+            Ok(Target::Clip(c))
+        })
+        .collect(),
         (None, None) => Ok(p
             .tracks
             .iter()
@@ -11540,6 +11532,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         "source_in_tc": p.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
+    if let Some(link) = c.link {
+        v["link"] = json!(link);
+    }
     if let Some(color) = c.shown_color(media) {
         v["color"] = json!(color);
     }
@@ -11564,7 +11559,7 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         v["effects"] = json!(e.names());
     }
     if let Some(a) = &c.audio {
-        v["audio"] = json!({ "stream": a.stream, "head": a.head, "tail": a.tail, "gain_db": a.gain_db, "muted": a.muted });
+        v["audio"] = json!({ "stream": a.stream, "gain_db": a.gain_db, "muted": a.muted });
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
         }
@@ -11635,7 +11630,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                     let at = cuts.place(p, x)?;
                     (at >= a && at <= b).then(|| {
                         json!({ "id": x.id, "name": otio::transitions::name(x), "at": at, "before": x.before,
-                            "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
+                            "after": x.after, "from": x.from, "to": x.to })
                     })
                 })
                 .collect();

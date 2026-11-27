@@ -127,6 +127,6 @@ mod tests {
     fn a_roll_reaches_as_far_as_both_clips_media_allow() {
         let f = two_clips();
         let p = f.editor.project();
-        assert_eq!(roll_reach(p, clip(&f, "c1"), clip(&f, "c2")), (-10, 49));
+        assert_eq!(roll_reach(p, clip(&f, "c1"), clip(&f, "c3")), (-10, 49));
     }
 }

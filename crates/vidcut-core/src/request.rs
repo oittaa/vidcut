@@ -721,7 +721,8 @@ pub enum Request {
     #[serde(rename = "probe")]
     Probe { path: PathBuf },
 
-    /// Tracks with their clips and gaps (frames plus timecodes).
+    /// Tracks with their clips and gaps (frames plus timecodes). A clip of a
+    /// link group gives its `link` number.
     #[serde(rename = "timeline.get")]
     TimelineGet {
         #[serde(default)]
@@ -747,7 +748,7 @@ pub enum Request {
 
     /// Silent stretches (as Ripple Delete Silence finds them) in `media`
     /// (source frames), in `clips` (timeline frames), or in every clip with
-    /// sound.
+    /// sound. A picture clip gives the stretches of its linked sound clips.
     #[serde(rename = "analyze.silence")]
     AnalyzeSilence {
         #[serde(default)]
@@ -833,7 +834,8 @@ pub enum Request {
     /// The words said, each with its frames, for `edit.ripple_delete_words`.
     /// With `media` or `clips`, from their media's transcripts
     /// (`media.transcribe`), heard nothing new: the media's source frames,
-    /// or each clip's timeline frames. Otherwise the mix of the tracks heard
+    /// or each clip's timeline frames. A picture clip gives the words of its
+    /// linked sound clips. Otherwise the mix of the tracks heard
     /// (`tracks`) over `range` is heard now, as `subtitles.transcribe` hears
     /// it, without adding cues. Only a model that times words: Parakeet
     /// Ultra does. Whisper large-v3 times phrases and Qwen3-ASR gives no
@@ -1336,7 +1338,7 @@ pub enum Request {
     /// their tracks. It makes a compound clip of what is
     /// between them. It goes on the lowest picture track and the lowest
     /// sound track with clips in the range, and the clips outside the range
-    /// stay. A J or L cut that reaches a mark is undone. A clip in the range on a
+    /// stay. A clip in the range on a
     /// locked track refuses it. A cue on a locked subtitle track stays whole.
     /// `range` defaults to the timeline's marks,
     /// which stay. With one mark, the range runs from the start of the
@@ -1377,7 +1379,7 @@ pub enum Request {
     MediaCompoundRemove { compound: String },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
     /// their times, trimmed to the part it shows. Inner track n goes on the
-    /// track of the compound clip plus n. Where a clip is in the way, a new
+    /// track of the compound clip's part of its kind plus n. Where a clip is in the way, a new
     /// track goes in, and that clip and the tracks above it move up. One made
     /// here brings its clips back whole. One from another editor (deviation
     /// X9) brings them from its file: a picture block its pictures, and a
@@ -1707,7 +1709,8 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). Only an audio track takes the
+    /// sound settings. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1738,8 +1741,8 @@ pub enum Request {
         /// Ducking: the track dips by its Duck Amount where any of its
         /// sources is active, by speech or by sound level. Each field given
         /// replaces its own; null takes it off with its settings. `{}`
-        /// turns it on with the usual values, under every other track with
-        /// sound. Sources not measured yet are measured first.
+        /// turns it on with the usual values, under every other audio
+        /// track. Sources not measured yet are measured first.
         #[serde(
             default,
             deserialize_with = "given",
@@ -1820,7 +1823,8 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, Noise Reduction, name,
-    /// Clip Color, Voice Isolation, Retime Process and Render Cache.
+    /// Clip Color, Voice Isolation, Retime Process and Render Cache. The sound settings of a picture clip go to
+    /// its linked sound clips.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1921,18 +1925,21 @@ pub enum Request {
         download: bool,
     },
     /// Paste Attributes (Alt+V): give `clips` the chosen `attributes` of a
-    /// copied clip. `copied` is a clip as `edit.copy` returns it, and `from`
-    /// is a clip of the timeline. Default: the first clip of the GUI's
-    /// clipboard. Each attribute takes the place of the clip's own, with its
-    /// keyframes. A clip takes only what it can have: a clip with no sound
-    /// takes no volume, and a clip with no source takes no speed.
+    /// copied clip. `copied` is the clips as `edit.copy` returns them, and
+    /// `from` is a clip of the timeline. Default: the GUI's clipboard. The
+    /// first clip and the clips linked to it give the attributes: the sound
+    /// attributes come from the one with sound. Each attribute takes the
+    /// place of the clip's own, with its keyframes. The sound attributes go
+    /// to the linked sound clips of a picture clip. A clip takes only what it
+    /// can have: a clip with no sound takes no volume, and a clip with no
+    /// source takes no speed.
     #[serde(rename = "clip.paste_attributes")]
     ClipPasteAttributes {
         clips: OneOrMany<ClipRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<ClipRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        copied: Option<Box<crate::model::TrackClip>>,
+        copied: Option<Vec<crate::model::TrackClip>>,
         attributes: Vec<ClipAttribute>,
         /// Where the keyframes go in each clip. Default: `maintain`.
         #[serde(default)]
@@ -1944,7 +1951,8 @@ pub enum Request {
         ripple: bool,
     },
     /// Remove Attributes: give the chosen `attributes` of `clips` their
-    /// usual values, with no keyframes.
+    /// usual values, with no keyframes. The sound attributes of a picture
+    /// clip are those of its linked sound clips.
     #[serde(rename = "clip.remove_attributes")]
     ClipRemoveAttributes {
         clips: OneOrMany<ClipRef>,
@@ -1956,7 +1964,8 @@ pub enum Request {
         ripple: bool,
     },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
-    /// that their level reaches `target`. Each clip is measured over the
+    /// that their level reaches `target`. A picture clip gives its linked
+    /// sound clips. Each clip is measured over the
     /// sound it plays, as the export mixes it, without its volume and its
     /// volume keyframes, mute, Voice Isolation and transitions, and without
     /// its track's mixer. The volume of a clip with volume keyframes is its
@@ -2008,7 +2017,8 @@ pub enum Request {
     /// clip. A speed keyframe goes only inside the clip, after its first
     /// frame. Without a `value`, it takes the value the clip has there. A
     /// keyframe already on that frame takes the value and the ease. With
-    /// its first keyframe, a clip's volume follows its keyframes. On a
+    /// its first keyframe, a clip's volume follows its keyframes. The volume
+    /// and pan of a picture clip are those of its linked sound clips. On a
     /// title, position, zoom and rotation are those of its text, and a
     /// scroll's text takes only position. The
     /// handles of its position keys bend its path. The other values of a
@@ -6587,8 +6597,8 @@ pub enum TrimSide {
     /// Both: a roll.
     #[default]
     Both,
-    /// Its audio edit: where a clip's sound ends or starts, the J/L handle
-    /// (decision D20).
+    /// Its audio edit: the edge of a linked sound clip on an audio track,
+    /// the J/L handle (decision D20).
     Audio,
 }
 
@@ -7009,17 +7019,16 @@ pub struct SourceParams {
     #[serde(default)]
     pub audio_only: bool,
     /// The target track. Default: V1, or A1 for audio-only clips. The next new
-    /// track (`V3` when there are two) is made. On an audio track only the
+    /// track (`V3` when there are two) is made. The sound of a picture on `Vn`
+    /// goes on `An`, linked, and each next sound stream on the next audio
+    /// track. On an audio track only the
     /// audio is used. A generator or adjustment clip goes only on a video track.
     #[serde(default)]
     pub track: Option<String>,
     /// With Decompose Compound Clips On Edit on: the timeline track for a
     /// track inside the compound clip, as `{"V2": "V4", "A1": null}`. `null`
     /// leaves that track out. A track that is not named goes on the edit's
-    /// track plus its number minus 1. The sound of a picture track moves with
-    /// it, also with `audio_only`. `null` on a picture track leaves out only
-    /// its picture: its sound goes on the first audio track from its own that
-    /// no other track inside takes.
+    /// track of its kind plus its number minus 1.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inner_tracks: BTreeMap<String, Option<String>>,
     /// A part of the Multi Source viewer: the frames left empty before the
@@ -8117,8 +8126,8 @@ impl DynamicZoomSet {
 }
 
 /// A change to a track's ducking: each field given replaces its own, and
-/// the rest stay as they are. A new one is on, under every other track
-/// with sound, at the usual values: Duck Amount 2.7 dB, Lookahead 15 ms,
+/// the rest stay as they are. A new one is on, under every other audio
+/// track, at the usual values: Duck Amount 2.7 dB, Lookahead 15 ms,
 /// Rise Time 10 ms, Hold 150 ms, Recovery Time 750 ms, by speech, and from
 /// -42 dBFS by level.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -8127,7 +8136,7 @@ pub struct DuckSet {
     /// On or off. Off keeps the settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
-    /// The tracks whose sound dips it (`V1`, `A2`), never its own.
+    /// The audio tracks whose sound dips it (`A2`), never its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<String>>,
     /// The Duck Amount: how far it dips, in dB, from 0 to 18.

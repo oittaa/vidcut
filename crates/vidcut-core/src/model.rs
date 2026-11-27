@@ -1799,9 +1799,9 @@ pub struct AudioInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackKind {
-    /// Combined video+audio clips (`V1`, `V2`, …).
+    /// Picture clips (`V1`, `V2`, …).
     Video,
-    /// Audio-only clips (`A1`, `A2`, …).
+    /// Sound clips (`A1`, `A2`, …).
     Audio,
 }
 
@@ -1814,29 +1814,32 @@ pub struct Track {
     /// Sorted by `start`, never overlapping.
     pub clips: Vec<Clip>,
     pub locked: bool,
-    /// Audio of this track is silent.
+    /// The sound of this audio track is silent. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub muted: bool,
-    /// While any track is soloed, only soloed tracks are heard (the mixer).
+    /// While any audio track is soloed, only soloed tracks are heard (the
+    /// mixer). Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
-    /// The mixer fader, in dB, from -100 to 10. -100 stands for the fader's
-    /// bottom, minus infinity: the track is silent.
+    /// The mixer fader of an audio track, in dB, from -100 to 10. -100
+    /// stands for the fader's bottom, minus infinity: the track is silent.
+    /// Left out at 0.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
-    /// Voice Isolation on the track's clips that have none of their own.
-    /// Left out, it is off.
+    /// Voice Isolation on the clips of an audio track that have none of
+    /// their own. Left out, it is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_isolation: Option<VoiceIsolation>,
-    /// Ducking: the track dips where its sources are active (decision
-    /// D76).
+    /// Ducking: an audio track dips where its sources are active (decision
+    /// D76). Left out when the track has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<Duck>,
-    /// The equalizer of the track, after its Dynamics and before its fader.
-    /// Left out when the track has none, as a new track: then it is off,
-    /// with the usual bands.
+    /// The equalizer of an audio track, after its Dynamics and before its
+    /// fader. Left out when the track has none, as a new track: then it is
+    /// off, with the usual bands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<TrackEqualizer>,
-    /// The Dynamics of the track, after its ducking and before its
+    /// The Dynamics of an audio track, after its ducking and before its
     /// equalizer. Left out when the track has none, as a new track: then
     /// they are on, with each module off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1846,7 +1849,8 @@ pub struct Track {
     /// A name shown in the track header and the mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Transitions on its edit points, carried from another editor.
+    /// Transitions on its edit points, carried from another editor: picture
+    /// transitions on a video track, sound transitions on an audio track.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<Transition>,
     /// Off, the render cache's User mode renders none of its speed
@@ -1868,7 +1872,7 @@ pub struct Duck {
     /// It dips the track. Off keeps the settings.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub on: bool,
-    /// The tracks whose sound dips it (`V1`, `A2`), never its own. A source
+    /// The audio tracks whose sound dips it (`A2`), never its own. A source
     /// counts only where it is heard: not muted, and soloed while any
     /// track is.
     #[serde(default)]
@@ -1930,9 +1934,6 @@ pub enum DuckDetect {
 pub struct Transition {
     /// `t<N>`, never reused.
     pub id: String,
-    /// Between the clips' sounds (an audio edit), not their pictures.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub sound: bool,
     /// The clip before the cut; none for a gap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -2318,7 +2319,7 @@ pub struct Clip {
     pub media: String,
     /// First timeline frame.
     pub start: i64,
-    /// Length in frames (of the video; the audio may differ by J/L offsets).
+    /// Length in frames.
     pub duration: i64,
     /// Source position of the clip's first frame, in project frames from the
     /// media's first video frame.
@@ -2328,9 +2329,12 @@ pub struct Clip {
     /// on a frame of media at another frame rate has one. Left out at 0.
     #[serde(default, skip_serializing_if = "is_zero_f64")]
     pub phase: f64,
-    /// Whether the clip shows video (false for audio-only clips).
+    /// Whether the clip shows video: true on a video track, false on an
+    /// audio track.
     pub video: bool,
-    /// The clip's audio, if it carries any.
+    /// The sound of a clip on an audio track. A clip on a video track has
+    /// none: its sound is a linked clip on an audio track. Left out on a
+    /// clip with no sound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<ClipAudio>,
     /// Disabled clips are kept but not shown (the D key).
@@ -2382,9 +2386,9 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// Its link group. The clips of a group with the same start, length,
-    /// source start and speed act as one clip in an edit: the picture and
-    /// the sound of a compound clip, or the parts of a clip with no media.
+    /// Its link group: the clips with the same number act as one clip in
+    /// an edit, as the picture and the sound of one clip. Each clip of a
+    /// group moves and trims by the same frames, so a J or L cut stays.
     /// Left out when the clip has no link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<u32>,
@@ -9036,11 +9040,6 @@ pub struct TrackClip {
 pub struct ClipAudio {
     /// Index into the media's audio streams.
     pub stream: u32,
-    /// Audio starts this many frames after the clip start (negative: before,
-    /// i.e. a J cut).
-    pub head: i64,
-    /// Audio ends this many frames after the clip end (positive: an L cut).
-    pub tail: i64,
     /// The volume in dB, from -100 to 30, while the clip has no volume
     /// keyframes.
     pub gain_db: f64,
@@ -9312,12 +9311,29 @@ impl VoiceIsolation {
     }
 }
 
+impl ClipAudio {
+    pub fn of(stream: u32) -> Self {
+        Self {
+            stream,
+            gain_db: 0.0,
+            gain_keys: Vec::new(),
+            muted: false,
+            pan: 0.0,
+            pan_on: true,
+            pan_keys: Vec::new(),
+            equalizer: None,
+            dialogue_leveler: None,
+            compressor: None,
+            noise_reduction: None,
+            effects: None,
+            voice_isolation: None,
+        }
+    }
+}
+
 impl Clip {
     pub fn tied_with(&self, o: &Clip) -> bool {
-        self.link.is_some()
-            && self.link == o.link
-            && (self.start, self.duration, self.source_in) == (o.start, o.duration, o.source_in)
-            && self.pace() == o.pace()
+        self.link.is_some() && self.link == o.link
     }
 
     pub const ADJUSTMENT_CLIP: &str = "Adjustment Clip";
@@ -9362,12 +9378,6 @@ impl Clip {
 
     pub fn end(&self) -> i64 {
         self.start + self.duration
-    }
-
-    pub fn audio_range(&self) -> Option<(i64, i64)> {
-        self.audio
-            .as_ref()
-            .map(|a| (self.start + a.head, self.end() + a.tail))
     }
 
     pub fn pace(&self) -> crate::render::Pace {
@@ -9424,7 +9434,8 @@ impl Clip {
     }
 
     pub fn sound_span(&self) -> Option<(f64, f64)> {
-        let (a, b) = self.audio_range()?;
+        self.audio.as_ref()?;
+        let (a, b) = (self.start, self.end());
         if self.constant_speed().is_some() {
             if self.speed_at(self.start) == 0.0 {
                 return None;
@@ -10855,22 +10866,7 @@ impl Project {
     }
 
     pub fn end(&self) -> i64 {
-        let clips = self
-            .tracks
-            .iter()
-            .flat_map(|t| t.clips.iter())
-            .map(|c| c.audio_range().map_or(c.end(), |(_, e)| e.max(c.end())));
-        let fades = self.tracks.iter().flat_map(|t| {
-            t.transitions
-                .iter()
-                .filter(|x| x.to.is_none())
-                .filter_map(|x| {
-                    let c = t.clips.iter().find(|c| Some(&c.id) == x.from.as_ref())?;
-                    let edge = if x.sound { c.audio_range()?.1 } else { c.end() };
-                    Some(edge + x.after)
-                })
-        });
-        clips.chain(fades).max().unwrap_or(0)
+        crate::ops::compound::end_of(&self.tracks)
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
@@ -11137,7 +11133,7 @@ impl Track {
     }
 
     pub fn has_sound(&self) -> bool {
-        self.kind == TrackKind::Audio || self.clips.iter().any(|c| c.audio.is_some())
+        self.kind == TrackKind::Audio
     }
 
     pub fn in_mix(&self, any_solo: bool) -> bool {

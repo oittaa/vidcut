@@ -1067,6 +1067,7 @@ impl Words<'_> {
                 ids => format!("Split {} at {at}", self.names_of(ids)),
             };
         };
+        let mut groups = std::collections::HashSet::new();
         let cut: Vec<(String, &str)> = p
             .tracks
             .iter()
@@ -1074,6 +1075,7 @@ impl Words<'_> {
             .flat_map(|t| t.clips.iter().map(move |c| (c, t.id.as_str())))
             .filter(|(c, _)| only.is_empty() || only.contains(&c.id))
             .filter(|(c, _)| frames.iter().any(|&f| c.start < f && f < c.end()))
+            .filter(|(c, _)| c.link.is_none_or(|l| groups.insert(l)))
             .map(|(c, t)| (c.id.clone(), t))
             .collect();
         match cut.as_slice() {

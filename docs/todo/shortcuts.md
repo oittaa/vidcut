@@ -6,11 +6,9 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **A press of a key that two actions have:**
 
-- An imported key file can give one key to two actions of one level. Both keep it ([spec §11](../spec.md#11-keyboard-shortcuts)).
-- A press does the first of these actions in the table. The manual tells of a warning dialog instead (p. 126).
-- To do: the action of such a press, after case 28 of shortcuts-resolve-runs.md.
-- The file of the Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point. The built-in set gives V only to Smart Insert.
-- To do: make the built-in set follow case 28 g.
+- A press of such a key does none of the actions ([spec §11](../spec.md#11-keyboard-shortcuts)).
+- In Resolve, Add Marker and Mark In on one key run Add Marker (case 28). The other measured pairs run nothing.
+- To do: find the rule with case 29 of shortcuts-resolve-runs.md, then build it.
 
 **Meta in the sets of other editors:**
 

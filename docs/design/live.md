@@ -374,6 +374,21 @@ The bar and the Jobs button:
 - `Rows::layout` lays out the rows of the lower timeline from the bottom, and shrinks them to fit, down to a minimum.
 - When they still overflow, the wheel (`scroll_rows`) and the scrollbar (`row_scrollbar`) lift them (`TimelineView::rows_lift`, `Rows::overflow`).
 
+**Sound bands** ([spec §5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718)).
+
+- `geometry::Bands` holds each sound clip that is linked to a picture clip, with the video track of that picture. `Rows::layout` makes it.
+- `Rows::layout` leaves out an audio track whose clips are all in bands. Why: the row of the picture shows them.
+- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the first linked sound clip of each picture, at its own place. Thus a J/L cut shows.
+- The band draws the sound transitions between its sound clips. It draws no volume line.
+- A sound block is a compound clip or a generator without picture. It fills its place in the band (`paint::clip_fill`).
+- The row draws the band first and the picture clips over it. Thus the frame of a selected item is on top of the band.
+- With Trim to Audio, a picture clip that the drag changes shows its band sound the full height of the row.
+- `geometry::band_hit` finds the edge of a band sound under the pointer. It gives `Hit::AudioEdit` with the picture clip.
+  - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
+  - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
+- An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
+- The Mute of a main track header sets `muted` on each audio track that holds the linked sound of its clips (`geometry::heard_on`). One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
 - `paint::volume_line` draws the volume line of each clip with sound. With volume keyframes, the line is the curve (`geometry::curve_y`), with a mark on each keyframe.
@@ -921,7 +936,9 @@ Keys:
 
 - The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
 - `Bindings` joins the table, `Preferences.keys` and the key set in force. It gives the keys of an action and the owner of a key (`Combo`).
-  - A key file can give one key to two actions of one level. `Bindings::owner` then gives the first in the table, and `Bindings::owners` gives all.
+  - A key file can give one key to two actions of one level. `Bindings::owner` then gives no action, and `Bindings::owners` gives all.
+  - That key stays taken. An action that the set does not list does not get it.
+  - `shortcuts::conflicted` finds such keys in the events of a frame. `Workspace::keys` names their actions in the status line.
   - `Bindings::conflicts` lists these keys, and `Bindings::conflicting` gives the keys of one action that another action has.
 - `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
 - Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.

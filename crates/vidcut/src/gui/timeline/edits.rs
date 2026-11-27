@@ -17,7 +17,7 @@ impl Cut {
     pub fn of(p: &Project, e: &EditSel) -> Option<Self> {
         let t = p.track(&e.track.id())?;
         if e.side == Side::Audio {
-            return audio_edit_at(t, e.at).map(|(id, edge)| match edge {
+            return audio_edit_at(p, t, e.at).map(|(id, edge)| match edge {
                 Edge::Tail => Self::Audio(id),
                 Edge::Head => Self::AudioHead(id),
             });
@@ -70,8 +70,8 @@ impl Cut {
     pub fn at(&self, p: &Project) -> Option<i64> {
         let c = p.clip(self.clip())?;
         Some(match self {
-            Self::Audio(_) => audio_edge(c, Edge::Tail)?,
-            Self::AudioHead(_) => audio_edge(c, Edge::Head)?,
+            Self::Audio(id) => audio_edge(p, id, Edge::Tail)?,
+            Self::AudioHead(id) => audio_edge(p, id, Edge::Head)?,
             Self::Head(_) => c.start,
             Self::Roll(_) | Self::Tail(_) => c.end(),
         })

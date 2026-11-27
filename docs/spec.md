@@ -827,11 +827,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - A video clip shows a filmstrip. Each picture is the frame under its left edge, and the first picture is the first frame of the clip.
   - Thus a picture that starts before a cut in the source shows the shot before the cut.
 - Its audio shows as a waveform band along the bottom. The band becomes larger with the track (p. 647).
+  - The band shows the linked sound clip of each picture, at the place of the sound clip. Thus a J or L cut shows past the picture.
+  - vidcut: a picture with two or more sound clips shows the first one, on the lowest audio track.
+- An audio track that holds only the linked sound of pictures has no row of its own (p. 646). An audio track with other clips shows them in its row (p. 648).
+  - vidcut: an empty audio track has a row. A linked sound clip shows only in its band, also on an audio track that has a row.
 - Its duration shows as seconds:frames, at the bottom left.
 - The clips of a locked track are stippled. The clips of a disabled track are dimmed.
 - A disabled clip is dull. A muted clip shows a mute icon.
 
 **Track headers** (pp. 647, 678, 717): Enlarge (one track at a time), Lock, Mute (audio) and Video Enable icons (D43).
+- The Mute of a main track mutes each audio track that holds the linked sound of its clips. A second click turns the mute off. This is a measurement in Resolve Studio 21.2, on one timeline.
+  - vidcut: the Mute is lit when all these audio tracks are muted. A click sets them all to the other state, in one undo step.
+  - A main track with no linked sound has no Mute.
 - These are measurements in Resolve Studio 21.2:
   - Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
   - A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
@@ -859,7 +866,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - These tracks ripple only where there is no Track 1 video under them (p. 721; D22).
   - Clips on these tracks sit freely, with gaps.
 - **Audio tracks:**
-  - A1, A2, … are below the video tracks. They hold sound alone, for example music.
+  - A1, A2, … are below the video tracks. They hold all the sound. A clip on a video track has picture only (pp. 646–647).
+  - The sound of a picture on Vn goes on An. A second sound stream goes on the next audio track (D24).
   - Media without video go there by default (D26).
 - **Track header** (p. 647):
   - A click makes the track the target (D3).
@@ -867,9 +875,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - **Overlapping video:**
   - The highest enabled track is visible (p. 647).
   - A disabled clip, or a track with its video off, shows what is under it.
-- **Linking:**
-  - The video and audio of a clip are one combined clip.
-  - Trims move both, but a J/L cut moves only the audio edit (§8.7).
+- **Linking** (pp. 913–916):
+  - A picture clip and its sound clips are linked. They are one link group.
+  - An edit of one clip of a group acts on each clip of the group (p. 3875): move, trim, roll, slip, slide, split, join, delete, speed and paste.
+  - Each clip of a group moves and trims by the same amount. Thus a J/L cut stays (§8.7).
+  - The Cut page shows a picture clip and its linked sound as one item. The sound is the band along the bottom of the item (§5; pp. 646–647).
   - The Cut page has no link/unlink.
 
 ## 7. Edit functions (pp. 696–701)
@@ -1244,7 +1254,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
-  - **Lower audio band at an edit: audio-only roll**, a J/L cut (§8.7).
+  - **The edge of a linked sound clip on an audio track: audio-only roll**, a J/L cut (§8.7).
 - **Safe Edit** (option, p. 732):
   - A trim stops at the neighbor clip, with a small timer on the cursor.
   - Continue the drag to overwrite the neighbor.
@@ -1310,11 +1320,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - W again deselects the edit.
 
 ### 8.7 J/L cuts (p. 728)
-- Hover over the lower audio part of a clip at an edit until the cursor shows a note. Then drag.
-- Only the audio edit moves, as an audio roll.
+- A J or L cut is a linked sound clip that starts or ends at a different time than its picture clip.
+- Hover over an edit in the band of a main track until the cursor shows a note. Then drag (p. 728).
+  - Enlarge Track makes the band larger. It is not necessary.
+- Only the sound edits move. Each linked sound clip of the picture rolls on its audio track. The picture clips do not change.
 - A click selects that audio edit, and `,` / `.` move it (D20).
 - The edit needs sound on one side only.
-  - With sound on the outgoing side only, the sound goes on past the picture. It goes into a gap, or under a clip with no sound.
+  - With sound on the outgoing side only, the sound goes on past the picture, into a gap of the audio track.
   - With sound on the incoming side only, the sound starts before the picture.
   - vidcut stops the edit at the nearest sound on the track, at the timeline's start and where the media runs out.
 
@@ -1692,7 +1704,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In the GUI, a question that gives their size comes before the download.
   - The dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
   - The model list gives the languages of each model, how it times the words, and its size or price.
-  - A box for each track with sound is ticked when playback hears that track.
+  - A box for each audio track is ticked when playback hears that track.
   - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
   - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
 - **Paid speech models** (vidcut):
@@ -2191,6 +2203,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The OTIO `Pan` is Position X divided by the timeline width. `Tilt` is Position Y divided by the timeline height.
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
+    - On pixels that are not square, `cropLeft` is the crop / (f × the source width). f is the factor of the fit, with no pixel aspect ratio in it.
+    - Measured in Resolve Studio 21.2: Crop Left 3.0 on a 2:1 file of 640 x 720 in 1280 x 720 is 3/640.
+    - Crop Left 3.0 on a 9:8 file of 1000 x 800 in 1280 x 720 is 3/900.
   - Zoom is a factor (1.000). Rotation is in degrees.
 
 ### 8.16 Effects (pp. 765, 3526, 3536)
@@ -2853,9 +2868,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Insert and Smart Insert move other tracks by the rules of D23.
     - The tracks inside go on the track that the edit picks, and on the tracks above it.
     - `inner_tracks` of an edit puts a track inside on a track of the timeline. `null` leaves that track out.
-    - The sound of a picture track inside moves with it.
-    - `null` on a picture track inside leaves out only its picture.
-      - Its sound goes on the first audio track from its own that no other track inside takes.
+    - A track inside that `inner_tracks` does not name goes on the track of its kind that the edit picks, plus its number minus 1.
     - Two tracks inside on one track of the timeline are refused.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
@@ -4935,7 +4948,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - On a downhill clip with a large correction, Cropping Ratio 0.75 gives a mean zoom of 1.40.
   - The smoothing follows a fast pan. The crowd clip has pans of more than one picture width in less than 0.5 s. At Smooth 0.25, its zoom stays 1.32.
   - The smoothing is local in time. The first 150 frames of the crowd clip get the same correction as the first 299 frames, except near the end.
-  - The record is section R14 of `fixtures/program/NOTES.md` in the test data.
+  - These cases are measured by script on the rally clip, at 1920 x 1080 and 1280 x 720. They fit the order correction, crop, transform.
+    - With Zoom, Position and Rotation, the picture is the transform of the stabilized picture, to 0.03 px. The other order is off by 32 px or more.
+    - A crop after Stabilize does not change the correction. The crop edges stay at the same place in each frame.
+    - The zoom of the stabilization does not scale the crop. The transform moves the crop with the picture.
+  - A speed of 50% after Stabilize: timeline frame 2k shows the stabilized source frame k.
+  - Stabilize after a speed of 50% moves the picture the same way, with a smaller zoom: 1.155, against 1.204.
+  - The records are sections R14 and M6 of `fixtures/program/NOTES.md` in the test data.
 - vidcut:
   - `picture.stabilize` analyzes the clip and stores the correction on the clip, with the values that it used.
     - It reads each frame of the file from the In to the Out of the clip.
@@ -4951,13 +4970,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Video tab of the Inspector has the Stabilization section: the switch, Reset, Mode, Camera Lock, Zoom, Cropping Ratio, Smooth, Strength and Stabilize.
     - Stabilize is grey while the correction has the values that the section shows. It is grey while a stabilization runs too.
     - Camera Lock greys out Cropping Ratio, Smooth and Strength.
-  - The correction moves the cropped picture, before its transform. Thus it works in the coordinates of the source, as on p. 295.
+  - The correction comes first, then the crop, then the transform, as measured.
+    - The correction moves the source under the crop. The crop keeps its place, and the zoom of the correction does not scale it.
+    - A trim, a split, a slip or a speed change keeps the correction of each frame of the file.
   - With Zoom on, one zoom for the whole clip keeps the black edges out of each frame.
   - Camera Lock holds the view of the first frame of the clip.
   - Only a clip of a video file takes a stabilization.
   - The viewer Tools have no Stabilization tool. The Color page has no Tracker palette.
   - An OpenTimelineIO file of vidcut keeps the stabilization in the vidcut metadata of the picture. Other editors read nothing of it.
-  - Not measured: the section on a generator, a title or a still; a stabilized clip with a transform, a crop or a speed change.
+  - Not measured: the section on a generator, a title or a still.
   - [design](design/analysis.md#stabilization) gives the method.
 
 ### 8.28 Qualifier (pp. 3238–3256, 3263, 3436; measured in Resolve Studio 21.2)
@@ -5068,7 +5089,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
 - **Mixer** (pp. 649–650):
-  - It has a channel strip for each track with sound: name, meter, fader in dB, mute and solo.
+  - It has a channel strip for each audio track: name, meter, fader in dB, mute and solo.
   - D27 has the law and the ticks of the fader.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
@@ -5446,6 +5467,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Ducking, Ripple Delete Silence and the meters follow the keyframes (D84). The keys are in D85.
 - **Ripple Delete Silence** (p. 773):
   - Clip > Audio Operations > Ripple Delete Silence works on the selected clips.
+  - vidcut: a selected picture clip gives the sound of its linked sound clips. Remove cuts each clip of the link group.
   - vidcut: it is also in the right-click menu of the clip and in Timeline Actions.
   - Settings: threshold (dB), pre-head, post-tail, minimum to trip.
   - vidcut adds Detect: Sound level or Speech.
@@ -5475,7 +5497,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It sets the volume of the selected clips so that their level reaches a target. It applies no dynamics.
   - Normalization Mode: several loudness standards, Sample Peak or True Peak.
   - Set Level: Relative treats the clips as one clip. Independent gives each clip its own change.
-  - vidcut: `clip.normalize`, in Audio Operations of the right-click menu, acts on the selected clips with sound.
+  - vidcut: `clip.normalize`, in Audio Operations of the right-click menu, acts on the selected clips with sound. A selected picture clip gives its linked sound clips.
     - Normalize in the header of the Inspector's Audio section opens the same window for the clips of the section.
     - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
     - A short message tells how many clips stopped at the volume limit or at the peak limit.
@@ -5512,18 +5534,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With a custom size, the picture fits into the rounded size with one draw.
     - Measured in Resolve Studio 21.2 with H.264 and H.265 on the CPU: each odd side goes up by one. This is so on a timeline and as a custom size.
     - 1279 x 719 gives 1280 x 720, and 853 x 481 gives 854 x 482. 1001 x 1001 gives 1002 x 1002, and 257 x 257 gives 258 x 258.
-    - Measured with 7 sizes in H.264 and H.265: the frame of an odd timeline fits into the even size with one factor. The frame stays centered.
-    - Measured: the factor is the smaller of the two ratios of the sides, even size to timeline size. This is so at Fill and at Fit.
-    - Measured: with an odd width only, or an odd height only, the factor is 1. A bar of half a pixel shows on each odd side.
-    - Measured: with both sides odd, the width fills. Bars show at the top and the bottom: 0.22 of a pixel at 1279 x 719, and 0.1 at 2001 x 1601.
-    - Measured: on a 1280 x 720 timeline, a custom size of 1279 x 720, 1280 x 719 or 1279 x 719 gives a full picture. No bar shows.
-    - Measured: an EXR keeps the odd size. The picture fits into that size, centered.
+    - Measured in Resolve Studio 21.2 in H.264 and H.265 at 7 sizes, from 853 x 481 to 2001 x 1601.
+    - Each edge is within 0.23 px of these rules, at Fill and at Fit:
+      - The factor for a timeline is the smaller of file width / timeline width and file height / timeline height. The picture stays centered.
+      - With one odd side, the factor is 1. The picture moves by half a pixel, and the edge rows or columns of that axis read 0.5 of their value.
+      - With two odd sides, the width fills in each measured size. The top and bottom rows read 0.78 at 1279 x 719, and 0.9 at 2001 x 1601.
+      - A custom size fits the timeline picture into the file size with one draw.
+      - On a 1280 x 720 timeline, a custom 1279 x 720, 1280 x 719 or 1279 x 719 gives the full picture, with no bar.
+      - A custom 2001 x 1600 of a 1280 x 720 timeline gives a picture of 2002 x 1126.13 in a file of 2002 x 1600.
+      - An OpenEXR file keeps the odd size. The picture fits into that size, centered.
     - One earlier run, with the barcode clip at 1279 x 719, showed a part-dark bottom row and no top bar. Its cause is not known.
     - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
     - Resolve Studio 21.1.2 does this with these four. Its DNxHR 444 keeps 1281 x 721.
-  - ProRes, DNxHR 444, VP9 and AV1 on the CPU keep an odd side.
+  - ProRes, DNxHR 444, VP9, AV1 on the CPU and OpenEXR keep an odd side. Resolve Studio 21.2 keeps it in OpenEXR too (measured).
   - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
   - A side of a custom size is from 256 to 32768.
     - Measured with the render settings of the scripting API in Resolve Studio 21.1.2. The Deliver page was not seen.
@@ -5974,8 +5999,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The row of each such action has a warning mark (p. 125). Its tooltip names the other actions.
     - A click on the mark selects that key on the on-screen keyboard. The Active Key list then shows all its actions (p. 125).
     - `keys.list` gives these keys in `conflicts`.
-    - A press of such a key does the first of these actions in the table. Not measured (case 28 of shortcuts-resolve-runs.md).
-    - The manual tells of a warning dialog on such a press, with the key and the names of the actions (p. 126).
+    - A press of such a key does none of these actions (measured, case 28 of shortcuts-resolve-runs.md).
+    - The manual tells of a warning dialog on such a press (p. 126). Resolve Studio 21.2 opens no dialog (measured, case 28).
+    - At the application level, vidcut names the key and its actions in the status line.
+    - At a panel level, such a key does its application action, as a key with no action there does. Not measured.
+    - In one measured pair, Resolve does Add Marker and not Mark In. vidcut does neither. The rule is not known ([todo](todo/shortcuts.md)).
   - A key works at one level: the application, or a panel (pp. 123–124). The keys of the panel that has the focus go first. A key with no action there does its application action.
   - The Media Pool has no level of its own. Its Remove Clips command is the Delete command of the application, with the same keys (measured).
   - A click in the Media tab gives the Media Pool the focus, and a click in another place takes the focus away.
@@ -6055,8 +6083,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
   - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
   - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
-  - The file of the Avid Media Composer preset gives `V` to Insert and `v` to Select Nearest Edit Point. The set gives V only to Smart Insert.
-    - An import of that file keeps V on Smart Insert and on Nearest Cut. What Resolve shows is not measured (case 28 g, [todo](todo/shortcuts.md)).
+  - The Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point, with a warning mark on both (measured, case 28 g).
+    - Its file writes `v` for the second. Resolve shows it as V.
+    - The set gives V to Smart Insert and to Nearest Cut. Thus V does nothing in this set, as in Resolve (measured).
   - The actions that have no command of Resolve keep their keys from the table, as the next rule tells.
   - A set lists only the actions whose keys are different from the table. The other actions have their keys from the table, less the keys that a listed action has. Thus a new action of a later version gets its key, if no listed action has that key (p. 122).
     - A set also lists each action that has a key of another listed action of its level. Thus both actions keep that key.
@@ -6179,11 +6208,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Keys that the Cut chapters do not give come from the Edit page.
   - §11 marks them with †.
 - **D14. J/L cuts at an edit point.**
-  - Between two touching clips with sound, a J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
-  - An edit that gives such a clip another neighbor with sound there resets the J/L cut to a straight cut.
-  - The edit also resets the other cut of the clip, if the clip would have no sound of its own.
-  - With a gap or a clip with no sound there, the `head` or `tail` stays. It gets shorter when it would overlap other sound.
-  - Reason: sound does not overlap on a track.
+  - A J/L cut (§8.7) is a roll of the edit between two sound clips on an audio track. The picture cut stays.
+  - With a gap on one side, the sound clip on the other side moves its edge alone. It stops at the nearest sound on the track.
+  - Reason: the clips on a track do not overlap.
 - **D15. Playhead after an edit function.**
   - After Smart Insert, Append, Overwrite, Ripple Overwrite, Close Up or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).
@@ -6215,6 +6242,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - On a J/L handle, they move the audio edit, and leave the picture cut (D36).
 - **D21. Following Track 1** (pp. 649, 727).
   - A clip on another track is attached to the Track 1 picture under its first frame.
+  - A clip that is linked to a Track 1 clip is attached to that clip instead. Thus the sound of a J/L cut moves with its picture.
   - It moves with that picture, split parts included.
   - When that Track 1 clip is deleted, the attached clip goes where Track 1 closed up.
   - A trim of the tail of that Track 1 clip past the attached clip deletes the attached clip (p. 727).
@@ -6243,6 +6271,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D24. Where Place On Top goes** (pp. 699–700).
   - It goes onto the video track above the highest track with clips in the incoming span. It makes that track if necessary.
   - It goes onto Track 1 only if no track has clips there (D10 applies).
+  - The sound of a picture on Vn goes on An, linked to it (p. 646). A second sound stream goes on the next audio track. Each sound clip writes over what is there.
   - Sound alone goes to the first audio track with room.
 - **D25. Moving clips between tracks.**
   - A move gives positions as they are before the move.
@@ -6452,13 +6481,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The timeline shows it red, and the viewer shows Media Offline for a clip on a video track.
     - An import warning names the clip.
     - An OTIO export writes a `Clip` with a `MissingReference` on its track.
-    - Clips with the same place and the same link group in the file stay in one link group.
+    - Clips with the same link group in the file stay in one link group.
     - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media.
-  - **The linked parts of a clip with no media or of a compound clip.** Each part is a clip on its track. The parts act together, as linked clips do in Resolve:
-    - Clips with no media are parts of one clip when they have the same link group, start, length, source start and speed.
-    - A picture and a sound of a compound clip are one clip when they have the same link group, start, length, source start and speed.
-      - The edit that makes a compound clip gives the two one link group.
-      - An import keeps the link groups of the file. In a file with no link groups, the two need the same sequence, start, length, source start and speed.
+  - **Linked clips.** Each part is a clip on its track. The clips of one link group act together, as linked clips do in Resolve:
+    - An edit of a clip with picture and sound gives the picture clip and its sound clips one link group.
+    - The edit that makes a compound clip gives its picture and its sound one link group.
+    - An import keeps the link groups of the file. In a file with no link groups, a sound clip links to the picture clip of the same media at the same place.
+      - The picture and the sound of a compound clip need the same sequence, start, length, source start and speed.
     - A request that names one part acts on each part: `edit.delete`, `edit.cut`, `edit.copy`, `edit.move`, `edit.replace`, `edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, `edit.split`, `edit.join`, `edit.change_duration` and `edit.change_speed`.
     - The part on V1 leads. The rules of V1 apply to it. The other parts move and change by the same amount.
     - An insert into such a clip on V1 splits each part at that frame.
@@ -6466,7 +6495,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move of a sound part to another audio track moves its picture to the new place on the picture's own track.
     - A part on a locked track refuses the edit.
     - An edit that writes on one track does not write on the other parts: `edit.overwrite`, `edit.ripple_overwrite`, `edit.place_on_top`, `edit.source_overwrite` and `edit.paste`.
-    - After such an edit the parts can differ in place or length. Then they are separate clips, and an export gives them no link group.
+    - After such an edit the parts can differ in place or length. They stay in their link group.
     - A timeline drag shows only the part under the pointer. The other parts move when the drag ends.
     - Resolve was not measured for a locked part, or for a move to another track.
 - **D41. Proxies** (the proxy chapters, pp. 207–218, are outside the Cut page).
@@ -7464,6 +7493,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Pitch and yaw work about the middle of the picture, in its own axes (D93).
     - The zoom works across and down in the picture's own axes, before the turn.
     - The rotation is counterclockwise.
+    - On pixels that are not square, the turn is not rigid. These facts are measured in Resolve Studio 21.2:
+      - The files have pixels of 4:3, 2:1, 9:8 and 10:9. The Rotations are 2, 10 and 30, and small values near the limit for a thin bar.
+      - With the pixel aspect ratio p and the Rotation θ, the picture turns by atan(tan θ / p).
+      - In its own axes, it scales by √(cos²θ + sin²θ / p²) across and by √(cos²θ + p² sin²θ) down. It stays rectangular.
+      - The marks fit this within 0.4 px over about 1000 px. At Rotation 2, the edge slopes are tan 2° / p.
+      - Thus a small Rotation on these files leaves corner gaps of W / 2 × θ / p and H / 2 × θ / p, with θ in radians.
+      - vidcut turns the shown picture by θ, with no change of shape ([todo](todo/picture-fit.md)).
+      - Not measured: Zoom, Pitch and Yaw with a Rotation on these files, and a file with pixels that are not square and a rotation.
     - The crop cuts the source picture, and what is left stays where it was.
     - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
       - The number of pixels that a side loses is its crop in source pixels, rounded down.
@@ -7471,7 +7508,25 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - On a 3840 x 2160 picture, Crop Left 1.5 is 4.5 source pixels. It cuts 4, so the edge is at x = 1.333.
       - On a 1000 x 562 picture, Crop Top 1 is 0.78 of a source pixel, and it cuts nothing.
       - The rule is the same with Zoom, Rotation and Softness.
-      - A crop with keyframes, pixels that are not square and a rotation in the file were not measured. vidcut uses the same rule, in the pixels of the upright file.
+      - Pixels that are not square and a rotation in the file, measured in Resolve Studio 21.2 at 1280 x 720 and 1920 x 1080:
+        - The cut is floor(crop / f) source pixels, as for square pixels. f is the factor of the fit, with no pixel aspect ratio in it.
+        - Files of 2:1 and 4:3 have f = 1 in 1280 x 720. Crop Left and Crop Right of 1.0, 2.0 and 3.0 cut 1, 2 and 3 source pixels.
+        - A source pixel of the 2:1 file is 2 timeline pixels wide. Thus its Crop Left 3.0 moves the edge by 6 timeline pixels.
+        - A 999 x 800 file with pixels of 10:9 has f = 1.35 in 1920 x 1080. Crop Left and Crop Right of 1.4 and 2.8 cut 1 and 2 source pixels.
+        - A 1000 x 800 file with pixels of 9:8 has f = 0.9 in 1280 x 720. Crop Left 3.0 cuts 3 source pixels. In 1920 x 1080, f = 1.35, and it cuts 2.
+        - A 1280 x 720 file with a rotation of 90 has f = 0.5625 in 1280 x 720. Crop Left 0.5, 1.0, 1.5 and 3.0 cut 0, 1, 2 and 5 source pixels.
+        - On a file with a rotation, some crops cut another side of the upright picture ([gotchas](gotchas.md#resolves-renders)).
+      - vidcut uses the rule in the pixels of the upright file. It cuts the side that each crop names, on the upright picture.
+        - The Inspector and the keyframe editor count a crop in source pixels × f, with no pixel aspect ratio.
+      - A crop with keyframes, measured in Resolve Studio 21.2. Crop Left has keys of 0 at frame 2 and 10 at frame 20, set in the Inspector:
+        - At each frame, the cut is floor(v / f) source pixels. v is the value of the crop, linear between the keys.
+        - This fits all 24 frames on 4 files, in 96 renders:
+          - a square file in 1280 x 720 (f = 1) and in 1920 x 1080 (f = 1.5);
+          - a 9:8 file in 1280 x 720 (f = 0.9);
+          - a file with a rotation of 90 in 1280 x 720 (f = 0.5625).
+        - The cut rounds down. On the file with a rotation of 90, frame 3 has v / f = 0.988 and cuts 0. Frame 4 has 1.975 and cuts 1.
+        - A curve with an ease does not fit. At frame 4 of the square file in 1280 x 720, an ease gives a cut of 0, and the render cuts 1.
+      - vidcut reads the crop on each frame, and cuts whole source pixels in the same way.
       - The crop of a compound clip (measured in Resolve Studio 21.2, in timelines 1280, 1920 and 3840 wide):
         - It can hold one clip with no change of place, size or crop. Then its crop is a crop of that clip, in that clip's source pixels.
         - A 960 x 720 picture in a 1280 x 720 timeline starts at x = 160. Crop Left 10 on the compound clip moves that edge to x = 167. Crop Left 40 moves it to x = 190.
@@ -7798,8 +7853,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `track.set` refuses a value outside its range, and changes no value (X69).
     - The project file keeps only the values that are not the usual ones.
   - **Sources:**
-    - A new ducking has every other track with sound as its sources (X69).
-    - A source is a video or audio track. Only its sound counts. A track cannot duck under itself.
+    - A new ducking has every other audio track as its sources (X69).
+    - A source is an audio track. A track cannot duck under itself.
     - When a track is removed, it leaves the sources. The other sources follow their new numbers.
   - Each change is one undo step.
   - **Mixer:**
@@ -7820,6 +7875,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
   - The line is in the sound part of the clip, 2 px in from its top and its bottom.
   - It shows only where the sound part is 20 px high or more.
+  - It is on the clips of an audio row. The band of a main track has no line, as in Resolve (X73). The Inspector sets the volume of a linked sound clip.
   - **Scale:**
     - −100 dB is at the bottom, and +30 dB is at the top.
     - 0 dB is at 10/13 of the height.
@@ -7830,7 +7886,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The two sides have the same slope at 0 dB. Thus a drag across 0 dB keeps its speed.
   - **Drag:**
     - Within 4 px of the line, the pointer becomes an up-down arrow.
-    - The trim handles at the ends of a clip, and at the sound edit of a J or L cut, come before the line.
+    - The trim handles at the ends of a clip come before the line.
     - The line comes before the slip handle of the clip.
     - A drag moves the line as far as the pointer moves. With Shift, it moves the line a tenth as far.
     - Shift can go on or off during the drag. The line does not jump.
@@ -7851,7 +7907,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D79. The In and Out fields against other cues** (§8.12; deviation X43).
   - Measured in Resolve Studio 21.1.2: an In typed inside the cue before, or an Out typed inside the cue after, changes nothing. Both cues stay.
   - vidcut does the same. Its field shows the stored time at once, and Resolve's field shows it when the cue is selected again. The result is the same.
-  - `subtitles.set` does not refuse such a value. A script in Resolve is not measured.
+  - `subtitles.set` does not refuse such a value.
+  - Measured in Resolve Studio 21.2: the scripting API cannot set the In or the Out of a cue. A script move of a cue overwrites the other cues (X43).
   - A new In or Out overwrites only the part that it newly covers (X43).
   - Measured in Resolve Studio 21.1.2: a track has no overlaps, so a field cannot put a cue inside a longer cue.
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
@@ -7891,7 +7948,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Range** (measured in Resolve Studio 21.1.2):
     - A loudness target is from −30 to 0 LUFS. The export's loudness setting takes the same range.
     - A peak target and a peak limit are from −20 to 0 dB.
-  - **Measured part:** the sound that the clip plays, with its J or L cut and at its speed.
+  - **Measured part:** the sound that the sound clip plays, at its speed.
     - The clip is measured alone, without its volume, mute and Voice Isolation, and without transitions.
     - Its track's volume, mute, solo, Voice Isolation and ducking do not apply.
     - Thus the mixer does not change the result. A muted clip is measured too.
@@ -8416,8 +8473,15 @@ These facts are measured in Resolve Studio 21.1.2, in a default project that sca
   - 1000 x 562: the factor is 1.28 and the height is 719.36. Each bar is 0.32 of a pixel, and the top and bottom rows read 0.68 of their value.
   - 999 x 800: the factor is 0.9 and the width is 899.1. Each bar is 190.45 pixels, and the edge columns read 0.55 of their value.
 - 1920 x 1080 in a timeline of 1921 x 1081 has the factor 1921 / 1920 and a bar of 0.21875 of a pixel. The edge rows read a part of their value.
-- A picture with pixels that are not square, or with a rotation in its file, was not measured.
-  - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels.
+- Pixels that are not square and a rotation in the file, measured in Resolve Studio 21.2 at 1280 x 720 and 1920 x 1080:
+  - The fit uses the display size. 1000 x 800 with pixels of 9:8 shows as 1125 x 800. In 1280 x 720 the factor is 0.9, and the picture is 1012.5 x 720.
+  - Its edge columns read 0.25 of their value. In 1920 x 1080 it is 1518.75 wide, and its right column reads 0.375.
+  - 999 x 800 with pixels of 10:9 shows as 1110 x 800. In 1920 x 1080 it is 1498.5 wide.
+  - Files with pixels of 4:3 and 2:1 that show as 1280 x 720 fill the frame. Each part of the picture is at its place in the display size.
+  - A rotation of 90, 180 or 270 in the `tkhd` matrix of the file turns the picture clockwise by that angle. The fit uses the upright size.
+  - 1280 x 720 with a rotation of 90 is 405 x 720 in 1280 x 720, with edge columns of 0.5. In 1920 x 1080, it is 607.5 x 1080.
+  - Thus these files fit by the rule above, with no rounding of size or place. The rule takes the display size of the upright picture.
+  - vidcut fits each file in this way.
 
 ### Input scaling (pp. 292–293)
 
@@ -8468,10 +8532,33 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - Position 0.15 across and down: the distance is 0.212, and the bars show.
   - A Zoom that leaves bars of 0.17 and 0.0956: the distance is 0.195, and no bar shows.
   - A Zoom that leaves bars of 0.18 and 0.10125: the distance is 0.2065, and the bars show.
-  - Rotation 0.016: no bar. Rotation 0.02: the bars show. The rule gives the change at 0.0179. That value was not measured.
+  - Rotation 0.016: no bar. Rotation 0.02: the bars show.
   - A part of the picture past the frame does not count. A left bar of 0.15 on an enlarged picture shows no bar.
-  - The rounding of an odd frame size for an encoder does not use the limit. At 2001 x 1601 in H.264 and H.265, bars of 0.1 show.
-- These cases were not measured:
-  - Softness: vidcut does not use the limit on a picture with Softness.
-  - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
-  - A compound clip: vidcut uses the rule on each level by itself.
+- These facts are measured in Resolve Studio 21.2:
+  - The rule gives the change of Rotation at 0.0179 in 1280 x 720. Rotation 0.0179 shows no bar, and 0.0181 shows the bars at their exact widths.
+  - The rule gives the change at 0.01194 in 1920 x 1080. Rotation 0.0119 shows no bar, and 0.0120 shows the bars.
+  - The Zoom on two axes fits the rule in 12 cases, in 1280 x 720 and 1920 x 1080. With bars bx and by, the distance is √(bx² + by²).
+    - Zoom X 0.9997 and Zoom Y 0.99985 in 1280 x 720 leave bars of 0.192 and 0.054. The distance is 0.1994, and no bar shows.
+    - Zoom X 0.9997 and Zoom Y 0.9998 leave bars of 0.192 and 0.072. The distance is 0.2051, and the bars show.
+  - A crop on any side stops the limit, also a crop that cuts no source pixel. Each bar then shows at its exact width.
+    - Measured with each of the four sides at 0.3 or 0.5, on the square and 4:3 files, in 1280 x 720 and 1920 x 1080.
+    - Rotation 0.016 with Crop Left 0.5 on the square file in 1280 x 720 shows bars of 0.1787 and 0.1003.
+  - Crop Softness of 0.5 and 2 does not stop the limit. Crop Softness of −0.5 stops it. This is measured on the square and the 4:3 files.
+  - A lean stops the limit. On the square file in 1280 x 720, Zoom X 0.9997 leaves bars of 0.192. With Pitch 0.0003 or Yaw 0.0003, they show.
+  - Pitch and Yaw, on the square file. The values are those of the two corner pixels on the side that the lean moves away:
+    - Pitch in 1280 x 720: 1 at 0.0005 and 0.0007, 0.925 at 0.0009, 0.797 at 0.0011, 0.669 at 0.0013 and 0.173 at 0.002.
+    - Pitch in 1920 x 1080: 0.829 at 0.0007, 0.637 at 0.0009 and 0.404 at 0.0011. The top middle reads 0.907 at 0.0011.
+    - Yaw in 1280 x 720 gives the same values as Pitch, at the two right corners. A 2:1 file gives the same values as the square file.
+    - The top edge is at y = 3.064 at Pitch 0.01, and at y = 16.643 at Pitch 0.05. A projective lean about the middle gives 3.564 and 17.143.
+    - These cases fit one reading. The gap that a lean opens is 0.5 px less than the projective lean gives, and not less than 0.
+    - Other bars add to that gap. With Zoom X 0.9997 and Pitch 0.0003, the corners read 0.808, as the bars of the Zoom alone.
+  - The fit into the even size of an encoder does not use the limit. At Fill, timelines of 2001 x 1601, 3001 x 2001 and 4001 x 3001 give bars of 0.1, 0.167 and 0.125.
+  - A compound clip, in 9 cases with Zoom X on the clip inside and on the compound clip:
+    - The clip inside keeps the limit for its own bars.
+    - With Zoom X 1 inside, the compound clip keeps the limit too.
+    - With another Zoom X inside, the compound clip shows its bar at its exact width. The 9 cases give no general rule.
+- vidcut:
+  - A crop on any side and Crop Softness below 0 stop the limit, as measured. A Softness below 0 that gives no fade was not measured.
+  - It uses the same rule on the corners of a leaned picture, with the gaps of the projective lean ([todo](todo/picture-fit.md)).
+  - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
+  - It does not use the limit in the fit for an encoder.
