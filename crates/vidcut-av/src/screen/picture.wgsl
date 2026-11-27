@@ -14,7 +14,7 @@ struct Params {
     part: vec4<f32>,
     site: vec4<f32>,
     shrunk: vec4<f32>,
-    levels: array<vec4<f32>, 7u>,
+    levels: array<vec4<f32>, 8u>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -295,7 +295,7 @@ fn rgb(s: vec3<f32>) -> vec3<f32> {
     return c;
 }
 
-fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
+fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>, outset: f32) -> vec3<f32> {
     if s.x >= s.z || s.y >= s.w {
         return vec3<f32>(0.0);
     }
@@ -320,7 +320,7 @@ fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
         (sizes.y + abs(s.y)) / gv,
         (sizes.y + abs(s.w)) / gv,
     );
-    let raw = edges + 0.5;
+    let raw = edges + 0.5 + outset;
     let e = clamp(select(raw, vec4<f32>(0.0), raw <= slack), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
 }
@@ -370,11 +370,12 @@ fn sample_shown(px: vec2<f32>) -> vec4<f32> {
     }
     let row0 = p.levels[0];
     let row1 = p.levels[1];
-    var edge = cut(row0, row1, p.levels[2], px);
+    let outset = p.levels[7].x;
+    var edge = cut(row0, row1, p.levels[2], px, outset);
     var at = edge.xy;
     if p.levels[4].w > 0.5 {
-        let area = cut(p.levels[5], p.levels[6], p.levels[2], px);
-        let source = cut(row0, row1, vec4<f32>(0.0, 0.0, 1.0, 1.0), px);
+        let area = cut(p.levels[5], p.levels[6], p.levels[2], px, outset);
+        let source = cut(row0, row1, vec4<f32>(0.0, 0.0, 1.0, 1.0), px, outset);
         edge = vec3<f32>(source.xy, area.z * source.z);
         at = area.xy;
     }

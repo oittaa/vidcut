@@ -4239,7 +4239,7 @@ fn shader() -> &'static str {
     concat!(include_str!("transfer.wgsl"), include_str!("picture.wgsl"))
 }
 
-const PER_LEVEL: usize = 7;
+const PER_LEVEL: usize = 8;
 
 const PARAMS: usize = (15 + PER_LEVEL) * 16;
 
@@ -4328,6 +4328,7 @@ fn level_floats(level: Option<&Level>) -> Vec<f64> {
         floats.extend([l.soft.reach[0], l.soft.reach[1], l.opacity, steady]);
         let [a, b, e, c, d, f, g, h] = *l.area();
         floats.extend([a, b, e, g, c, d, f, h]);
+        floats.extend([l.outset, 0.0, 0.0, 0.0]);
     }
     floats.resize(4 * PER_LEVEL, 0.0);
     floats
