@@ -167,7 +167,9 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 ## The open project
 
 - `OpenProject` keeps `Store`, `Editor`, `FileId`, and the SQLite `data_version` from the last read or write.
-- `OpenProject::reload` and `OpenProject::refresh` read again through `Store::reload_if_changed` when the file inode or `data_version` changes.
+- `OpenProject::reload` and `OpenProject::refresh` read again through `Store::reload_if_changed` when `FileId` or `data_version` changes.
+  - On Unix, `FileId` is the device and the inode of the file. Thus a file that another file replaces reads again.
+  - On Windows, `FileId` only tells that the file exists.
 - `OpenProject::apply` runs mutations inside `Store::mutate_live`. History compaction (`Store::compact`) runs on `vidcut-history`.
 - A `notify` watcher on the folder watches the project file, `-wal`, and `-journal`, and sends `Msg::FileChanged`.
 - A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::checkpoint`.

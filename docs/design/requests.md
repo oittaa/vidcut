@@ -80,7 +80,7 @@ The registry and the client:
 
 - `Handle::call`, `Handle::request` and `Handle::request_answered` put a `Msg::Request` on the channel of the `vidcut-session` thread.
 - `Live::request` checks the expected project and `if_rev`. `Live::dispatch` answers at once, or schedules the work.
-- Edits go through `Live::edit` to `OpenProject::apply` and `Store::mutate_live`. SQLite checks `data_version`, reloads if changed, applies the edit, and commits before replying.
+- Edits go through `Live::edit` to `OpenProject::apply` and `Store::mutate_live`. `Store::mutate_live` checks `data_version`, reloads if it changed, applies the edit, and commits before replying.
 - The live core publishes the new `Snapshot` before the replies go. Thus, when a client hears back, the GUI shows the change.
 
 ```mermaid
