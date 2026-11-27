@@ -1084,9 +1084,7 @@ fn sync_project(
     let meta_changed = match old {
         None => true,
         Some(old) => {
-            old.rev != new.rev
-                || old.edited != new.edited
-                || old.settings != new.settings
+            old.settings != new.settings
                 || old.recent != new.recent
                 || old.compound_path != new.compound_path
                 || old.tape_marks != new.tape_marks
@@ -1114,7 +1112,13 @@ fn sync_project(
         let data = serde_json::to_string(&row).map_err(json_err)?;
         tx.execute(
             "INSERT OR REPLACE INTO meta (id, rev, edited, data) VALUES (1, ?1, ?2, ?3)",
-            params![new.rev as i64, new.edited.map(|e| e as i64), data],
+            params![new.rev, new.edited, data],
+        )
+        .map_err(|e| Error::internal(e.to_string()))?;
+    } else if old.is_some_and(|old| (old.rev, old.edited) != (new.rev, new.edited)) {
+        tx.execute(
+            "UPDATE meta SET rev = ?1, edited = ?2 WHERE id = 1",
+            params![new.rev, new.edited],
         )
         .map_err(|e| Error::internal(e.to_string()))?;
     }

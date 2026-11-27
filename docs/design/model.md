@@ -466,6 +466,7 @@ Ranges and resolution:
 - Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.
 - `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
 - `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
+  - When only `rev` and `edited` change, it updates those two columns of `meta`, and does not write its `data` again.
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
   - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut`, `color_viewer_lut` and `scopes_lut` of the settings.
   - `history_base` and `history_events` store those project-folder paths relative too, so undo and external diffs stay valid after moving the folder.
