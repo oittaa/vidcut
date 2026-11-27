@@ -80,7 +80,7 @@ The registry and the client:
 
 - `Handle::call`, `Handle::request` and `Handle::request_answered` put a `Msg::Request` on the channel of the `vidcut-session` thread.
 - `Live::request` checks the expected project and `if_rev`. `Live::dispatch` answers at once, or schedules the work.
-- Edits go through `Live::edit` to `OpenProject::apply` and `Store::mutate_live`. SQLite checks `data_version`, reloads if changed, applies the edit, and commits before replying.
+- Edits go through `Live::edit` to `OpenProject::apply` and `Store::mutate_live`. `Store::mutate_live` checks `data_version`, reloads if it changed, applies the edit, and commits before replying.
 - The live core publishes the new `Snapshot` before the replies go. Thus, when a client hears back, the GUI shows the change.
 
 ```mermaid
@@ -147,7 +147,7 @@ Changes:
 The history tables:
 
 - The undo history lives inside `.vidcut` (`HistoryDb`), in `history_meta`, `history_base` and `history_events` tables.
-- Each save appends `Moved` events with zlib-compressed `Change` deltas. `Editor` caches the last `HISTORY_ENTRIES_KEPT` read entries in an `Lru`.
+- Each save appends `Moved` events with zlib-compressed `Change` deltas. `Editor` keeps the entries that it reads and saves in a `ByBytes`, up to `HISTORY_ENTRIES_BYTES` of their JSON.
 - SQLite triggers set `external_dirty` when another writer changes an entity table. Then `Store::load` builds the difference through `Editor::record_external`, as one step by `file`.
 - When a GUI cannot write the project file, the edit stays in memory (`OpenProject::apply`).
   - The request succeeds, with a warning. Its result has `saved: false`.

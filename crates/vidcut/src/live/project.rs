@@ -13,7 +13,7 @@ pub struct OpenProject {
     pub store: Store,
     pub editor: Editor,
     file_id: Option<FileId>,
-    data_version: i64,
+    data_version: Option<i64>,
     pub unsaved: Option<String>,
     pub save_failed: bool,
     opened: u64,
@@ -38,10 +38,10 @@ impl OpenProject {
         }
         let store = Store::open(path)?;
         let opened = crate::when::now_ms();
-        let mut editor = store.load()?;
+        let mut file_id = None;
+        let mut data_version = None;
+        let mut editor = store.load_live(&mut file_id, &mut data_version)?;
         editor.opened_at(opened);
-        let file_id = store.file_id();
-        let data_version = store.data_version()?;
         let watcher = watch_project(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,
@@ -134,7 +134,7 @@ impl OpenProject {
     pub fn close(&mut self) {
         self.save_left();
         self.editor.close_db();
-        self.store.checkpoint();
+        self.store.close();
     }
 }
 
