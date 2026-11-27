@@ -15,8 +15,8 @@ flowchart TD
   client -- "one JSON-RPC line" --> server["ipc::server<br>vidcut-ipc-conn"]
   server -- "Handle::call" --> core["Live::request<br>vidcut-session"]
   gui["GUI window<br>Workspace::send"] -- "Msg::Request" --> core
-  headless -- "mutation" --> transact["Store::transact<br>lock, load, save"]
-  core -- "Live::edit" --> open["OpenProject::apply<br>lock, refresh, save"]
+  headless -- "mutation" --> transact["Store::transact<br>load, edit, save"]
+  core -- "Live::edit" --> open["OpenProject::apply<br>refresh, edit, save"]
   transact --> editor["Editor::apply"]
   headless -- "query" --> editor
   open --> editor
@@ -71,16 +71,16 @@ The registry and the client:
 ## Headless
 
 - `session::run_with` refuses live requests, and answers projectless requests itself. For other requests, it opens the `Store` of the project.
-- A mutation runs in `Store::transact`: take the lock (`Store::lock`), load the project and its history, `Editor::apply`, and save if the revision moved.
-- A query needs no lock.
-- `proxy.generate` (spec D41), the transcriptions and the re-timings first do their work on a copy, outside the lock (`work_first`). Inside the lock, the edit finds the work done.
+- A mutation runs in `Store::transact`: begin one SQLite `BEGIN IMMEDIATE` write transaction, load, call `Editor::apply`, and commit if the state moved.
+- A query needs no write transaction.
+- `proxy.generate` (spec D41), the transcriptions and the re-timings first do their work on a copy, outside the write transaction (`work_first`). Inside it, the edit finds the work done.
   - The transcriptions are `subtitles.transcribe`, `media.transcribe` and `analyze.words`. The re-timings are `subtitles.retime` and `subtitles.time_words`.
 
 ## Live
 
 - `Handle::call`, `Handle::request` and `Handle::request_answered` put a `Msg::Request` on the channel of the `vidcut-session` thread.
 - `Live::request` checks the expected project and `if_rev`. `Live::dispatch` answers at once, or schedules the work.
-- Edits go through `Live::edit` to `OpenProject::apply`. It takes the lock of the headless runs, and reads the file again if it changed. Then it applies the edit, and saves before it answers.
+- Edits go through `Live::edit` to `OpenProject::apply` and `Store::mutate_live`. SQLite checks `data_version`, reloads if changed, applies the edit, and commits before replying.
 - The live core publishes the new `Snapshot` before the replies go. Thus, when a client hears back, the GUI shows the change.
 
 ```mermaid
@@ -88,7 +88,7 @@ sequenceDiagram
   participant T as vidcut edit split (terminal)
   participant C as vidcut-ipc-conn
   participant S as vidcut-session
-  participant F as .vidcut file and history
+  participant F as .vidcut SQLite file
   participant U as main thread (GUI)
   T->>T: Cli::action, Envelope
   T->>T: ipc::route finds the GUI with the project
@@ -96,15 +96,15 @@ sequenceDiagram
   C->>S: Handle::call, Msg::Request with a reply channel
   S->>S: Live::request checks project and if_rev
   S->>S: Live::dispatch, Live::edit
-  S->>F: OpenProject::apply takes Store::lock, refreshes
+  S->>F: OpenProject::apply runs Store::mutate_live
   S->>S: Editor::apply, mutate, ops::split
-  S->>F: Store::save writes history lines, then the project
+  S->>F: Store::save writes dirty rows and history_events
   S->>S: project_changed, Live::finish logs it
   S->>U: Live::publish new Snapshot, request repaint
   S->>C: ReplyEvent::Done(Response)
   C->>T: JSON-RPC result with rev, changes, via
   U->>U: Workspace::ui reads Handle::snapshot
-  F-->>S: watcher sends Msg::FileChanged, same text, no change
+  F-->>S: watcher sends Msg::FileChanged, same data_version, no change
 ```
 
 ## Requests that only read
@@ -144,20 +144,16 @@ Changes:
 - A `Change` is a tree of what differs: replaced values (`Set`), object fields (`Fields`) and lists of things with ids (`Items`). Thus a step costs what it changed.
 - Undo applies a change backward, and makes a new revision. Revisions only grow.
 
-The history file:
+The history tables:
 
-- The history is a `.jsonl` file in the `history` folder of the state dir. A digest of the path of the project names it (`HistoryFile`).
-- Each save appends lines. They end with a hash of the project text that the save wrote.
-- On load (`Store::load_text`), a project file that does not match that hash was changed by something else. Then `Editor::record_external` makes the difference from the last saved state one undoable step, by `file`.
+- The undo history lives inside `.vidcut` (`HistoryDb`), in `history_meta` and `history_events` tables.
+- Each save appends `Moved` events with zlib-compressed `Change` deltas. `Editor` caches the last `HISTORY_ENTRIES_KEPT` read entries in an `Lru`.
+- SQLite triggers set `external_dirty` when another writer changes an entity table. Then `Store::load` builds the difference through `Editor::record_external`, as one step by `file`.
 - When a GUI cannot write the project file, the edit stays in memory (`OpenProject::apply`).
   - The request succeeds, with a warning. Its result has `saved: false`.
-  - The next edit writes the file again. A quit and the open of another project do so too (`OpenProject::save_left`), if no other program changed the file.
-  - If no later write succeeds, the project loads without that edit. One undo brings it back, because the history has the edit.
+  - The next edit writes again. Closing the project does so too (`OpenProject::save_left`), if no other program changed the file.
   - Without a GUI, the request fails. The CLI process keeps nothing in memory.
-- vidcut never writes over a history file that it cannot read. Examples: `HistoryFile::read_tail` fails, or the last saved project cannot be rebuilt.
-  - Then the editor keeps the steps of the session in memory and tells why (`Editor::history_trouble`: a GUI notice, the warnings of `history.get`).
-  - It appends these steps when the file reads again where it left off (`Store::save`, `Store::recover`).
-- A GUI sees such writes through its file watcher (`Msg::FileChanged`, `OpenProject::reload`).
+- A GUI sees external commits through its watcher on the database and WAL files (`Msg::FileChanged`, `OpenProject::reload`).
 - [spec §8.10](../spec.md#810-undo-pp-651652) tells the behavior.
 
 Steps:
@@ -169,31 +165,31 @@ Steps:
   - the clips and frames that it changed (`steps::places`, from the project before and after)
   - the commands of an `apply`, and the request that made it (`Call`: its method and params)
 - The CLI and `mcp` put the `Client` on the `Envelope` (the `client` key of a JSON-RPC request). A GUI gives its own `Client`, and the `Client` of its IPC callers, in `Live::request`.
-- `Editor::history_steps` reads the steps without their changes (`HistoryFile::steps_now`, through one handle).
-- A `StepsCache` keeps what it read. Thus a GUI reads only what a save appended. After a compaction, it reads the whole file again.
+- `Editor::history_steps` reads step metadata without `Change` deltas (`HistoryDb::steps_now`).
+- `StepsCache` tracks `generation` and the last sequence number. Thus a GUI reads only new events until compaction.
 - `history.get` lists the steps, with the runs that one client made in a row (`steps::listing`, `steps::groups`). `history.go` undoes or redoes to a step, as one revision.
 
 The tree of versions:
 
-- The history is a tree. Each saved step gets an id, and `Tail` keeps the next id. When the tail has no next id, a save takes the one after the largest id in the file.
-- A step can go where steps can still be redone. Then it moves those steps into a `Branch` that hangs after its place (`Tree::place_at`). Thus the reader of the file rebuilds the versions that it already holds.
+- The history is a tree. `history_meta` keeps the next step id, and each saved step gets one.
+- A step can go where steps can still be redone. Then it moves those steps into a `Branch` that hangs after its place (`Tree::place_at`). Thus the reader rebuilds the versions that the database holds.
 - `history.restore` undoes or redoes to the place where a version branched. Then it writes the steps of the version again under their own ids, stamped with the time of the restore.
   - When the reader sees the first id of a version come back, it takes that version out.
   - The steps that the restore replaces become a version.
   - A version inside another version comes back with the versions that hold it, outermost first, in the same revision (`Editor::chain`, `editor::climb`).
 - When the user hovers over the step of a version, the timeline draws the project as it was then (`PreviewAt`, `Past::version_at`).
 
-Compaction (`HistoryFile::compact`):
+Compaction (`HistoryDb::compact`):
 
 - It leaves the steps and versions under the limit, with room. Why: the next steps do not compact again at once.
 - The versions get a small share of the limit: named versions first, then the newest. The versions that hang before the oldest kept step go.
-- It gives no step an id, and carries the next id over.
+- It increments `generation` and removes unreferenced `blobs`. It carries the next step id over.
 - It drops the names of the steps that it drops. When the start moves, it also drops the name of the start.
 
 Names:
 
-- A name is a `Mark` line on the id of a step (`history.mark`). It is saved without a new revision (`Editor::unsaved`).
-- The GUI watches the history file. Thus a name given elsewhere shows at once.
+- A name is a `Mark` event on the id of a step (`history.mark`). It is saved without a new revision (`Editor::unsaved`).
+- The GUI watches `.vidcut` and its WAL. Thus a name given elsewhere shows at once.
 
 Revert:
 
@@ -221,10 +217,10 @@ The History panel (`HistoryUi`):
 - An undo, redo or `history.go` from the GUI publishes a `Flash` of what it moved through.
 - [spec §8.10](../spec.md#810-undo-pp-651652) tells the behavior.
 
-**Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at the same time.
+**Why** SQLite transactions, the revision and the reload: the CLI, agents and the GUI edit one file at the same time.
 
-- The lock orders the writers.
-- The file always holds the latest project.
+- `BEGIN IMMEDIATE` write transactions order the writers.
+- The database always holds the latest project.
 - `if_rev` refuses an edit to a project that changed after the client read it.
 
 ## Code

@@ -1352,8 +1352,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Resolve Studio 20.3 and later have named timeline backups, as copies beside the project.
 - A new change discards the steps that could be redone. vidcut keeps them as a version (vidcut's versions, below).
 - Details: D55.
-- **vidcut's history file:**
-  - The history is a file in the state folder. Thus it stays after a restart and between separate CLI runs.
+- **vidcut's undo history:**
+  - The history lives inside the `.vidcut` file. Thus it stays after a restart, between CLI runs, and when the file moves.
   - It keeps up to 131,072 steps ([design/requests.md](design/requests.md#undo-history)).
 - **vidcut's step labels:**
   - A step tells what it did and by how much. It gives the place as a timecode and a track.

@@ -38,7 +38,7 @@ flowchart LR
   GUI["GUI window"] -->|"Msg::Request"| live
   headless --> editor["Editor::apply"]
   live --> editor
-  editor --> file[".vidcut file<br>and undo history"]
+  editor --> file[".vidcut SQLite file<br>project and history"]
   live -->|"RenderPlan"| player["player engine"]
   player --> viewer["viewer thread<br>wgpu"]
   headless -->|"export, analyze"| media["vidcut-av"]
@@ -47,7 +47,7 @@ flowchart LR
 
 - A **request** is one `Request` value: a method such as `edit.split` and its params, in an `Envelope` ([requests](requests.md)).
   - The JSON schema of the request type generates the CLI, the MCP tools and `vidcut schema`. The GUI sends the same requests.
-- With no GUI open on the project, a command runs **headless**: it locks the `.vidcut` file, loads it, applies the request and saves.
+- With no GUI open on the project, a command runs **headless**. It opens the `.vidcut` database, runs the request in one write transaction, and saves.
 - With a GUI open, the command goes to that GUI over its socket, and runs in its **live core** ([live](live.md)).
 - The **editor** (`Editor`) applies edits to the `Project`, records each as a `Change` for undo, and answers queries ([model](model.md)).
 - To play or export, vidcut flattens the project into a **render plan** (`RenderPlan`): pieces of sources on lanes, frame by frame.
