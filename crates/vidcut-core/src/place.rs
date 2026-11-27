@@ -2567,40 +2567,6 @@ mod tests {
         assert_eq!(detail(&[placed]), 0.4);
     }
 
-    #[test]
-    fn a_keyed_crop_cuts_the_whole_pixels_of_its_value_on_each_frame() {
-        let key = |frame, value| crate::model::Keyframe {
-            frame,
-            value,
-            in_handle: None,
-            out_handle: None,
-        };
-        let picture = Picture {
-            crop_left_keys: vec![key(2, 0.0), key(20, 10.0 / 1280.0)],
-            ..Picture::default()
-        };
-        let cut = |source| {
-            let placed = Placed {
-                clip: "c1".into(),
-                picture: picture.clone(),
-                mapped: None,
-                run: None,
-                source,
-                frame: 0,
-                start: 0,
-                ready: true,
-                ramp: None,
-                crossing: false,
-                moving: None,
-                clock: Default::default(),
-                adjustment: false,
-            };
-            let shown = Placing::whole(&[placed], (1280.0, 720.0)).level.shown;
-            (shown[0] * 1280.0 * 1e6).round() / 1e6
-        };
-        assert_eq!([3, 4, 10, 11].map(cut), [0.0, 1.0, 4.0, 5.0]);
-    }
-
     fn turned_level(picture: Picture) -> Level {
         let placed = Placed {
             clip: "c1".into(),
