@@ -323,7 +323,7 @@ pub fn default_length(p: &Project) -> i64 {
     p.fps().secs_to_frames(DEFAULT_SECS).max(1)
 }
 
-pub fn faded(opacity: Option<f64>) -> Result<Option<Picture>> {
+pub fn faded(opacity: Option<f64>) -> Result<Option<crate::shared::Shared<Picture>>> {
     super::picture::checked(&Picture {
         opacity,
         ..Picture::default()
@@ -593,7 +593,7 @@ fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) 
     if let Some(l) = &change.look {
         let picture = Picture {
             opacity: l.opacity,
-            ..c.picture.clone().unwrap_or_default()
+            ..c.picture.as_deref().cloned().unwrap_or_default()
         };
         c.picture = super::picture::checked(&picture)?;
     }

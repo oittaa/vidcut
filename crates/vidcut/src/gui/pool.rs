@@ -2605,7 +2605,8 @@ mod tests {
             media("m1", "Beach", ""),
             media("m2", "Beach walk", "Day 1/Noon"),
             media("m3", "Forest", "Day 1"),
-        ];
+        ]
+        .into();
         p
     }
 

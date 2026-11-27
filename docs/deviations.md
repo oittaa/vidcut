@@ -17,12 +17,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Media that move go offline until the user relinks them (pp. 668–669).
   - Relink Selected Clips matches clips to files by file name and timecode (p. 669).
 - **vidcut:**
-  - A project is one `.vidcut` JSON file. There is no library of projects.
+  - A project is one `.vidcut` SQLite database file in WAL mode. It holds both the project and its undo history. There is no library of projects.
   - The project file stores the paths of media in or under the project's folder relative to that folder.
   - Relink Media finds missing files by name. It relinks only the same file ([design/model.md](design/model.md#fingerprints-and-relinking)).
 - **Why:**
   - Scripts and agents edit projects through the CLI while the GUI can have them open. One file keeps all of them in agreement.
-  - JSON is easy to read and to diff.
+  - SQLite gives atomic incremental saves and keeps the undo history with the project when the file moves. Standard SQLite tools can read or edit the file.
   - The user can move the project folder, also to another computer, and keep its media.
   - A different file with the same name does not take the place of the media.
 
