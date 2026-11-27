@@ -3666,15 +3666,16 @@ pub enum Request {
         /// it. One more than the last subject starts a new subject.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<u32>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256. Without it, a missing
         /// model is an error that tells its size.
         #[serde(default)]
         download: bool,
     },
     /// Change the Magic Mask of a corrector of the grade of a clip: Invert
-    /// Mask, or one click. The masks of the changed click's subject come
-    /// again from its clicks.
+    /// Mask, Quality, or one click. The masks of the changed click's subject
+    /// come again from its clicks. A change of Quality makes the masks of
+    /// all the clicks again with the other model.
     #[serde(rename = "grade.mask.set")]
     GradeMaskSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3689,6 +3690,10 @@ pub enum Request {
         /// Invert Mask: the mask is where the subjects are not.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         invert: Option<bool>,
+        /// Quality: `faster` gives a looser mask quickly, `better` more
+        /// detail.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quality: Option<crate::model::MaskQuality>,
         /// The number of the click that changes, from 1, in the order of the
         /// clicks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3702,7 +3707,7 @@ pub enum Request {
         /// With `click`: a negative or a positive click.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         negative: Option<bool>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -3725,7 +3730,7 @@ pub enum Request {
         /// clicks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         click: Option<usize>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -3761,7 +3766,7 @@ pub enum Request {
         /// Without it, the track goes to the start or the end of the clip.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<u32>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,

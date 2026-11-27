@@ -56,8 +56,9 @@ Pages 3288–3304 tell of version 1. A rule from these pages has the mark "versi
 - A corrector has windows, a qualifier and a key input. `key_steps` folds them on the GPU in 32-bit float (`crates/vidcut-core/src/grade.rs`).
 - The Color page has no palette that tracks. It has no Tracker palette ([motion tracking](motion-tracking.md)).
 - `motion.track` follows a box with VitTrack, in tract on the CPU. `motion.find` finds people with YOLOX-S.
-- A corrector has a Magic Mask with clicks, a track of the clicks, Invert Mask and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
-  - SAM 2.1 tiny makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set`, `grade.mask.track` and `grade.mask.clear`.
+- A corrector has a Magic Mask with clicks, a track of the clicks, Invert Mask, Quality and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
+  - SAM 2.1 makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set`, `grade.mask.track` and `grade.mask.clear`.
+  - Quality selects the model: tiny for Faster, base+ for Better. The preference `color.magic_mask_large` selects large for Better.
   - A track carries the clicks of one frame forward and back, with the video memory of SAM 2.1.
   - With `gpu.acceleration` off, the same kernels run on the software adapter of wgpu. A frame of a track takes about 50 s there.
   - The mask store keeps the maps in memory and in the disk cache (`disk_cache::Kind::Masks`). An export makes a missing map again.
@@ -138,6 +139,7 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
 Each step is one pull request.
 
 - **Palette:** the Magic Mask palette, the click tools, the Click list, Mask Overlay and Quality.
+  - The switch of `color.magic_mask_large` in Preferences > Color.
   - The track buttons, Stop Tracking and the timeline of the Click list.
   - The viewer makes a missing map again, as the export does.
 - **The measured rules:** set `masks::RULES` and `MASK_CUT` to the results of runs R3–R6.
@@ -149,6 +151,7 @@ Each step is one pull request.
 - **A change before the node:** the name of a map is a digest of the input picture at the time of the click.
   - An export makes a missing map from the picture of now, under the old name (`editor::mask_remakes`).
   - Thus, after a change before the node and a lost map, the export can show another mask than the viewer showed.
+  - A change of `color.magic_mask_large` has the same effect on a lost map of Better.
   - Run R3 shows what Resolve does. vidcut then makes the mask again, or keeps it, as Resolve does.
 - **Alpha Output:** the Alpha Output of the Node Editor. The mask then makes the clip transparent over the tracks below.
 - **Smart Refine and Consistency.**
@@ -173,16 +176,16 @@ These are vidcut's runs:
   - The overlap of vidcut's mask with the official mask on each frame: the mean and the worst. Higher is better. The aim is 0.99.
   - J&F of both against the true masks of DAVIS.
   - The official J&F with one click on the first frame, one run of each model: tiny 68.0, base+ 68.7, large 76.7.
-  - Done for tiny: frame 0 of the 30 videos, 61 objects, one positive click on each.
-    - On the same input, vidcut and the official network overlap 0.9999 on average, and 0.9993 at worst.
+  - Done for each model: frame 0 of the 30 videos, 61 objects, one positive click on each.
+    - On the same input, vidcut and the official network overlap on average 0.9999 (tiny), 0.9999 (base+) and 1.0000 (large).
+    - The worst overlaps are 0.9993 (tiny), 0.9976 (base+) and 0.9997 (large).
   - Still to do on frame 0: two positive clicks, a positive and a negative click, and a click near the edge of the frame.
-    - Also base+ and large.
     - Also one click each on a face, on the hair and on the shoes of a person.
     - Why: one click does not test the choice of the output for more clicks, or the part that a click gives.
   - Still to do: one frame each of the five clips of the Resolve runs, with the same clicks for both.
     - Why: each DAVIS frame is 854 × 480. The scale to the input square changes with the frame size.
-  - Done for tracks of tiny on the same input: 12 frames of blackswan, and two objects on 12 frames of bike-packing.
-    - The masks of vidcut and of the official video predictor overlap 0.9999 on average.
+  - Done for tracks of each model on the same input: 12 frames of blackswan, and two objects on 12 frames of bike-packing.
+    - The masks of vidcut and of the official video predictor overlap 0.9999 (tiny) and 1.0000 (base+ and large) on average.
   - Still to do: J&F of vidcut's tracks on all 30 videos, against the official 68.0.
 - **M2, cost:** 10 s each of tos-720p-mov, pedestrian-area, stab-crowd-4k, stab-dashcam and stab-rally.
   - One click, a track forward, each model, GPU decoding on.

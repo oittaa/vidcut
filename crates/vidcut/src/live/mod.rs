@@ -2147,7 +2147,8 @@ impl Live {
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. } = &envelope.request
         {
-            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead);
+            let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead, large);
             if looks.is_empty() {
                 return None;
             }
@@ -2160,7 +2161,9 @@ impl Live {
             }));
         }
         if let Request::GradeMaskTrack { .. } = &envelope.request {
-            let looks = vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead);
+            let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+            let looks =
+                vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead, large);
             if looks.is_empty() {
                 return None;
             }
