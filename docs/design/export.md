@@ -574,7 +574,7 @@ Voice Isolation:
   - `top_at` gives the clip of the top track at a frame. A plain click on a clip under another clip keeps that clip in `thumbnails`. Why: the outline stays on the top clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
-  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.
+  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips that meet it, from 1, as measured.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
 
 The render queue:

@@ -5812,6 +5812,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Color page has a Thumbnail timeline too. An arrow next to its Clips button opens the timeline filters (p. 3114).
   - A filter hides the clips that do not meet it. It does not change the edit (p. 3114).
   - Measured: the arrow is only on the Color page. Each timeline keeps its own filter, and the Thumbnail timeline of the Deliver page shows it too.
+  - Measured: a filtered strip numbers its clips from 01. A clip that is 04 under All Clips can be 01 under a filter.
   - Measured: with a filter on, a red line is under Clips on both pages. The manual says orange (p. 3114).
   - Measured: the menu has these groups, with a line between them:
     - All Clips, Selected Clips.
@@ -5992,7 +5993,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.
   - `clip_filter` of `timeline.set` sets the filter of a timeline. A pick of a filter is an undo step.
-  - The Thumbnail timeline of both pages shows only the clips that meet the filter. Each clip keeps its number.
+  - The Thumbnail timeline of both pages shows only the clips that meet the filter. It numbers them from 1.
   - With a filter on, a red line is under Clips.
   - vidcut has Graded, Ungraded, Clips with Composition, Clip Color, Marked Clips, Video Effects, Different Frame Rate and Edit Sizing.
   - A graded clip has a grade that is not the usual grade. A clip with a composition has a node other than MediaIn and MediaOut.
