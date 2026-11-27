@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
@@ -212,76 +213,241 @@ impl Clone for Store {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct MetaRow {
-    settings: Settings,
-    recent: Vec<String>,
-    compound_path: Vec<OpenCompound>,
-    tape_marks: TapeMarks,
-    next_id: NextIds,
-    bins: Vec<String>,
-    groups: Vec<SyncGroup>,
-    speakers: Speakers,
-    queue: Vec<RenderJob>,
+#[derive(Serialize, Deserialize, PartialEq)]
+struct MetaRow<'a> {
+    settings: Cow<'a, Settings>,
+    recent: Cow<'a, [String]>,
+    compound_path: Cow<'a, [OpenCompound]>,
+    tape_marks: Cow<'a, TapeMarks>,
+    next_id: Cow<'a, NextIds>,
+    bins: Cow<'a, [String]>,
+    groups: Cow<'a, [SyncGroup]>,
+    speakers: Cow<'a, Speakers>,
+    queue: Cow<'a, [RenderJob]>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct TimelineRow {
-    id: String,
-    name: String,
-    bin: String,
+impl<'a> MetaRow<'a> {
+    fn of(p: &'a Project) -> Self {
+        let Project {
+            rev: _,
+            edited: _,
+            settings,
+            media: _,
+            tracks: _,
+            compounds: _,
+            compound_path,
+            marks: _,
+            tape_marks,
+            markers: _,
+            subtitles: _,
+            timelines: _,
+            recent,
+            next_id,
+            bins,
+            groups,
+            speakers,
+            queue,
+        } = p;
+        Self {
+            settings: Cow::Borrowed(settings),
+            recent: Cow::Borrowed(recent.as_slice()),
+            compound_path: Cow::Borrowed(compound_path.as_slice()),
+            tape_marks: Cow::Borrowed(tape_marks),
+            next_id: Cow::Borrowed(next_id),
+            bins: Cow::Borrowed(bins.as_slice()),
+            groups: Cow::Borrowed(groups.as_slice()),
+            speakers: Cow::Borrowed(speakers),
+            queue: Cow::Borrowed(queue.as_slice()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+struct TimelineRow<'a> {
+    id: Cow<'a, str>,
+    name: Cow<'a, str>,
+    bin: Cow<'a, str>,
     start_tc: i64,
     own: Option<TimelineSettings>,
-    grade: Option<Grade>,
+    grade: Cow<'a, Option<Grade>>,
     render: RenderRange,
-    clip_filter: ClipFilter,
-    marks: Marks,
-    markers: Vec<Marker>,
+    clip_filter: Cow<'a, ClipFilter>,
+    marks: Cow<'a, Marks>,
+    markers: Cow<'a, [Marker]>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct CompoundRow {
-    id: String,
-    name: String,
-    bin: String,
+impl<'a> TimelineRow<'a> {
+    fn of(p: &'a Project, t: &'a Timeline) -> Self {
+        let Timeline {
+            id,
+            name,
+            bin,
+            start_tc,
+            own,
+            grade,
+            render,
+            clip_filter,
+            tracks: _,
+            marks: _,
+            markers: _,
+            subtitles: _,
+        } = t;
+        let (_, marks, markers, _) = timeline_sheet(p, t);
+        Self {
+            id: Cow::Borrowed(id.as_str()),
+            name: Cow::Borrowed(name.as_str()),
+            bin: Cow::Borrowed(bin.as_str()),
+            start_tc: *start_tc,
+            own: *own,
+            grade: Cow::Borrowed(grade),
+            render: *render,
+            clip_filter: Cow::Borrowed(clip_filter),
+            marks: Cow::Borrowed(marks),
+            markers: Cow::Borrowed(markers.as_slice()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+struct CompoundRow<'a> {
+    id: Cow<'a, str>,
+    name: Cow<'a, str>,
+    bin: Cow<'a, str>,
     removed: bool,
-    sequence_id: String,
+    sequence_id: Cow<'a, str>,
     fps: crate::time::Rational,
     drop_frame: bool,
     start_tc: i64,
     frames: i64,
-    marks: Marks,
-    markers: Vec<Marker>,
-    kept_otio: Option<Kept>,
+    marks: Cow<'a, Marks>,
+    markers: Cow<'a, [Marker]>,
+    kept_otio: Cow<'a, Option<Kept>>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct TrackRow {
-    id: String,
+impl<'a> CompoundRow<'a> {
+    fn of(p: &'a Project, k: &'a Compound) -> Self {
+        let Compound {
+            id,
+            name,
+            bin,
+            removed,
+            sequence_id,
+            fps,
+            drop_frame,
+            start_tc,
+            frames,
+            tracks: _,
+            marks: _,
+            markers: _,
+            kept_otio,
+        } = k;
+        let (_, marks, markers) = compound_sheet(p, k);
+        Self {
+            id: Cow::Borrowed(id.as_str()),
+            name: Cow::Borrowed(name.as_str()),
+            bin: Cow::Borrowed(bin.as_str()),
+            removed: *removed,
+            sequence_id: Cow::Borrowed(sequence_id.as_str()),
+            fps: *fps,
+            drop_frame: *drop_frame,
+            start_tc: *start_tc,
+            frames: *frames,
+            marks: Cow::Borrowed(marks),
+            markers: Cow::Borrowed(markers.as_slice()),
+            kept_otio: Cow::Borrowed(kept_otio),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+struct TrackRow<'a> {
+    id: Cow<'a, str>,
     kind: TrackKind,
     locked: bool,
     muted: bool,
     solo: bool,
     volume_db: f64,
     voice_isolation: Option<VoiceIsolation>,
-    duck: Option<crate::model::Duck>,
-    equalizer: Option<crate::model::TrackEqualizer>,
+    duck: Cow<'a, Option<crate::model::Duck>>,
+    equalizer: Cow<'a, Option<crate::model::TrackEqualizer>>,
     dynamics: Option<crate::model::TrackDynamics>,
     video_enabled: bool,
-    name: Option<String>,
-    transitions: Vec<Transition>,
+    name: Cow<'a, Option<String>>,
+    transitions: Cow<'a, [Transition]>,
     render_cache: bool,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SubtitleTrackRow {
-    id: String,
-    name: Option<String>,
-    language: Option<String>,
+impl<'a> TrackRow<'a> {
+    fn of(t: &'a Track) -> Self {
+        let Track {
+            id,
+            kind,
+            clips: _,
+            locked,
+            muted,
+            solo,
+            volume_db,
+            voice_isolation,
+            duck,
+            equalizer,
+            dynamics,
+            video_enabled,
+            name,
+            transitions,
+            render_cache,
+        } = t;
+        Self {
+            id: Cow::Borrowed(id.as_str()),
+            kind: *kind,
+            locked: *locked,
+            muted: *muted,
+            solo: *solo,
+            volume_db: *volume_db,
+            voice_isolation: *voice_isolation,
+            duck: Cow::Borrowed(duck),
+            equalizer: Cow::Borrowed(equalizer),
+            dynamics: *dynamics,
+            video_enabled: *video_enabled,
+            name: Cow::Borrowed(name),
+            transitions: Cow::Borrowed(transitions.as_slice()),
+            render_cache: *render_cache,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+struct SubtitleTrackRow<'a> {
+    id: Cow<'a, str>,
+    name: Cow<'a, Option<String>>,
+    language: Cow<'a, Option<String>>,
     shown: bool,
     destination: bool,
     locked: bool,
-    style: SubtitleStyle,
+    style: Cow<'a, SubtitleStyle>,
+}
+
+impl<'a> SubtitleTrackRow<'a> {
+    fn of(s: &'a SubtitleTrack) -> Self {
+        let SubtitleTrack {
+            id,
+            name,
+            language,
+            shown,
+            destination,
+            locked,
+            style,
+            cues: _,
+        } = s;
+        Self {
+            id: Cow::Borrowed(id.as_str()),
+            name: Cow::Borrowed(name),
+            language: Cow::Borrowed(language),
+            shown: *shown,
+            destination: *destination,
+            locked: *locked,
+            style: Cow::Borrowed(style),
+        }
+    }
 }
 
 fn configure_journal(conn: &Connection, remote: bool, writable: bool) -> rusqlite::Result<()> {
@@ -906,10 +1072,10 @@ fn load_project_from_conn(
                 Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
             })?;
             let clips = clips_by
-                .remove(&(owner.clone(), tr.id.clone()))
+                .remove(&(owner.clone(), tr.id.to_string()))
                 .unwrap_or_default();
             tracks_by.entry(owner).or_default().push(Track {
-                id: tr.id,
+                id: tr.id.into_owned(),
                 kind: tr.kind,
                 clips: clips.into(),
                 locked: tr.locked,
@@ -917,12 +1083,12 @@ fn load_project_from_conn(
                 solo: tr.solo,
                 volume_db: tr.volume_db,
                 voice_isolation: tr.voice_isolation,
-                duck: tr.duck,
-                equalizer: tr.equalizer,
+                duck: tr.duck.into_owned(),
+                equalizer: tr.equalizer.into_owned(),
                 dynamics: tr.dynamics,
                 video_enabled: tr.video_enabled,
-                name: tr.name,
-                transitions: tr.transitions,
+                name: tr.name.into_owned(),
+                transitions: tr.transitions.into_owned(),
                 render_cache: tr.render_cache,
             });
         }
@@ -958,16 +1124,16 @@ fn load_project_from_conn(
                 Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
             })?;
             let cues = cues_by
-                .remove(&(tl_id.clone(), sr.id.clone()))
+                .remove(&(tl_id.clone(), sr.id.to_string()))
                 .unwrap_or_default();
             subs_by.entry(tl_id).or_default().push(SubtitleTrack {
-                id: sr.id,
-                name: sr.name,
-                language: sr.language,
+                id: sr.id.into_owned(),
+                name: sr.name.into_owned(),
+                language: sr.language.into_owned(),
                 shown: sr.shown,
                 destination: sr.destination,
                 locked: sr.locked,
-                style: sr.style,
+                style: sr.style.into_owned(),
                 cues: cues.into(),
             });
         }
@@ -988,19 +1154,19 @@ fn load_project_from_conn(
             })?;
             let owner = format!("t:{}", tr.id);
             let tracks = tracks_by.remove(&owner).unwrap_or_default();
-            let subtitles = subs_by.remove(&tr.id).unwrap_or_default();
+            let subtitles = subs_by.remove(tr.id.as_ref()).unwrap_or_default();
             out.push(Timeline {
-                id: tr.id,
-                name: tr.name,
-                bin: tr.bin,
+                id: tr.id.into_owned(),
+                name: tr.name.into_owned(),
+                bin: tr.bin.into_owned(),
                 start_tc: tr.start_tc,
                 own: tr.own,
-                grade: tr.grade,
+                grade: tr.grade.into_owned(),
                 render: tr.render,
-                clip_filter: tr.clip_filter,
+                clip_filter: tr.clip_filter.into_owned(),
                 tracks: tracks.into(),
-                marks: tr.marks,
-                markers: tr.markers,
+                marks: tr.marks.into_owned(),
+                markers: tr.markers.into_owned(),
                 subtitles: subtitles.into(),
             });
         }
@@ -1023,19 +1189,19 @@ fn load_project_from_conn(
             let owner = format!("c:{}", kr.id);
             let tracks = tracks_by.remove(&owner).unwrap_or_default();
             out.push(Compound {
-                id: kr.id,
-                name: kr.name,
-                bin: kr.bin,
+                id: kr.id.into_owned(),
+                name: kr.name.into_owned(),
+                bin: kr.bin.into_owned(),
                 removed: kr.removed,
-                sequence_id: kr.sequence_id,
+                sequence_id: kr.sequence_id.into_owned(),
                 fps: kr.fps,
                 drop_frame: kr.drop_frame,
                 start_tc: kr.start_tc,
                 frames: kr.frames,
                 tracks: tracks.into(),
-                marks: kr.marks,
-                markers: kr.markers,
-                kept_otio: kr.kept_otio,
+                marks: kr.marks.into_owned(),
+                markers: kr.markers.into_owned(),
+                kept_otio: kr.kept_otio.into_owned(),
             });
         }
         out
@@ -1044,22 +1210,22 @@ fn load_project_from_conn(
     let mut project = Project {
         rev,
         edited,
-        settings: meta.settings,
+        settings: meta.settings.into_owned(),
         media: media.into(),
         tracks: SharedVec::new(),
         compounds: compounds.into(),
-        compound_path: meta.compound_path,
+        compound_path: meta.compound_path.into_owned(),
         marks: Marks::default(),
-        tape_marks: meta.tape_marks,
+        tape_marks: meta.tape_marks.into_owned(),
         markers: Vec::new(),
         subtitles: SharedVec::new(),
         timelines: timelines.into(),
-        recent: meta.recent,
-        next_id: meta.next_id,
-        bins: meta.bins,
-        groups: meta.groups,
-        speakers: meta.speakers,
-        queue: meta.queue,
+        recent: meta.recent.into_owned(),
+        next_id: meta.next_id.into_owned(),
+        bins: meta.bins.into_owned(),
+        groups: meta.groups.into_owned(),
+        speakers: meta.speakers.into_owned(),
+        queue: meta.queue.into_owned(),
     };
     project.check_out();
     resolve_paths(&mut project, dir);
@@ -1081,34 +1247,9 @@ fn sync_project(
     new: &Project,
     blob_hashes: Option<&BlobHashCache>,
 ) -> Result<()> {
-    let meta_changed = match old {
-        None => true,
-        Some(old) => {
-            old.settings != new.settings
-                || old.recent != new.recent
-                || old.compound_path != new.compound_path
-                || old.tape_marks != new.tape_marks
-                || old.next_id != new.next_id
-                || old.bins != new.bins
-                || old.groups != new.groups
-                || old.speakers != new.speakers
-                || old.queue != new.queue
-        }
-    };
-    if meta_changed {
-        let mut settings = new.settings.clone();
-        relativize_settings(&mut settings, dir);
-        let row = MetaRow {
-            settings,
-            recent: new.recent.clone(),
-            compound_path: new.compound_path.clone(),
-            tape_marks: new.tape_marks.clone(),
-            next_id: new.next_id.clone(),
-            bins: new.bins.clone(),
-            groups: new.groups.clone(),
-            speakers: new.speakers.clone(),
-            queue: new.queue.clone(),
-        };
+    let mut row = MetaRow::of(new);
+    if old.is_none_or(|old| MetaRow::of(old) != row) {
+        relativize_settings(row.settings.to_mut(), dir);
         let data = serde_json::to_string(&row).map_err(json_err)?;
         tx.execute(
             "INSERT OR REPLACE INTO meta (id, rev, edited, data) VALUES (1, ?1, ?2, ?3)",
@@ -1266,43 +1407,21 @@ fn sync_timelines(
         .unwrap_or_default();
 
     for (ord, new_t) in new.timelines.iter().enumerate() {
-        let (new_tracks, new_marks, new_markers, new_subs) = timeline_sheet(new, new_t);
-        let old_entry = old_map.get(new_t.id.as_str()).copied();
-        let old_sheet = old_entry.map(|(old_ord, old_t)| {
-            (
-                old_ord,
-                old_t,
-                timeline_sheet(old.expect("old present"), old_t),
-            )
-        });
-        let header_dirty = match old_sheet {
-            None => true,
-            Some((old_ord, old_t, (_, old_marks, old_markers, _))) => {
-                old_ord != ord
-                    || old_t.name != new_t.name
-                    || old_t.bin != new_t.bin
-                    || old_t.start_tc != new_t.start_tc
-                    || old_t.own != new_t.own
-                    || old_t.grade != new_t.grade
-                    || old_t.render != new_t.render
-                    || old_t.clip_filter != new_t.clip_filter
-                    || old_marks != new_marks
-                    || old_markers != new_markers
-            }
-        };
-        if header_dirty {
-            let row = TimelineRow {
-                id: new_t.id.clone(),
-                name: new_t.name.clone(),
-                bin: new_t.bin.clone(),
-                start_tc: new_t.start_tc,
-                own: new_t.own,
-                grade: new_t.grade.clone(),
-                render: new_t.render,
-                clip_filter: new_t.clip_filter.clone(),
-                marks: new_marks.clone(),
-                markers: new_markers.clone(),
-            };
+        let (new_tracks, _, _, new_subs) = timeline_sheet(new, new_t);
+        let row = TimelineRow::of(new, new_t);
+        let old_entry =
+            old.zip(old_map.get(new_t.id.as_str()).copied())
+                .map(|(old, (old_ord, old_t))| {
+                    (
+                        old_ord,
+                        TimelineRow::of(old, old_t),
+                        timeline_sheet(old, old_t),
+                    )
+                });
+        if old_entry
+            .as_ref()
+            .is_none_or(|(old_ord, old_row, _)| *old_ord != ord || *old_row != row)
+        {
             let data = serde_json::to_string(&row).map_err(json_err)?;
             tx.execute(
                 "INSERT OR REPLACE INTO timelines (id, ord, name, bin, data) \
@@ -1311,20 +1430,16 @@ fn sync_timelines(
             )
             .map_err(|e| Error::internal(e.to_string()))?;
         }
+        let old_sheet = old_entry.map(|(_, _, sheet)| sheet);
         let owner = format!("t:{}", new_t.id);
         sync_tracks(
             tx,
             &owner,
-            old_sheet.map(|(_, _, (t, _, _, _))| t),
+            old_sheet.map(|(t, _, _, _)| t),
             new_tracks,
             blob_hashes,
         )?;
-        sync_subtitles(
-            tx,
-            &new_t.id,
-            old_sheet.map(|(_, _, (_, _, _, s))| s),
-            new_subs,
-        )?;
+        sync_subtitles(tx, &new_t.id, old_sheet.map(|(_, _, _, s)| s), new_subs)?;
     }
     Ok(())
 }
@@ -1379,47 +1494,21 @@ fn sync_compounds(
         .unwrap_or_default();
 
     for (ord, new_k) in new.compounds.iter().enumerate() {
-        let (new_tracks, new_marks, new_markers) = compound_sheet(new, new_k);
-        let old_entry = old_map.get(new_k.id.as_str()).copied();
-        let old_sheet = old_entry.map(|(old_ord, old_k)| {
-            (
-                old_ord,
-                old_k,
-                compound_sheet(old.expect("old present"), old_k),
-            )
-        });
-        let header_dirty = match old_sheet {
-            None => true,
-            Some((old_ord, old_k, (_, old_marks, old_markers))) => {
-                old_ord != ord
-                    || old_k.name != new_k.name
-                    || old_k.bin != new_k.bin
-                    || old_k.removed != new_k.removed
-                    || old_k.sequence_id != new_k.sequence_id
-                    || old_k.fps != new_k.fps
-                    || old_k.drop_frame != new_k.drop_frame
-                    || old_k.start_tc != new_k.start_tc
-                    || old_k.frames != new_k.frames
-                    || old_k.kept_otio != new_k.kept_otio
-                    || old_marks != new_marks
-                    || old_markers != new_markers
-            }
-        };
-        if header_dirty {
-            let row = CompoundRow {
-                id: new_k.id.clone(),
-                name: new_k.name.clone(),
-                bin: new_k.bin.clone(),
-                removed: new_k.removed,
-                sequence_id: new_k.sequence_id.clone(),
-                fps: new_k.fps,
-                drop_frame: new_k.drop_frame,
-                start_tc: new_k.start_tc,
-                frames: new_k.frames,
-                marks: new_marks.clone(),
-                markers: new_markers.clone(),
-                kept_otio: new_k.kept_otio.clone(),
-            };
+        let (new_tracks, _, _) = compound_sheet(new, new_k);
+        let row = CompoundRow::of(new, new_k);
+        let old_entry =
+            old.zip(old_map.get(new_k.id.as_str()).copied())
+                .map(|(old, (old_ord, old_k))| {
+                    (
+                        old_ord,
+                        CompoundRow::of(old, old_k),
+                        compound_sheet(old, old_k).0,
+                    )
+                });
+        if old_entry
+            .as_ref()
+            .is_none_or(|(old_ord, old_row, _)| *old_ord != ord || *old_row != row)
+        {
             let data = serde_json::to_string(&row).map_err(json_err)?;
             tx.execute(
                 "INSERT OR REPLACE INTO compounds (id, ord, name, data) VALUES (?1, ?2, ?3, ?4)",
@@ -1431,7 +1520,7 @@ fn sync_compounds(
         sync_tracks(
             tx,
             &owner,
-            old_sheet.map(|(_, _, (t, _, _))| t),
+            old_entry.map(|(_, _, t)| t),
             new_tracks,
             blob_hashes,
         )?;
@@ -1439,39 +1528,8 @@ fn sync_compounds(
     Ok(())
 }
 
-fn track_meta_eq(a: &Track, b: &Track) -> bool {
-    a.kind == b.kind
-        && a.locked == b.locked
-        && a.muted == b.muted
-        && a.solo == b.solo
-        && a.volume_db == b.volume_db
-        && a.voice_isolation == b.voice_isolation
-        && a.duck == b.duck
-        && a.equalizer == b.equalizer
-        && a.dynamics == b.dynamics
-        && a.video_enabled == b.video_enabled
-        && a.name == b.name
-        && a.transitions == b.transitions
-        && a.render_cache == b.render_cache
-}
-
 fn upsert_track(tx: &Transaction<'_>, owner: &str, ord: usize, tr: &Track) -> Result<()> {
-    let row = TrackRow {
-        id: tr.id.clone(),
-        kind: tr.kind,
-        locked: tr.locked,
-        muted: tr.muted,
-        solo: tr.solo,
-        volume_db: tr.volume_db,
-        voice_isolation: tr.voice_isolation,
-        duck: tr.duck.clone(),
-        equalizer: tr.equalizer.clone(),
-        dynamics: tr.dynamics,
-        video_enabled: tr.video_enabled,
-        name: tr.name.clone(),
-        transitions: tr.transitions.clone(),
-        render_cache: tr.render_cache,
-    };
+    let row = TrackRow::of(tr);
     let kind = match tr.kind {
         TrackKind::Video => "video",
         TrackKind::Audio => "audio",
@@ -1519,9 +1577,9 @@ fn sync_tracks(
             .collect();
         for (ord, new_tr) in new.iter().enumerate() {
             let old_entry = old_map.get(new_tr.id.as_str()).copied();
-            if old_entry
-                .is_none_or(|(old_ord, old_tr)| old_ord != ord || !track_meta_eq(old_tr, new_tr))
-            {
+            if old_entry.is_none_or(|(old_ord, old_tr)| {
+                old_ord != ord || TrackRow::of(old_tr) != TrackRow::of(new_tr)
+            }) {
                 upsert_track(tx, owner, ord, new_tr)?;
             }
             sync_clips(
@@ -1628,30 +1686,13 @@ fn sync_clips(
     Ok(())
 }
 
-fn subtitle_meta_eq(a: &SubtitleTrack, b: &SubtitleTrack) -> bool {
-    a.name == b.name
-        && a.language == b.language
-        && a.shown == b.shown
-        && a.destination == b.destination
-        && a.locked == b.locked
-        && a.style == b.style
-}
-
 fn upsert_subtitle_track(
     tx: &Transaction<'_>,
     tl_id: &str,
     ord: usize,
     sr: &SubtitleTrack,
 ) -> Result<()> {
-    let row = SubtitleTrackRow {
-        id: sr.id.clone(),
-        name: sr.name.clone(),
-        language: sr.language.clone(),
-        shown: sr.shown,
-        destination: sr.destination,
-        locked: sr.locked,
-        style: sr.style.clone(),
-    };
+    let row = SubtitleTrackRow::of(sr);
     let data = serde_json::to_string(&row).map_err(json_err)?;
     tx.prepare_cached(
         "INSERT OR REPLACE INTO subtitles (tl_id, id, ord, data) VALUES (?1, ?2, ?3, ?4)",
@@ -1694,9 +1735,9 @@ fn sync_subtitles(
             .collect();
         for (ord, new_s) in new.iter().enumerate() {
             let old_entry = old_map.get(new_s.id.as_str()).copied();
-            if old_entry
-                .is_none_or(|(old_ord, old_s)| old_ord != ord || !subtitle_meta_eq(old_s, new_s))
-            {
+            if old_entry.is_none_or(|(old_ord, old_s)| {
+                old_ord != ord || SubtitleTrackRow::of(old_s) != SubtitleTrackRow::of(new_s)
+            }) {
                 upsert_subtitle_track(tx, tl_id, ord, new_s)?;
             }
             sync_cues(

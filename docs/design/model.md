@@ -464,6 +464,8 @@ Ranges and resolution:
 - After each save, `Store` copies the WAL into the main file (`settle`, a `PASSIVE` checkpoint). Thus a copy, a backup or a sync of the `.vidcut` file alone has the saved edits.
   - A `PASSIVE` checkpoint does not wait. It leaves in the WAL the changes that a reader in another process still needs. The next checkpoint copies them.
 - Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.
+  - `MetaRow`, `TimelineRow`, `CompoundRow`, `TrackRow` and `SubtitleTrackRow` borrow their fields from the model. `Store::save` compares them to find a dirty row.
+  - Each row takes all the fields of its model struct by name, with no rest pattern. Thus a new field does not compile until the store writes it.
 - `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
 - `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
   - When only `rev` and `edited` change, it updates those two columns of `meta`, and does not write its `data` again.
