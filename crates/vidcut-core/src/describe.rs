@@ -490,7 +490,8 @@ pub fn describe_at(
         | "grade.window.paste"
         | "grade.mask.click"
         | "grade.mask.set"
-        | "grade.mask.clear" => format!(
+        | "grade.mask.clear"
+        | "grade.mask.track" => format!(
             "{} {}",
             match method {
                 "grade.keys.add" if d.flag("edl") => "Add EDL marks to",
@@ -516,6 +517,7 @@ pub fn describe_at(
                 "grade.mask.clear" if d.params.get("click").is_some() =>
                     "Delete a Magic Mask click of",
                 "grade.mask.clear" => "Clear the Magic Mask of",
+                "grade.mask.track" => "Track the Magic Mask of",
                 _ => "Link the nodes of",
             },
             match d.flag("timeline") {

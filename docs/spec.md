@@ -5052,12 +5052,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - vidcut:
   - The Magic Mask is a part of a corrector of the grade of a clip. SAM 2.1 tiny makes the mask ([design](design/analysis.md#subject-masks)).
   - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask or one click. `grade.mask.clear` deletes one click or all of them.
-  - The model reads the picture that comes into the corrector on the frame of the click.
-  - A positive click outside the mask starts a new subject. A click on the mask of a subject goes to that subject.
+  - `grade.mask.track` carries the subjects of the clicks on one frame to the frames before and after it.
+    - `way` and `length` select the frames, as for `motion.track`. Without `length`, the track goes to the start or the end of the clip.
+    - The model remembers each subject on the frames that it saw. It finds the subject again on the next frame.
+    - Each frame that the track reaches gets a map of each subject.
+    - A track is a job with progress. A cancel stops it, and the clip keeps no map of it.
+  - The model reads the picture that comes into the corrector, on the frame of the click and on each tracked frame.
+  - The rules with the mark "vidcut's choice" are not measured yet. Runs R3–R6 measure them ([todo](todo/subject-masks.md#measurements)).
+  - A positive click outside the mask starts a new subject. A click on the mask of a subject goes to that subject (vidcut's choice).
   - A negative click outside the mask goes to the last subject of its frame.
   - For each subject on each frame, the model gives 256 by 256 values over the frame. The values scale to the frame size, bilinear.
-  - The mask is 1 where the value of a subject is above 0, and 0 elsewhere.
-  - The mask of a frame comes from the clicks on that frame. On a frame with no clicks, the mask is empty. Tracking comes later ([todo](todo/subject-masks.md)).
+  - The mask is 1 where the value of a subject is above 0, and 0 elsewhere (vidcut's choice).
+  - The mask of a frame is the union of the maps of its subjects. A frame with no clicks and no track has an empty mask.
+  - These rules of a track are vidcut's choice:
+    - A frame with clicks of a subject keeps the map of its clicks. A track does not replace it.
+    - A track replaces the maps of the earlier tracks of its subjects on the frames that it reaches.
+    - A change of the clicks of a subject on a frame removes the maps that a track carried from them.
+    - A change before the node keeps the tracked maps. A track again reads the new picture.
   - The mask folds into the key of the corrector after the windows and the qualifier, with Matte when a window or a qualifier is on.
     - With a window and a qualifier, the key is the intersection of all three. The manual names two at a time ([todo](todo/subject-masks.md)).
   - Invert Mask inverts the mask before the fold.
@@ -5065,7 +5076,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `grade.clear` of a node, or of all nodes with `keep_nodes`, also deletes the Magic Mask.
   - Only a corrector of the grade of a clip has a Magic Mask. Each click is from 0 to 1 across and down the frame.
   - A click on a frame outside the clip, for example after a split, makes no mask. An export skips it.
-  - The palette, Quality, tracking, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
+  - The palette, Quality, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

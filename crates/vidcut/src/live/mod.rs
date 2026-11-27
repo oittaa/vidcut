@@ -2159,6 +2159,19 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::GradeMaskTrack { .. } = &envelope.request {
+            let looks = vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                let env = AvEnv::new();
+                for need in &looks {
+                    vidcut_core::editor::mask_tracked(&env, need)?;
+                }
+                Ok(())
+            }));
+        }
         if let Request::PictureStabilize { .. } = &envelope.request {
             let looks = vidcut_core::editor::stabilize_looks(p, &envelope.request, playhead);
             if looks.is_empty() {
@@ -3926,6 +3939,15 @@ impl Live {
                 Some(measure) => Step::Encode(measure, Box::new(envelope), "Track".into(), "track"),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
+            Request::GradeMaskTrack { .. } if !envelope.dry_run => {
+                match self.measuring(&envelope) {
+                    Some(measure) => {
+                        let title = "Track Mask".into();
+                        Step::Encode(measure, Box::new(envelope), title, "mask_track")
+                    }
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::PictureStabilize { .. } if !envelope.dry_run => {
                 match self.measuring(&envelope) {
                     Some(measure) => {
@@ -3942,6 +3964,7 @@ impl Live {
             | Request::GradeMaskClick { .. }
             | Request::GradeMaskSet { .. }
             | Request::GradeMaskClear { .. }
+            | Request::GradeMaskTrack { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
@@ -6048,6 +6071,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::GradeMaskClick { .. }
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. }
+        | Request::GradeMaskTrack { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }

@@ -262,8 +262,10 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
   - A check against a PyTorch version of a model reads them.
 - `VIDCUT_MASK_DUMP=DIR` makes the Magic Mask model write its stages as `.npy` files into `DIR`, all float, `[H, W, C]`.
-  - `image.npy`: the input at the model size, normalized. `feat-s0.npy` and `feat-s1.npy`: the high-resolution features. `embedding.npy`: the image embedding.
+  - `image.npy`: the input at the model size, normalized. `feat-s0.npy` and `feat-s1.npy`: the high-resolution features. `vision.npy`: the image features.
+  - In a track, each frame writes these four files with its step number, for example `image-3.npy`. Step 0 is the frame of the clicks.
   - `masks-N.npy` and `scores-N.npy`, for each subject: the 256 × 256 logits of the four outputs, then their predicted overlaps and the object score.
+  - `N` counts the decodes of the run, from 0.
   - The scripts in the sam2 folder of the test data compare them with the official SAM 2.1 code.
 - `VIDCUT_SUBJECTS_DUMP=DIR` makes `motion.find` write what the model gets and what it finds as `.npy` files into `DIR`.
   - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.

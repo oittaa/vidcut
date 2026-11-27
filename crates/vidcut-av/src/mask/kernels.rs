@@ -1,5 +1,5 @@
 use crate::compute::Gpu;
-use crate::compute::ops::{HEADER, Ops, SHARED, View};
+use crate::compute::ops::{Act, Conv, HEADER, Ops, Res, SHARED, View, tensor};
 
 const LANES: u32 = 64;
 
@@ -172,9 +172,122 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
 }
 "#;
 
+const ROPE: &str = r#"
+@group(0) @binding(1) var<storage, read> turns: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> x: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let rows = u(0u); let base = u(1u); let stride = u(2u); let period = u(3u); let pairs = u(4u);
+    let i = gid(wg, nw) * 256u + li;
+    if (i >= rows * pairs) {
+        return;
+    }
+    let j = i % pairs;
+    let r = i / pairs;
+    let cs = turns[(r % period) * pairs + j];
+    let at = base + r * stride + 2u * j;
+    let a = x[at];
+    let b = x[at + 1u];
+    x[at] = a * cs.x - b * cs.y;
+    x[at + 1u] = a * cs.y + b * cs.x;
+}
+"#;
+
+const MEMORY_MASK: &str = r#"
+@group(0) @binding(1) var<storage, read> src: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dst: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let n = u(0u); let way = u(1u); let scale = f(2u); let bias = f(3u); let sb = u(4u); let db = u(5u);
+    let i = gid(wg, nw) * 256u + li;
+    if (i >= n) {
+        return;
+    }
+    let v = src[sb + i];
+    var m = 0.0;
+    if (way == 0u) {
+        m = select(0.0, 1.0, v > 0.0);
+    } else if (way == 1u) {
+        m = 1.0 / (1.0 + exp(-v));
+    }
+    dst[db + i] = m * scale + bias;
+}
+"#;
+
+const SOFTMAX: &str = r#"
+@group(0) @binding(1) var<storage, read_write> x: array<f32>;
+
+var<workgroup> red: array<f32, 256>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let rows = u(0u); let base = u(1u); let len = u(2u); let valid = u(3u); let scale = f(4u);
+    let r = gid(wg, nw);
+    if (r >= rows) {
+        return;
+    }
+    let at = base + r * len;
+    var m = -3.0e38;
+    for (var j = li; j < valid; j += 256u) {
+        m = max(m, x[at + j]);
+    }
+    red[li] = m;
+    workgroupBarrier();
+    for (var s = 128u; s > 0u; s >>= 1u) {
+        if (li < s) {
+            red[li] = max(red[li], red[li + s]);
+        }
+        workgroupBarrier();
+    }
+    m = red[0];
+    workgroupBarrier();
+    var sum = 0.0;
+    for (var j = li; j < valid; j += 256u) {
+        let e = exp((x[at + j] - m) * scale);
+        x[at + j] = e;
+        sum += e;
+    }
+    red[li] = sum;
+    workgroupBarrier();
+    for (var s = 128u; s > 0u; s >>= 1u) {
+        if (li < s) {
+            red[li] += red[li + s];
+        }
+        workgroupBarrier();
+    }
+    let inv = 1.0 / red[0];
+    for (var j = li; j < len; j += 256u) {
+        x[at + j] = select(0.0, x[at + j] * inv, j < valid);
+    }
+}
+"#;
+
+const TRANSPOSE: &str = r#"
+@group(0) @binding(1) var<storage, read> src: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dst: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let n = u(0u); let c = u(1u); let sb = u(2u); let sstr = u(3u); let len = u(4u);
+    let i = gid(wg, nw) * 256u + li;
+    if (i >= n * c) {
+        return;
+    }
+    let row = i / c;
+    let d = i % c;
+    dst[d * len + row] = src[sb + row * sstr + d];
+}
+"#;
+
 pub(super) struct Kernels {
     windows: wgpu::ComputePipeline,
     scale: wgpu::ComputePipeline,
+    rope: wgpu::ComputePipeline,
+    memory_mask: wgpu::ComputePipeline,
+    softmax: wgpu::ComputePipeline,
+    transpose: wgpu::ComputePipeline,
 }
 
 impl Kernels {
@@ -182,8 +295,78 @@ impl Kernels {
         Self {
             windows: gpu.pipe("mask-windows", || format!("{HEADER}{WINDOWS}")),
             scale: gpu.pipe("mask-scale", || format!("{HEADER}{SCALE}")),
+            rope: gpu.pipe("mask-rope", || format!("{HEADER}{ROPE}")),
+            memory_mask: gpu.pipe("mask-memory-mask", || format!("{HEADER}{MEMORY_MASK}")),
+            softmax: gpu.pipe("mask-softmax", || format!("{HEADER}{SOFTMAX}")),
+            transpose: gpu.pipe("mask-transpose", || format!("{HEADER}{TRANSPOSE}")),
         }
     }
+}
+
+fn softmax(ops: &mut Ops, k: &Kernels, x: &View, (valid, scale): (u32, f32)) {
+    let p = [x.w, x.base, x.c, valid, scale.to_bits()];
+    let param = ops.gpu.uniform(&p);
+    ops.gpu
+        .dispatch(ops.pass, &k.softmax, param, &[&x.buf], x.w);
+}
+
+fn transpose(ops: &mut Ops, k: &Kernels, src: &View, dst: &wgpu::Buffer, len: u32) {
+    let p = [src.w, src.c, src.base + src.at, src.stride, len];
+    let param = ops.gpu.uniform(&p);
+    let items = src.w * src.c;
+    ops.gpu.dispatch(
+        ops.pass,
+        &k.transpose,
+        param,
+        &[&src.buf, dst],
+        items.div_ceil(256),
+    );
+}
+
+pub(super) fn rope(ops: &mut Ops, k: &Kernels, turns: &wgpu::Buffer, x: &View, rows: u32) {
+    let pairs = x.c / 2;
+    let p = [rows, x.base + x.at, x.stride, ROPE_PERIOD, pairs];
+    let param = ops.gpu.uniform(&p);
+    ops.gpu.dispatch(
+        ops.pass,
+        &k.rope,
+        param,
+        &[turns, &x.buf],
+        (rows * pairs).div_ceil(256),
+    );
+}
+
+const ROPE_PERIOD: u32 = 64 * 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Remembered {
+    Cut,
+    Soft,
+    Empty,
+}
+
+pub(super) fn memory_mask(
+    ops: &mut Ops,
+    k: &Kernels,
+    (scale, bias): (f32, f32),
+    way: Remembered,
+    (src, dst): (&View, &View),
+) {
+    let n = src.n * src.h * src.w * src.c;
+    let way = match way {
+        Remembered::Cut => 0,
+        Remembered::Soft => 1,
+        Remembered::Empty => 2,
+    };
+    let p = [n, way, scale.to_bits(), bias.to_bits(), src.base, dst.base];
+    let param = ops.gpu.uniform(&p);
+    ops.gpu.dispatch(
+        ops.pass,
+        &k.memory_mask,
+        param,
+        &[&src.buf, &dst.buf],
+        n.div_ceil(256),
+    );
 }
 
 fn place(v: &View) -> [u32; 3] {
@@ -311,4 +494,81 @@ pub(super) fn scale_down(
         &[src, &a.bounds, &a.taps, dst],
         items.div_ceil(256),
     );
+}
+
+pub(super) struct Gemm {
+    kt: wgpu::Buffer,
+    vt: View,
+    scores: View,
+    zeros: wgpu::Buffer,
+    queries: u32,
+}
+
+impl Gemm {
+    pub(super) fn new(gpu: &Gpu, dim: u32, keys: u32, queries: u32) -> Self {
+        let (len, cols) = (keys.next_multiple_of(64), dim.next_multiple_of(64));
+        Self {
+            kt: gpu.buffer((dim * len * 4) as usize),
+            vt: tensor(gpu, 1, 1, len, cols),
+            scores: tensor(gpu, 1, 1, queries, len),
+            zeros: gpu.buffer((len.max(cols) * 4) as usize),
+            queries,
+        }
+    }
+}
+
+fn rows_of(v: &View, from: u32, count: u32) -> View {
+    View {
+        base: v.base + from * v.stride,
+        w: count,
+        ..v.clone()
+    }
+}
+
+pub(super) fn attend_gemm(
+    ops: &mut Ops,
+    k: &Kernels,
+    g: &Gemm,
+    (q, keys, values, out): (&View, &View, &View, &View),
+) {
+    let (d, lq, lk) = (q.c, q.w, keys.w);
+    let (len, cols) = (lk.next_multiple_of(64), d.next_multiple_of(64));
+    transpose(ops, k, keys, &g.kt, len);
+    let packed = values.base == 0 && values.at == 0 && values.stride == cols;
+    let mixed = match packed {
+        true => values.buf.clone(),
+        false => {
+            let to = View {
+                c: d,
+                ..g.vt.shaped(1, 1, lk, cols)
+            };
+            ops.copy(values, &to, 1.0, 0.0, Act::None);
+            g.vt.buf.clone()
+        }
+    };
+    let gemm = |cin: u32, cout: u32, weights: wgpu::Buffer| Conv {
+        cin,
+        cout,
+        kh: 1,
+        kw: 1,
+        stride: (1, 1),
+        pad: (0, 0),
+        dil: (1, 1),
+        cols: cout.next_multiple_of(64),
+        weights,
+        bias: g.zeros.clone(),
+        alpha: g.zeros.clone(),
+        act: Act::None,
+    };
+    let score = gemm(d, len, g.kt.clone());
+    let mix = gemm(len, d, mixed);
+    let scale = 1.0 / (d as f32).sqrt();
+    let step = g.queries.min(lq);
+    for at in (0..lq).step_by(step as usize) {
+        let n = step.min(lq - at);
+        let s = g.scores.shaped(1, 1, n, len);
+        ops.conv(&score, &rows_of(q, at, n), &s, Res::None);
+        softmax(ops, k, &s, (lk, scale));
+        ops.conv(&mix, &s, &rows_of(out, at, n), Res::None);
+    }
 }

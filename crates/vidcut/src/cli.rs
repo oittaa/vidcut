@@ -129,6 +129,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.mask.click", &["clip"]),
     ("grade.mask.set", &["clip"]),
     ("grade.mask.clear", &["clip"]),
+    ("grade.mask.track", &["clip"]),
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
