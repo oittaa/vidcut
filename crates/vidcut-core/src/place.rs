@@ -1718,15 +1718,24 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
     let (gw, gh) = extent.grid;
-    let ((sin, cos), [across, down]) = turn_of(p.turn(), (cw * fw * gh) / (ch * fh * gw));
+    let aspect = (cw * fw * gh) / (ch * fh * gw);
+    let aspect = match aspect.is_finite() && aspect > 0.0 {
+        true => aspect,
+        false => 1.0,
+    };
+    let plain = p.turn().to_radians().sin_cos();
+    let ((sin, cos), [across, down]) = turn_of(plain, aspect);
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
-    let (zx, zy) = (zx * across, zy * down);
     let [ax, ay] = p.pivot();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
     let [qx, qy] = anchored(p, frame, fitted);
     let (dx, dy) = (zx * (ax - 0.5) * fw, zy * (ay - 0.5) * fh);
-    let (ox, oy) = (qx - cos * dx - sin * dy, qy + sin * dx - cos * dy);
+    let (ox, oy) = (
+        qx - plain.1 * dx - aspect * plain.0 * dy,
+        qy + plain.0 * dx / aspect - plain.1 * dy,
+    );
+    let (zx, zy) = (zx * across, zy * down);
     let (k, [u0, v0]) = placed
         .zoomed()
         .map_or((1.0, Picture::MIDDLE), |b| (b.size, flipped(p, b.center)));
@@ -1782,12 +1791,7 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     }
 }
 
-fn turn_of(degrees: f64, aspect: f64) -> ((f64, f64), [f64; 2]) {
-    let (sin, cos) = degrees.to_radians().sin_cos();
-    let p = match aspect.is_finite() && aspect > 0.0 {
-        true => aspect,
-        false => 1.0,
-    };
+fn turn_of((sin, cos): (f64, f64), p: f64) -> ((f64, f64), [f64; 2]) {
     let (x, y) = (cos, sin / p);
     let across = x.hypot(y);
     ((y / across, x / across), [across, cos.hypot(p * sin)])
