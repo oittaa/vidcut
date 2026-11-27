@@ -74,8 +74,6 @@ mod animated_subtitles_tests;
 #[cfg(test)]
 mod cue_speakers_tests;
 #[cfg(test)]
-mod find_values_tests;
-#[cfg(test)]
 mod folder_tests;
 #[cfg(test)]
 mod history_tests;
