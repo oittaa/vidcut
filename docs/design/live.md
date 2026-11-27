@@ -667,12 +667,14 @@ The bar and the Jobs button:
   - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
   - Name, X Offset and Y Offset are of the picked pattern.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+    - The Subject menu, Model, Quality and the Advanced rows change the find values of the Tracker (`FindValues`). Each change sends `comp.set` with `find`.
+    - Why: the values stay in the project and have undo. A find from the CLI or MCP takes them too.
     - For Faces, Model is Fast or Slow (`FindModel::ALL`). For the other subjects, Find always uses Fast (`FindModel::for_subject`).
-    - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
-    - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
-    - Each field tells on hover what it sets, and what a lower or a higher number does.
-    - Find sends the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
-  - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject.
+    - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better sets the size `BETTER_SIDE`. Faster removes the size.
+    - Advanced shows a number row for the size of the picture and for each value of the path rules (`FIND_VALUES`). The reset of a row gives the usual value.
+    - A row at its usual value (`FIND_SAME`) keeps no value. Thus the usual value of a new subject applies.
+    - Each row tells on hover what it sets, and what a lower or a higher number does.
+  - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject. `motion.find` takes the other values from the Tracker.
   - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
     - Each pattern with a path gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
     - A pattern without a path gets no mask. Such a pattern does not move. A mask on it blurs the same box on each frame.

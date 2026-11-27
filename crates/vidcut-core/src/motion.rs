@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use crate::analysis::{Detections, Found, Look, Tracked};
-use crate::model::{MotionPath, PathSample, Subject};
+use crate::model::{FindValues, MotionPath, PathSample, Subject};
 
 pub const SAMPLES_KEPT: usize = 1_000_000;
 pub const REACH: f64 = 10.0;
@@ -246,6 +246,45 @@ impl Join {
     }
 
     pub const MOST_SECS: f64 = 60.0;
+
+    pub fn with(self, f: &FindValues) -> Self {
+        Self {
+            start: f.start.unwrap_or(self.start),
+            keep: f.keep.unwrap_or(self.keep),
+            overlap: f.overlap.unwrap_or(self.overlap),
+            wait_secs: f.wait.unwrap_or(self.wait_secs),
+            shortest_secs: f.shortest.unwrap_or(self.shortest_secs),
+            steady: f.steady.unwrap_or(self.steady),
+        }
+    }
+}
+
+impl FindValues {
+    pub fn over(self, under: Self) -> Self {
+        Self {
+            subject: self.subject.or(under.subject),
+            model: self.model.or(under.model),
+            size: self.size.or(under.size),
+            start: self.start.or(under.start),
+            keep: self.keep.or(under.keep),
+            overlap: self.overlap.or(under.overlap),
+            wait: self.wait.or(under.wait),
+            shortest: self.shortest.or(under.shortest),
+            steady: self.steady.or(under.steady),
+        }
+    }
+
+    pub fn problem(&self) -> Option<String> {
+        let subject = self.subject.unwrap_or_default();
+        if let Some(why) = Join::of(subject).with(self).problem() {
+            return Some(why.to_string());
+        }
+        let (lo, hi) = crate::analysis::SIDES;
+        if self.size.is_some_and(|s| !(lo..=hi).contains(&s)) {
+            return Some(format!("size is from {lo} to {hi} pixels"));
+        }
+        None
+    }
 }
 
 struct Open {

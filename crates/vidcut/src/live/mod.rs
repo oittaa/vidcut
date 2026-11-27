@@ -3928,8 +3928,13 @@ impl Live {
                 Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
-            Request::MotionFind { subject, .. } if !envelope.dry_run => {
-                let title = format!("Find {}", subject.many());
+            Request::MotionFind { .. } if !envelope.dry_run => {
+                let p = self.project.as_ref().map(|o| o.project());
+                let playhead = Some(self.player.position(TIMELINE));
+                let found = p.and_then(|p| {
+                    vidcut_core::editor::find_subject(p, &envelope.request, playhead)
+                });
+                let title = format!("Find {}", found.unwrap_or_default().many());
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Encode(measure, Box::new(envelope), title, "find"),
                     None => Step::Now(self.edit(envelope, job.origin)),

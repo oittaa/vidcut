@@ -287,6 +287,7 @@ impl Tracker {
             custom_time: None,
             intermediate_points: None,
             fade_frames: None,
+            find: None,
         }
     }
 

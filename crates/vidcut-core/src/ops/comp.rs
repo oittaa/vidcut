@@ -553,6 +553,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.custom_time, &mut t.custom_time);
             given(&mut left.intermediate_points, &mut t.intermediate_points);
             given(&mut left.fade_frames, &mut t.fade_frames);
+            given(&mut left.find, &mut t.find);
         }
         Tool::Merge(m) => {
             if let Some(c) = left.values.center.take() {
