@@ -4994,11 +4994,32 @@ pub struct MagicMask {
     /// off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
+    /// Quality: the model that makes the maps. Left out for `faster`.
+    #[serde(default, skip_serializing_if = "MaskQuality::is_usual")]
+    pub quality: MaskQuality,
     /// One map for each subject on each frame that has clicks of it that
     /// are on, and on each frame that a track of it reached. Left out when
     /// there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub maps: Vec<MaskMap>,
+}
+
+/// The Quality of a Magic Mask.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskQuality {
+    /// A looser mask, made quickly by SAM 2.1 tiny.
+    #[default]
+    Faster,
+    /// More detail, made by SAM 2.1 base+. With the preference
+    /// `color.magic_mask_large` on, SAM 2.1 large makes it.
+    Better,
+}
+
+impl MaskQuality {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A click of the Magic Mask.
