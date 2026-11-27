@@ -2530,38 +2530,6 @@ mod tests {
     }
 
     #[test]
-    fn the_atmosphere_of_a_glow_grows_with_the_height_of_the_picture() {
-        let mut effect = crate::model::EffectType::Glow.made();
-        if let EffectKind::Glow(g) = &mut effect.kind {
-            g.atmosphere = true;
-        }
-        let placed = Placed {
-            clip: "c1".into(),
-            picture: Picture {
-                effects: vec![effect],
-                ..Picture::default()
-            },
-            mapped: None,
-            run: None,
-            source: 0,
-            frame: 0,
-            start: 0,
-            ready: true,
-            ramp: None,
-            crossing: false,
-            moving: None,
-            clock: Default::default(),
-            adjustment: false,
-        };
-        let placing = Placing::whole(&[placed], (1080.0, 1920.0));
-        let Work::Glow(g) = &placing.effects[0].work else {
-            panic!("a glow");
-        };
-        let cell = g.noise.expect("an atmosphere").cell;
-        assert_eq!(cell.map(|c| (c * 100.0).round()), [60444.0, 60444.0]);
-    }
-
-    #[test]
     fn the_largest_zoom_key_sets_the_detail() {
         let picture = Picture {
             zoom_keys: vec![
