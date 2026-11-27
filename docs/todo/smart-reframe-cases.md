@@ -29,8 +29,11 @@ The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-95
 - **Pan Only and Tilt Only with a rotation.** Now: no case. vidcut frees the axis of the picture, and the move turns with the picture.
   - Test (SR3 step W1): Pan Only and Tilt Only with rotations of 10° and 90°, on four files each.
 
-## Not measured
+## Not a case for Resolve
 
-- **A short gap in the path of the main subject.** With `subject`, a frame where the main path has no box takes the box of the next path of the shot (`reframe::found`). Thus a short gap moves the view to another thing and back. Resolve has no case of this yet.
-  - Test: shots where the main person is hidden for a few frames, or leaves and comes back, with other people in the frame. Use four files.
-  - The crowd shots of SR2 (P 0, P 250, M 1200, M 2200, C 400) have such gaps. Compare the Auto move of Resolve with `subject` `person` of vidcut.
+- **Other things at the ends of the main path.** With `subject`, a frame where the main path has no box takes the box of the next path of the shot (`reframe::found`).
+  - The finders keep a thing on its path through a gap of up to a second. On the 21 shots of SR2 (9 files), the view never goes to another thing and back.
+  - On 8 of the 21 shots, the main path starts after the shot starts or ends before the shot ends. There the view follows other people, for up to 41 frames.
+  - On M 2200, three people come one after the other in the first 19 frames. Then the main person comes.
+  - Resolve cannot test this, because it has no `subject`. On the crowd shots, the `subject` move is a median of 161 to 1624 pixels from the Auto move of Resolve.
+  - To decide (the owner): on those frames, follow the next thing, or keep the nearest place of the main thing.
