@@ -855,6 +855,7 @@ impl HistoryDb {
             }
             crate::store::gc_blobs(&tx)?;
             tx.commit().map_err(|e| db_err(&self.path, e))?;
+            crate::store::settle(conn);
             Ok(())
         })
     }

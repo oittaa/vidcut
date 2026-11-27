@@ -458,9 +458,10 @@ Ranges and resolution:
 
 ## The `.vidcut` file
 
-- `Store` reads and writes `Project` as one SQLite database file. On local drives it uses WAL mode (`synchronous = NORMAL`).
-- On a network drive (`dirs::on_network`), `Store` uses rollback `DELETE` journal mode (`synchronous = FULL`), because WAL needs shared memory on one host.
-- In WAL mode, recent writes stay in `-wal` until a checkpoint runs. Copy or move a `.vidcut` file after `Store::checkpoint` or with its `-wal`.
+- `Store` reads and writes `Project` as one SQLite database file, with `synchronous = FULL`. Why: edits come at the speed of a person, and each save must stay after a power loss.
+- On local drives, `Store` uses WAL mode. On a network drive (`dirs::on_network`), it uses the rollback `DELETE` journal mode, because WAL needs shared memory on one host.
+- After each save, `Store` copies the WAL into the main file (`settle`, a `PASSIVE` checkpoint). Thus a copy, a backup or a sync of the `.vidcut` file alone has the saved edits.
+  - A `PASSIVE` checkpoint does not wait. It leaves in the WAL the changes that a reader in another process still needs. The next checkpoint copies them.
 - Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.
 - `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
 - `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
@@ -470,7 +471,7 @@ Ranges and resolution:
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
-- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::checkpoint` checkpoints local WAL files on close.
+- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::checkpoint` empties the WAL on close (a `TRUNCATE` checkpoint).
 - A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
 - The undo history lives in the same `.vidcut` file ([requests](requests.md#undo-history)).
 

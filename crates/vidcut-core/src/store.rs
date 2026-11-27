@@ -335,16 +335,12 @@ fn configure_journal(conn: &Connection, remote: bool, writable: bool) -> rusqlit
             };
             conn.execute_batch(pragma)?;
         }
-        if !remote {
-            conn.execute_batch("PRAGMA wal_autocheckpoint = 1000;")?;
-        }
     }
-    let tail = if remote {
-        "PRAGMA synchronous = FULL; PRAGMA temp_store = MEMORY;"
-    } else {
-        "PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;"
-    };
-    conn.execute_batch(tail)
+    conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA temp_store = MEMORY;")
+}
+
+pub(crate) fn settle(conn: &Connection) {
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
 }
 
 fn configure_conn(conn: &Connection, path: &Path, writable: bool) -> rusqlite::Result<()> {
@@ -511,9 +507,7 @@ impl Store {
 
     pub fn checkpoint(&self) {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(conn) = guard.take()
-            && !crate::dirs::on_network(&self.path)
-        {
+        if let Some(conn) = guard.take() {
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         }
     }
@@ -614,6 +608,7 @@ impl Store {
             });
             if outcome.is_ok() {
                 *last_dv = query_data_version(conn, &self.path)?;
+                settle(conn);
             }
             Some(outcome)
         } else {
@@ -747,6 +742,7 @@ impl Store {
             }
             let (saved, _) = self.save_in_tx(&tx, &editor)?;
             tx.commit().map_err(|e| sqlite_err(&self.path, e))?;
+            settle(conn);
             (out, saved.compact)
         };
         if compact {
@@ -789,6 +785,7 @@ impl Store {
             commit.added,
         );
         *last_dv = query_data_version(conn, &self.path)?;
+        settle(conn);
         Ok(true)
     }
 
@@ -799,6 +796,7 @@ impl Store {
                 .map_err(|e| sqlite_err(&self.path, e))?;
             let (saved, commit) = self.save_in_tx(&tx, editor)?;
             tx.commit().map_err(|e| sqlite_err(&self.path, e))?;
+            settle(conn);
             editor.commit_saved(
                 self.history_db(),
                 (commit.meta.undo, commit.meta.redo),
