@@ -134,7 +134,7 @@ impl OpenProject {
     pub fn close(&mut self) {
         self.save_left();
         self.editor.close_db();
-        self.store.checkpoint();
+        self.store.close();
     }
 }
 

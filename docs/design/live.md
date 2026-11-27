@@ -173,7 +173,7 @@ Each wait has a deadline, except an untimed `jobs.wait`.
   - A new connection always reads again (`Store::live_conn`). Why: the `data_version` of one connection does not compare with that of another.
 - `OpenProject::apply` runs mutations inside `Store::mutate_live`. History compaction (`Store::compact`) runs on `vidcut-history`.
 - A `notify` watcher on the folder watches the project file, `-wal`, and `-journal`, and sends `Msg::FileChanged`.
-- A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::checkpoint`.
+- A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::close`.
 - The file is the source of truth. [requests](requests.md) tells about outside changes and undo.
 - Each timeline keeps its playhead. When another timeline opens, `Live::switch_playhead` keeps the playhead of the one before, and seeks to the playhead of the new one.
   - `playheads` holds them by timeline id, for the open project only. It loses the ids of deleted timelines at each change.

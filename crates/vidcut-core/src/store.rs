@@ -631,11 +631,17 @@ impl Store {
         HistoryDb::new(self.path.clone())
     }
 
-    pub fn checkpoint(&self) {
+    pub fn close(&self) {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(conn) = guard.take() {
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        let Some(mut conn) = guard.take() else {
+            return;
+        };
+        if let Ok(tx) = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            && gc_blobs(&tx).is_ok()
+        {
+            let _ = tx.commit();
         }
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
     }
 
     fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -2810,7 +2816,7 @@ mod tests {
         let path_a = a.join("p.vidcut");
         let store = Store::create(&path_a, &proj).unwrap();
         add_bin(&store, "scenes");
-        store.checkpoint();
+        store.close();
         drop(store);
         let path_b = b.join("p.vidcut");
         std::fs::rename(&path_a, &path_b).unwrap();
@@ -2952,7 +2958,7 @@ mod tests {
         proj.media[0].path = a.join("clip.mp4");
         let path_a = a.join("p.vidcut");
         let store = Store::create(&path_a, &proj).unwrap();
-        store.checkpoint();
+        store.close();
         drop(store);
         std::fs::rename(&a, &b).unwrap();
         let path_b = b.join("p.vidcut");
@@ -2996,7 +3002,7 @@ mod tests {
         }))
         .unwrap();
         store.transact(|ed| ed.apply(relink, &env, None)).unwrap();
-        store.checkpoint();
+        store.close();
         drop(store);
         std::fs::rename(&a, &b).unwrap();
         let mut moved = Store::open(&b.join("p.vidcut")).unwrap().load().unwrap();

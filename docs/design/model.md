@@ -467,6 +467,7 @@ Ranges and resolution:
   - `MetaRow`, `TimelineRow`, `CompoundRow`, `TrackRow` and `SubtitleTrackRow` borrow their fields from the model. `Store::save` compares them to find a dirty row.
   - Each row takes all the fields of its model struct by name, with no rest pattern. Thus a new field does not compile until the store writes it.
 - `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
+  - `gc_blobs` removes the blobs that no clip row names. A compaction and `Store::close` run it. A save writes a blob again when a clip needs it.
 - `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
   - When only `rev` and `edited` change, it updates those two columns of `meta`, and does not write its `data` again.
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
@@ -475,7 +476,7 @@ Ranges and resolution:
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
-- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::checkpoint` empties the WAL on close (a `TRUNCATE` checkpoint).
+- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::close` removes unreferenced `blobs` and empties the WAL (a `TRUNCATE` checkpoint).
 - A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
   - `open_conn` verifies the header before it sets the journal mode. Thus it does not change a file that it refuses.
 - The undo history lives in the same `.vidcut` file ([requests](requests.md#undo-history)).
