@@ -3161,11 +3161,10 @@ fn glow_has(flag: i32) -> bool {
 fn glow_taken(px: vec2<i32>, picture: texture_2d<f32>) -> vec4<f32> {
     let use_alpha = glowing.mixing.w;
     let c = effect_taken(textureLoad(picture, px, 0), use_alpha);
-    var rgb = clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     if glow_has(GLOW_INVERT) {
-        rgb = 1.0 - rgb;
+        return vec4<f32>(1.0 - clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), c.a);
     }
-    return vec4<f32>(rgb, c.a);
+    return c;
 }
 
 fn glow_shining(c: vec3<f32>) -> vec3<f32> {
@@ -3181,7 +3180,7 @@ fn fs_glow_mask(in: Out) -> @location(0) vec4<f32> {
         let th = glowing.shine.y;
         return vec4<f32>(vec3<f32>(max(c.a - th + GLOW_ROOM, 0.0) / (1.0 - th + GLOW_ROOM)), 1.0);
     }
-    return vec4<f32>(c.a * glow_shining(c.rgb), 1.0);
+    return vec4<f32>(c.a * glow_shining(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0))), 1.0);
 }
 
 struct GlowCells {
@@ -3306,9 +3305,10 @@ fn glow_atmosphere(px: vec2<f32>) -> f32 {
     var total = 0.0;
     var amount = 1.0;
     var size = 1.0;
+    let from_middle = px - 0.5 * vec2<f32>(textureDimensions(blur_start));
     for (var i = 0; i < GLOW_OCTAVES; i++) {
         let layer = GLOW_LAYERS * f32(i);
-        let at = vec3<f32>(px * glowing.noise.zw * size + layer, glowing.depth.x * size + layer);
+        let at = vec3<f32>(from_middle * glowing.noise.zw * size + layer, glowing.depth.x * size + layer);
         sum += amount * perlin(at);
         total += amount;
         amount *= glowing.noise.y;
@@ -3382,9 +3382,9 @@ fn fs_glow(in: Out) -> @location(0) vec4<f32> {
     if glow_has(GLOW_INVERT) {
         out = vec4<f32>(1.0 - out.rgb, out.a);
     }
-    out.a = max(was.a, max(out.r, max(out.g, out.b)));
+    out.a = min(max(was.a, max(out.r, max(out.g, out.b))), 1.0);
     let last = effect_mixed(px, out, glowing.mixing.z, glowing.mixing.w);
-    return clamp(last, vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec4<f32>(last.rgb, clamp(last.a, 0.0, 1.0));
 }
 
 struct Grain {

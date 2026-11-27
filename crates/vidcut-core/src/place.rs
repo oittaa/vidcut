@@ -469,14 +469,14 @@ pub struct GlowNoise {
 }
 
 impl GlowNoise {
-    const CELL: f64 = 340.0 / (0.6 * 1440.0);
+    const CELL: f64 = 340.0 / (0.6 * 1080.0);
     const EVOLUTION: f64 = 1.8;
     const SEETHE: f64 = 0.0208;
     const SEETHE_POWER: f64 = 1.9;
     const DEPTHS: f64 = 4096.0;
 
-    fn of(g: &Glow, area: f64, frame: i64) -> Self {
-        let cell = Self::CELL * g.noise_scale() * area;
+    fn of(g: &Glow, height: f64, frame: i64) -> Self {
+        let cell = Self::CELL * g.noise_scale() * height;
         let moved = frame.max(0) as f64 * Self::SEETHE * g.noise_seethe().powf(Self::SEETHE_POWER);
         Self {
             strength: g.noise_strength(),
@@ -534,7 +534,7 @@ impl Glowing {
             second_color: g.second_color(),
             gamma: g.curve(),
             saturation: g.colorful(),
-            noise: g.atmosphere.then(|| GlowNoise::of(g, area, on.frame)),
+            noise: g.atmosphere.then(|| GlowNoise::of(g, on.size[1], on.frame)),
             seen_only: g.frames() == GlowFraming::OnlyAsSeen,
             mode: g.over(),
             opacity: g.shown(),

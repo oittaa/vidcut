@@ -1256,9 +1256,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X140. The Atmosphere noise of a Glow has its own pattern
 
 - **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590).
+  - These are measurements in Resolve Studio 21.1.2 and 21.2 (Glow, p. 3590).
   - Atmosphere multiplies the glow by a noise.
-  - The renders show the statistics and the size of the noise at 1920×1080. They do not show the rule that makes its pattern.
+  - The renders show the statistics of the noise at 1920×1080. They show its size and its middle on five frame sizes.
+  - They do not show the rule that makes its pattern.
 - **vidcut:**
   - vidcut makes the noise itself ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
   - The noise has the statistics of the renders at the measured values. Its pattern is not the pattern of Resolve.
