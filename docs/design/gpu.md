@@ -327,7 +327,11 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 - `Ops::conv_shuffled` gives a transposed convolution with a stride of 2 as a 1×1 convolution and a pixel shuffle. The Magic Mask uses it.
 - `kernels::attend_gemm` of the Magic Mask gives attention as two `CONV4` passes with a `SOFTMAX` pass between them.
   - The keys, turned by `TRANSPOSE`, are the weights of the first pass. The values are the weights of the second pass.
-  - `kernels::attend` gives each query to one thread. The windowed and pooled blocks of the image encoder use it.
+- `kernels::attend` gives attention in one pass. The windowed and pooled blocks of the image encoder and the mask decoder use it.
+  - A workgroup takes 64 queries of one window and head, or 16 queries when there are fewer than 64.
+  - Four threads share each query. Each thread scores 4 keys of a block of 16 and adds up a quarter of the channels of the values.
+  - The keys and the values of each block go through workgroup memory.
+  - The softmax is online: the four threads of a query keep its running maximum and its running sum.
 - `Gpu::start_soft` gets the software adapter of wgpu. The kernels then run on the CPU.
 
 ## Deinterlacing and HDR

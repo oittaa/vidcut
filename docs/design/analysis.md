@@ -364,7 +364,8 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
   - With a negative object score, the memory gets an empty mask and the no-object pointer.
 - Attention with many keys is two matrix multiplies and a softmax (`kernels::attend_gemm`).
   - The memory attention and the global blocks of the image encoder use it.
-  - Why: the attention of one query in one thread is too slow for nearly 29,000 keys.
+  - Why: in the global blocks, two matrix multiplies are faster than `kernels::attend`.
+  - A head of the memory attention has 256 channels. The values of 16 keys fill all the workgroup memory of `ops::SHARED`.
 - `tracking::Shown` reports the frames done. A cancel stops the track between two frames.
 
 **The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
