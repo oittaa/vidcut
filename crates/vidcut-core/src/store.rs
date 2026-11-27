@@ -385,7 +385,7 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
 
 struct SaveCommit {
     meta: HistoryMeta,
-    added: Vec<(i64, Entry)>,
+    added: Vec<history::Added>,
 }
 
 impl Store {

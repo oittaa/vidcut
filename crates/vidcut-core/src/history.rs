@@ -9,9 +9,9 @@ use flate2::write::ZlibEncoder;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 
-use crate::editor::{Chain, Entry, HISTORY_CAP, HISTORY_ENTRIES_KEPT, History, Moved};
+use crate::editor::{Chain, Entry, HISTORY_CAP, HISTORY_ENTRIES_BYTES, History, Moved};
 use crate::error::{Error, Result};
-use crate::lru::Lru;
+use crate::lru::ByBytes;
 use crate::model::Project;
 use crate::steps::{Branch, Mark, Node, Step, Steps, StepsCache, Tree};
 
@@ -31,7 +31,9 @@ pub(crate) struct HistoryMeta {
     pub external_dirty: bool,
 }
 
-pub(crate) type EntryCache = Mutex<Lru<(u64, i64), Entry, HISTORY_ENTRIES_KEPT>>;
+pub(crate) type EntryCache = Mutex<ByBytes<(u64, i64), Entry>>;
+
+pub(crate) type Added = (i64, Entry, usize);
 
 pub(crate) fn due(meta: &HistoryMeta) -> bool {
     meta.steps > HISTORY_CAP
@@ -168,7 +170,7 @@ impl HistoryDb {
         dir: &Path,
         meta: &HistoryMeta,
         moved: &[Moved],
-    ) -> Result<(HistoryMeta, Vec<(i64, Entry)>)> {
+    ) -> Result<(HistoryMeta, Vec<Added>)> {
         let mut t = meta.clone();
         let mut added = Vec::new();
         {
@@ -195,6 +197,7 @@ impl HistoryDb {
                         let step_json = serde_json::to_string(&e.step).map_err(json_err)?;
                         let change_raw = serde_json::to_vec(&rel_change).map_err(json_err)?;
                         let change_blob = compress_bytes(&change_raw)?;
+                        let bytes = step_json.len() + change_raw.len();
                         stmt.execute(params![
                             KIND_STEP,
                             t.undo as i64,
@@ -205,7 +208,7 @@ impl HistoryDb {
                         ])
                         .map_err(|err| Error::internal(err.to_string()))?;
                         let seq = tx.last_insert_rowid();
-                        added.push((seq, e));
+                        added.push((seq, e, bytes));
                     }
                     Moved::Undo(n) => {
                         let n = (*n as usize).min(t.undo);
@@ -611,7 +614,7 @@ impl HistoryDb {
                 r.get(5).map_err(|e| Error::internal(e.to_string()))?;
             match kind {
                 KIND_STEP => {
-                    let entry = parse_entry(step_meta, change_delta)?;
+                    let (entry, _) = parse_entry(step_meta, change_delta)?;
                     tree.place_at(place(at_pos)?, entry);
                 }
                 KIND_UNDO => tree.back(place(at_pos)?),
@@ -857,14 +860,14 @@ fn unmarked(step_id: Option<u64>) -> Result<u64> {
     step_id.ok_or_else(|| Error::internal("missing step id in history"))
 }
 
-fn parse_entry(step_meta: Option<String>, change_delta: Option<Vec<u8>>) -> Result<Entry> {
+fn parse_entry(step_meta: Option<String>, change_delta: Option<Vec<u8>>) -> Result<(Entry, usize)> {
     let json = step_meta.ok_or_else(|| Error::internal("missing step metadata in history"))?;
     let step: Step = serde_json::from_str(&json).map_err(json_err)?;
     let delta_blob =
         change_delta.ok_or_else(|| Error::internal("missing step delta in history"))?;
     let delta_raw = decompress_bytes(&delta_blob)?;
     let change = serde_json::from_slice(&delta_raw).map_err(json_err)?;
-    Ok(Entry { step, change })
+    Ok((Entry { step, change }, json.len() + delta_raw.len()))
 }
 
 fn read_entry_cached(
@@ -890,12 +893,12 @@ fn read_entry_cached(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| db_err(path, e))?;
-    let mut entry = parse_entry(step_meta, change_delta)?;
+    let (mut entry, bytes) = parse_entry(step_meta, change_delta)?;
     crate::store::resolve_change(&mut entry.change, dir);
     if let Some(c) = cache {
-        c.lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert((generation, seq), entry.clone());
+        let mut c = c.lock().unwrap_or_else(|e| e.into_inner());
+        c.insert((generation, seq), entry.clone(), bytes);
+        c.fit(HISTORY_ENTRIES_BYTES);
     }
     Ok(entry)
 }
