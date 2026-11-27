@@ -576,6 +576,7 @@ Voice Isolation:
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
   - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
+  - Graded and Ungraded use `Grade::is_active`, as the render does. Why: a node or a value that changes nothing does not grade a clip, as measured.
 
 The render queue:
 
