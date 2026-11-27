@@ -825,6 +825,14 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
   - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **Stretch makes a file with pixels that are not square too wide.**
+  - Stretch scales the stored pixels to the frame. Then the pixel aspect ratio makes the picture wider again.
+  - Thus the picture is W × PAR wide, and it goes out of the frame at the left and the right.
+  - This is measured on files with pixels of 4:3, 2:1 and 10:9:
+    - The 4:3 file is 1706.67 px wide in 1280 x 720 and in 1280 x 960. This is 1280 × 4/3.
+    - The marks of the 2:1 file are 2 times as far apart across as at Fit, in 1280 x 720 and in 1280 x 960.
+    - The 10:9 file is 1422.4 px wide in 1280 x 960. Its left edge is at the place that 1280 × 10/9 gives, and its right edge is 0.2 px farther out.
+  - vidcut does not copy this fault. Stretch fills the frame on each axis (`place::mapped`, [spec](spec.md#input-scaling-pp-292293)).
 - **The crop of a file with a rotation cuts other sides of the picture.**
   - The files have a rotation of 90, 180 or 270 in the `tkhd` matrix. The timeline shows them upright.
   - One 1280 x 720 file was measured at each angle.

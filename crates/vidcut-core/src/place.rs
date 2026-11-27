@@ -1717,9 +1717,11 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let [cx, cy, cw, ch] = extent.within(fitted);
     let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
+    let (gw, gh) = extent.grid;
+    let ((sin, cos), [across, down]) = turn_of(p.turn(), (cw * fw * gh) / (ch * fh * gw));
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
+    let (zx, zy) = (zx * across, zy * down);
     let [ax, ay] = p.pivot();
-    let (sin, cos) = p.turn().to_radians().sin_cos();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
     let [qx, qy] = anchored(p, frame, fitted);
@@ -1731,7 +1733,6 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
-    let (gw, gh) = extent.grid;
     let crop = [
         cx + whole_pixels(c0.left, gw) * cw,
         cy + whole_pixels(c0.top, gh) * ch,
@@ -1779,6 +1780,17 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
             }
         },
     }
+}
+
+fn turn_of(degrees: f64, aspect: f64) -> ((f64, f64), [f64; 2]) {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let p = match aspect.is_finite() && aspect > 0.0 {
+        true => aspect,
+        false => 1.0,
+    };
+    let (x, y) = (cos, sin / p);
+    let across = x.hypot(y);
+    ((y / across, x / across), [across, cos.hypot(p * sin)])
 }
 
 fn leaned(
