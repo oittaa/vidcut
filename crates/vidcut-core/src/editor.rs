@@ -153,10 +153,11 @@ pub trait Env {
     fn subject_masks(
         &self,
         plan: &RenderPlan,
+        size: crate::masks::Size,
         subjects: &[Vec<crate::masks::Point>],
         download: bool,
     ) -> Result<Vec<Arc<[f32]>>> {
-        let _ = (plan, subjects, download);
+        let _ = (plan, size, subjects, download);
         Err(Error::usage(
             "the Magic Mask reads the picture in the vidcut program",
         ))
@@ -5660,7 +5661,8 @@ fn mutate(
         Request::GradeMaskClick { .. }
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. } => {
-            let edit = mask_edit(p, request, playhead)?;
+            let large = env.printer_lights().magic_mask_large;
+            let edit = mask_edit(p, request, playhead, large)?;
             if !dry_run {
                 for need in &edit.needs {
                     mask_made(env, need)?;
@@ -5670,7 +5672,8 @@ fn mutate(
             edit.out
         }
         Request::GradeMaskTrack { .. } => {
-            let edit = mask_track(p, request, playhead)?;
+            let large = env.printer_lights().magic_mask_large;
+            let edit = mask_track(p, request, playhead, large)?;
             if !dry_run && let Some(need) = &edit.need {
                 mask_tracked(env, need)?;
             }
@@ -8878,6 +8881,7 @@ fn mask_track_plan(
 #[derive(Debug, Clone)]
 pub struct MaskNeed {
     pub plan: RenderPlan,
+    pub size: crate::masks::Size,
     pub subjects: Vec<(String, Vec<crate::masks::Point>)>,
     pub download: bool,
 }
@@ -8890,7 +8894,12 @@ struct MaskEdit {
     out: Value,
 }
 
-fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<MaskEdit> {
+fn mask_edit(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Result<MaskEdit> {
     use ops::grade_masks::{ClickChange, click_changed, click_removed, clicked, mask_of};
     let opened = |clip: &Option<ClipRef>, layer: &Option<usize>, node: &Option<u32>| {
         let of = grade_of(p, clip, (false, *layer), playhead)?;
@@ -8923,6 +8932,7 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
             layer,
             node,
             invert,
+            quality,
             click,
             on,
             place,
@@ -8935,24 +8945,31 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
                 place: *place,
                 negative: *negative,
             };
+            if (invert.is_some() || quality.is_some()) && mask.clicks.is_empty() {
+                return Err(Error::invalid(format!(
+                    "the Magic Mask of node {n} has no click: click first"
+                )));
+            }
             if let Some(v) = invert {
-                if mask.clicks.is_empty() {
-                    return Err(Error::invalid(format!(
-                        "the Magic Mask of node {n} has no click: click first"
-                    )));
-                }
                 mask.invert = *v;
             }
-            let touched = match click {
+            let other = quality.filter(|q| *q != mask.quality);
+            let mut touched = match click {
                 Some(k) => vec![click_changed(&mut mask, *k, &change)?],
                 None if change != ClickChange::default() => {
                     return Err(Error::usage("`on`, `place` and `negative` need `click`"));
                 }
-                None if invert.is_none() => {
-                    return Err(Error::usage("give `invert` or `click`"));
+                None if invert.is_none() && quality.is_none() => {
+                    return Err(Error::usage("give `invert`, `quality` or `click`"));
                 }
                 None => Vec::new(),
             };
+            if let Some(q) = other {
+                mask.quality = q;
+                touched.extend(mask.clicks.iter().map(|c| (c.frame, c.subject)));
+                touched.sort_unstable();
+                touched.dedup();
+            }
             (of, n, mask, touched, Value::Null, *download)
         }
         Request::GradeMaskClear {
@@ -8974,7 +8991,7 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
         }
         _ => return Err(Error::invalid("not a Magic Mask request")),
     };
-    let needs = mask_maps(p, (&of, n), &mut mask, &touched, download)?;
+    let needs = mask_maps(p, (&of, n), &mut mask, &touched, (download, large))?;
     Ok(MaskEdit {
         of,
         n,
@@ -8989,8 +9006,9 @@ fn mask_maps(
     (of, n): (&ops::grade::GradeOf, u32),
     mask: &mut crate::model::MagicMask,
     touched: &[(i64, u32)],
-    download: bool,
+    (download, large): (bool, bool),
 ) -> Result<Vec<MaskNeed>> {
+    let size = crate::masks::Size::of(mask.quality, large);
     let mut frames: Vec<i64> = touched.iter().map(|v| v.0).collect();
     frames.sort_unstable();
     frames.dedup();
@@ -9015,7 +9033,7 @@ fn mask_maps(
             if points.is_empty() {
                 continue;
             }
-            let name = crate::masks::name(crate::catalog::SAM21_TINY.id, &picture, &points);
+            let name = crate::masks::name(size.model().id, &picture, &points);
             if !crate::masks::has(&name) && !subjects.iter().any(|(v, _)| *v == name) {
                 subjects.push((name.clone(), points));
             }
@@ -9029,6 +9047,7 @@ fn mask_maps(
         if !subjects.is_empty() {
             needs.push(MaskNeed {
                 plan,
+                size,
                 subjects,
                 download,
             });
@@ -9041,6 +9060,7 @@ fn mask_maps(
 #[derive(Debug, Clone)]
 pub struct TrackNeed {
     pub plan: RenderPlan,
+    pub size: crate::masks::Size,
     pub source: std::path::PathBuf,
     pub at: i64,
     pub backward: bool,
@@ -9058,7 +9078,12 @@ struct TrackEdit {
     out: Value,
 }
 
-fn mask_track(p: &Project, request: &Request, playhead: Option<i64>) -> Result<TrackEdit> {
+fn mask_track(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Result<TrackEdit> {
     let Request::GradeMaskTrack {
         clip,
         layer,
@@ -9077,6 +9102,7 @@ fn mask_track(p: &Project, request: &Request, playhead: Option<i64>) -> Result<T
     let of = grade_of(p, clip, (false, *layer), playhead)?;
     let n = node.unwrap_or(1);
     let mut mask = ops::grade_masks::mask_of(p, &of, n)?;
+    let size = crate::masks::Size::of(mask.quality, large);
     let t = time_or_playhead(p, at.as_ref(), playhead)?
         .ok_or_else(|| Error::usage("grade.mask.track needs `at` (--at): there is no playhead"))?;
     let ops::grade::GradeOf::Clip(id, _) = &of else {
@@ -9131,7 +9157,7 @@ fn mask_track(p: &Project, request: &Request, playhead: Option<i64>) -> Result<T
                 continue;
             }
             let looked = format!("{picture}\ntrack {frame} {f}");
-            let name = crate::masks::name(crate::catalog::SAM21_TINY.id, &looked, &clicked[k]);
+            let name = crate::masks::name(size.model().id, &looked, &clicked[k]);
             names.push((i, k, name.clone()));
             made.push(crate::model::MaskMap {
                 frame: f,
@@ -9159,6 +9185,7 @@ fn mask_track(p: &Project, request: &Request, playhead: Option<i64>) -> Result<T
     });
     let need = (!names.is_empty()).then(|| TrackNeed {
         plan,
+        size,
         source,
         at: t - t0,
         backward: way.backward(),
@@ -9194,8 +9221,13 @@ pub fn mask_tracked(env: &dyn Env, need: &TrackNeed) -> Result<()> {
     })
 }
 
-pub fn mask_track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackNeed> {
-    mask_track(p, request, playhead)
+pub fn mask_track_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Vec<TrackNeed> {
+    mask_track(p, request, playhead, large)
         .ok()
         .and_then(|e| e.need)
         .into_iter()
@@ -9205,7 +9237,7 @@ pub fn mask_track_looks(p: &Project, request: &Request, playhead: Option<i64>) -
 pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
     let points: Vec<Vec<crate::masks::Point>> =
         need.subjects.iter().map(|(_, p)| p.clone()).collect();
-    let maps = env.subject_masks(&need.plan, &points, need.download)?;
+    let maps = env.subject_masks(&need.plan, need.size, &points, need.download)?;
     for ((name, _), map) in need.subjects.iter().zip(maps) {
         crate::masks::put(name, map);
     }
@@ -9227,12 +9259,15 @@ fn played_compounds(p: &Project) -> Vec<String> {
     found
 }
 
-pub fn mask_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
-    let mut needs = sheet_remakes(p, download);
+pub fn mask_remakes(
+    p: &Project,
+    (download, large): (bool, bool),
+) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
+    let mut needs = sheet_remakes(p, (download, large));
     for id in played_compounds(p) {
         let mut inside = p.clone();
         if ops::compound::open_alone(&mut inside, &id).is_ok() {
-            let (clicks, tracks) = sheet_remakes(&inside, download);
+            let (clicks, tracks) = sheet_remakes(&inside, (download, large));
             needs.0.extend(clicks);
             needs.1.extend(tracks);
         }
@@ -9244,7 +9279,7 @@ fn track_remake(
     p: &Project,
     (of, n): (&ops::grade::GradeOf, u32),
     mask: &crate::model::MagicMask,
-    (from, download): (i64, bool),
+    (from, download, large): (i64, bool, bool),
 ) -> Option<TrackNeed> {
     let ops::grade::GradeOf::Clip(id, _) = of else {
         return None;
@@ -9275,6 +9310,7 @@ fn track_remake(
     let source = (p.media(&c.media).map(|m| m.path.clone())).unwrap_or_default();
     Some(TrackNeed {
         plan,
+        size: crate::masks::Size::of(mask.quality, large),
         source,
         at: from - lo,
         backward: lo < from,
@@ -9295,7 +9331,7 @@ fn widened(p: &Project, id: &str, (lo, hi): (i64, i64)) -> Option<Project> {
     Some(wide)
 }
 
-fn sheet_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
+fn sheet_remakes(p: &Project, (download, large): (bool, bool)) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
     let mut needs = Vec::new();
     let mut tracks = Vec::new();
     let clips = p.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
@@ -9319,7 +9355,7 @@ fn sheet_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>)
                 let on = (&of, k as u32 + 1);
                 let remade = froms
                     .into_iter()
-                    .filter_map(|f| track_remake(p, on, mask, (f, download)));
+                    .filter_map(|f| track_remake(p, on, mask, (f, download, large)));
                 tracks.extend(remade);
                 let missing: Vec<&crate::model::MaskMap> = (mask.maps.iter())
                     .filter(|m| m.from.is_none() && !crate::masks::has(&m.name))
@@ -9344,6 +9380,7 @@ fn sheet_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>)
                     if !subjects.is_empty() {
                         needs.push(MaskNeed {
                             plan,
+                            size: crate::masks::Size::of(mask.quality, large),
                             subjects,
                             download,
                         });
@@ -9355,8 +9392,13 @@ fn sheet_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>)
     (needs, tracks)
 }
 
-pub fn mask_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<MaskNeed> {
-    mask_edit(p, request, playhead).map_or_else(|_| Vec::new(), |e| e.needs)
+pub fn mask_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Vec<MaskNeed> {
+    mask_edit(p, request, playhead, large).map_or_else(|_| Vec::new(), |e| e.needs)
 }
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {

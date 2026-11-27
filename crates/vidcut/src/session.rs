@@ -758,7 +758,8 @@ pub fn export_media(
     .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
     if prepared.settings.video.is_some() {
         let env = AvEnv::for_project(path);
-        let (clicks, tracks) = vidcut_core::editor::mask_remakes(p, params.download);
+        let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+        let (clicks, tracks) = vidcut_core::editor::mask_remakes(p, (params.download, large));
         for need in &clicks {
             vidcut_core::editor::mask_made(&env, need)?;
         }

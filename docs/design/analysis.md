@@ -297,7 +297,7 @@ flowchart TD
 
 The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297)) has three parts:
 
-- The project keeps the clicks, Invert Mask and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
+- The project keeps the clicks, Invert Mask, Quality and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
 - `vidcut_core::masks` keeps the maps. Each map holds the logits of one subject on one frame.
 - The key stage scales each map to the frame on the GPU, and cuts it at 0.
 
@@ -305,6 +305,8 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 
 - `ops::grade_masks` changes the clicks. `clicked` chooses the subject of a new click with `subject_at`, which reads the maps of its frame.
 - `editor::mask_maps` makes the needs of the subjects that the request changed (`MaskNeed`).
+  - A change of Quality changes all the subjects of all the frames with clicks.
+  - `masks::Size::of` gives the model from Quality and the preference `ColorPrefs::magic_mask_large`. Each need holds it.
   - `mask_plan` gives the picture that comes into the corrector: the plan of `solo_plan`, with the input of the node as the output of the grade.
   - The plan leaves out the Magic Mask of the node itself. Thus a click does not change the picture that the next click reads.
   - The name of a map is a digest of the model, the plan and the clicks of its subject (`masks::name`).
@@ -340,7 +342,7 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
   - With one click, or none on a tracked frame, the output with the best predicted overlap.
   - With more clicks, the first output when it is stable, else the best one.
   - With a negative object score, no mask.
-- `mask::NET` keeps the loaded model for the next frame.
+- `mask::NET` keeps the loaded model for the next frame. A need of another `mask::Size` loads that model in its place.
 - With `gpu.acceleration` on, the model runs on the GPU. With it off, `Gpu::start_soft` gets the software adapter of wgpu.
   - The same kernels then run on the CPU: WARP on Windows, lavapipe on Linux.
   - macOS has no software adapter. There the request fails with `gpu.acceleration` off.
@@ -388,13 +390,14 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 
 **Checks.** The scripts and results are in the sam2 folder of the test data.
 
-- On the same input, the masks of vidcut and Meta's network overlap 0.9999 on average, and 0.9993 at worst.
-- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click. The model is SAM 2.1 tiny.
-- A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 on average.
+- On the same input, the masks of vidcut and Meta's network overlap 0.9999 or more on average, with each of the three models.
+  - The worst overlaps are 0.9993 (tiny), 0.9976 (base+) and 0.9997 (large).
+- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click.
+- A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 or more on average, with each model.
   - The cases are 12 frames of blackswan, and two objects on 12 frames of bike-packing. The logits differ by 0.06 at most.
   - Meta's predictor keeps its memories in bfloat16. vidcut keeps them in 32-bit float.
 - On the software adapter, the masks match the GPU within 8e-5.
-- Two or more clicks, negative clicks, base+ and large are not checked yet ([todo](../todo/subject-masks.md#measurements)).
+- Two or more clicks and negative clicks are not checked yet ([todo](../todo/subject-masks.md#measurements)).
 
 ## In a GUI
 

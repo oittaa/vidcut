@@ -1059,6 +1059,8 @@ Requests:
   - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
   - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
   - A set file holds one table, `keys`, in the form of `Preferences.keys`.
+    - A key of a set file can also name Meta, the Control key of macOS. Why: one file serves all systems, and a preset can use Control on macOS.
+    - On the other systems, `key_sets::parse` leaves out a key with Meta.
   - A set file also holds `base`, the built-in set that it changes (`KeySet::base`). The file leaves it out for vidcut's own set.
     - `keys.save` gives the new set the base of the set in its `from`. An import gives the base of the set that the file names.
   - `keys.export` and `keys.import` use the key file of other editors (`key_file`). `key_file::text` writes it, and `key_file::parse` reads it.

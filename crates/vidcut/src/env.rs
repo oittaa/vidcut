@@ -550,6 +550,7 @@ impl Env for AvEnv {
     fn subject_masks(
         &self,
         plan: &RenderPlan,
+        size: vidcut_core::masks::Size,
         subjects: &[Vec<vidcut_core::masks::Point>],
         download: bool,
     ) -> Result<Vec<Arc<[f32]>>> {
@@ -559,7 +560,7 @@ impl Env for AvEnv {
             ));
         }
         let dir = paths::models_dir();
-        let size = vidcut_av::mask::Size::Tiny;
+        let size = mask_size(size);
         vidcut_av::mask::get_ready(&dir, size, download).map_err(av_error)?;
         let piece = plan
             .video
@@ -603,7 +604,7 @@ impl Env for AvEnv {
             ));
         }
         let dir = paths::models_dir();
-        let size = vidcut_av::mask::Size::Tiny;
+        let size = mask_size(need.size);
         vidcut_av::mask::get_ready(&dir, size, need.download).map_err(av_error)?;
         let decoder = crate::preferences::gpu_decoding().own_decoder();
         let run = vidcut_av::mask::Run {
@@ -907,6 +908,14 @@ impl Env for AvEnv {
         } else {
             vidcut_core::editor::read_timeline_file(path)
         }
+    }
+}
+
+fn mask_size(size: vidcut_core::masks::Size) -> vidcut_av::mask::Size {
+    match size {
+        vidcut_core::masks::Size::Tiny => vidcut_av::mask::Size::Tiny,
+        vidcut_core::masks::Size::BasePlus => vidcut_av::mask::Size::BasePlus,
+        vidcut_core::masks::Size::Large => vidcut_av::mask::Size::Large,
     }
 }
 
