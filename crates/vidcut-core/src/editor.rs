@@ -527,6 +527,12 @@ impl Editor {
         }
     }
 
+    pub fn close_db(&self) {
+        if let Some(db) = &self.db {
+            db.close();
+        }
+    }
+
     pub fn project(&self) -> &Project {
         &self.project
     }

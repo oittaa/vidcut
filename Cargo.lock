@@ -5406,6 +5406,7 @@ name = "vidcut-core"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "libc",
  "roxmltree 0.21.2",
  "rusqlite",
  "schemars",
@@ -5417,6 +5418,7 @@ dependencies = [
  "toml",
  "unicode-general-category",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

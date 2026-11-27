@@ -14,7 +14,6 @@ pub struct OpenProject {
     pub editor: Editor,
     file_id: Option<FileId>,
     data_version: i64,
-    stamp: Option<(u64, std::time::SystemTime)>,
     pub unsaved: Option<String>,
     pub save_failed: bool,
     opened: u64,
@@ -43,14 +42,12 @@ impl OpenProject {
         editor.opened_at(opened);
         let file_id = store.file_id();
         let data_version = store.data_version()?;
-        let stamp = store.stamp();
         let watcher = watch_project(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,
             editor,
             file_id,
             data_version,
-            stamp,
             unsaved: None,
             save_failed: false,
             opened,
@@ -80,7 +77,6 @@ impl OpenProject {
         };
         editor.opened_at(self.opened);
         self.editor = editor;
-        self.stamp = self.store.stamp();
         self.save_failed = false;
         Ok(true)
     }
@@ -109,16 +105,14 @@ impl OpenProject {
             let saved = outcome.saved.expect("committed save result");
             self.unsaved = unsaved_warning(&saved);
             self.save_failed = saved.is_err();
-            if let Ok(saved) = saved {
-                self.stamp = self.store.stamp();
-                if saved.compact {
-                    let store = self.store.clone();
-                    let _ = crate::threads::spawn(
-                        "vidcut-history",
-                        crate::threads::Work::Job,
-                        move || store.compact(),
-                    );
-                }
+            if let Ok(saved) = saved
+                && saved.compact
+            {
+                let store = self.store.clone();
+                let _ =
+                    crate::threads::spawn("vidcut-history", crate::threads::Work::Job, move || {
+                        store.compact()
+                    });
             }
         }
         (outcome.result, outcome.committed || outcome.refreshed)
@@ -128,21 +122,18 @@ impl OpenProject {
         if !self.save_failed {
             return;
         }
-        if self.store.stamp() == self.stamp
-            && self
-                .store
-                .reload_if_changed(&mut self.file_id, &mut self.data_version)
-                .is_ok_and(|changed| changed.is_none())
-            && self.store.save(&mut self.editor).is_ok()
+        if self
+            .store
+            .save_if_unchanged(&mut self.file_id, &mut self.data_version, &mut self.editor)
+            .is_ok_and(|saved| saved)
         {
-            self.stamp = self.store.stamp();
-            self.data_version = self.store.data_version().unwrap_or(self.data_version);
             self.save_failed = false;
         }
     }
 
     pub fn close(&mut self) {
         self.save_left();
+        self.editor.close_db();
         self.store.checkpoint();
     }
 }
@@ -293,5 +284,50 @@ mod tests {
         ext.transact(|ed| ed.apply(add_b, &env, None)).unwrap();
         assert!(open.reload().unwrap());
         assert_eq!(open.project().bins, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn close_releases_history_handle_so_replace_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut open = opened(dir.path());
+        let env = crate::env::AvEnv::for_project(open.store.path());
+        let add =
+            Envelope::from_json(serde_json::json!({"method": "bins.add", "params": {"path": "a"}}))
+                .unwrap();
+        open.apply(add, &env, None).0.unwrap();
+        let _ = open.steps().unwrap();
+        let path = open.store.path().to_path_buf();
+        open.close();
+        let (inbox, _) = std::sync::mpsc::channel();
+        let replaced = OpenProject::open(
+            &path,
+            Some(New {
+                settings: Settings::default(),
+                replace: true,
+            }),
+            inbox,
+        )
+        .unwrap();
+        assert!(replaced.project().bins.is_empty());
+    }
+
+    #[test]
+    fn save_left_skips_when_another_writer_committed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut open = opened(dir.path());
+        let env = crate::env::AvEnv::for_project(open.store.path());
+        let add_a =
+            Envelope::from_json(serde_json::json!({"method": "bins.add", "params": {"path": "a"}}))
+                .unwrap();
+        open.editor.apply(add_a, &env, None).unwrap();
+        open.save_failed = true;
+        let ext = Store::open(open.store.path()).unwrap();
+        let add_b =
+            Envelope::from_json(serde_json::json!({"method": "bins.add", "params": {"path": "b"}}))
+                .unwrap();
+        ext.transact(|ed| ed.apply(add_b, &env, None)).unwrap();
+        open.save_left();
+        assert!(open.save_failed);
+        assert_eq!(ext.load().unwrap().project().bins, vec!["b"]);
     }
 }

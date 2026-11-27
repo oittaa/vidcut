@@ -8,7 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::editor::{Editor, Entry};
+use crate::change::Change;
+use crate::editor::{Editor, Entry, History, Moved};
 use crate::error::{Error, Result};
 use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
 use crate::lru::Lru;
@@ -35,10 +36,6 @@ type BlobHashCache = Mutex<Lru<usize, (BlobWeak, String), BLOB_HASHES_KEPT>>;
 
 const SCHEMA: &str = "\
 PRAGMA page_size = 4096;
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA temp_store = MEMORY;
-PRAGMA wal_autocheckpoint = 1000;
 PRAGMA application_id = 1447253332;
 PRAGMA user_version = 1;
 CREATE TABLE meta (
@@ -325,9 +322,33 @@ fn on_true() -> bool {
     true
 }
 
-fn configure_conn(conn: &Connection) -> rusqlite::Result<()> {
+fn configure_journal(conn: &Connection, remote: bool, writable: bool) -> rusqlite::Result<()> {
     conn.busy_timeout(BUSY_TIMEOUT)?;
-    conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;")
+    if writable {
+        let want = if remote { "delete" } else { "wal" };
+        let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+        if !mode.eq_ignore_ascii_case(want) {
+            let pragma = if remote {
+                "PRAGMA journal_mode = DELETE;"
+            } else {
+                "PRAGMA journal_mode = WAL;"
+            };
+            conn.execute_batch(pragma)?;
+        }
+        if !remote {
+            conn.execute_batch("PRAGMA wal_autocheckpoint = 1000;")?;
+        }
+    }
+    let tail = if remote {
+        "PRAGMA synchronous = FULL; PRAGMA temp_store = MEMORY;"
+    } else {
+        "PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;"
+    };
+    conn.execute_batch(tail)
+}
+
+fn configure_conn(conn: &Connection, path: &Path, writable: bool) -> rusqlite::Result<()> {
+    configure_journal(conn, crate::dirs::on_network(path), writable)
 }
 
 fn verify_db(conn: &Connection, path: &Path) -> Result<()> {
@@ -347,7 +368,7 @@ fn verify_db(conn: &Connection, path: &Path) -> Result<()> {
 pub(crate) fn open_conn(path: &Path) -> Result<Connection> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = Connection::open_with_flags(path, flags).map_err(|e| open_err(path, e))?;
-    configure_conn(&conn).map_err(|e| open_err(path, e))?;
+    configure_conn(&conn, path, true).map_err(|e| open_err(path, e))?;
     verify_db(&conn, path)?;
     Ok(conn)
 }
@@ -358,8 +379,7 @@ fn open_ro_or_rw(path: &Path) -> Result<Connection> {
     }
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = Connection::open_with_flags(path, flags).map_err(|e| open_err(path, e))?;
-    conn.busy_timeout(BUSY_TIMEOUT)
-        .map_err(|e| open_err(path, e))?;
+    configure_conn(&conn, path, false).map_err(|e| open_err(path, e))?;
     verify_db(&conn, path)?;
     Ok(conn)
 }
@@ -426,18 +446,22 @@ impl Store {
                     | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )
             .map_err(|e| sqlite_err(temp.path(), e))?;
-            configure_conn(&conn).map_err(|e| sqlite_err(temp.path(), e))?;
             conn.execute_batch(SCHEMA)
                 .map_err(|e| sqlite_err(temp.path(), e))?;
+            configure_conn(&conn, temp.path(), true).map_err(|e| sqlite_err(temp.path(), e))?;
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| sqlite_err(temp.path(), e))?;
             sync_project(&tx, &dir, None, project, None)?;
-            HistoryDb::init_meta_in(&tx, project)?;
+            let mut rel = project.clone();
+            relativize_project(&mut rel, &dir);
+            HistoryDb::init_meta_in(&tx, &rel)?;
             clear_dirty(&tx, temp.path())?;
             tx.commit().map_err(|e| sqlite_err(temp.path(), e))?;
-            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-                .map_err(|e| sqlite_err(temp.path(), e))?;
+            if !crate::dirs::on_network(temp.path()) {
+                conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                    .map_err(|e| sqlite_err(temp.path(), e))?;
+            }
         }
         let _ = std::fs::remove_file(sidecar(temp.path(), "-wal"));
         let _ = std::fs::remove_file(sidecar(temp.path(), "-shm"));
@@ -474,10 +498,6 @@ impl Store {
         HistoryDb::new(self.path.clone())
     }
 
-    pub fn stamp(&self) -> Option<(u64, std::time::SystemTime)> {
-        stamp_of(&self.path)
-    }
-
     pub fn file_id(&self) -> Option<FileId> {
         file_id_of(&self.path)
     }
@@ -488,7 +508,9 @@ impl Store {
 
     pub fn checkpoint(&self) {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(conn) = guard.take() {
+        if let Some(conn) = guard.take()
+            && !crate::dirs::on_network(&self.path)
+        {
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         }
     }
@@ -714,6 +736,43 @@ impl Store {
         Ok(out)
     }
 
+    pub fn save_if_unchanged(
+        &self,
+        last_id: &mut Option<FileId>,
+        last_dv: &mut i64,
+        editor: &mut Editor,
+    ) -> Result<bool> {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let current_id = file_id_of(&self.path);
+        if *last_id != current_id {
+            *guard = None;
+            *last_id = current_id;
+            return Ok(false);
+        }
+        if guard.is_none() {
+            *guard = Some(open_conn(&self.path)?);
+        }
+        let conn = guard.as_mut().expect("connection opened");
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| sqlite_err(&self.path, e))?;
+        let dv = query_data_version(&tx, &self.path)?;
+        if dv != *last_dv {
+            return Ok(false);
+        }
+        let (_, commit) = self.save_in_tx(&tx, editor)?;
+        tx.commit().map_err(|e| sqlite_err(&self.path, e))?;
+        editor.commit_saved(
+            self.history_db(),
+            (commit.meta.undo, commit.meta.redo),
+            commit.meta.generation,
+            editor.project().clone(),
+            commit.added,
+        );
+        *last_dv = query_data_version(conn, &self.path)?;
+        Ok(true)
+    }
+
     pub fn save(&self, editor: &mut Editor) -> Result<Saved> {
         self.with_conn(|conn| {
             let tx = conn
@@ -743,21 +802,51 @@ impl Store {
         let meta = HistoryDb::read_meta_in(tx)?;
         let moved = editor.moved();
         let mut added = Vec::new();
-        let new_meta = if editor.has_db() && editor.db_generation() == meta.generation {
+        let new_meta = if editor.has_db() {
             if moved.is_empty() {
                 meta
             } else {
-                let (m, inserted) = HistoryDb::append_in(tx, &meta, moved)?;
+                if editor.db_generation() != meta.generation {
+                    let mut u = meta.undo;
+                    let mut r = meta.redo;
+                    for m in moved {
+                        match m {
+                            Moved::Step(_) => {
+                                u += 1;
+                                r = 0;
+                            }
+                            Moved::Undo(n) => {
+                                if (*n as usize) > u {
+                                    return Err(Error::conflict(
+                                        "history was compacted past this undo",
+                                    ));
+                                }
+                                u -= *n as usize;
+                                r += *n as usize;
+                            }
+                            Moved::Redo(n) => {
+                                let step = (*n as usize).min(r);
+                                u += step;
+                                r -= step;
+                            }
+                            Moved::Mark(_) | Moved::Unmark(_) => {}
+                        }
+                    }
+                }
+                let (m, inserted) = HistoryDb::append_in(tx, self.dir(), &meta, moved)?;
                 added = inserted;
                 m
             }
         } else {
-            let h = editor.held();
-            let mut base = serde_json::to_value(editor.project()).map_err(json_err)?;
-            for e in h.undo.iter().rev() {
+            let mut rel_proj = editor.project().clone();
+            relativize_project(&mut rel_proj, self.dir());
+            let mut rel_h = editor.held().clone();
+            relativize_history(&mut rel_h, self.dir());
+            let mut base = serde_json::to_value(&rel_proj).map_err(json_err)?;
+            for e in rel_h.undo.iter().rev() {
                 e.change.apply(&mut base, false).map_err(Error::internal)?;
             }
-            HistoryDb::write_whole_in(tx, &base, h, meta.generation + 1, None, true)?
+            HistoryDb::write_whole_in(tx, &base, &rel_h, meta.generation + 1, None, true)?
         };
         clear_dirty(tx, &self.path)?;
         Ok((
@@ -2127,6 +2216,203 @@ fn relativize_path(path: &mut PathBuf, dir: &Path) {
     }
 }
 
+fn relativize_path_str(s: &mut String, dir: &Path) {
+    let mut path = PathBuf::from(&*s);
+    relativize_path(&mut path, dir);
+    *s = path.to_string_lossy().into_owned();
+}
+
+fn resolve_path(file: &mut PathBuf, dir: &Path) {
+    if !absolute_anywhere(file) {
+        *file = dir.join(native(file));
+    }
+}
+
+fn resolve_path_str(s: &mut String, dir: &Path) {
+    let mut path = PathBuf::from(&*s);
+    resolve_path(&mut path, dir);
+    *s = path.to_string_lossy().into_owned();
+}
+
+fn map_media_value(v: &mut Value, map: &impl Fn(&mut String)) {
+    let Some(obj) = v.as_object_mut() else {
+        return;
+    };
+    for key in ["path", "input_lut"] {
+        if let Some(Value::String(s)) = obj.get_mut(key) {
+            map(s);
+        }
+    }
+}
+
+fn map_lut_value(v: &mut Value, map: &impl Fn(&mut String)) {
+    if let Some(obj) = v.as_object_mut()
+        && let Some(Value::String(s)) = obj.get_mut("file")
+    {
+        map(s);
+    }
+}
+
+fn map_settings_value(v: &mut Value, map: &impl Fn(&mut String)) {
+    let Some(obj) = v.as_object_mut() else {
+        return;
+    };
+    for key in ["input_lut", "output_lut", "video_monitor_lut"] {
+        if let Some(Value::String(s)) = obj.get_mut(key) {
+            map(s);
+        }
+    }
+    for key in ["color_viewer_lut", "scopes_lut"] {
+        if let Some(lut) = obj.get_mut(key) {
+            map_lut_value(lut, map);
+        }
+    }
+}
+
+fn map_set_str(c: &mut Change, map: &impl Fn(&mut String)) {
+    if let Change::Set { before, after } = c {
+        for slot in [before.as_mut(), after.as_mut()].into_iter().flatten() {
+            if let Value::String(s) = slot {
+                map(s);
+            }
+        }
+    }
+}
+
+fn map_lut_change(c: &mut Change, map: &impl Fn(&mut String)) {
+    match c {
+        Change::Set { before, after } => {
+            for slot in [before.as_mut(), after.as_mut()].into_iter().flatten() {
+                map_lut_value(slot, map);
+            }
+        }
+        Change::Fields(fields) => {
+            if let Some(file) = fields.get_mut("file") {
+                map_set_str(file, map);
+            }
+        }
+        Change::Items(_) => {}
+    }
+}
+
+fn map_settings_change(c: &mut Change, map: &impl Fn(&mut String)) {
+    match c {
+        Change::Set { before, after } => {
+            for slot in [before.as_mut(), after.as_mut()].into_iter().flatten() {
+                map_settings_value(slot, map);
+            }
+        }
+        Change::Fields(fields) => {
+            for key in ["input_lut", "output_lut", "video_monitor_lut"] {
+                if let Some(field) = fields.get_mut(key) {
+                    map_set_str(field, map);
+                }
+            }
+            for key in ["color_viewer_lut", "scopes_lut"] {
+                if let Some(lut) = fields.get_mut(key) {
+                    map_lut_change(lut, map);
+                }
+            }
+        }
+        Change::Items(_) => {}
+    }
+}
+
+fn map_media_change(c: &mut Change, map: &impl Fn(&mut String)) {
+    match c {
+        Change::Set { before, after } => {
+            for slot in [before.as_mut(), after.as_mut()].into_iter().flatten() {
+                map_media_value(slot, map);
+            }
+        }
+        Change::Fields(fields) => {
+            for key in ["path", "input_lut"] {
+                if let Some(field) = fields.get_mut(key) {
+                    map_set_str(field, map);
+                }
+            }
+        }
+        Change::Items(_) => {}
+    }
+}
+
+fn map_media_list_change(c: &mut Change, map: &impl Fn(&mut String)) {
+    match c {
+        Change::Set { before, after } => {
+            for slot in [before.as_mut(), after.as_mut()].into_iter().flatten() {
+                if let Some(items) = slot.as_array_mut() {
+                    for item in items {
+                        map_media_value(item, map);
+                    }
+                }
+            }
+        }
+        Change::Items(items) => {
+            items.map_items(|v| map_media_value(v, map), |c| map_media_change(c, map));
+        }
+        Change::Fields(_) => {}
+    }
+}
+
+fn map_change(change: &mut Change, map: &impl Fn(&mut String)) {
+    match change {
+        Change::Set { before, after } => {
+            for slot in [before.as_mut(), after.as_mut()].into_iter().flatten() {
+                let Some(obj) = slot.as_object_mut() else {
+                    continue;
+                };
+                if let Some(Value::Array(items)) = obj.get_mut("media") {
+                    for item in items {
+                        map_media_value(item, map);
+                    }
+                }
+                if let Some(settings) = obj.get_mut("settings") {
+                    map_settings_value(settings, map);
+                }
+            }
+        }
+        Change::Fields(fields) => {
+            if let Some(media) = fields.get_mut("media") {
+                map_media_list_change(media, map);
+            }
+            if let Some(settings) = fields.get_mut("settings") {
+                map_settings_change(settings, map);
+            }
+        }
+        Change::Items(_) => {}
+    }
+}
+
+pub(crate) fn relativize_project(project: &mut Project, dir: &Path) {
+    relativize_settings(&mut project.settings, dir);
+    for m in &mut project.media {
+        relativize_media(m, dir);
+    }
+}
+
+pub(crate) fn relativize_change(change: &mut Change, dir: &Path) {
+    map_change(change, &|s| relativize_path_str(s, dir));
+}
+
+pub(crate) fn resolve_change(change: &mut Change, dir: &Path) {
+    map_change(change, &|s| resolve_path_str(s, dir));
+}
+
+pub(crate) fn relativize_history(history: &mut History, dir: &Path) {
+    fn map_branch(branches: &mut [crate::steps::Branch<Entry>], dir: &Path) {
+        for b in branches {
+            for e in &mut b.steps {
+                relativize_change(&mut e.change, dir);
+            }
+            map_branch(&mut b.branches, dir);
+        }
+    }
+    for e in history.undo.iter_mut().chain(&mut history.redo) {
+        relativize_change(&mut e.change, dir);
+    }
+    map_branch(&mut history.branches, dir);
+}
+
 fn relativize_media(m: &mut Media, dir: &Path) {
     relativize_path(&mut m.path, dir);
     if let Some(lut) = m.input_lut.as_mut() {
@@ -2155,29 +2441,24 @@ pub(crate) fn resolve_paths(project: &mut Project, dir: &Path) {
     let Project {
         media, settings, ..
     } = project;
-    let resolve = |file: &mut PathBuf| {
-        if !absolute_anywhere(file) {
-            *file = dir.join(native(file));
-        }
-    };
     for m in media {
-        resolve(&mut m.path);
+        resolve_path(&mut m.path, dir);
         if let Some(lut) = m.input_lut.as_mut() {
-            resolve(lut);
+            resolve_path(lut, dir);
         }
     }
     if let Some(p) = settings.input_lut.as_mut() {
-        resolve(p);
+        resolve_path(p, dir);
     }
     if let Some(p) = settings.output_lut.as_mut() {
-        resolve(p);
+        resolve_path(p, dir);
     }
     if let Some(p) = settings.video_monitor_lut.as_mut() {
-        resolve(p);
+        resolve_path(p, dir);
     }
     for lut in [&mut settings.color_viewer_lut, &mut settings.scopes_lut] {
         if let crate::model::MonitorLut::File(path) = lut {
-            resolve(path);
+            resolve_path(path, dir);
         }
     }
 }
@@ -2238,7 +2519,7 @@ mod tests {
     use super::*;
     use crate::model::{
         ClipCache, ClipRetime, Composition, MotionPath, Node, PathSample, Pattern, Picture,
-        Settings, Tracker,
+        Settings, Stabilization, Stabilized, Stabilizing, Tracker,
     };
     use crate::request::Envelope;
     use crate::test_support::FakeEnv;
@@ -2600,6 +2881,163 @@ mod tests {
             after_undo.project().tracks[0].clips[0].picture,
             expected_pic
         );
+    }
+
+    #[test]
+    fn save_after_generation_bump_keeps_history_and_appends_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        add_bin(&store, "b");
+        let mut ed = store.load().unwrap();
+        store
+            .with_conn(|c| {
+                c.execute("UPDATE history_meta SET generation = 2 WHERE id = 1", [])
+                    .map_err(|e| sqlite_err(store.path(), e))?;
+                Ok(())
+            })
+            .unwrap();
+        let add_c =
+            Envelope::from_json(json!({"method": "bins.add", "params": {"path": "c"}})).unwrap();
+        ed.apply(add_c, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        let mut loaded = store.load().unwrap();
+        assert_eq!(loaded.history_counts(), (3, 0));
+        assert_eq!(loaded.project().bins, vec!["a", "b", "c"]);
+        let undo =
+            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
+        loaded.apply(undo, &FakeEnv::default(), None).unwrap();
+        assert_eq!(loaded.project().bins, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn moving_folder_preserves_history_paths_on_external_edit_and_undo() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = crate::dirs::canonical(dir.path()).unwrap();
+        let a = root.join("a");
+        let b = root.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(4.0, true)]);
+        let mut proj = fixture.editor.project().clone();
+        proj.media[0].path = a.join("clip.mp4");
+        let path_a = a.join("p.vidcut");
+        let store = Store::create(&path_a, &proj).unwrap();
+        let add_bin_req =
+            Envelope::from_json(json!({"method": "bins.add", "params": {"path": "scenes"}}))
+                .unwrap();
+        store
+            .transact(|ed| ed.apply(add_bin_req, &FakeEnv::default(), None))
+            .unwrap();
+        let relink = Envelope::from_json(json!({
+            "method": "media.relink",
+            "params": {
+                "media": "m1",
+                "path": a.join("sub").join("clip.mp4").to_string_lossy()
+            }
+        }))
+        .unwrap();
+        let mut env = FakeEnv::default();
+        env.files.insert(
+            a.join("sub").join("clip.mp4"),
+            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
+        );
+        store.transact(|ed| ed.apply(relink, &env, None)).unwrap();
+        store.checkpoint();
+        drop(store);
+        std::fs::rename(&a, &b).unwrap();
+        let path_b = b.join("p.vidcut");
+        external_flip_ripple(&path_b);
+        let mut moved = Store::open(&path_b).unwrap().load().unwrap();
+        assert_eq!(
+            (
+                moved.project().media[0].path.clone(),
+                moved.history_counts()
+            ),
+            (b.join("sub").join("clip.mp4"), (3, 0))
+        );
+        let undo =
+            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 2}})).unwrap();
+        moved.apply(undo, &FakeEnv::default(), None).unwrap();
+        assert_eq!(moved.project().media[0].path, b.join("clip.mp4"));
+    }
+
+    #[test]
+    fn stabilized_frames_blob_round_trips_and_undoes() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
+        let mut proj = fixture.editor.project().clone();
+        let frames = Arc::new(vec![[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; 24]);
+        let mut clip = motion_clip("c1", 0, Vec::new());
+        clip.duration = 24;
+        clip.picture = Some(
+            Picture {
+                stabilization: Some(Stabilization {
+                    values: Stabilizing::default(),
+                    off: false,
+                    made: Some(Stabilized {
+                        with: Stabilizing::default(),
+                        first: 0,
+                        frames,
+                    }),
+                }),
+                ..Picture::default()
+            }
+            .into(),
+        );
+        let expected_pic = clip.picture.clone();
+        proj.tracks[0].clips = vec![clip].into();
+        let path = dir.path().join("p.vidcut");
+        let store = Store::create(&path, &proj).unwrap();
+        let mut ed = store.load().unwrap();
+        let disable = Envelope::from_json(
+            json!({"method": "clip.set", "params": {"clips": ["c1"], "enabled": false}}),
+        )
+        .unwrap();
+        ed.apply(disable, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        let after_edit = store.load().unwrap();
+        assert_eq!(
+            after_edit.project().tracks[0].clips[0].picture,
+            expected_pic
+        );
+        let undo =
+            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
+        ed.apply(undo, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        let after_undo = store.load().unwrap();
+        assert_eq!(
+            after_undo.project().tracks[0].clips[0].picture,
+            expected_pic
+        );
+    }
+
+    #[test]
+    fn rollback_delete_journal_mode_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.vidcut");
+        let project = Project::new(Settings {
+            auto_format: false,
+            ..Settings::default()
+        });
+        let store = Store::create(&path, &project).unwrap();
+        store
+            .with_conn(|conn| {
+                configure_journal(conn, true, true).map_err(|e| sqlite_err(&path, e))?;
+                let mode: String = conn
+                    .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                let sync_mode: i64 = conn
+                    .query_row("PRAGMA synchronous", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))?;
+                assert_eq!(
+                    (mode.to_ascii_lowercase().as_str(), sync_mode),
+                    ("delete", 2)
+                );
+                Ok(())
+            })
+            .unwrap();
+        add_bin(&store, "remote-bin");
+        assert_eq!(store.load().unwrap().project().bins, vec!["remote-bin"]);
     }
 
     #[test]

@@ -96,6 +96,14 @@ impl HistoryDb {
         &self.path
     }
 
+    pub(crate) fn close(&self) {
+        *self.conn.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn dir(&self) -> &Path {
+        self.path.parent().unwrap_or(Path::new("/"))
+    }
+
     fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
@@ -157,6 +165,7 @@ impl HistoryDb {
 
     pub(crate) fn append_in(
         tx: &Transaction<'_>,
+        dir: &Path,
         meta: &HistoryMeta,
         moved: &[Moved],
     ) -> Result<(HistoryMeta, Vec<(i64, Entry)>)> {
@@ -181,8 +190,10 @@ impl HistoryDb {
                             e.step.id = Some(t.next);
                             t.next += 1;
                         }
+                        let mut rel_change = e.change.clone();
+                        crate::store::relativize_change(&mut rel_change, dir);
                         let step_json = serde_json::to_string(&e.step).map_err(json_err)?;
-                        let change_raw = serde_json::to_vec(&e.change).map_err(json_err)?;
+                        let change_raw = serde_json::to_vec(&rel_change).map_err(json_err)?;
                         let change_blob = compress_bytes(&change_raw)?;
                         stmt.execute(params![
                             KIND_STEP,
@@ -377,6 +388,7 @@ impl HistoryDb {
                 undo.push(read_entry_cached(
                     conn,
                     &self.path,
+                    self.dir(),
                     meta.generation,
                     seq,
                     cache,
@@ -400,6 +412,7 @@ impl HistoryDb {
                 redo.push(read_entry_cached(
                     conn,
                     &self.path,
+                    self.dir(),
                     meta.generation,
                     since,
                     cache,
@@ -419,6 +432,7 @@ impl HistoryDb {
                     redo.push(read_entry_cached(
                         conn,
                         &self.path,
+                        self.dir(),
                         meta.generation,
                         seq,
                         cache,
@@ -628,11 +642,20 @@ impl HistoryDb {
     }
 
     pub(crate) fn chain(&self, id: u64) -> Result<Option<Chain>> {
-        self.with_conn(|conn| {
+        let mut chain: Option<Chain> = self.with_conn(|conn| {
             let (_, h, _) = Self::read_all_in(conn)?;
             Ok(crate::steps::chain(&h.branches, id)
                 .map(|c| c.into_iter().map(|b| (b.after, b.steps.clone())).collect()))
-        })
+        })?;
+        if let Some(chain) = chain.as_mut() {
+            let dir = self.dir();
+            for (_, entries) in chain {
+                for e in entries {
+                    crate::store::resolve_change(&mut e.change, dir);
+                }
+            }
+        }
+        Ok(chain)
     }
 
     pub(crate) fn compact(&self) -> Result<()> {
@@ -659,13 +682,13 @@ impl HistoryDb {
     fn compact_to(&self, limit: usize, hook: impl FnOnce() -> Result<()>) -> Result<()> {
         let (meta, mut base, mut h, snap_max_seq) = self.with_conn(|conn| {
             let meta = Self::read_meta_in(conn)?;
-            if meta.steps <= limit {
+            if meta.external_dirty || meta.steps <= limit {
                 return Ok((meta, Value::Null, History::default(), 0));
             }
             let (base, h, max_seq) = Self::read_all_in(conn)?;
             Ok((meta, base, h, max_seq))
         })?;
-        if meta.steps <= limit {
+        if meta.external_dirty || meta.steps <= limit {
             return Ok(());
         }
         let keep = limit - limit / 10;
@@ -710,7 +733,7 @@ impl HistoryDb {
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| db_err(&self.path, e))?;
             let now_meta = Self::read_meta_in(&tx)?;
-            if now_meta.generation != meta.generation {
+            if now_meta.generation != meta.generation || now_meta.external_dirty {
                 return Ok(());
             }
             type RawEventRow = (
@@ -743,6 +766,36 @@ impl HistoryDb {
                 rows.collect::<std::result::Result<Vec<_>, _>>()
                     .map_err(|e| db_err(&self.path, e))?
             };
+            if now_meta.undo < gone {
+                return Ok(());
+            }
+            let (mut pos, mut redo) = (meta.undo, meta.redo);
+            for (kind, at_pos, _, _, _, _) in &more {
+                match *kind {
+                    KIND_STEP => {
+                        let at = at_pos.unwrap_or(1).max(0) as usize;
+                        if at <= gone {
+                            return Ok(());
+                        }
+                        pos = at;
+                        redo = 0;
+                    }
+                    KIND_UNDO => {
+                        let step = (at_pos.unwrap_or(0).max(0) as usize).min(pos);
+                        pos -= step;
+                        redo += step;
+                        if pos < gone {
+                            return Ok(());
+                        }
+                    }
+                    KIND_REDO => {
+                        let step = (at_pos.unwrap_or(0).max(0) as usize).min(redo);
+                        redo -= step;
+                        pos += step;
+                    }
+                    _ => {}
+                }
+            }
             let mut written = Self::write_whole_in(
                 &tx,
                 &base,
@@ -817,6 +870,7 @@ fn parse_entry(
 fn read_entry_cached(
     conn: &Connection,
     path: &Path,
+    dir: &Path,
     generation: u64,
     seq: i64,
     cache: Option<&EntryCache>,
@@ -836,7 +890,8 @@ fn read_entry_cached(
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|e| db_err(path, e))?;
-    let entry = parse_entry(step_meta, step_id, change_delta)?;
+    let mut entry = parse_entry(step_meta, step_id, change_delta)?;
+    crate::store::resolve_change(&mut entry.change, dir);
     if let Some(c) = cache {
         c.lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -980,7 +1035,7 @@ mod tests {
         db.with_conn_mut(|conn| {
             let tx = conn.transaction().unwrap();
             let meta = HistoryDb::read_meta_in(&tx).unwrap();
-            HistoryDb::append_in(&tx, &meta, &moved).unwrap();
+            HistoryDb::append_in(&tx, db.dir(), &meta, &moved).unwrap();
             tx.commit().unwrap();
             Ok(())
         })
@@ -1222,5 +1277,42 @@ mod tests {
         save(&db, vec![Moved::Step(Box::new(step(4)))]);
         let (undo, _) = db.top(1, 0, None).unwrap();
         assert_eq!(undo[0].step.id, Some(4));
+    }
+
+    #[test]
+    fn compaction_bails_when_external_dirty_is_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = history(dir.path(), 11);
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE history_meta SET external_dirty = 1 WHERE id = 1",
+                [],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        db.compact_to(10, || Ok(())).unwrap();
+        let meta = db.meta().unwrap();
+        assert_eq!(
+            (meta.generation, meta.steps, meta.external_dirty),
+            (1, 11, true)
+        );
+    }
+
+    #[test]
+    fn compaction_bails_when_concurrent_undo_reaches_trimmed_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = history(dir.path(), 11);
+        let db2 = db.clone();
+        db.compact_to(10, || {
+            save(&db2, vec![Moved::Undo(10)]);
+            Ok(())
+        })
+        .unwrap();
+        let meta = db.meta().unwrap();
+        assert_eq!((meta.generation, meta.undo, meta.redo), (1, 1, 10));
+        let (_, redo) = db.top(0, 10, None).unwrap();
+        assert_eq!(redo.len(), 10);
     }
 }
