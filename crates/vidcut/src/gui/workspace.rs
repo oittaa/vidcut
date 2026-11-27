@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::{FindModel, Marker, PictureTool, Project, RenderCache, Subject};
 use vidcut_core::preferences::Scope;
 use vidcut_core::request::{GradeLevel, Page, Request, ViewerMode};
-use vidcut_core::shortcuts::Action;
+use vidcut_core::shortcuts::{Action, Panel};
 use vidcut_core::time::{Rational, format_timecode};
 
 pub use super::timeline::tools::{DynamicMode, DynamicTarget, heard};
@@ -1658,6 +1658,14 @@ impl Workspace {
         self.color_keys(ctx);
         let input = ctx.input(|i| i.clone());
         let fired = Fired::of(&bindings, &input);
+        for combo in super::shortcuts::conflicted(&bindings, Panel::App, &input) {
+            let on: Vec<&str> = bindings
+                .owners(Panel::App, combo)
+                .iter()
+                .map(|a| a.title())
+                .collect();
+            self.say(format!("{} is on {}", combo.shown(), on.join(" and ")));
+        }
         if fired.pressed(Action::Help) {
             self.help.open = !self.help.open;
         }

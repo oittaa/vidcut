@@ -26,7 +26,7 @@ use vidcut_core::model::{
     ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
-use vidcut_core::place::mapped;
+use vidcut_core::place::{crop_unit, mapped};
 use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::{GAIN, PAN};
 
@@ -866,6 +866,7 @@ impl Direction {
 pub(super) struct Shape {
     pub(super) frame: [f64; 2],
     pub(super) mapped: [f64; 2],
+    pub(super) crop: [f64; 2],
 }
 
 impl Field {
@@ -993,6 +994,7 @@ impl Field {
         let p = owned.as_ref().unwrap_or(p);
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
         let ([w, h], [fw, fh], [ax, ay]) = (s.frame, s.mapped, p.pivot());
+        let [cw, ch] = s.crop;
         let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
         match self {
             Field::Zoom | Field::ZoomX => zx * 100.0,
@@ -1004,10 +1006,10 @@ impl Field {
             Field::AnchorY => (0.5 - ay) * fh,
             Field::Pitch => p.pitch(),
             Field::Yaw => p.yaw(),
-            Field::Left => c.left * fw,
-            Field::Right => c.right * fw,
-            Field::Top => c.top * fh,
-            Field::Bottom => c.bottom * fh,
+            Field::Left => c.left * cw,
+            Field::Right => c.right * cw,
+            Field::Top => c.top * ch,
+            Field::Bottom => c.bottom * ch,
             Field::Softness => p.softness(),
             Field::Opacity => p.opaque() * 100.0,
             Field::StartZoom | Field::EndZoom => 100.0 / b.size,
@@ -1058,8 +1060,8 @@ impl Field {
             Field::AnchorX => -reach * fw..=reach * fw,
             Field::AnchorY => -reach * fh..=reach * fh,
             Field::Pitch | Field::Yaw => -lean..=lean,
-            Field::Left | Field::Right => 0.0..=fw,
-            Field::Top | Field::Bottom => 0.0..=fh,
+            Field::Left | Field::Right => 0.0..=s.crop[0],
+            Field::Top | Field::Bottom => 0.0..=s.crop[1],
             Field::Softness => -soft..=soft,
             Field::Opacity => 0.0..=100.0,
             Field::StartZoom | Field::EndZoom => 100.0 / box_size.1..=100.0 / box_size.0,
@@ -1108,10 +1110,10 @@ impl Field {
             Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / fh)]),
             Field::Pitch => out.pitch = Some(v),
             Field::Yaw => out.yaw = Some(v),
-            Field::Left => out.crop.left = v / fw,
-            Field::Right => out.crop.right = v / fw,
-            Field::Top => out.crop.top = v / fh,
-            Field::Bottom => out.crop.bottom = v / fh,
+            Field::Left => out.crop.left = v / s.crop[0],
+            Field::Right => out.crop.right = v / s.crop[0],
+            Field::Top => out.crop.top = v / s.crop[1],
+            Field::Bottom => out.crop.bottom = v / s.crop[1],
             Field::Softness => out.crop_softness = Some(v),
             Field::Opacity => out.opacity = Some(v / 100.0),
             Field::StartZoom
@@ -3355,11 +3357,11 @@ fn rate(p: &Project, c: &Clip) -> f64 {
 pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
     let (w, h) = (p.width().max(1), p.height().max(1));
     let frame = [f64::from(w), f64::from(h)];
-    let size = p
+    let (mapped, crop) = p
         .media(&c.media)
         .and_then(|m| m.info.video.as_ref())
         .filter(|v| v.width > 0 && v.height > 0)
-        .map_or(frame, |v| {
+        .map_or((frame, frame), |v| {
             let sar = (v.sar[0], v.sar[1]);
             let scaling = c
                 .picture
@@ -3367,11 +3369,13 @@ pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
                 .map_or(ClipScaling::Project, |q| q.scaling);
             let to = scaling.or(p.scaling());
             let [_, _, fw, fh] = mapped(to, (v.width, v.height), sar, v.rotation, (w, h));
-            [fw.max(1.0), fh.max(1.0)]
+            let size = [fw.max(1.0), fh.max(1.0)];
+            (size, crop_unit(size, sar, v.rotation))
         });
     Shape {
         frame,
-        mapped: size,
+        mapped,
+        crop,
     }
 }
 

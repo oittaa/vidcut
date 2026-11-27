@@ -312,6 +312,23 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - `editor::mask_made` runs `Env::subject_masks` for each need and puts the maps into the store.
 - In a GUI, `Live::measuring` makes the maps first (`editor::mask_looks`). The edit then finds them in the store.
 
+**A track.** `grade.mask.track` goes through `editor::mask_track`:
+
+- The subjects are those with clicks that are on, on the frame of `at` (`grade_masks::clicked_subjects`).
+- `mask_track_plan` gives the picture that comes into the corrector on all the frames of the track.
+  - It is the plan of `solo_plan` over a range of frames. The grade keeps its keyframes, and the renderer resolves them on each frame.
+- Each frame of the clip that the track reaches gets a `MaskMap` with `from`, the frame of the clicks.
+  - A retimed clip can show one frame of the clip on more than one frame of the timeline. The first of them that the track reaches gives the map.
+- The name of a tracked map is a digest of the model, the plan and the clicks of its subject. It also holds its own frame and the frame of the clicks.
+- `TrackNeed` lists the names with their frames in the plan. `editor::mask_tracked` runs `Env::subject_tracks` when the store lacks a name.
+  - `Env::subject_tracks` gives the maps of each frame as it makes them. `mask_tracked` puts them into the store at once.
+- In a GUI, `Live::measuring` tracks first, as a job with progress and a cancel (`editor::mask_track_looks`). The edit then finds the maps in the store.
+- `masks::RULES` holds the rules that the runs measure later. Until then they are vidcut's choice:
+  - `joins`: a positive click on the mask of a subject goes to that subject.
+  - `clicked_stays`: a frame with clicks of a subject keeps the map of its clicks.
+  - `clicks_drop_tracked`: a change of the clicks on a frame removes the maps tracked from them (`mask_maps`).
+- The edge of the mask is `MASK_CUT` in the key shader.
+
 **The model.** `AvEnv::subject_masks` renders the frame of the plan in float with `floats_sized`. Then `mask::find` in vidcut-av runs SAM 2.1:
 
 - `net::Net` runs the image encoder, the prompt encoder and the mask decoder in vidcut's own GPU kernels (`compute`).
@@ -319,12 +336,34 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - The input is the picture clamped to 0..1, scaled to the square with the bicubic filter of `bicubic::taps`, and normalized.
   - Meta's video code rounds the scaled picture to 8 bits. vidcut keeps it in float ([AGENTS.md](../../AGENTS.md), rule 1).
 - One encode serves all the subjects of the frame. Each subject gets one decode with its clicks.
-- The choice of the output is the choice of SAM 2.1 (`chosen`):
-  - With one click, the output with the best predicted overlap.
+- The choice of the output is the choice of SAM 2.1 (`pick`):
+  - With one click, or none on a tracked frame, the output with the best predicted overlap.
   - With more clicks, the first output when it is stable, else the best one.
   - With a negative object score, no mask.
 - `mask::NET` keeps the loaded model for the next frame.
-- The model needs a GPU. It runs on the GPU also with `gpu.acceleration` off, as the AI upscalers do. With no GPU, the request fails.
+- With `gpu.acceleration` on, the model runs on the GPU. With it off, `Gpu::start_soft` gets the software adapter of wgpu.
+  - The same kernels then run on the CPU: WARP on Windows, lavapipe on Linux.
+  - macOS has no software adapter. There the request fails with `gpu.acceleration` off.
+
+**The track engine.** `AvEnv::subject_tracks` gives a `mask::Run` to `mask::track`:
+
+- `mask::Pictures` renders the frames of the plan in float (`VideoFrames`).
+- Each way starts a new `mask::Track` from the frame of the clicks. The way forward comes first.
+  - The way back reads parts of at most `PART_BYTES` forward. Then it gives the frames of each part to the model in reverse.
+- `Track::start` encodes the frame of the clicks. `Net::first` decodes each subject with its clicks and remembers the result.
+- `Track::next` encodes the next frame. For each subject, `Net::next` recalls the memory, decodes with no clicks, and remembers the result.
+- Each subject has its own memory, a `Bank`. One encode of a frame serves all the subjects.
+  - The memory holds the frame of the clicks and the last six frames, each as features of 64 × 64 × 64.
+  - It also holds the object pointers of the last 16 frames: one token of the decoder of each frame.
+- `Net::recall` is the memory attention of SAM 2.1: four layers, with rotary positions (`kernels::rope`) on the features.
+  - The features of the frame attend to themselves, then to all the memories and the object pointers.
+- `Net::remember` encodes the mask of the frame with the features of the frame into a memory (`kernels::memory_mask`).
+  - The mask of the frame of the clicks is cut at 0. A tracked mask goes through a sigmoid.
+  - With a negative object score, the memory gets an empty mask and the no-object pointer.
+- Attention with many keys is two matrix multiplies and a softmax (`kernels::attend_gemm`).
+  - The memory attention and the global blocks of the image encoder use it.
+  - Why: the attention of one query in one thread is too slow for nearly 29,000 keys.
+- `tracking::Shown` reports the frames done. A cancel stops the track between two frames.
 
 **The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
 
@@ -332,6 +371,11 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - The disk cache limit can remove a map. Before an export, `editor::mask_remakes` lists the maps that the store does not have. The export makes them again.
   - It makes one plan for each frame, with all the missing subjects of that frame.
   - It skips a clip that is off, a frame outside the clip and a node with no input. Such a map does not show.
+  - For tracked maps, `track_remake` makes one `TrackNeed` for each frame of clicks that has a missing map in the clip.
+    - Its frames go from the first to the last map of that track, with the frame of the clicks. These are the frames of the first track.
+    - Why: the model takes fewer object pointers on a track of fewer than 16 frames. A shorter track gives other maps.
+    - A trim can take some of these frames out of the clip. Thus the plan reads a copy of the clip that covers them (`widened`, `Clip::walk`).
+    - The track runs again from the frame of the clicks, because each tracked map needs the memory of the frames before it.
   - It also reads each compound clip that the export plays, opened alone in a copy of the project (`ops::compound::open_alone`).
 - A split gives each part all the clicks and maps. A frame outside a part gets no new map (`mask_maps`).
 - `grade_masks::checked` lets a map name be only a digest. Thus a name from a project file stays in the `masks` folder.
@@ -339,13 +383,17 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 **The key.** `Grade::at` keeps only the maps of its frame. `key_steps` adds `KeySource::Mask` after the windows and the qualifier.
 
 - `Pass::Mask` names the maps of the frame (`Masking`). `mask_into` in the screen puts them into one storage buffer.
-- `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above 0.
+- `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above `MASK_CUT`.
 - A `Pass::KeyFold` then applies Invert Mask and folds the mask into the key of the corrector.
 
 **Checks.** The scripts and results are in the sam2 folder of the test data.
 
 - On the same input, the masks of vidcut and Meta's network overlap 0.9999 on average, and 0.9993 at worst.
 - The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click. The model is SAM 2.1 tiny.
+- A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 on average.
+  - The cases are 12 frames of blackswan, and two objects on 12 frames of bike-packing. The logits differ by 0.06 at most.
+  - Meta's predictor keeps its memories in bfloat16. vidcut keeps them in 32-bit float.
+- On the software adapter, the masks match the GPU within 8e-5.
 - Two or more clicks, negative clicks, base+ and large are not checked yet ([todo](../todo/subject-masks.md#measurements)).
 
 ## In a GUI

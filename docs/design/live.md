@@ -942,7 +942,9 @@ Keys:
 
 - The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
 - `Bindings` joins the table, `Preferences.keys` and the key set in force. It gives the keys of an action and the owner of a key (`Combo`).
-  - A key file can give one key to two actions of one level. `Bindings::owner` then gives the first in the table, and `Bindings::owners` gives all.
+  - A key file can give one key to two actions of one level. `Bindings::owner` then gives no action, and `Bindings::owners` gives all.
+  - That key stays taken. An action that the set does not list does not get it.
+  - `shortcuts::conflicted` finds such keys in the events of a frame. `Workspace::keys` names their actions in the status line.
   - `Bindings::conflicts` lists these keys, and `Bindings::conflicting` gives the keys of one action that another action has.
 - `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
 - Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.

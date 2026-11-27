@@ -2725,6 +2725,7 @@ struct MaskKeying {
 @group(0) @binding(3) var<storage, read> mask_maps: array<f32>;
 
 const MASK_SIDE: u32 = 256u;
+const MASK_CUT: f32 = 0.0;
 
 fn mask_value(m: u32, u: f32, v: f32) -> f32 {
     let last = MASK_SIDE - 1u;
@@ -2758,7 +2759,7 @@ fn fs_mask_key(in: Out) -> @location(0) vec4<f32> {
     let count = u32(mask_keying.size.z);
     var key = 0.0;
     for (var m = 0u; m < count; m++) {
-        if mask_value(m, u, v) > 0.0 {
+        if mask_value(m, u, v) > MASK_CUT {
             key = 1.0;
         }
     }

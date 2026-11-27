@@ -693,8 +693,8 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::Speed
         | KeyParam::ShadowOpacity
         | KeyParam::BackgroundOpacity => v * 100.0,
-        KeyParam::CropLeft | KeyParam::CropRight => v * fw,
-        KeyParam::CropTop | KeyParam::CropBottom => v * fh,
+        KeyParam::CropLeft | KeyParam::CropRight => v * f.crop[0],
+        KeyParam::CropTop | KeyParam::CropBottom => v * f.crop[1],
         KeyParam::Volume
         | KeyParam::Pan
         | KeyParam::Rotation
@@ -742,8 +742,8 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::Speed
         | KeyParam::ShadowOpacity
         | KeyParam::BackgroundOpacity => v / 100.0,
-        KeyParam::CropLeft | KeyParam::CropRight => v / fw,
-        KeyParam::CropTop | KeyParam::CropBottom => v / fh,
+        KeyParam::CropLeft | KeyParam::CropRight => v / f.crop[0],
+        KeyParam::CropTop | KeyParam::CropBottom => v / f.crop[1],
         KeyParam::Volume
         | KeyParam::Pan
         | KeyParam::Rotation

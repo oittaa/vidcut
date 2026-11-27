@@ -3789,6 +3789,42 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// Magic Mask: carry the subjects of the clicks on a frame through the
+    /// frames before and after it. The model remembers each subject on the
+    /// frames that it has seen, and finds it again on the next frame. Each
+    /// frame that the track reaches gets a map of each subject. A frame
+    /// with clicks of a subject keeps the map of its clicks. A track again
+    /// from the same frame replaces the maps of the last one. A change of
+    /// the clicks on that frame removes them. Returns the `subjects`, the
+    /// first and the last frame of the track (`first`, `last`), and the
+    /// count of the new `maps`.
+    #[serde(rename = "grade.mask.track")]
+    GradeMaskTrack {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame of the clicks that the track starts from. Left out:
+        /// the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The ways the track goes from that frame. Usual: `both`.
+        #[serde(default)]
+        way: TrackWay,
+        /// The most frames that the track goes in each `way`, from 1.
+        /// Without it, the track goes to the start or the end of the clip.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<u32>,
+        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// computer, checked against its SHA-256.
+        #[serde(default)]
+        download: bool,
+    },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences, compound clips and adjustment clips.
     /// A generator takes no effects. The effects work in their order, on the
