@@ -2,7 +2,7 @@ use crate::validate::{GAIN, PAN};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
@@ -13,7 +13,8 @@ use crate::analysis::{
 use crate::change::Change;
 use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
-use crate::history::HistoryFile;
+use crate::history::HistoryDb;
+use crate::lru::Lru;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
     Media, MediaInfo, Picture, Project, Proxy, Subject, SubtitleTrack, Timeline, Title, Track,
@@ -449,6 +450,7 @@ pub enum Moved {
 }
 
 pub const HISTORY_CAP: usize = 1 << 17;
+pub const HISTORY_ENTRIES_KEPT: usize = 256;
 
 pub const EXTERNAL: &str = "Changed outside vidcut";
 
@@ -464,9 +466,12 @@ pub struct Editor {
     project: Project,
     history: History,
     moved: Vec<Moved>,
-    pub(crate) file: Option<(HistoryFile, String)>,
+    pub(crate) db: Option<HistoryDb>,
+    base_counts: (usize, usize),
+    db_generation: u64,
+    saved: Option<Project>,
+    entry_cache: Mutex<Lru<(u64, i64), Entry, HISTORY_ENTRIES_KEPT>>,
     opened: Option<u64>,
-    blocked: Option<(String, String)>,
 }
 
 fn now_ms() -> u64 {
@@ -482,44 +487,12 @@ impl Editor {
             project,
             history,
             moved: Vec::new(),
-            file: None,
+            db: None,
+            base_counts: (0, 0),
+            db_generation: 0,
+            saved: None,
+            entry_cache: Mutex::new(Lru::new()),
             opened: None,
-            blocked: None,
-        }
-    }
-
-    pub(crate) fn unreadable(project: Project, hash: String, why: String) -> Self {
-        Self {
-            blocked: Some((hash, why)),
-            ..Self::new(project, History::default())
-        }
-    }
-
-    pub fn history_trouble(&self) -> Option<&str> {
-        self.blocked.as_ref().map(|(_, why)| why.as_str())
-    }
-
-    pub(crate) fn blocked_on(&self) -> Option<&str> {
-        self.blocked.as_ref().map(|(hash, _)| hash.as_str())
-    }
-
-    pub(crate) fn stands_on(&self) -> Option<&str> {
-        match (&self.file, &self.blocked) {
-            (Some((_, hash)), _) | (None, Some((hash, _))) => Some(hash),
-            (None, None) => None,
-        }
-    }
-
-    pub(crate) fn block(&mut self, why: String) {
-        if let Some((_, hash)) = self.file.take() {
-            for m in &self.moved {
-                if let Moved::Step(e) = m {
-                    self.history.undo.push((**e).clone());
-                }
-            }
-            self.blocked = Some((hash, why));
-        } else if let Some((_, was)) = &mut self.blocked {
-            *was = why;
         }
     }
 
@@ -527,9 +500,18 @@ impl Editor {
         self.opened = Some(ms);
     }
 
-    pub(crate) fn on_file(project: Project, file: HistoryFile, hash: String) -> Self {
+    pub(crate) fn on_db(
+        project: Project,
+        db: HistoryDb,
+        base_counts: (usize, usize),
+        db_generation: u64,
+        saved: Option<Project>,
+    ) -> Self {
         Self {
-            file: Some((file, hash)),
+            db: Some(db),
+            base_counts,
+            db_generation,
+            saved,
             ..Self::new(project, History::default())
         }
     }
@@ -538,29 +520,53 @@ impl Editor {
         &self.project
     }
 
-    pub(crate) fn project_mut(&mut self) -> &mut Project {
-        &mut self.project
+    pub(crate) fn saved_state(&self) -> Option<&Project> {
+        self.saved.as_ref()
+    }
+
+    pub(crate) fn has_db(&self) -> bool {
+        self.db.is_some()
+    }
+
+    pub(crate) fn db_generation(&self) -> u64 {
+        self.db_generation
     }
 
     pub(crate) fn held(&self) -> &History {
         &self.history
     }
 
-    pub(crate) fn take_moved(&mut self) -> Vec<Moved> {
-        std::mem::take(&mut self.moved)
+    pub(crate) fn moved(&self) -> &[Moved] {
+        &self.moved
     }
 
-    pub(crate) fn saved_to(&mut self, file: HistoryFile, hash: String) {
+    pub(crate) fn commit_saved(
+        &mut self,
+        db: HistoryDb,
+        base_counts: (usize, usize),
+        db_generation: u64,
+        project: Project,
+        added: Vec<(i64, Entry)>,
+    ) {
+        self.moved.clear();
         self.history = History::default();
-        self.file = Some((file, hash));
-        self.blocked = None;
+        self.db = Some(db);
+        self.base_counts = base_counts;
+        self.db_generation = db_generation;
+        self.saved = Some(project);
+        if !added.is_empty() {
+            let mut cache = self.entry_cache.lock().unwrap_or_else(|e| e.into_inner());
+            for (seq, entry) in added {
+                cache.insert((db_generation, seq), entry);
+            }
+        }
     }
 
     pub fn history_counts(&self) -> (usize, usize) {
-        let Some((file, _)) = &self.file else {
+        let Some(_) = &self.db else {
             return (self.history.undo.len(), self.history.redo.len());
         };
-        let (mut u, mut r) = file.tail().map_or((0, 0), |(t, _)| (t.undo, t.redo));
+        let (mut u, mut r) = self.base_counts;
         for m in &self.moved {
             match m {
                 Moved::Step(_) => (u, r) = (u + 1, 0),
@@ -587,11 +593,15 @@ impl Editor {
     }
 
     pub fn on_its_file(&self) -> bool {
-        self.file.is_some() && self.moved.is_empty()
+        self.db.is_some() && self.moved.is_empty()
     }
 
     pub fn history_view(&self, n: usize) -> Result<History> {
-        let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
+        let (undo, redo) = self.view(
+            n,
+            |db, nu, nr| db.top(nu, nr, Some(&self.entry_cache)),
+            Entry::clone,
+        )?;
         Ok(History {
             undo,
             redo,
@@ -600,12 +610,12 @@ impl Editor {
     }
 
     pub fn history_labels(&self, n: usize) -> Result<Labels> {
-        let (undo, redo) = self.view(n, HistoryFile::top_labels, |e| e.step.label.clone())?;
+        let (undo, redo) = self.view(n, HistoryDb::top_labels, |e| e.step.label.clone())?;
         Ok(Labels { undo, redo })
     }
 
     pub fn history_steps(&self, cache: &mut StepsCache) -> Result<Steps> {
-        let Some((file, _)) = &self.file else {
+        let Some(db) = &self.db else {
             let mut steps = Steps::default();
             for e in &self.history.undo {
                 steps.place(e.step.clone());
@@ -620,13 +630,7 @@ impl Editor {
             }
             return Ok(steps);
         };
-        let unreadable = |e: std::io::Error| {
-            Error::internal(format!(
-                "the undo history {} can't be read: {e}",
-                file.path().display()
-            ))
-        };
-        let mut steps = match file.steps_now(cache).map_err(unreadable)? {
+        let mut steps = match db.steps_now(cache)? {
             true => cache.steps.clone(),
             false => Steps::default(),
         };
@@ -681,19 +685,10 @@ impl Editor {
         if lo == hi {
             return Ok(Vec::new());
         }
-        if let Some((file, _)) = &self.file
+        if let Some(db) = &self.db
             && self.moved.is_empty()
         {
-            let unreadable = |e: std::io::Error| {
-                Error::internal(format!(
-                    "the undo history {} can't be read: {e}",
-                    file.path().display()
-                ))
-            };
-            let Some((tail, end)) = file.read_tail().map_err(unreadable)? else {
-                return Err(Error::internal("the undo history is gone"));
-            };
-            return file.between(&tail, end, lo, hi).map_err(unreadable);
+            return db.between(lo, hi, Some(&self.entry_cache));
         }
         if hi <= u {
             let h = self.history_view(u - lo)?;
@@ -707,39 +702,21 @@ impl Editor {
     fn view<T: Clone>(
         &self,
         n: usize,
-        top: impl Fn(
-            &HistoryFile,
-            &crate::history::Tail,
-            u64,
-            usize,
-            usize,
-        ) -> std::io::Result<(Vec<T>, Vec<T>)>,
+        top: impl Fn(&HistoryDb, usize, usize) -> Result<(Vec<T>, Vec<T>)>,
         of: impl Fn(&Entry) -> T,
     ) -> Result<(Vec<T>, Vec<T>)> {
         let newest = |v: &[T]| v[v.len().saturating_sub(n)..].to_vec();
-        let Some((file, _)) = &self.file else {
+        let Some(db) = &self.db else {
             let all = |v: &[Entry]| v.iter().map(&of).collect::<Vec<_>>();
             return Ok((
                 newest(&all(&self.history.undo)),
                 newest(&all(&self.history.redo)),
             ));
         };
-        let unreadable = |e: std::io::Error| {
-            Error::internal(format!(
-                "the undo history {} can't be read: {e}",
-                file.path().display()
-            ))
-        };
         let k = n + self.moved.len();
-        let (mut undo, mut redo) = match file.read_tail().map_err(unreadable)? {
-            Some((tail, end)) => {
-                let (mut undo, mut redo) = top(file, &tail, end, k, k).map_err(unreadable)?;
-                undo.reverse();
-                redo.reverse();
-                (undo, redo)
-            }
-            None => (Vec::new(), Vec::new()),
-        };
+        let (mut undo, mut redo) = top(db, k, k)?;
+        undo.reverse();
+        redo.reverse();
         for m in &self.moved {
             match m {
                 Moved::Step(e) => {
@@ -755,7 +732,7 @@ impl Editor {
     }
 
     fn push(&mut self, mut entry: Entry) {
-        if self.file.is_none() && entry.step.id.is_none() {
+        if self.db.is_none() && entry.step.id.is_none() {
             let next = self
                 .history
                 .undo
@@ -768,7 +745,7 @@ impl Editor {
             entry.step.id = Some(next);
         }
         self.moved.push(Moved::Step(Box::new(entry.clone())));
-        if self.file.is_none() {
+        if self.db.is_none() {
             self.history.undo.push(entry);
             self.history.redo.clear();
             let over = over(self.history.undo.len());
@@ -823,11 +800,7 @@ impl Editor {
                 result,
                 dry_run: false,
                 via: String::new(),
-                warnings: self
-                    .history_trouble()
-                    .map(String::from)
-                    .into_iter()
-                    .collect(),
+                warnings: Vec::new(),
             });
         }
         if !request.is_mutation() {
@@ -1005,7 +978,7 @@ impl Editor {
                 }),
                 None => Moved::Unmark(id),
             };
-            if self.file.is_none() {
+            if self.db.is_none() {
                 self.history.marks.retain(|m| m.step != id);
                 if let Moved::Mark(m) = &moved {
                     self.history.marks.push(m.clone());
@@ -1024,7 +997,7 @@ impl Editor {
     }
 
     fn restore(&mut self, id: u64, dry_run: bool) -> Result<Response> {
-        if self.file.is_none() {
+        if self.db.is_none() {
             return Err(Error::invalid(
                 "this project's undo history isn't saved yet, so it keeps no versions",
             ));
@@ -1093,19 +1066,10 @@ impl Editor {
                 "no version {id}: history.get lists them in branches"
             ))
         };
-        let Some((file, _)) = &self.file else {
+        let Some(db) = &self.db else {
             return Err(missing());
         };
-        match file.tail() {
-            Some((_, end)) => file.chain(end, id).map_err(|e| {
-                Error::internal(format!(
-                    "the undo history {} can't be read: {e}",
-                    file.path().display()
-                ))
-            })?,
-            None => None,
-        }
-        .ok_or_else(missing)
+        db.chain(id)?.ok_or_else(missing)
     }
 
     fn revert(&mut self, step: usize, client: Option<Client>, dry_run: bool) -> Result<Response> {
@@ -1259,7 +1223,7 @@ impl Editor {
         #[cfg(debug_assertions)]
         let mut json = to_json(&self.project);
         let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
-        let mut history = match self.file {
+        let mut history = match self.db {
             None => self.history.clone(),
             Some(_) => self.history_view(steps as usize)?,
         };
@@ -1333,7 +1297,7 @@ impl Editor {
         project.rev = self.project.rev + 1;
         project.edited = Some(now_ms());
         self.project = project;
-        if self.file.is_none() {
+        if self.db.is_none() {
             self.history = history;
         }
         self.moved.push(if undo {

@@ -418,12 +418,7 @@ pub fn run_with(
                 answer(json!({ "existing": files }))
             } else {
                 crate::queue::refuse_existing(&files)?;
-                let (mut r, history_error) =
-                    store.transact(|editor| editor.apply(envelope, &env, None))?;
-                if let Some(e) = history_error {
-                    r.warnings.push(history_unsaved(&e));
-                }
-                r
+                store.transact(|editor| editor.apply(envelope, &env, None))?
             }
         }
         Request::Probe { .. } => {
@@ -468,12 +463,7 @@ pub fn run_with(
                 _ => {}
             }
             if envelope.request.is_mutation() {
-                let (mut r, history_error) =
-                    store.transact(|editor| editor.apply(envelope, &env, None))?;
-                if let Some(e) = history_error {
-                    r.warnings.push(history_unsaved(&e));
-                }
-                r
+                store.transact(|editor| editor.apply(envelope, &env, None))?
             } else {
                 store.load_project()?.apply(envelope, &env, None)?
             }
@@ -851,13 +841,6 @@ pub fn export_media(
     }));
     r.rev = p.rev;
     Ok(r)
-}
-
-pub fn history_unsaved(error: &str) -> String {
-    format!(
-        "the edit is saved, but its undo history isn't ({error}). The edits before it may \
-         not be undoable"
-    )
 }
 
 fn watches_cancel(request: &Request) -> bool {

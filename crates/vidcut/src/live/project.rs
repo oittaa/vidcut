@@ -4,7 +4,7 @@ use std::sync::mpsc::Sender;
 use notify::Watcher;
 use vidcut_core::model::Settings;
 use vidcut_core::steps::{Steps, StepsCache};
-use vidcut_core::store::Saved;
+use vidcut_core::store::{FileId, Saved};
 use vidcut_core::{Editor, Env, Envelope, Project, Response, Result, Store};
 
 use super::Msg;
@@ -12,16 +12,14 @@ use super::Msg;
 pub struct OpenProject {
     pub store: Store,
     pub editor: Editor,
-    disk: String,
+    file_id: Option<FileId>,
+    data_version: i64,
     stamp: Option<(u64, std::time::SystemTime)>,
     pub unsaved: Option<String>,
     pub save_failed: bool,
-    told: Option<String>,
     opened: u64,
     steps: StepsCache,
-    history_stamp: Option<(u64, std::time::SystemTime)>,
     _watcher: Option<notify::RecommendedWatcher>,
-    _history_watcher: Option<notify::RecommendedWatcher>,
 }
 
 pub struct New {
@@ -40,27 +38,24 @@ impl OpenProject {
             }
         }
         let store = Store::open(path)?;
-        let stamp = store.stamp();
-        let disk = store.read()?;
         let opened = crate::when::now_ms();
-        let mut editor = store.load_text(&disk)?;
+        let mut editor = store.load()?;
         editor.opened_at(opened);
-        let history_stamp = store.history_stamp();
-        let history_watcher = watch(store.history_path(), inbox.clone(), || Msg::FileChanged);
-        let watcher = watch(store.path(), inbox, || Msg::FileChanged);
+        let file_id = store.file_id();
+        let data_version = store.data_version()?;
+        let stamp = store.stamp();
+        let watcher = watch_project(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,
             editor,
-            disk,
+            file_id,
+            data_version,
             stamp,
             unsaved: None,
             save_failed: false,
-            told: None,
             opened,
             steps: StepsCache::default(),
-            history_stamp,
             _watcher: watcher,
-            _history_watcher: history_watcher,
         })
     }
 
@@ -68,54 +63,26 @@ impl OpenProject {
         self.editor.project()
     }
 
-    pub fn trouble(&mut self) -> Option<String> {
-        let now = self.editor.history_trouble().map(String::from);
-        if now == self.told {
-            return None;
-        }
-        self.told.clone_from(&now);
-        now
-    }
-
     pub fn steps(&mut self) -> Result<Steps> {
-        self.store.recover(&mut self.editor);
         self.editor.history_steps(&mut self.steps)
     }
 
     pub fn reload(&mut self) -> Result<bool> {
-        let _lock = self.store.lock()?;
-        self.read_again()
+        self.refresh()
     }
 
     pub fn refresh(&mut self) -> Result<bool> {
-        let stamp = self.store.stamp();
-        if stamp.is_some()
-            && stamp == self.stamp
-            && self.store.history_stamp() == self.history_stamp
-        {
+        let Some(mut editor) = self
+            .store
+            .reload_if_changed(&mut self.file_id, &mut self.data_version)?
+        else {
             return Ok(false);
-        }
-        self.read_again()
-    }
-
-    fn read_again(&mut self) -> Result<bool> {
-        let stamp = self.store.stamp();
-        let history = self.store.history_stamp();
-        let text = self.store.read()?;
-        self.stamp = stamp;
-        let history_moved = history != self.history_stamp;
-        self.history_stamp = history;
-        if text == self.disk {
-            return Ok(history_moved);
-        }
-        let mut editor = self.store.load_text(&text)?;
+        };
         editor.opened_at(self.opened);
-        let changed = editor.project() != self.editor.project()
-            || editor.history_counts() != self.editor.history_counts();
         self.editor = editor;
-        self.disk = text;
+        self.stamp = self.store.stamp();
         self.save_failed = false;
-        Ok(changed)
+        Ok(true)
     }
 
     pub fn apply(
@@ -124,30 +91,26 @@ impl OpenProject {
         env: &dyn Env,
         playhead: Option<i64>,
     ) -> (Result<Response>, bool) {
-        self.store.recover(&mut self.editor);
         if !envelope.request.is_mutation() {
             let refreshed = self.refresh().unwrap_or(false);
             return (self.editor.apply(envelope, env, playhead), refreshed);
         }
-        let _lock = match self.store.lock() {
-            Ok(l) => l,
+        let outcome = match self.store.mutate_live(
+            &mut self.file_id,
+            &mut self.data_version,
+            &mut self.editor,
+            self.opened,
+            |editor| editor.apply(envelope, env, playhead),
+        ) {
+            Ok(outcome) => outcome,
             Err(e) => return (Err(e), false),
         };
-        let refreshed = match self.refresh() {
-            Ok(r) => r,
-            Err(e) => return (Err(e), false),
-        };
-        let was = self.editor.unsaved();
-        let result = self.editor.apply(envelope, env, playhead);
-        let committed = self.editor.unsaved() != was;
-        if committed {
-            let saved = self.store.save(&mut self.editor);
+        if outcome.committed {
+            let saved = outcome.saved.expect("committed save result");
             self.unsaved = unsaved_warning(&saved);
             self.save_failed = saved.is_err();
             if let Ok(saved) = saved {
-                self.disk = saved.text;
                 self.stamp = self.store.stamp();
-                self.history_stamp = self.store.history_stamp();
                 if saved.compact {
                     let store = self.store.clone();
                     let _ = crate::threads::spawn(
@@ -158,33 +121,35 @@ impl OpenProject {
                 }
             }
         }
-        (result, committed || refreshed)
+        (outcome.result, outcome.committed || outcome.refreshed)
     }
 
     pub fn save_left(&mut self) {
         if !self.save_failed {
             return;
         }
-        let Ok(_lock) = self.store.lock() else {
-            return;
-        };
         if self.store.stamp() == self.stamp
-            && let Ok(saved) = self.store.save(&mut self.editor)
+            && self
+                .store
+                .reload_if_changed(&mut self.file_id, &mut self.data_version)
+                .is_ok_and(|changed| changed.is_none())
+            && self.store.save(&mut self.editor).is_ok()
         {
-            self.disk = saved.text;
             self.stamp = self.store.stamp();
-            self.history_stamp = self.store.history_stamp();
+            self.data_version = self.store.data_version().unwrap_or(self.data_version);
             self.save_failed = false;
         }
+    }
+
+    pub fn close(&mut self) {
+        self.save_left();
+        self.store.checkpoint();
     }
 }
 
 fn unsaved_warning(saved: &Result<Saved>) -> Option<String> {
     match saved {
-        Ok(saved) => saved
-            .history_error
-            .as_deref()
-            .map(crate::session::history_unsaved),
+        Ok(_) => None,
         Err(e) => Some(format!(
             "the edit isn't saved ({}); the next edit tries again",
             e.message
@@ -242,18 +207,40 @@ pub(super) fn watch(
     Some(watcher)
 }
 
+fn watch_project(
+    path: &Path,
+    inbox: Sender<Msg>,
+    changed: fn() -> Msg,
+) -> Option<notify::RecommendedWatcher> {
+    let dir = path.parent()?.to_path_buf();
+    let name = path.file_name()?.to_os_string();
+    let mut wal = name.clone();
+    wal.push("-wal");
+    let mut journal = name.clone();
+    journal.push("-journal");
+    let mut watcher = watcher(
+        move |p| {
+            p.file_name().is_some_and(|f| {
+                f == name.as_os_str() || f == wal.as_os_str() || f == journal.as_os_str()
+            })
+        },
+        inbox,
+        changed,
+    )?;
+    watcher
+        .watch(&dir, notify::RecursiveMode::NonRecursive)
+        .ok()?;
+    Some(watcher)
+}
+
 #[cfg(test)]
 mod tests {
     use vidcut_core::Error;
 
     use super::*;
 
-    fn saved(history_error: Option<&str>) -> Result<Saved> {
-        Ok(Saved {
-            text: String::new(),
-            history_error: history_error.map(String::from),
-            compact: false,
-        })
+    fn saved() -> Result<Saved> {
+        Ok(Saved { compact: false })
     }
 
     #[test]
@@ -266,13 +253,7 @@ mod tests {
 
     #[test]
     fn a_clean_save_has_no_warning() {
-        assert_eq!(unsaved_warning(&saved(None)), None);
-    }
-
-    #[test]
-    fn a_save_without_its_history_says_so() {
-        let warning = unsaved_warning(&saved(Some("no room"))).unwrap();
-        assert!(warning.contains("undo history isn't (no room)"));
+        assert_eq!(unsaved_warning(&saved()), None);
     }
 
     fn opened(dir: &Path) -> OpenProject {
@@ -292,5 +273,25 @@ mod tests {
         std::fs::write(open.store.path(), "{}").unwrap();
         open.save_left();
         assert!(open.save_failed);
+    }
+
+    #[test]
+    fn reload_after_own_save_does_not_reread_and_sees_external_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut open = opened(dir.path());
+        let env = crate::env::AvEnv::for_project(open.store.path());
+        let add =
+            Envelope::from_json(serde_json::json!({"method": "bins.add", "params": {"path": "a"}}))
+                .unwrap();
+        let (res, _) = open.apply(add, &env, None);
+        res.unwrap();
+        assert!(!open.reload().unwrap());
+        let ext = Store::open(open.store.path()).unwrap();
+        let add_b =
+            Envelope::from_json(serde_json::json!({"method": "bins.add", "params": {"path": "b"}}))
+                .unwrap();
+        ext.transact(|ed| ed.apply(add_b, &env, None)).unwrap();
+        assert!(open.reload().unwrap());
+        assert_eq!(open.project().bins, vec!["a", "b"]);
     }
 }

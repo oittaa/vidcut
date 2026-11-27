@@ -13,13 +13,12 @@ fn store(dir: &Path) -> Store {
         auto_format: false,
         ..Settings::default()
     });
-    std::fs::write(&path, serde_json::to_string(&project).unwrap()).unwrap();
-    Store::open_in(&path, &dir.join("state")).unwrap()
+    Store::create(&path, &project).unwrap()
 }
 
 fn run(store: &Store, method: &str, params: Value) -> Value {
     let e = Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
-    let (r, _) = store
+    let r = store
         .transact(|ed| ed.apply(e, &FakeEnv::default(), None))
         .unwrap_or_else(|e| panic!("{method}: {e}"));
     r.result
@@ -94,7 +93,7 @@ fn a_named_step_keeps_its_name_in_a_later_run() {
     let s = store(dir.path());
     bins(&s, &["a", "b"]);
     run(&s, "history.mark", json!({ "step": 1, "name": "Before b" }));
-    let again = Store::open_in(s.path(), &dir.path().join("state")).unwrap();
+    let again = Store::open(s.path()).unwrap();
     let m = &history(&again)["marks"][0];
     assert_eq!(
         (m["step"].clone(), m["id"].clone(), m["name"].clone()),

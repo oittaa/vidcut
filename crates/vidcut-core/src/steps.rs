@@ -345,8 +345,8 @@ pub fn category(kind: &str) -> &'static str {
 #[derive(Debug, Clone, Default)]
 pub struct StepsCache {
     pub(crate) path: std::path::PathBuf,
-    pub(crate) end: u64,
-    pub(crate) mark: Vec<u8>,
+    pub(crate) generation: u64,
+    pub(crate) last_seq: i64,
     pub(crate) steps: Steps,
 }
 

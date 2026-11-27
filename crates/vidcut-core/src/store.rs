@@ -1,13 +1,147 @@
-use std::fs::File;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Duration;
 
-use crate::editor::{Editor, History};
+use rusqlite::{Connection, OpenFlags, Transaction, params};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::editor::{Editor, Entry};
 use crate::error::{Error, Result};
-use crate::history::{self, HistoryFile, Tail, text_hash};
-use crate::model::Project;
+use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
+use crate::model::{
+    Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds, OpenCompound,
+    Project, RenderJob, RenderRange, Settings, Speakers, SubtitleStyle, SubtitleTrack, SyncGroup,
+    TapeMarks, Timeline, TimelineSettings, Tool, Track, TrackKind, Transition, VoiceIsolation,
+};
+use crate::shared::SharedVec;
 
-const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+const APP_ID: i32 = 0x5643_5554;
+const SCHEMA_VERSION: i32 = 1;
+const BLOB_MIN_SAMPLES: usize = 16;
+const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+
+const SCHEMA: &str = "\
+PRAGMA page_size = 4096;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA temp_store = MEMORY;
+PRAGMA wal_autocheckpoint = 1000;
+PRAGMA application_id = 1447253332;
+PRAGMA user_version = 1;
+CREATE TABLE meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    rev INTEGER NOT NULL,
+    edited INTEGER,
+    data TEXT NOT NULL
+);
+CREATE TABLE media (
+    id TEXT PRIMARY KEY,
+    ord INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    bin TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE TABLE timelines (
+    id TEXT PRIMARY KEY,
+    ord INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    bin TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE TABLE tracks (
+    owner TEXT NOT NULL,
+    id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (owner, id)
+);
+CREATE TABLE clips (
+    owner TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    start INTEGER NOT NULL,
+    duration INTEGER NOT NULL,
+    media_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (owner, track_id, id)
+);
+CREATE TABLE subtitles (
+    tl_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (tl_id, id)
+);
+CREATE TABLE cues (
+    tl_id TEXT NOT NULL,
+    sub_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    start INTEGER NOT NULL,
+    duration INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (tl_id, sub_id, id)
+);
+CREATE TABLE compounds (
+    id TEXT PRIMARY KEY,
+    ord INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE TABLE blobs (
+    hash TEXT PRIMARY KEY,
+    data BLOB NOT NULL
+);
+CREATE TABLE history_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    undo_count INTEGER NOT NULL,
+    redo_count INTEGER NOT NULL,
+    total_steps INTEGER NOT NULL,
+    next_step_id INTEGER NOT NULL,
+    generation INTEGER NOT NULL,
+    base_json BLOB,
+    external_dirty INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE history_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind INTEGER NOT NULL,
+    at_pos INTEGER,
+    step_id INTEGER,
+    label TEXT,
+    step_meta TEXT,
+    change_delta BLOB
+);
+CREATE INDEX idx_history_events_kind_at ON history_events (kind, at_pos, seq DESC);
+CREATE TRIGGER tr_meta_i AFTER INSERT ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_meta_u AFTER UPDATE ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_meta_d AFTER DELETE ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_media_i AFTER INSERT ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_media_u AFTER UPDATE ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_media_d AFTER DELETE ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_timelines_i AFTER INSERT ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_timelines_u AFTER UPDATE ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_timelines_d AFTER DELETE ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_tracks_i AFTER INSERT ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_tracks_u AFTER UPDATE ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_tracks_d AFTER DELETE ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_clips_i AFTER INSERT ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_clips_u AFTER UPDATE ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_clips_d AFTER DELETE ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_subtitles_i AFTER INSERT ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_subtitles_u AFTER UPDATE ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_subtitles_d AFTER DELETE ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_cues_i AFTER INSERT ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_cues_u AFTER UPDATE ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_cues_d AFTER DELETE ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_compounds_i AFTER INSERT ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_compounds_u AFTER UPDATE ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_compounds_d AFTER DELETE ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+";
 
 pub fn state_dir() -> PathBuf {
     crate::dirs::state()
@@ -15,16 +149,240 @@ pub fn state_dir() -> PathBuf {
 
 #[derive(Debug, Clone)]
 pub struct Saved {
-    pub text: String,
-    pub history_error: Option<String>,
     pub compact: bool,
 }
 
-#[derive(Debug, Clone)]
+pub struct LiveOutcome<T> {
+    pub result: Result<T>,
+    pub refreshed: bool,
+    pub committed: bool,
+    pub saved: Option<Result<Saved>>,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileId(u64, u64);
+
+#[cfg(not(unix))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileId;
+
+#[cfg(unix)]
+fn file_id_of(path: &Path) -> Option<FileId> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).ok()?;
+    Some(FileId(meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_id_of(path: &Path) -> Option<FileId> {
+    path.exists().then_some(FileId)
+}
+
 pub struct Store {
     path: PathBuf,
-    lock_path: PathBuf,
-    history_path: PathBuf,
+    conn: Mutex<Option<Connection>>,
+}
+
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Store").field("path", &self.path).finish()
+    }
+}
+
+impl Clone for Store {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            conn: Mutex::new(None),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct MetaRow {
+    settings: Settings,
+    #[serde(default)]
+    recent: Vec<String>,
+    #[serde(default)]
+    compound_path: Vec<OpenCompound>,
+    #[serde(default)]
+    tape_marks: TapeMarks,
+    next_id: NextIds,
+    #[serde(default)]
+    bins: Vec<String>,
+    #[serde(default)]
+    groups: Vec<SyncGroup>,
+    #[serde(default)]
+    speakers: Speakers,
+    #[serde(default)]
+    queue: Vec<RenderJob>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TimelineRow {
+    id: String,
+    name: String,
+    #[serde(default)]
+    bin: String,
+    start_tc: i64,
+    #[serde(default)]
+    own: Option<TimelineSettings>,
+    #[serde(default)]
+    grade: Option<Grade>,
+    #[serde(default)]
+    render: RenderRange,
+    #[serde(default)]
+    clip_filter: ClipFilter,
+    #[serde(default)]
+    marks: Marks,
+    #[serde(default)]
+    markers: Vec<Marker>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CompoundRow {
+    id: String,
+    name: String,
+    #[serde(default)]
+    bin: String,
+    #[serde(default)]
+    removed: bool,
+    sequence_id: String,
+    fps: crate::time::Rational,
+    #[serde(default)]
+    drop_frame: bool,
+    #[serde(default)]
+    start_tc: i64,
+    frames: i64,
+    #[serde(default)]
+    marks: Marks,
+    #[serde(default)]
+    markers: Vec<Marker>,
+    #[serde(default)]
+    kept_otio: Option<Kept>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TrackRow {
+    id: String,
+    kind: TrackKind,
+    locked: bool,
+    muted: bool,
+    #[serde(default)]
+    solo: bool,
+    #[serde(default)]
+    volume_db: f64,
+    #[serde(default)]
+    voice_isolation: Option<VoiceIsolation>,
+    #[serde(default)]
+    duck: Option<crate::model::Duck>,
+    #[serde(default)]
+    equalizer: Option<crate::model::TrackEqualizer>,
+    #[serde(default)]
+    dynamics: Option<crate::model::TrackDynamics>,
+    video_enabled: bool,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    transitions: Vec<Transition>,
+    #[serde(default = "on_true")]
+    render_cache: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SubtitleTrackRow {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    language: Option<String>,
+    shown: bool,
+    #[serde(default = "on_true")]
+    destination: bool,
+    locked: bool,
+    #[serde(default)]
+    style: SubtitleStyle,
+}
+
+fn on_true() -> bool {
+    true
+}
+
+fn configure_conn(conn: &Connection) -> rusqlite::Result<()> {
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;")
+}
+
+fn verify_db(conn: &Connection, path: &Path) -> Result<()> {
+    let invalid = || Error::invalid(format!("{} is not a vidcut project", path.display()));
+    let app_id: i32 = conn
+        .query_row("PRAGMA application_id", [], |r| r.get(0))
+        .map_err(|_| invalid())?;
+    let version: i32 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|_| invalid())?;
+    if app_id != APP_ID || version != SCHEMA_VERSION {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+pub(crate) fn open_conn(path: &Path) -> Result<Connection> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(path, flags).map_err(|e| open_err(path, e))?;
+    configure_conn(&conn).map_err(|e| open_err(path, e))?;
+    verify_db(&conn, path)?;
+    Ok(conn)
+}
+
+fn open_ro_or_rw(path: &Path) -> Result<Connection> {
+    if let Ok(conn) = open_conn(path) {
+        return Ok(conn);
+    }
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(path, flags).map_err(|e| open_err(path, e))?;
+    conn.busy_timeout(BUSY_TIMEOUT)
+        .map_err(|e| open_err(path, e))?;
+    verify_db(&conn, path)?;
+    Ok(conn)
+}
+
+fn query_data_version(conn: &Connection, path: &Path) -> Result<i64> {
+    conn.query_row("PRAGMA data_version", [], |r| r.get(0))
+        .map_err(|e| open_err(path, e))
+}
+
+fn open_err(path: &Path, e: rusqlite::Error) -> Error {
+    match e.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt) => {
+            Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+        }
+        _ => sqlite_err(path, e),
+    }
+}
+
+fn sqlite_err(path: &Path, e: rusqlite::Error) -> Error {
+    Error::internal(format!("{}: {e}", path.display()))
+}
+
+fn json_err(e: serde_json::Error) -> Error {
+    Error::internal(e.to_string())
+}
+
+fn io(path: &Path, e: std::io::Error) -> Error {
+    Error::internal(format!("{}: {e}", path.display()))
+}
+
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut os = path.as_os_str().to_owned();
+    os.push(suffix);
+    PathBuf::from(os)
+}
+
+struct SaveCommit {
+    meta: HistoryMeta,
+    added: Vec<(i64, Entry)>,
 }
 
 impl Store {
@@ -42,17 +400,38 @@ impl Store {
             .unwrap_or(Path::new("."));
         std::fs::create_dir_all(parent).map_err(|e| io(path, e))?;
         let dir = crate::dirs::canonical(parent).map_err(|e| io(path, e))?;
-        write_atomic(path, &to_json(&mut project.clone(), &dir)?).map_err(|e| io(path, e))?;
-        let store = Self::open(path)?;
-        let _ = std::fs::remove_file(&store.history_path);
-        Ok(store)
+        let (temp, handle) = crate::temp::file(path).map_err(|e| io(path, e))?;
+        drop(handle);
+        {
+            let mut conn = Connection::open_with_flags(
+                temp.path(),
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_CREATE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|e| sqlite_err(temp.path(), e))?;
+            configure_conn(&conn).map_err(|e| sqlite_err(temp.path(), e))?;
+            conn.execute_batch(SCHEMA)
+                .map_err(|e| sqlite_err(temp.path(), e))?;
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| sqlite_err(temp.path(), e))?;
+            sync_project(&tx, &dir, None, project)?;
+            HistoryDb::init_meta_in(&tx, project)?;
+            clear_dirty(&tx, temp.path())?;
+            tx.commit().map_err(|e| sqlite_err(temp.path(), e))?;
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .map_err(|e| sqlite_err(temp.path(), e))?;
+        }
+        let _ = std::fs::remove_file(sidecar(temp.path(), "-wal"));
+        let _ = std::fs::remove_file(sidecar(temp.path(), "-shm"));
+        let _ = std::fs::remove_file(sidecar(path, "-wal"));
+        let _ = std::fs::remove_file(sidecar(path, "-shm"));
+        temp.keep(path).map_err(|e| io(path, e))?;
+        Self::open(path)
     }
 
     pub fn open(path: &Path) -> Result<Self> {
-        Self::open_in(path, &state_dir())
-    }
-
-    pub(crate) fn open_in(path: &Path, state: &Path) -> Result<Self> {
         let path = crate::dirs::canonical(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Error::not_found(format!("no project file {}", path.display()))
@@ -60,17 +439,9 @@ impl Store {
                 io(path, e)
             }
         })?;
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let lock_path = path.with_file_name(format!(".{name}.lock"));
-        let name = crate::fingerprint::short_digest(path.as_os_str().as_encoded_bytes());
-        let history_path = state.join("history").join(format!("{name}.jsonl"));
         Ok(Self {
             path,
-            lock_path,
-            history_path,
+            conn: Mutex::new(None),
         })
     }
 
@@ -78,62 +449,180 @@ impl Store {
         &self.path
     }
 
-    pub fn history_path(&self) -> &Path {
-        &self.history_path
-    }
-
     fn dir(&self) -> &Path {
         self.path.parent().unwrap_or(Path::new("/"))
+    }
+
+    fn history_db(&self) -> HistoryDb {
+        HistoryDb::new(self.path.clone())
     }
 
     pub fn stamp(&self) -> Option<(u64, std::time::SystemTime)> {
         stamp_of(&self.path)
     }
 
-    pub fn history_stamp(&self) -> Option<(u64, std::time::SystemTime)> {
-        stamp_of(&self.history_path)
+    pub fn file_id(&self) -> Option<FileId> {
+        file_id_of(&self.path)
     }
 
-    pub fn read(&self) -> Result<String> {
-        std::fs::read_to_string(&self.path).map_err(|e| io(&self.path, e))
+    pub fn data_version(&self) -> Result<i64> {
+        self.with_conn(|conn| query_data_version(conn, &self.path))
+    }
+
+    pub fn checkpoint(&self) {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(conn) = guard.take() {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+    }
+
+    fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            *guard = Some(open_conn(&self.path)?);
+        }
+        let conn = guard.as_mut().expect("connection opened");
+        f(conn)
+    }
+
+    pub fn reload_if_changed(
+        &self,
+        last_id: &mut Option<FileId>,
+        last_dv: &mut i64,
+    ) -> Result<Option<Editor>> {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let current_id = file_id_of(&self.path);
+        let replaced = *last_id != current_id;
+        if replaced {
+            *guard = None;
+            *last_id = current_id;
+        }
+        if guard.is_none() {
+            *guard = Some(open_conn(&self.path)?);
+        }
+        let conn = guard.as_ref().expect("connection opened");
+        let dv = query_data_version(conn, &self.path)?;
+        if !replaced && dv == *last_dv {
+            return Ok(None);
+        }
+        let editor = self.load_in(conn)?;
+        *last_dv = dv;
+        Ok(Some(editor))
+    }
+
+    pub fn mutate_live<T>(
+        &self,
+        last_id: &mut Option<FileId>,
+        last_dv: &mut i64,
+        editor: &mut Editor,
+        opened: u64,
+        apply: impl FnOnce(&mut Editor) -> Result<T>,
+    ) -> Result<LiveOutcome<T>> {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let current_id = file_id_of(&self.path);
+        let replaced = *last_id != current_id;
+        if replaced {
+            *guard = None;
+            *last_id = current_id;
+        }
+        if guard.is_none() {
+            *guard = Some(open_conn(&self.path)?);
+        }
+        let conn = guard.as_mut().expect("connection opened");
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| sqlite_err(&self.path, e))?;
+        let dv = query_data_version(&tx, &self.path)?;
+        let mut refreshed = false;
+        if replaced || dv != *last_dv {
+            let mut loaded = self.load_in(&tx)?;
+            loaded.opened_at(opened);
+            *editor = loaded;
+            *last_dv = dv;
+            refreshed = true;
+        }
+        let was = editor.unsaved();
+        let result = apply(editor);
+        let committed = editor.unsaved() != was;
+        let saved = if committed {
+            let outcome = self.save_in_tx(&tx, editor).and_then(|(s, commit)| {
+                tx.commit().map_err(|e| sqlite_err(&self.path, e))?;
+                editor.commit_saved(
+                    self.history_db(),
+                    (commit.meta.undo, commit.meta.redo),
+                    commit.meta.generation,
+                    editor.project().clone(),
+                    commit.added,
+                );
+                Ok(s)
+            });
+            if outcome.is_ok() {
+                *last_dv = query_data_version(conn, &self.path)?;
+            }
+            Some(outcome)
+        } else {
+            None
+        };
+        Ok(LiveOutcome {
+            result,
+            refreshed,
+            committed,
+            saved,
+        })
     }
 
     pub fn load(&self) -> Result<Editor> {
-        self.load_text(&self.read()?)
+        self.with_conn(|conn| self.load_in(conn))
     }
 
-    pub fn load_text(&self, text: &str) -> Result<Editor> {
-        let project = parse(&self.path, self.dir(), text)?;
-        let file = self.history_file();
-        let hash = text_hash(text);
-        let (tail, end) = match settled(&file) {
-            Ok(Some(found)) => found,
-            Ok(None) => return Ok(Editor::new(project, History::default())),
-            Err(e) => return Ok(Editor::unreadable(project, hash, self.trouble(&e))),
-        };
-        if tail.hash == hash {
-            return Ok(Editor::on_file(project, file, hash));
+    fn load_in(&self, conn: &Connection) -> Result<Editor> {
+        let project = load_project_from_conn(conn, &self.path, self.dir())?;
+        let meta = HistoryDb::read_meta_in(conn)?;
+        if !meta.external_dirty {
+            return Ok(Editor::on_db(
+                project.clone(),
+                self.history_db(),
+                (meta.undo, meta.redo),
+                meta.generation,
+                Some(project),
+            ));
         }
-        let Some(mut last) = last_saved(&file, end) else {
-            let why = "its last saved project can't be rebuilt from it".to_string();
-            return Ok(Editor::unreadable(project, hash, self.trouble(&why)));
+        let Some(mut last) = HistoryDb::last_saved_in(conn, self.dir()) else {
+            return Ok(Editor::on_db(
+                project,
+                self.history_db(),
+                (meta.undo, meta.redo),
+                meta.generation,
+                None,
+            ));
         };
         for job in &mut last.queue {
             if let Some(now) = project.queue.iter().find(|j| j.id == job.id) {
                 job.status.clone_from(&now.status);
             }
         }
-        let mut editor = Editor::on_file(last, file, tail.hash);
+        let mut editor = Editor::on_db(
+            last,
+            self.history_db(),
+            (meta.undo, meta.redo),
+            meta.generation,
+            None,
+        );
         editor.record_external(project);
         Ok(editor)
     }
 
-    fn trouble(&self, why: &dyn std::fmt::Display) -> String {
-        format!(
-            "the undo history {} can't be read ({why}). This session's steps are kept in \
-             memory and the file is left as it is",
-            self.history_path.display()
-        )
+    pub fn load_project(&self) -> Result<Editor> {
+        let conn = open_ro_or_rw(&self.path)?;
+        let project = load_project_from_conn(&conn, &self.path, self.dir())?;
+        let meta = HistoryDb::read_meta_in(&conn)?;
+        Ok(Editor::on_db(
+            project.clone(),
+            self.history_db(),
+            (meta.undo, meta.redo),
+            meta.generation,
+            Some(project),
+        ))
     }
 
     pub fn project_at(
@@ -142,8 +631,17 @@ impl Store {
         current: Project,
         step: usize,
     ) -> Result<std::sync::Arc<Project>> {
+        let db = self.history_db();
+        let meta = db.meta().unwrap_or(HistoryMeta {
+            undo: 0,
+            redo: 0,
+            steps: 0,
+            next: 1,
+            generation: 1,
+            external_dirty: false,
+        });
         past.project_at(
-            &Editor::on_file(current, self.history_file(), String::new()),
+            &Editor::on_db(current, db, (meta.undo, meta.redo), meta.generation, None),
             step,
         )
     }
@@ -155,144 +653,111 @@ impl Store {
         id: u64,
         k: usize,
     ) -> Result<std::sync::Arc<Project>> {
+        let db = self.history_db();
+        let meta = db.meta().unwrap_or(HistoryMeta {
+            undo: 0,
+            redo: 0,
+            steps: 0,
+            next: 1,
+            generation: 1,
+            external_dirty: false,
+        });
         past.version_at(
-            &Editor::on_file(current, self.history_file(), String::new()),
+            &Editor::on_db(current, db, (meta.undo, meta.redo), meta.generation, None),
             id,
             k,
         )
     }
 
-    pub fn recover(&self, editor: &mut Editor) -> bool {
-        let Some(hash) = editor.blocked_on().map(String::from) else {
-            return false;
-        };
-        if editor.pending() {
-            return false;
-        }
-        let file = self.history_file();
-        match file.read_tail() {
-            Ok(Some((tail, _))) if tail.hash == hash => {
-                editor.saved_to(file, hash);
-                true
+    pub fn transact<T>(&self, f: impl FnOnce(&mut Editor) -> Result<T>) -> Result<T> {
+        let (out, compact) = {
+            let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.is_none() {
+                *guard = Some(open_conn(&self.path)?);
             }
-            _ => false,
-        }
-    }
-
-    pub fn load_project(&self) -> Result<Editor> {
-        let text = self.read()?;
-        let project = parse(&self.path, self.dir(), &text)?;
-        Ok(Editor::on_file(
-            project,
-            self.history_file(),
-            text_hash(&text),
-        ))
-    }
-
-    fn history_file(&self) -> HistoryFile {
-        HistoryFile::new(self.history_path.clone(), self.path.clone())
-    }
-
-    pub fn transact<T>(
-        &self,
-        f: impl FnOnce(&mut Editor) -> Result<T>,
-    ) -> Result<(T, Option<String>)> {
-        let lock = self.lock()?;
-        let mut editor = self.load()?;
-        let was = editor.unsaved();
-        let out = f(&mut editor)?;
-        if editor.unsaved() == was {
-            return Ok((out, None));
-        }
-        let saved = self.save(&mut editor)?;
-        drop(lock);
-        if saved.compact {
+            let conn = guard.as_mut().expect("connection opened");
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| sqlite_err(&self.path, e))?;
+            let mut editor = self.load_in(&tx)?;
+            let was = editor.unsaved();
+            let out = f(&mut editor)?;
+            if editor.unsaved() == was {
+                return Ok(out);
+            }
+            let (saved, _) = self.save_in_tx(&tx, &editor)?;
+            tx.commit().map_err(|e| sqlite_err(&self.path, e))?;
+            (out, saved.compact)
+        };
+        if compact {
             let _ = self.compact();
         }
-        Ok((out, saved.history_error))
+        Ok(out)
     }
 
     pub fn save(&self, editor: &mut Editor) -> Result<Saved> {
-        let text = to_json(editor.project_mut(), self.dir())?;
-        let history = self.save_history(editor, &text_hash(&text));
-        write_atomic(&self.path, &text).map_err(|e| io(&self.path, e))?;
-        Ok(Saved {
-            text,
-            compact: history.as_ref().is_ok_and(history::due),
-            history_error: history
-                .err()
-                .map(|e| format!("{}: {e}", self.history_path.display())),
+        self.with_conn(|conn| {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| sqlite_err(&self.path, e))?;
+            let (saved, commit) = self.save_in_tx(&tx, editor)?;
+            tx.commit().map_err(|e| sqlite_err(&self.path, e))?;
+            editor.commit_saved(
+                self.history_db(),
+                (commit.meta.undo, commit.meta.redo),
+                commit.meta.generation,
+                editor.project().clone(),
+                commit.added,
+            );
+            Ok(saved)
         })
     }
 
-    fn save_history(&self, editor: &mut Editor, hash: &str) -> std::io::Result<Tail> {
-        let file = self.history_file();
-        let found = settled(&file);
-        let stands_on = editor.stands_on().map(String::from);
-        match found {
-            Ok(Some((tail, end))) if Some(&tail.hash) == stands_on.as_ref() => {
-                let moved = editor.take_moved();
-                let tail = file.append(&tail, end, moved, hash)?;
-                editor.saved_to(file, hash.into());
-                return Ok(tail);
+    fn save_in_tx(&self, tx: &Transaction<'_>, editor: &Editor) -> Result<(Saved, SaveCommit)> {
+        sync_project(tx, self.dir(), editor.saved_state(), editor.project())?;
+        let meta = HistoryDb::read_meta_in(tx)?;
+        let moved = editor.moved();
+        let mut added = Vec::new();
+        let new_meta = if editor.has_db() && editor.db_generation() == meta.generation {
+            if moved.is_empty() {
+                meta
+            } else {
+                let (m, inserted) = HistoryDb::append_in(tx, &meta, moved)?;
+                added = inserted;
+                m
             }
-            Ok(None) => {}
-            Ok(Some(_)) => {
-                let why = "another program changed it since this session read it";
-                editor.block(self.trouble(&why));
-                return Err(std::io::Error::other(why));
+        } else {
+            let h = editor.held();
+            let mut base = serde_json::to_value(editor.project()).map_err(json_err)?;
+            for e in h.undo.iter().rev() {
+                e.change.apply(&mut base, false).map_err(Error::internal)?;
             }
-            Err(e) => {
-                editor.block(self.trouble(&e));
-                return Err(e);
-            }
-        }
-        editor.take_moved();
-        let h = editor.held();
-        let mut base = serde_json::to_value(editor.project()).map_err(std::io::Error::other)?;
-        for e in h.undo.iter().rev() {
-            e.change
-                .apply(&mut base, false)
-                .map_err(std::io::Error::other)?;
-        }
-        let tail = file.write_whole(&base, h, hash)?;
-        editor.saved_to(file, hash.into());
-        Ok(tail)
+            HistoryDb::write_whole_in(tx, &base, h, meta.generation + 1, None, true)?
+        };
+        clear_dirty(tx, &self.path)?;
+        Ok((
+            Saved {
+                compact: history::due(&new_meta),
+            },
+            SaveCommit {
+                meta: new_meta,
+                added,
+            },
+        ))
     }
 
     pub fn compact(&self) -> Result<()> {
-        self.history_file()
-            .compact(|| {
-                self.lock()
-                    .map_err(|e| std::io::Error::other(e.to_string()))
-            })
-            .map_err(|e| io(&self.history_path, e))
+        self.history_db().compact()
     }
+}
 
-    pub fn lock(&self) -> Result<File> {
-        let file = File::options()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&self.lock_path)
-            .map_err(|e| io(&self.lock_path, e))?;
-        let started = Instant::now();
-        loop {
-            match file.try_lock() {
-                Ok(()) => return Ok(file),
-                Err(std::fs::TryLockError::WouldBlock) if started.elapsed() < LOCK_TIMEOUT => {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(std::fs::TryLockError::WouldBlock) => {
-                    return Err(Error::conflict(format!(
-                        "{} is locked by another process",
-                        self.path.display()
-                    )));
-                }
-                Err(std::fs::TryLockError::Error(e)) => return Err(io(&self.lock_path, e)),
-            }
-        }
-    }
+fn clear_dirty(conn: &Connection, path: &Path) -> Result<()> {
+    conn.execute(
+        "UPDATE history_meta SET external_dirty = 0 WHERE id = 1",
+        [],
+    )
+    .map_err(|e| sqlite_err(path, e))?;
+    Ok(())
 }
 
 pub(crate) fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
@@ -300,68 +765,1190 @@ pub(crate) fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
     Some((meta.len(), meta.modified().ok()?))
 }
 
-fn settled(file: &HistoryFile) -> std::io::Result<Option<(Tail, u64)>> {
-    let mut tries = 0;
-    loop {
-        match file.read_tail() {
-            Err(_) if tries < 10 => {
-                tries += 1;
-                std::thread::sleep(Duration::from_millis(20));
+fn load_project_from_conn(conn: &Connection, path: &Path, dir: &Path) -> Result<Project> {
+    let (rev, edited, meta_json): (u64, Option<i64>, String) = conn
+        .query_row("SELECT rev, edited, data FROM meta WHERE id = 1", [], |r| {
+            Ok((r.get::<_, i64>(0)?.max(0) as u64, r.get(1)?, r.get(2)?))
+        })
+        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
+    let meta: MetaRow = serde_json::from_str(&meta_json)
+        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
+
+    let media: Vec<Media> = {
+        let mut stmt = conn
+            .prepare_cached("SELECT data FROM media ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let s = row.map_err(|e| sqlite_err(path, e))?;
+            out.push(serde_json::from_str(&s).map_err(|e| {
+                Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+            })?);
+        }
+        out
+    };
+
+    let mut blob_cache: HashMap<String, Value> = HashMap::new();
+    let mut clips_by: HashMap<(String, String), Vec<Clip>> = HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare_cached("SELECT owner, track_id, data FROM clips ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut rows = stmt.query([]).map_err(|e| sqlite_err(path, e))?;
+        while let Some(r) = rows.next().map_err(|e| sqlite_err(path, e))? {
+            let owner: String = r.get(0).map_err(|e| sqlite_err(path, e))?;
+            let track_id: String = r.get(1).map_err(|e| sqlite_err(path, e))?;
+            let raw: String = r.get(2).map_err(|e| sqlite_err(path, e))?;
+            let clip = decode_clip(conn, path, &raw, &mut blob_cache)?;
+            clips_by.entry((owner, track_id)).or_default().push(clip);
+        }
+    }
+
+    let mut tracks_by: HashMap<String, Vec<Track>> = HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare_cached("SELECT owner, data FROM tracks ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut rows = stmt.query([]).map_err(|e| sqlite_err(path, e))?;
+        while let Some(r) = rows.next().map_err(|e| sqlite_err(path, e))? {
+            let owner: String = r.get(0).map_err(|e| sqlite_err(path, e))?;
+            let raw: String = r.get(1).map_err(|e| sqlite_err(path, e))?;
+            let tr: TrackRow = serde_json::from_str(&raw).map_err(|e| {
+                Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+            })?;
+            let clips = clips_by
+                .remove(&(owner.clone(), tr.id.clone()))
+                .unwrap_or_default();
+            tracks_by.entry(owner).or_default().push(Track {
+                id: tr.id,
+                kind: tr.kind,
+                clips: clips.into(),
+                locked: tr.locked,
+                muted: tr.muted,
+                solo: tr.solo,
+                volume_db: tr.volume_db,
+                voice_isolation: tr.voice_isolation,
+                duck: tr.duck,
+                equalizer: tr.equalizer,
+                dynamics: tr.dynamics,
+                video_enabled: tr.video_enabled,
+                name: tr.name,
+                transitions: tr.transitions,
+                render_cache: tr.render_cache,
+            });
+        }
+    }
+
+    let mut cues_by: HashMap<(String, String), Vec<Cue>> = HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare_cached("SELECT tl_id, sub_id, data FROM cues ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut rows = stmt.query([]).map_err(|e| sqlite_err(path, e))?;
+        while let Some(r) = rows.next().map_err(|e| sqlite_err(path, e))? {
+            let tl_id: String = r.get(0).map_err(|e| sqlite_err(path, e))?;
+            let sub_id: String = r.get(1).map_err(|e| sqlite_err(path, e))?;
+            let raw: String = r.get(2).map_err(|e| sqlite_err(path, e))?;
+            let cue: Cue = serde_json::from_str(&raw).map_err(|e| {
+                Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+            })?;
+            cues_by.entry((tl_id, sub_id)).or_default().push(cue);
+        }
+    }
+
+    let mut subs_by: HashMap<String, Vec<SubtitleTrack>> = HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare_cached("SELECT tl_id, data FROM subtitles ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut rows = stmt.query([]).map_err(|e| sqlite_err(path, e))?;
+        while let Some(r) = rows.next().map_err(|e| sqlite_err(path, e))? {
+            let tl_id: String = r.get(0).map_err(|e| sqlite_err(path, e))?;
+            let raw: String = r.get(1).map_err(|e| sqlite_err(path, e))?;
+            let sr: SubtitleTrackRow = serde_json::from_str(&raw).map_err(|e| {
+                Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+            })?;
+            let cues = cues_by
+                .remove(&(tl_id.clone(), sr.id.clone()))
+                .unwrap_or_default();
+            subs_by.entry(tl_id).or_default().push(SubtitleTrack {
+                id: sr.id,
+                name: sr.name,
+                language: sr.language,
+                shown: sr.shown,
+                destination: sr.destination,
+                locked: sr.locked,
+                style: sr.style,
+                cues: cues.into(),
+            });
+        }
+    }
+
+    let timelines: Vec<Timeline> = {
+        let mut stmt = conn
+            .prepare_cached("SELECT data FROM timelines ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|e| sqlite_err(path, e))?;
+            let tr: TimelineRow = serde_json::from_str(&raw).map_err(|e| {
+                Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+            })?;
+            let owner = format!("t:{}", tr.id);
+            let tracks = tracks_by.remove(&owner).unwrap_or_default();
+            let subtitles = subs_by.remove(&tr.id).unwrap_or_default();
+            out.push(Timeline {
+                id: tr.id,
+                name: tr.name,
+                bin: tr.bin,
+                start_tc: tr.start_tc,
+                own: tr.own,
+                grade: tr.grade,
+                render: tr.render,
+                clip_filter: tr.clip_filter,
+                tracks: tracks.into(),
+                marks: tr.marks,
+                markers: tr.markers,
+                subtitles: subtitles.into(),
+            });
+        }
+        out
+    };
+
+    let compounds: Vec<Compound> = {
+        let mut stmt = conn
+            .prepare_cached("SELECT data FROM compounds ORDER BY ord ASC")
+            .map_err(|e| sqlite_err(path, e))?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| sqlite_err(path, e))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|e| sqlite_err(path, e))?;
+            let kr: CompoundRow = serde_json::from_str(&raw).map_err(|e| {
+                Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+            })?;
+            let owner = format!("c:{}", kr.id);
+            let tracks = tracks_by.remove(&owner).unwrap_or_default();
+            out.push(Compound {
+                id: kr.id,
+                name: kr.name,
+                bin: kr.bin,
+                removed: kr.removed,
+                sequence_id: kr.sequence_id,
+                fps: kr.fps,
+                drop_frame: kr.drop_frame,
+                start_tc: kr.start_tc,
+                frames: kr.frames,
+                tracks: tracks.into(),
+                marks: kr.marks,
+                markers: kr.markers,
+                kept_otio: kr.kept_otio,
+            });
+        }
+        out
+    };
+
+    let mut project = Project {
+        rev,
+        edited: edited.map(|e| e.max(0) as u64),
+        settings: meta.settings,
+        media: media.into(),
+        tracks: SharedVec::new(),
+        compounds: compounds.into(),
+        compound_path: meta.compound_path,
+        marks: Marks::default(),
+        tape_marks: meta.tape_marks,
+        markers: Vec::new(),
+        subtitles: SharedVec::new(),
+        timelines: timelines.into(),
+        recent: meta.recent,
+        next_id: meta.next_id,
+        bins: meta.bins,
+        groups: meta.groups,
+        speakers: meta.speakers,
+        queue: meta.queue,
+    };
+    project.check_out();
+    resolve_paths(&mut project, dir);
+    let problems = crate::validate::violations(&project);
+    if !problems.is_empty() {
+        return Err(Error::invalid(format!(
+            "{} is inconsistent: {}",
+            path.display(),
+            problems.join("; ")
+        )));
+    }
+    Ok(project)
+}
+
+fn sync_project(
+    tx: &Transaction<'_>,
+    dir: &Path,
+    old: Option<&Project>,
+    new: &Project,
+) -> Result<()> {
+    let meta_changed = match old {
+        None => true,
+        Some(old) => {
+            old.rev != new.rev
+                || old.edited != new.edited
+                || old.settings != new.settings
+                || old.recent != new.recent
+                || old.compound_path != new.compound_path
+                || old.tape_marks != new.tape_marks
+                || old.next_id != new.next_id
+                || old.bins != new.bins
+                || old.groups != new.groups
+                || old.speakers != new.speakers
+                || old.queue != new.queue
+        }
+    };
+    if meta_changed {
+        let mut settings = new.settings.clone();
+        relativize_settings(&mut settings, dir);
+        let row = MetaRow {
+            settings,
+            recent: new.recent.clone(),
+            compound_path: new.compound_path.clone(),
+            tape_marks: new.tape_marks.clone(),
+            next_id: new.next_id.clone(),
+            bins: new.bins.clone(),
+            groups: new.groups.clone(),
+            speakers: new.speakers.clone(),
+            queue: new.queue.clone(),
+        };
+        let data = serde_json::to_string(&row).map_err(json_err)?;
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (id, rev, edited, data) VALUES (1, ?1, ?2, ?3)",
+            params![new.rev as i64, new.edited.map(|e| e as i64), data],
+        )
+        .map_err(|e| Error::internal(e.to_string()))?;
+    }
+
+    sync_media(tx, dir, old.map(|p| &p.media), &new.media)?;
+    sync_timelines(tx, old, new)?;
+    sync_compounds(tx, old, new)?;
+    Ok(())
+}
+
+fn sync_media(
+    tx: &Transaction<'_>,
+    dir: &Path,
+    old: Option<&SharedVec<Media>>,
+    new: &SharedVec<Media>,
+) -> Result<()> {
+    if let Some(old) = old {
+        if SharedVec::ptr_eq(old, new) || old == new {
+            return Ok(());
+        }
+        let keep: HashSet<&str> = new.iter().map(|m| m.id.as_str()).collect();
+        let mut del = tx
+            .prepare_cached("DELETE FROM media WHERE id = ?1")
+            .map_err(|e| Error::internal(e.to_string()))?;
+        for m in old {
+            if !keep.contains(m.id.as_str()) {
+                del.execute(params![m.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
             }
-            found => return found,
+        }
+        let old_map: HashMap<&str, (usize, &Media)> = old
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.as_str(), (i, m)))
+            .collect();
+        let mut ins = tx
+            .prepare_cached(
+                "INSERT OR REPLACE INTO media (id, ord, path, name, bin, data) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .map_err(|e| Error::internal(e.to_string()))?;
+        for (ord, m) in new.iter().enumerate() {
+            if old_map.get(m.id.as_str()) == Some(&(ord, m)) {
+                continue;
+            }
+            let mut rel = m.clone();
+            relativize_media(&mut rel, dir);
+            let data = serde_json::to_string(&rel).map_err(json_err)?;
+            ins.execute(params![
+                rel.id,
+                ord as i64,
+                rel.path.to_string_lossy().as_ref(),
+                rel.name,
+                rel.bin,
+                data,
+            ])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        }
+        return Ok(());
+    }
+    tx.execute("DELETE FROM media", [])
+        .map_err(|e| Error::internal(e.to_string()))?;
+    let mut ins = tx
+        .prepare_cached(
+            "INSERT INTO media (id, ord, path, name, bin, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .map_err(|e| Error::internal(e.to_string()))?;
+    for (ord, m) in new.iter().enumerate() {
+        let mut rel = m.clone();
+        relativize_media(&mut rel, dir);
+        let data = serde_json::to_string(&rel).map_err(json_err)?;
+        ins.execute(params![
+            rel.id,
+            ord as i64,
+            rel.path.to_string_lossy().as_ref(),
+            rel.name,
+            rel.bin,
+            data,
+        ])
+        .map_err(|e| Error::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+fn timeline_sheet<'a>(
+    p: &'a Project,
+    t: &'a Timeline,
+) -> (
+    &'a SharedVec<Track>,
+    &'a Marks,
+    &'a Vec<Marker>,
+    &'a SharedVec<SubtitleTrack>,
+) {
+    if p.checked_out_timeline() == Some(t.id.as_str()) {
+        (&p.tracks, &p.marks, &p.markers, &p.subtitles)
+    } else {
+        (&t.tracks, &t.marks, &t.markers, &t.subtitles)
+    }
+}
+
+fn sync_timelines(tx: &Transaction<'_>, old: Option<&Project>, new: &Project) -> Result<()> {
+    if let Some(old) = old {
+        let keep: HashSet<&str> = new.timelines.iter().map(|t| t.id.as_str()).collect();
+        for t in &old.timelines {
+            if !keep.contains(t.id.as_str()) {
+                let owner = format!("t:{}", t.id);
+                tx.execute("DELETE FROM cues WHERE tl_id = ?1", params![t.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute("DELETE FROM subtitles WHERE tl_id = ?1", params![t.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute("DELETE FROM clips WHERE owner = ?1", params![owner])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute("DELETE FROM tracks WHERE owner = ?1", params![owner])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute("DELETE FROM timelines WHERE id = ?1", params![t.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+            }
+        }
+    } else {
+        tx.execute("DELETE FROM cues", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute("DELETE FROM subtitles", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute("DELETE FROM clips WHERE owner LIKE 't:%'", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute("DELETE FROM tracks WHERE owner LIKE 't:%'", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute("DELETE FROM timelines", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+    }
+
+    let old_map: HashMap<&str, (usize, &Timeline)> = old
+        .map(|p| {
+            p.timelines
+                .iter()
+                .enumerate()
+                .map(|(i, t)| (t.id.as_str(), (i, t)))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (ord, new_t) in new.timelines.iter().enumerate() {
+        let (new_tracks, new_marks, new_markers, new_subs) = timeline_sheet(new, new_t);
+        let old_entry = old_map.get(new_t.id.as_str()).copied();
+        let old_sheet = old_entry.map(|(old_ord, old_t)| {
+            (
+                old_ord,
+                old_t,
+                timeline_sheet(old.expect("old present"), old_t),
+            )
+        });
+        let header_dirty = match old_sheet {
+            None => true,
+            Some((old_ord, old_t, (_, old_marks, old_markers, _))) => {
+                old_ord != ord
+                    || old_t.name != new_t.name
+                    || old_t.bin != new_t.bin
+                    || old_t.start_tc != new_t.start_tc
+                    || old_t.own != new_t.own
+                    || old_t.grade != new_t.grade
+                    || old_t.render != new_t.render
+                    || old_t.clip_filter != new_t.clip_filter
+                    || old_marks != new_marks
+                    || old_markers != new_markers
+            }
+        };
+        if header_dirty {
+            let row = TimelineRow {
+                id: new_t.id.clone(),
+                name: new_t.name.clone(),
+                bin: new_t.bin.clone(),
+                start_tc: new_t.start_tc,
+                own: new_t.own,
+                grade: new_t.grade.clone(),
+                render: new_t.render,
+                clip_filter: new_t.clip_filter.clone(),
+                marks: new_marks.clone(),
+                markers: new_markers.clone(),
+            };
+            let data = serde_json::to_string(&row).map_err(json_err)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO timelines (id, ord, name, bin, data) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![new_t.id, ord as i64, new_t.name, new_t.bin, data],
+            )
+            .map_err(|e| Error::internal(e.to_string()))?;
+        }
+        let owner = format!("t:{}", new_t.id);
+        sync_tracks(
+            tx,
+            &owner,
+            old_sheet.map(|(_, _, (t, _, _, _))| t),
+            new_tracks,
+        )?;
+        sync_subtitles(
+            tx,
+            &new_t.id,
+            old_sheet.map(|(_, _, (_, _, _, s))| s),
+            new_subs,
+        )?;
+    }
+    Ok(())
+}
+
+fn compound_sheet<'a>(
+    p: &'a Project,
+    k: &'a Compound,
+) -> (&'a SharedVec<Track>, &'a Marks, &'a Vec<Marker>) {
+    if p.checked_out_compound() == Some(k.id.as_str()) {
+        (&p.tracks, &p.marks, &p.markers)
+    } else {
+        (&k.tracks, &k.marks, &k.markers)
+    }
+}
+
+fn sync_compounds(tx: &Transaction<'_>, old: Option<&Project>, new: &Project) -> Result<()> {
+    if let Some(old) = old {
+        let keep: HashSet<&str> = new.compounds.iter().map(|k| k.id.as_str()).collect();
+        for k in &old.compounds {
+            if !keep.contains(k.id.as_str()) {
+                let owner = format!("c:{}", k.id);
+                tx.execute("DELETE FROM clips WHERE owner = ?1", params![owner])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute("DELETE FROM tracks WHERE owner = ?1", params![owner])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute("DELETE FROM compounds WHERE id = ?1", params![k.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+            }
+        }
+    } else {
+        tx.execute("DELETE FROM clips WHERE owner LIKE 'c:%'", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute("DELETE FROM tracks WHERE owner LIKE 'c:%'", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute("DELETE FROM compounds", [])
+            .map_err(|e| Error::internal(e.to_string()))?;
+    }
+
+    let old_map: HashMap<&str, (usize, &Compound)> = old
+        .map(|p| {
+            p.compounds
+                .iter()
+                .enumerate()
+                .map(|(i, k)| (k.id.as_str(), (i, k)))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (ord, new_k) in new.compounds.iter().enumerate() {
+        let (new_tracks, new_marks, new_markers) = compound_sheet(new, new_k);
+        let old_entry = old_map.get(new_k.id.as_str()).copied();
+        let old_sheet = old_entry.map(|(old_ord, old_k)| {
+            (
+                old_ord,
+                old_k,
+                compound_sheet(old.expect("old present"), old_k),
+            )
+        });
+        let header_dirty = match old_sheet {
+            None => true,
+            Some((old_ord, old_k, (_, old_marks, old_markers))) => {
+                old_ord != ord
+                    || old_k.name != new_k.name
+                    || old_k.bin != new_k.bin
+                    || old_k.removed != new_k.removed
+                    || old_k.sequence_id != new_k.sequence_id
+                    || old_k.fps != new_k.fps
+                    || old_k.drop_frame != new_k.drop_frame
+                    || old_k.start_tc != new_k.start_tc
+                    || old_k.frames != new_k.frames
+                    || old_k.kept_otio != new_k.kept_otio
+                    || old_marks != new_marks
+                    || old_markers != new_markers
+            }
+        };
+        if header_dirty {
+            let row = CompoundRow {
+                id: new_k.id.clone(),
+                name: new_k.name.clone(),
+                bin: new_k.bin.clone(),
+                removed: new_k.removed,
+                sequence_id: new_k.sequence_id.clone(),
+                fps: new_k.fps,
+                drop_frame: new_k.drop_frame,
+                start_tc: new_k.start_tc,
+                frames: new_k.frames,
+                marks: new_marks.clone(),
+                markers: new_markers.clone(),
+                kept_otio: new_k.kept_otio.clone(),
+            };
+            let data = serde_json::to_string(&row).map_err(json_err)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO compounds (id, ord, name, data) VALUES (?1, ?2, ?3, ?4)",
+                params![new_k.id, ord as i64, new_k.name, data],
+            )
+            .map_err(|e| Error::internal(e.to_string()))?;
+        }
+        let owner = format!("c:{}", new_k.id);
+        sync_tracks(tx, &owner, old_sheet.map(|(_, _, (t, _, _))| t), new_tracks)?;
+    }
+    Ok(())
+}
+
+fn track_meta_eq(a: &Track, b: &Track) -> bool {
+    a.kind == b.kind
+        && a.locked == b.locked
+        && a.muted == b.muted
+        && a.solo == b.solo
+        && a.volume_db == b.volume_db
+        && a.voice_isolation == b.voice_isolation
+        && a.duck == b.duck
+        && a.equalizer == b.equalizer
+        && a.dynamics == b.dynamics
+        && a.video_enabled == b.video_enabled
+        && a.name == b.name
+        && a.transitions == b.transitions
+        && a.render_cache == b.render_cache
+}
+
+fn upsert_track(tx: &Transaction<'_>, owner: &str, ord: usize, tr: &Track) -> Result<()> {
+    let row = TrackRow {
+        id: tr.id.clone(),
+        kind: tr.kind,
+        locked: tr.locked,
+        muted: tr.muted,
+        solo: tr.solo,
+        volume_db: tr.volume_db,
+        voice_isolation: tr.voice_isolation,
+        duck: tr.duck.clone(),
+        equalizer: tr.equalizer.clone(),
+        dynamics: tr.dynamics,
+        video_enabled: tr.video_enabled,
+        name: tr.name.clone(),
+        transitions: tr.transitions.clone(),
+        render_cache: tr.render_cache,
+    };
+    let kind = match tr.kind {
+        TrackKind::Video => "video",
+        TrackKind::Audio => "audio",
+    };
+    let data = serde_json::to_string(&row).map_err(json_err)?;
+    tx.prepare_cached(
+        "INSERT OR REPLACE INTO tracks (owner, id, ord, kind, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .map_err(|e| Error::internal(e.to_string()))?
+    .execute(params![owner, tr.id, ord as i64, kind, data])
+    .map_err(|e| Error::internal(e.to_string()))?;
+    Ok(())
+}
+
+fn sync_tracks(
+    tx: &Transaction<'_>,
+    owner: &str,
+    old: Option<&SharedVec<Track>>,
+    new: &SharedVec<Track>,
+) -> Result<()> {
+    if let Some(old) = old {
+        if SharedVec::ptr_eq(old, new) {
+            return Ok(());
+        }
+        let keep: HashSet<&str> = new.iter().map(|t| t.id.as_str()).collect();
+        for t in old {
+            if !keep.contains(t.id.as_str()) {
+                tx.execute(
+                    "DELETE FROM clips WHERE owner = ?1 AND track_id = ?2",
+                    params![owner, t.id],
+                )
+                .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute(
+                    "DELETE FROM tracks WHERE owner = ?1 AND id = ?2",
+                    params![owner, t.id],
+                )
+                .map_err(|e| Error::internal(e.to_string()))?;
+            }
+        }
+        let old_map: HashMap<&str, (usize, &Track)> = old
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.id.as_str(), (i, t)))
+            .collect();
+        for (ord, new_tr) in new.iter().enumerate() {
+            let old_entry = old_map.get(new_tr.id.as_str()).copied();
+            if old_entry
+                .is_none_or(|(old_ord, old_tr)| old_ord != ord || !track_meta_eq(old_tr, new_tr))
+            {
+                upsert_track(tx, owner, ord, new_tr)?;
+            }
+            sync_clips(
+                tx,
+                owner,
+                &new_tr.id,
+                old_entry.map(|(_, t)| &t.clips),
+                &new_tr.clips,
+            )?;
+        }
+        return Ok(());
+    }
+    for (ord, new_tr) in new.iter().enumerate() {
+        upsert_track(tx, owner, ord, new_tr)?;
+        sync_clips(tx, owner, &new_tr.id, None, &new_tr.clips)?;
+    }
+    Ok(())
+}
+
+fn sync_clips(
+    tx: &Transaction<'_>,
+    owner: &str,
+    track_id: &str,
+    old: Option<&SharedVec<Clip>>,
+    new: &SharedVec<Clip>,
+) -> Result<()> {
+    if let Some(old) = old {
+        if SharedVec::ptr_eq(old, new) {
+            return Ok(());
+        }
+        let keep: HashSet<&str> = new.iter().map(|c| c.id.as_str()).collect();
+        {
+            let mut del = tx
+                .prepare_cached("DELETE FROM clips WHERE owner = ?1 AND track_id = ?2 AND id = ?3")
+                .map_err(|e| Error::internal(e.to_string()))?;
+            for c in old {
+                if !keep.contains(c.id.as_str()) {
+                    del.execute(params![owner, track_id, c.id])
+                        .map_err(|e| Error::internal(e.to_string()))?;
+                }
+            }
+        }
+        let old_map: HashMap<&str, (usize, &Clip)> = old
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id.as_str(), (i, c)))
+            .collect();
+        for (ord, new_c) in new.iter().enumerate() {
+            match old_map.get(new_c.id.as_str()).copied() {
+                Some((old_ord, old_c)) if old_ord == ord && old_c == new_c => {}
+                Some((_, old_c)) if old_c == new_c => {
+                    tx.prepare_cached(
+                        "UPDATE clips SET ord = ?1 WHERE owner = ?2 AND track_id = ?3 AND id = ?4",
+                    )
+                    .map_err(|e| Error::internal(e.to_string()))?
+                    .execute(params![ord as i64, owner, track_id, new_c.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                }
+                _ => {
+                    let data = encode_clip(tx, new_c)?;
+                    tx.prepare_cached(
+                        "INSERT OR REPLACE INTO clips \
+                         (owner, track_id, id, ord, start, duration, media_id, data) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    )
+                    .map_err(|e| Error::internal(e.to_string()))?
+                    .execute(params![
+                        owner,
+                        track_id,
+                        new_c.id,
+                        ord as i64,
+                        new_c.start,
+                        new_c.duration,
+                        new_c.media,
+                        data,
+                    ])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                }
+            }
+        }
+        return Ok(());
+    }
+    for (ord, new_c) in new.iter().enumerate() {
+        let data = encode_clip(tx, new_c)?;
+        tx.prepare_cached(
+            "INSERT INTO clips (owner, track_id, id, ord, start, duration, media_id, data) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .map_err(|e| Error::internal(e.to_string()))?
+        .execute(params![
+            owner,
+            track_id,
+            new_c.id,
+            ord as i64,
+            new_c.start,
+            new_c.duration,
+            new_c.media,
+            data,
+        ])
+        .map_err(|e| Error::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+fn subtitle_meta_eq(a: &SubtitleTrack, b: &SubtitleTrack) -> bool {
+    a.name == b.name
+        && a.language == b.language
+        && a.shown == b.shown
+        && a.destination == b.destination
+        && a.locked == b.locked
+        && a.style == b.style
+}
+
+fn upsert_subtitle_track(
+    tx: &Transaction<'_>,
+    tl_id: &str,
+    ord: usize,
+    sr: &SubtitleTrack,
+) -> Result<()> {
+    let row = SubtitleTrackRow {
+        id: sr.id.clone(),
+        name: sr.name.clone(),
+        language: sr.language.clone(),
+        shown: sr.shown,
+        destination: sr.destination,
+        locked: sr.locked,
+        style: sr.style.clone(),
+    };
+    let data = serde_json::to_string(&row).map_err(json_err)?;
+    tx.prepare_cached(
+        "INSERT OR REPLACE INTO subtitles (tl_id, id, ord, data) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .map_err(|e| Error::internal(e.to_string()))?
+    .execute(params![tl_id, sr.id, ord as i64, data])
+    .map_err(|e| Error::internal(e.to_string()))?;
+    Ok(())
+}
+
+fn sync_subtitles(
+    tx: &Transaction<'_>,
+    tl_id: &str,
+    old: Option<&SharedVec<SubtitleTrack>>,
+    new: &SharedVec<SubtitleTrack>,
+) -> Result<()> {
+    if let Some(old) = old {
+        if SharedVec::ptr_eq(old, new) {
+            return Ok(());
+        }
+        let keep: HashSet<&str> = new.iter().map(|s| s.id.as_str()).collect();
+        for s in old {
+            if !keep.contains(s.id.as_str()) {
+                tx.execute(
+                    "DELETE FROM cues WHERE tl_id = ?1 AND sub_id = ?2",
+                    params![tl_id, s.id],
+                )
+                .map_err(|e| Error::internal(e.to_string()))?;
+                tx.execute(
+                    "DELETE FROM subtitles WHERE tl_id = ?1 AND id = ?2",
+                    params![tl_id, s.id],
+                )
+                .map_err(|e| Error::internal(e.to_string()))?;
+            }
+        }
+        let old_map: HashMap<&str, (usize, &SubtitleTrack)> = old
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.id.as_str(), (i, s)))
+            .collect();
+        for (ord, new_s) in new.iter().enumerate() {
+            let old_entry = old_map.get(new_s.id.as_str()).copied();
+            if old_entry
+                .is_none_or(|(old_ord, old_s)| old_ord != ord || !subtitle_meta_eq(old_s, new_s))
+            {
+                upsert_subtitle_track(tx, tl_id, ord, new_s)?;
+            }
+            sync_cues(
+                tx,
+                tl_id,
+                &new_s.id,
+                old_entry.map(|(_, s)| &s.cues),
+                &new_s.cues,
+            )?;
+        }
+        return Ok(());
+    }
+    for (ord, new_s) in new.iter().enumerate() {
+        upsert_subtitle_track(tx, tl_id, ord, new_s)?;
+        sync_cues(tx, tl_id, &new_s.id, None, &new_s.cues)?;
+    }
+    Ok(())
+}
+
+fn sync_cues(
+    tx: &Transaction<'_>,
+    tl_id: &str,
+    sub_id: &str,
+    old: Option<&SharedVec<Cue>>,
+    new: &SharedVec<Cue>,
+) -> Result<()> {
+    if let Some(old) = old {
+        if SharedVec::ptr_eq(old, new) {
+            return Ok(());
+        }
+        let keep: HashSet<&str> = new.iter().map(|c| c.id.as_str()).collect();
+        {
+            let mut del = tx
+                .prepare_cached("DELETE FROM cues WHERE tl_id = ?1 AND sub_id = ?2 AND id = ?3")
+                .map_err(|e| Error::internal(e.to_string()))?;
+            for c in old {
+                if !keep.contains(c.id.as_str()) {
+                    del.execute(params![tl_id, sub_id, c.id])
+                        .map_err(|e| Error::internal(e.to_string()))?;
+                }
+            }
+        }
+        let old_map: HashMap<&str, (usize, &Cue)> = old
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id.as_str(), (i, c)))
+            .collect();
+        for (ord, new_c) in new.iter().enumerate() {
+            match old_map.get(new_c.id.as_str()).copied() {
+                Some((old_ord, old_c)) if old_ord == ord && old_c == new_c => {}
+                Some((_, old_c)) if old_c == new_c => {
+                    tx.prepare_cached(
+                        "UPDATE cues SET ord = ?1 WHERE tl_id = ?2 AND sub_id = ?3 AND id = ?4",
+                    )
+                    .map_err(|e| Error::internal(e.to_string()))?
+                    .execute(params![ord as i64, tl_id, sub_id, new_c.id])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                }
+                _ => {
+                    let data = serde_json::to_string(new_c).map_err(json_err)?;
+                    tx.prepare_cached(
+                        "INSERT OR REPLACE INTO cues \
+                         (tl_id, sub_id, id, ord, start, duration, data) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    )
+                    .map_err(|e| Error::internal(e.to_string()))?
+                    .execute(params![
+                        tl_id,
+                        sub_id,
+                        new_c.id,
+                        ord as i64,
+                        new_c.start,
+                        new_c.duration,
+                        data,
+                    ])
+                    .map_err(|e| Error::internal(e.to_string()))?;
+                }
+            }
+        }
+        return Ok(());
+    }
+    let mut ins = tx
+        .prepare_cached(
+            "INSERT INTO cues (tl_id, sub_id, id, ord, start, duration, data) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .map_err(|e| Error::internal(e.to_string()))?;
+    for (ord, new_c) in new.iter().enumerate() {
+        let data = serde_json::to_string(new_c).map_err(json_err)?;
+        ins.execute(params![
+            tl_id,
+            sub_id,
+            new_c.id,
+            ord as i64,
+            new_c.start,
+            new_c.duration,
+            data,
+        ])
+        .map_err(|e| Error::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+fn clip_has_heavy_blobs(clip: &Clip) -> bool {
+    let Some(pic) = clip.picture.as_deref() else {
+        return false;
+    };
+    if pic
+        .stabilization
+        .as_ref()
+        .and_then(|s| s.made.as_ref())
+        .is_some_and(|m| m.frames.len() >= BLOB_MIN_SAMPLES)
+    {
+        return true;
+    }
+    pic.composition.as_ref().is_some_and(|comp| {
+        comp.nodes.iter().any(|n| match &n.tool {
+            Tool::Tracker(t) => t.patterns.iter().any(|p| {
+                p.path
+                    .as_ref()
+                    .is_some_and(|mp| mp.samples.len() >= BLOB_MIN_SAMPLES)
+            }),
+            _ => false,
+        })
+    })
+}
+
+fn store_blob(tx: &Transaction<'_>, val: &Value) -> Result<String> {
+    let raw = serde_json::to_vec(val).map_err(json_err)?;
+    let hash = crate::fingerprint::digest(&raw);
+    let compressed = compress_bytes(&raw)?;
+    tx.prepare_cached("INSERT OR IGNORE INTO blobs (hash, data) VALUES (?1, ?2)")
+        .map_err(|e| Error::internal(e.to_string()))?
+        .execute(params![hash, compressed])
+        .map_err(|e| Error::internal(e.to_string()))?;
+    Ok(hash)
+}
+
+fn encode_clip(tx: &Transaction<'_>, clip: &Clip) -> Result<String> {
+    if !clip_has_heavy_blobs(clip) {
+        return serde_json::to_string(clip).map_err(json_err);
+    }
+    let mut val = serde_json::to_value(clip).map_err(json_err)?;
+    if let Some(pic) = val.get_mut("picture").and_then(Value::as_object_mut) {
+        if let Some(frames) = pic
+            .get_mut("stabilization")
+            .and_then(Value::as_object_mut)
+            .and_then(|s| s.get_mut("made"))
+            .and_then(Value::as_object_mut)
+            .and_then(|m| m.get_mut("frames"))
+            && frames
+                .as_array()
+                .is_some_and(|a| a.len() >= BLOB_MIN_SAMPLES)
+        {
+            let hash = store_blob(tx, frames)?;
+            *frames = json!({ "$blob": hash });
+        }
+        if let Some(nodes) = pic
+            .get_mut("composition")
+            .and_then(Value::as_object_mut)
+            .and_then(|c| c.get_mut("nodes"))
+            .and_then(Value::as_array_mut)
+        {
+            for node in nodes {
+                let Some(patterns) = node.get_mut("patterns").and_then(Value::as_array_mut) else {
+                    continue;
+                };
+                for pat in patterns {
+                    if let Some(samples) = pat
+                        .get_mut("path")
+                        .and_then(Value::as_object_mut)
+                        .and_then(|p| p.get_mut("samples"))
+                        && samples
+                            .as_array()
+                            .is_some_and(|a| a.len() >= BLOB_MIN_SAMPLES)
+                    {
+                        let hash = store_blob(tx, samples)?;
+                        *samples = json!({ "$blob": hash });
+                    }
+                }
+            }
+        }
+    }
+    serde_json::to_string(&val).map_err(json_err)
+}
+
+fn hydrate_blobs(
+    conn: &Connection,
+    path: &Path,
+    val: &mut Value,
+    cache: &mut HashMap<String, Value>,
+) -> Result<()> {
+    match val {
+        Value::Array(items) => {
+            for item in items {
+                hydrate_blobs(conn, path, item, cache)?;
+            }
+        }
+        Value::Object(map) => {
+            if map.len() == 1
+                && let Some(hash) = map.get("$blob").and_then(Value::as_str).map(String::from)
+            {
+                if let Some(hit) = cache.get(&hash) {
+                    *val = hit.clone();
+                    return Ok(());
+                }
+                let compressed: Vec<u8> = conn
+                    .prepare_cached("SELECT data FROM blobs WHERE hash = ?1")
+                    .map_err(|e| sqlite_err(path, e))?
+                    .query_row(params![hash], |r| r.get(0))
+                    .map_err(|e| {
+                        Error::invalid(format!("{} missing blob {hash}: {e}", path.display()))
+                    })?;
+                let raw = decompress_bytes(&compressed)?;
+                let parsed: Value = serde_json::from_slice(&raw).map_err(json_err)?;
+                cache.insert(hash, parsed.clone());
+                *val = parsed;
+                return Ok(());
+            }
+            for child in map.values_mut() {
+                hydrate_blobs(conn, path, child, cache)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn decode_clip(
+    conn: &Connection,
+    path: &Path,
+    raw: &str,
+    cache: &mut HashMap<String, Value>,
+) -> Result<Clip> {
+    if !raw.contains("\"$blob\"") {
+        return serde_json::from_str(raw).map_err(|e| {
+            Error::invalid(format!("{} is not a vidcut project: {e}", path.display()))
+        });
+    }
+    let mut val: Value = serde_json::from_str(raw)
+        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
+    hydrate_blobs(conn, path, &mut val, cache)?;
+    serde_json::from_value(val)
+        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))
+}
+
+fn collect_blob_refs(val: &Value, used: &mut HashSet<String>) {
+    match val {
+        Value::Array(items) => {
+            for item in items {
+                collect_blob_refs(item, used);
+            }
+        }
+        Value::Object(map) => {
+            if map.len() == 1
+                && let Some(hash) = map.get("$blob").and_then(Value::as_str)
+            {
+                used.insert(hash.to_string());
+                return;
+            }
+            for child in map.values() {
+                collect_blob_refs(child, used);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn gc_blobs(tx: &Transaction<'_>) -> Result<()> {
+    let mut used = HashSet::new();
+    {
+        let mut stmt = tx
+            .prepare_cached("SELECT data FROM clips WHERE instr(data, '\"$blob\"') > 0")
+            .map_err(|e| Error::internal(e.to_string()))?;
+        let mut rows = stmt.query([]).map_err(|e| Error::internal(e.to_string()))?;
+        while let Some(r) = rows.next().map_err(|e| Error::internal(e.to_string()))? {
+            let raw: String = r.get(0).map_err(|e| Error::internal(e.to_string()))?;
+            if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+                collect_blob_refs(&val, &mut used);
+            }
+        }
+    }
+    let hashes: Vec<String> = {
+        let mut stmt = tx
+            .prepare_cached("SELECT hash FROM blobs")
+            .map_err(|e| Error::internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| Error::internal(e.to_string()))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal(e.to_string()))?
+    };
+    let mut del = tx
+        .prepare_cached("DELETE FROM blobs WHERE hash = ?1")
+        .map_err(|e| Error::internal(e.to_string()))?;
+    for h in hashes {
+        if !used.contains(&h) {
+            del.execute(params![h])
+                .map_err(|e| Error::internal(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn relativize_path(path: &mut PathBuf, dir: &Path) {
+    if let Ok(rel) = path.strip_prefix(dir) {
+        *path = portable(rel);
+    }
+}
+
+fn relativize_media(m: &mut Media, dir: &Path) {
+    relativize_path(&mut m.path, dir);
+    if let Some(lut) = m.input_lut.as_mut() {
+        relativize_path(lut, dir);
+    }
+}
+
+fn relativize_settings(settings: &mut Settings, dir: &Path) {
+    if let Some(p) = settings.input_lut.as_mut() {
+        relativize_path(p, dir);
+    }
+    if let Some(p) = settings.output_lut.as_mut() {
+        relativize_path(p, dir);
+    }
+    if let Some(p) = settings.video_monitor_lut.as_mut() {
+        relativize_path(p, dir);
+    }
+    for lut in [&mut settings.color_viewer_lut, &mut settings.scopes_lut] {
+        if let crate::model::MonitorLut::File(path) = lut {
+            relativize_path(path, dir);
         }
     }
 }
 
-fn last_saved(file: &HistoryFile, end: u64) -> Option<Project> {
-    let (mut json, h) = file.read_all(end).ok()?;
-    for e in &h.undo {
-        e.change.apply(&mut json, true).ok()?;
-    }
-    serde_json::from_value(json).ok()
-}
-
-fn io(path: &Path, e: std::io::Error) -> Error {
-    Error::internal(format!("{}: {e}", path.display()))
-}
-
-fn files(project: &mut Project) -> Vec<&mut PathBuf> {
+pub(crate) fn resolve_paths(project: &mut Project, dir: &Path) {
     let Project {
         media, settings, ..
     } = project;
-    let mut out = Vec::with_capacity(media.len());
+    let resolve = |file: &mut PathBuf| {
+        if !absolute_anywhere(file) {
+            *file = dir.join(native(file));
+        }
+    };
     for m in media {
-        out.push(&mut m.path);
-        out.extend(m.input_lut.as_mut());
+        resolve(&mut m.path);
+        if let Some(lut) = m.input_lut.as_mut() {
+            resolve(lut);
+        }
     }
-    out.extend(settings.input_lut.as_mut());
-    out.extend(settings.output_lut.as_mut());
-    out.extend(settings.video_monitor_lut.as_mut());
+    if let Some(p) = settings.input_lut.as_mut() {
+        resolve(p);
+    }
+    if let Some(p) = settings.output_lut.as_mut() {
+        resolve(p);
+    }
+    if let Some(p) = settings.video_monitor_lut.as_mut() {
+        resolve(p);
+    }
     for lut in [&mut settings.color_viewer_lut, &mut settings.scopes_lut] {
         if let crate::model::MonitorLut::File(path) = lut {
-            out.push(path);
+            resolve(path);
         }
     }
-    out
-}
-
-fn to_json(project: &mut Project, dir: &Path) -> Result<String> {
-    let absolute: Vec<Option<PathBuf>> = files(project)
-        .into_iter()
-        .map(|path| {
-            let relative = path.strip_prefix(dir).ok().map(portable);
-            relative.map(|r| std::mem::replace(path, r))
-        })
-        .collect();
-    let text = serde_json::to_string_pretty(project);
-    for (path, was) in files(project).into_iter().zip(absolute) {
-        if let Some(was) = was {
-            *path = was;
-        }
-    }
-    let mut s = text.map_err(|e| Error::internal(e.to_string()))?;
-    s.push('\n');
-    Ok(s)
 }
 
 fn portable(relative: &Path) -> PathBuf {
@@ -385,29 +1972,6 @@ fn absolute_anywhere(path: &Path) -> bool {
         return path.is_absolute();
     };
     s.starts_with(['/', '\\']) || windows_absolute(s)
-}
-
-fn parse(path: &Path, dir: &Path, text: &str) -> Result<Project> {
-    let mut project: Project = serde_json::from_str(text)
-        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
-    for file in files(&mut project) {
-        if !absolute_anywhere(file) {
-            *file = dir.join(native(file));
-        }
-    }
-    let problems = crate::validate::violations(&project);
-    if !problems.is_empty() {
-        return Err(Error::invalid(format!(
-            "{} is inconsistent: {}",
-            path.display(),
-            problems.join("; ")
-        )));
-    }
-    Ok(project)
-}
-
-pub(crate) fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
-    crate::temp::write(path, data.as_bytes())
 }
 
 pub fn from_another_system(path: &Path) -> bool {
@@ -436,10 +2000,15 @@ pub(crate) fn is_drive(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use serde_json::json;
 
     use super::*;
-    use crate::model::Settings;
+    use crate::model::{
+        ClipCache, ClipRetime, Composition, MotionPath, Node, PathSample, Pattern, Picture,
+        Settings, Tracker,
+    };
     use crate::request::Envelope;
     use crate::test_support::FakeEnv;
 
@@ -449,25 +2018,127 @@ mod tests {
             auto_format: false,
             ..Settings::default()
         });
-        std::fs::write(&path, to_json(&mut project.clone(), dir).unwrap()).unwrap();
-        Store::open_in(&path, &dir.join("state")).unwrap()
+        Store::create(&path, &project).unwrap()
     }
 
     fn add_bin(store: &Store, name: &str) {
-        let mut editor = store.load().unwrap();
         let request = json!({"method": "bins.add", "params": {"path": name}});
-        editor
-            .apply(
-                Envelope::from_json(request).unwrap(),
-                &FakeEnv::default(),
-                None,
-            )
+        store
+            .transact(|ed| {
+                ed.apply(
+                    Envelope::from_json(request).unwrap(),
+                    &FakeEnv::default(),
+                    None,
+                )
+            })
             .unwrap();
-        store.save(&mut editor).unwrap();
     }
 
-    fn history_text(store: &Store) -> String {
-        std::fs::read_to_string(&store.history_path).unwrap()
+    fn external_flip_ripple(path: &Path) {
+        let conn = open_conn(path).unwrap();
+        let data: String = conn
+            .query_row("SELECT data FROM meta WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        let swapped = data.replace("\"ripple_on\":true", "\"ripple_on\":false");
+        conn.execute("UPDATE meta SET data = ?1 WHERE id = 1", params![swapped])
+            .unwrap();
+    }
+
+    fn motion_clip(id: &str, start: i64, samples: Vec<PathSample>) -> Clip {
+        Clip {
+            id: id.into(),
+            media: "m1".into(),
+            start,
+            duration: 20,
+            source_in: 0,
+            phase: 0.0,
+            video: true,
+            audio: None,
+            enabled: true,
+            name: None,
+            effects: None,
+            generator: None,
+            title: None,
+            adjustment: false,
+            picture: Some(
+                Picture {
+                    composition: Some(Composition {
+                        nodes: vec![Node {
+                            name: "Tracker1".into(),
+                            tool: Tool::Tracker(Tracker {
+                                patterns: vec![Pattern {
+                                    name: "Pattern 1".into(),
+                                    enabled: true,
+                                    path: Some(MotionPath {
+                                        subject: None,
+                                        tracked: true,
+                                        samples: Arc::new(samples),
+                                    }),
+                                    center: None,
+                                    width: None,
+                                    height: None,
+                                    offset: None,
+                                }],
+                                operation: None,
+                                merge: None,
+                                edges: None,
+                                apply_mode: None,
+                                operator: None,
+                                subtractive_additive: None,
+                                match_position: true,
+                                match_rotation: true,
+                                match_scaling: true,
+                                pivot_type: None,
+                                pivot_tracker: None,
+                                pivot: None,
+                                reference_time: None,
+                                custom_time: None,
+                                intermediate_points: None,
+                                fade_frames: None,
+                            }),
+                            input: None,
+                            foreground: None,
+                            effect_mask: None,
+                            detail_map: None,
+                            brightness_map: None,
+                            pass_through: false,
+                            locked: false,
+                            blend: None,
+                            blur_alpha: true,
+                            multiply_by_mask: false,
+                            mask_channel: None,
+                            mask_range: None,
+                            mask_clip: None,
+                            place: [0.0, 0.0],
+                            keys: Vec::new(),
+                            connect: None,
+                        }],
+                        loop_play: true,
+                        ping_pong: false,
+                        start: 0,
+                    }),
+                    ..Picture::default()
+                }
+                .into(),
+            ),
+            compound: None,
+            speed: None,
+            retime: ClipRetime::Project,
+            color: None,
+            render_cache: ClipCache::Auto,
+            link: None,
+        }
+    }
+
+    fn sample_path() -> Vec<PathSample> {
+        (0..20)
+            .map(|frame| PathSample {
+                frame,
+                center: [0.5, 0.5],
+                size: [0.1, 0.1],
+                rotation: 0.0,
+            })
+            .collect()
     }
 
     #[test]
@@ -478,22 +2149,21 @@ mod tests {
         let mut project = fixture.editor.project().clone();
         project.media[0].path = dir.join("1.mp4");
         let path = dir.join("p.vidcut");
-        std::fs::write(&path, to_json(&mut project, &dir).unwrap()).unwrap();
-        let store = Store::open_in(&path, &dir.join("state")).unwrap();
+        let store = Store::create(&path, &project).unwrap();
         let mut editor = store.load().unwrap();
         store.save(&mut editor).unwrap();
         assert_eq!(editor.project().media[0].path, dir.join("1.mp4"));
     }
 
     #[test]
-    fn a_save_adds_lines_to_the_history() {
+    fn a_save_adds_events_to_the_history() {
         let dir = tempfile::tempdir().unwrap();
         let store = project_in(dir.path());
         add_bin(&store, "a");
-        let before = history_text(&store);
+        let before = store.history_db().meta().unwrap().steps;
         add_bin(&store, "b");
-        let after = history_text(&store);
-        assert!(after.len() > before.len() && after.starts_with(&before));
+        let after = store.history_db().meta().unwrap().steps;
+        assert_eq!((before, after), (1, 2));
     }
 
     #[test]
@@ -501,25 +2171,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = project_in(dir.path());
         add_bin(&store, "a");
-        let text = store
-            .read()
-            .unwrap()
-            .replace("\"ripple_on\": true", "\"ripple_on\": false");
-        std::fs::write(store.path(), text).unwrap();
+        external_flip_ripple(store.path());
         let newest = store.load().unwrap().history_view(1).unwrap().undo;
         assert_eq!(newest[0].step.label, crate::editor::EXTERNAL);
-    }
-
-    #[test]
-    fn a_cut_off_last_line_is_skipped() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = project_in(dir.path());
-        add_bin(&store, "a");
-        add_bin(&store, "b");
-        let mut text = history_text(&store);
-        text.push_str("{\"step\": {\"lab");
-        std::fs::write(&store.history_path, text).unwrap();
-        assert_eq!(store.load().unwrap().history_counts(), (2, 0));
     }
 
     #[test]
@@ -527,8 +2181,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = project_in(dir.path());
         add_bin(&store, "a");
-        let outside = store.read().unwrap().replace("\"a\"", "\"z\"");
-        std::fs::write(&store.path, &outside).unwrap();
+        external_flip_ripple(store.path());
         let request = json!({"method": "bins.add", "params": {"path": "b"}, "dry_run": true});
         store
             .transact(|ed| {
@@ -539,7 +2192,137 @@ mod tests {
                 )
             })
             .unwrap();
-        assert_eq!(store.read().unwrap(), outside);
+        assert!(store.history_db().meta().unwrap().external_dirty);
+        assert!(!store.load_project().unwrap().project().settings.ripple_on);
+    }
+
+    #[test]
+    fn a_non_sqlite_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.vidcut");
+        std::fs::write(&path, "{}").unwrap();
+        let err = Store::open(&path).unwrap().load().err().unwrap();
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidEdit);
+    }
+
+    #[test]
+    fn an_incremental_save_writes_only_changed_clips_and_deduplicates_motion_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
+        let samples = sample_path();
+        let mut proj = fixture.editor.project().clone();
+        proj.tracks[0].clips = vec![
+            motion_clip("c1", 0, samples.clone()),
+            motion_clip("c2", 20, samples),
+        ]
+        .into();
+        let path = dir.path().join("p.vidcut");
+        let store = Store::create(&path, &proj).unwrap();
+        let count: i64 = store
+            .with_conn(|c| {
+                c.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+        store
+            .transact(|ed| {
+                ed.apply(
+                    Envelope::from_json(
+                        json!({"method": "clip.set", "params": {"clips": "c1", "color": "teal"}}),
+                    )
+                    .unwrap(),
+                    &FakeEnv::default(),
+                    None,
+                )
+            })
+            .unwrap();
+        let reloaded = store.load().unwrap();
+        assert_eq!(
+            reloaded.project().clip("c1").unwrap().color.as_deref(),
+            Some("teal")
+        );
+        assert_eq!(reloaded.project().clip("c2"), proj.clip("c2"));
+    }
+
+    #[test]
+    fn moving_a_project_file_keeps_its_history_and_relative_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = crate::dirs::canonical(dir.path()).unwrap().join("a");
+        let b = crate::dirs::canonical(dir.path()).unwrap().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let mut fixture = crate::test_support::Fixture::new(&[(4.0, true)]);
+        let mut proj = fixture.editor.project().clone();
+        proj.media[0].path = a.join("clip.mp4");
+        let path_a = a.join("p.vidcut");
+        let store = Store::create(&path_a, &proj).unwrap();
+        add_bin(&store, "scenes");
+        store.checkpoint();
+        drop(store);
+        let path_b = b.join("p.vidcut");
+        std::fs::rename(&path_a, &path_b).unwrap();
+        let moved = Store::open(&path_b).unwrap().load().unwrap();
+        assert_eq!(
+            (
+                moved.project().media[0].path.clone(),
+                moved.history_counts()
+            ),
+            (b.join("clip.mp4"), (1, 0))
+        );
+        fixture.ok(json!({"method": "bins.add", "params": {"path": "scenes"}}));
+        assert_eq!(moved.project().bins, fixture.editor.project().bins);
+    }
+
+    #[test]
+    fn compaction_removes_unreferenced_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
+        let mut proj = fixture.editor.project().clone();
+        proj.tracks[0].clips = vec![motion_clip("c1", 0, sample_path())].into();
+        let path = dir.path().join("p.vidcut");
+        let store = Store::create(&path, &proj).unwrap();
+        store
+            .transact(|ed| {
+                ed.apply(
+                    Envelope::from_json(
+                        json!({"method": "edit.delete", "params": {"clips": "c1"}}),
+                    )
+                    .unwrap(),
+                    &FakeEnv::default(),
+                    None,
+                )
+            })
+            .unwrap();
+        let count_after_gc: i64 = store
+            .with_conn(|c| {
+                let tx = c.transaction().unwrap();
+                gc_blobs(&tx).unwrap();
+                tx.commit().unwrap();
+                c.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
+                    .map_err(|e| sqlite_err(&path, e))
+            })
+            .unwrap();
+        assert_eq!(count_after_gc, 0);
+    }
+
+    #[test]
+    fn concurrent_transact_writers_keep_both_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        let s1 = store.clone();
+        let s2 = store.clone();
+        std::thread::scope(|scope| {
+            scope.spawn(|| add_bin(&s1, "one"));
+            scope.spawn(|| add_bin(&s2, "two"));
+        });
+        let loaded = store.load().unwrap();
+        let mut bins = loaded.project().bins.clone();
+        bins.sort();
+        assert_eq!(
+            (bins, loaded.history_counts()),
+            (vec!["one".into(), "two".into()], (2, 0))
+        );
     }
 
     #[test]

@@ -29,12 +29,7 @@ pub fn run(saved: bool, keep_downloads: bool, dry_run: bool) -> Result<Value> {
         )));
     }
     let dirs = Dirs::here();
-    let mut keep: Vec<PathBuf> = running
-        .into_iter()
-        .filter_map(|i| i.project)
-        .filter_map(|p| vidcut_core::store::Store::open(&p).ok())
-        .map(|s| s.history_path().to_path_buf())
-        .collect();
+    let mut keep: Vec<PathBuf> = Vec::new();
     if !saved {
         keep.extend(["presets", "themes", "looks", "LUT"].map(|d| dirs.config.join(d)));
     }

@@ -1199,7 +1199,7 @@ impl Live {
             let _ = r.tx.send(ReplyEvent::Done(result));
         }
         if let Some(open) = self.project.as_mut() {
-            open.save_left();
+            open.close();
         }
         if let Some(i) = &self.instance {
             ipc::registry::unregister(i);
@@ -4348,7 +4348,7 @@ impl Live {
 
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         if let Some(old) = self.project.as_mut() {
-            old.save_left();
+            old.close();
         }
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.render.open(open.store.path());
@@ -4408,9 +4408,6 @@ impl Live {
     }
 
     fn project_changed(&mut self, response: Option<&Response>) {
-        if let Some(trouble) = self.project.as_mut().and_then(OpenProject::trouble) {
-            self.notice(trouble, true);
-        }
         let Some(open) = &self.project else {
             self.project_snap = None;
             self.missing_watch.watch(Vec::new(), Vec::new());

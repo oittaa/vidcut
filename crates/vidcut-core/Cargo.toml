@@ -16,6 +16,8 @@ roxmltree.workspace = true
 toml.workspace = true
 unicode-segmentation.workspace = true
 unicode-general-category.workspace = true
+rusqlite.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
