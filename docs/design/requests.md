@@ -146,7 +146,7 @@ Changes:
 
 The history tables:
 
-- The undo history lives inside `.vidcut` (`HistoryDb`), in `history_meta` and `history_events` tables.
+- The undo history lives inside `.vidcut` (`HistoryDb`), in `history_meta`, `history_base` and `history_events` tables.
 - Each save appends `Moved` events with zlib-compressed `Change` deltas. `Editor` caches the last `HISTORY_ENTRIES_KEPT` read entries in an `Lru`.
 - SQLite triggers set `external_dirty` when another writer changes an entity table. Then `Store::load` builds the difference through `Editor::record_external`, as one step by `file`.
 - When a GUI cannot write the project file, the edit stays in memory (`OpenProject::apply`).

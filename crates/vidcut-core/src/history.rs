@@ -92,6 +92,10 @@ impl HistoryDb {
         }
     }
 
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
     fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
@@ -115,8 +119,13 @@ impl HistoryDb {
         let blob = compress_bytes(&raw)?;
         tx.execute(
             "INSERT OR REPLACE INTO history_meta \
-             (id, undo_count, redo_count, total_steps, next_step_id, generation, base_json, external_dirty) \
-             VALUES (1, 0, 0, 0, 1, 1, ?1, 0)",
+             (id, undo_count, redo_count, total_steps, next_step_id, generation, external_dirty) \
+             VALUES (1, 0, 0, 0, 1, 1, 0)",
+            [],
+        )
+        .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute(
+            "INSERT OR REPLACE INTO history_base (id, base_json) VALUES (1, ?1)",
             params![blob],
         )
         .map_err(|e| Error::internal(e.to_string()))?;
@@ -320,16 +329,20 @@ impl HistoryDb {
         };
         tx.execute(
             "INSERT OR REPLACE INTO history_meta \
-             (id, undo_count, redo_count, total_steps, next_step_id, generation, base_json, external_dirty) \
-             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, 0)",
+             (id, undo_count, redo_count, total_steps, next_step_id, generation, external_dirty) \
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, 0)",
             params![
                 meta.undo as i64,
                 meta.redo as i64,
                 meta.steps as i64,
                 meta.next as i64,
                 meta.generation as i64,
-                base_blob,
             ],
+        )
+        .map_err(|e| Error::internal(e.to_string()))?;
+        tx.execute(
+            "INSERT OR REPLACE INTO history_base (id, base_json) VALUES (1, ?1)",
+            params![base_blob],
         )
         .map_err(|e| Error::internal(e.to_string()))?;
         Ok(meta)
@@ -556,7 +569,7 @@ impl HistoryDb {
 
     pub(crate) fn read_all_in(conn: &Connection) -> Result<(Value, History, i64)> {
         let base_blob: Vec<u8> = conn
-            .query_row("SELECT base_json FROM history_meta WHERE id = 1", [], |r| {
+            .query_row("SELECT base_json FROM history_base WHERE id = 1", [], |r| {
                 r.get(0)
             })
             .map_err(|_| Error::internal("no first project"))?;

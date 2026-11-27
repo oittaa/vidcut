@@ -28,7 +28,7 @@ use crate::request::{
     ImportMode, NewTrack, OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
 use crate::retime;
-use crate::shared::SharedVec;
+use crate::shared::{Shared, SharedVec};
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode, rescale};
 use crate::transcript::{self, Speech};
@@ -550,7 +550,9 @@ impl Editor {
     ) {
         self.moved.clear();
         self.history = History::default();
-        self.db = Some(db);
+        if self.db.as_ref().is_none_or(|d| d.path() != db.path()) {
+            self.db = Some(db);
+        }
         self.base_counts = base_counts;
         self.db_generation = db_generation;
         self.saved = Some(project);
@@ -1544,12 +1546,7 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
         (
             "clips",
             diff_vec(&mut clips.0, &mut clips.1, |a, b| {
-                Change::of_items(
-                    a,
-                    b,
-                    |c| &c.id,
-                    |a, b| moved_only(a, b, |c| &mut c.start, "start"),
-                )
+                Change::of_items(a, b, |c| &c.id, clip_change)
             }),
         ),
         ("transitions", transitions_change),
@@ -1800,7 +1797,7 @@ fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Res
                 &mut t.clips,
                 forward,
                 |c| &c.id,
-                apply_json,
+                clip_step,
                 |c, field, by| {
                     match field {
                         "start" => {
@@ -1844,6 +1841,38 @@ fn split_fields<'a>(
         }
     }
     (named, rest)
+}
+
+fn clip_change(a: &mut Clip, b: &mut Clip) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    let same_pic = match (&a.picture, &b.picture) {
+        (None, None) => true,
+        (Some(pa), Some(pb)) => Shared::ptr_eq(pa, pb) || pa == pb,
+        _ => false,
+    };
+    if same_pic {
+        let pa = a.picture.take();
+        let pb = b.picture.take();
+        let out = moved_only(a, b, |c| &mut c.start, "start");
+        a.picture = pa;
+        b.picture = pb;
+        return out;
+    }
+    moved_only(a, b, |c| &mut c.start, "start")
+}
+
+fn clip_step(c: &mut Clip, change: &Change, forward: bool) -> std::result::Result<(), String> {
+    if let Change::Fields(fields) = change
+        && !fields.contains_key("picture")
+    {
+        let pic = c.picture.take();
+        let out = crate::change::apply_json(c, change, forward);
+        c.picture = pic;
+        return out;
+    }
+    crate::change::apply_json(c, change, forward)
 }
 
 fn moved_only<T: serde::Serialize + PartialEq>(
@@ -1920,32 +1949,55 @@ fn diff(before: &Project, after: &Project) -> Changes {
             Option<&'a crate::model::Grade>,
         ),
     }
-    fn index(p: &Project, sheet: bool) -> HashMap<&str, Named<'_>> {
+    struct DiffSkip<'a> {
+        sheet: bool,
+        media: bool,
+        groups: bool,
+        timelines: bool,
+        markers: bool,
+        tracks: HashSet<&'a str>,
+        subs: HashSet<&'a str>,
+    }
+    fn index<'a>(p: &'a Project, skip: &DiffSkip<'_>) -> HashMap<&'a str, Named<'a>> {
         let mut m = HashMap::new();
-        for media in &p.media {
-            m.insert(media.id.as_str(), Named::Media(media));
+        if !skip.media {
+            for media in &p.media {
+                m.insert(media.id.as_str(), Named::Media(media));
+            }
         }
-        for g in &p.groups {
-            m.insert(g.id.as_str(), Named::Group(g));
+        if !skip.groups {
+            for g in &p.groups {
+                m.insert(g.id.as_str(), Named::Group(g));
+            }
         }
-        for t in &p.timelines {
-            m.insert(
-                t.id.as_str(),
-                Named::Timeline(&t.name, &t.bin, t.start_tc, t.own, t.grade.as_ref()),
-            );
+        if !skip.timelines {
+            for t in &p.timelines {
+                m.insert(
+                    t.id.as_str(),
+                    Named::Timeline(&t.name, &t.bin, t.start_tc, t.own, t.grade.as_ref()),
+                );
+            }
         }
-        if !sheet {
+        if !skip.sheet {
             return m;
         }
         for t in &p.tracks {
+            if skip.tracks.contains(t.id.as_str()) {
+                continue;
+            }
             for c in &t.clips {
                 m.insert(c.id.as_str(), Named::Clip(&t.id, c));
             }
         }
-        for k in &p.markers {
-            m.insert(k.id.as_str(), Named::Marker(k));
+        if !skip.markers {
+            for k in &p.markers {
+                m.insert(k.id.as_str(), Named::Marker(k));
+            }
         }
         for t in &p.subtitles {
+            if skip.subs.contains(t.id.as_str()) {
+                continue;
+            }
             for c in &t.cues {
                 m.insert(c.id.as_str(), Named::Cue(&t.id, c));
             }
@@ -1953,7 +2005,52 @@ fn diff(before: &Project, after: &Project) -> Changes {
         m
     }
     let same = before.sheet_key() == after.sheet_key();
-    let (a, b) = (index(before, same), index(after, same));
+    let mut skip_tracks = HashSet::new();
+    let mut skip_subs = HashSet::new();
+    if same {
+        if SharedVec::ptr_eq(&before.tracks, &after.tracks) {
+            for t in &before.tracks {
+                skip_tracks.insert(t.id.as_str());
+            }
+        } else {
+            for bt in &before.tracks {
+                if after
+                    .tracks
+                    .iter()
+                    .find(|at| at.id == bt.id)
+                    .is_some_and(|at| SharedVec::ptr_eq(&bt.clips, &at.clips))
+                {
+                    skip_tracks.insert(bt.id.as_str());
+                }
+            }
+        }
+        if SharedVec::ptr_eq(&before.subtitles, &after.subtitles) {
+            for s in &before.subtitles {
+                skip_subs.insert(s.id.as_str());
+            }
+        } else {
+            for bs in &before.subtitles {
+                if after
+                    .subtitles
+                    .iter()
+                    .find(|as_| as_.id == bs.id)
+                    .is_some_and(|as_| SharedVec::ptr_eq(&bs.cues, &as_.cues))
+                {
+                    skip_subs.insert(bs.id.as_str());
+                }
+            }
+        }
+    }
+    let skip = DiffSkip {
+        sheet: same,
+        media: SharedVec::ptr_eq(&before.media, &after.media),
+        groups: before.groups == after.groups,
+        timelines: SharedVec::ptr_eq(&before.timelines, &after.timelines),
+        markers: before.markers == after.markers,
+        tracks: skip_tracks,
+        subs: skip_subs,
+    };
+    let (a, b) = (index(before, &skip), index(after, &skip));
     let mut c = Changes::default();
     for (id, v) in &b {
         match a.get(id) {

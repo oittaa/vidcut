@@ -1,26 +1,37 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, Transaction, params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::editor::{Editor, Entry};
 use crate::error::{Error, Result};
 use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
+use crate::lru::Lru;
 use crate::model::{
     Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds, OpenCompound,
-    Project, RenderJob, RenderRange, Settings, Speakers, SubtitleStyle, SubtitleTrack, SyncGroup,
-    TapeMarks, Timeline, TimelineSettings, Tool, Track, TrackKind, Transition, VoiceIsolation,
+    PathSample, Project, RenderJob, RenderRange, Settings, Speakers, SubtitleStyle, SubtitleTrack,
+    SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool, Track, TrackKind, Transition,
+    VoiceIsolation,
 };
 use crate::shared::SharedVec;
 
 const APP_ID: i32 = 0x5643_5554;
 const SCHEMA_VERSION: i32 = 1;
 const BLOB_MIN_SAMPLES: usize = 16;
+const BLOB_HASHES_KEPT: usize = 512;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+
+enum BlobWeak {
+    Samples(Weak<Vec<PathSample>>),
+    Frames(Weak<Vec<[f32; 8]>>),
+}
+
+type BlobHashCache = Mutex<Lru<usize, (BlobWeak, String), BLOB_HASHES_KEPT>>;
 
 const SCHEMA: &str = "\
 PRAGMA page_size = 4096;
@@ -104,8 +115,11 @@ CREATE TABLE history_meta (
     total_steps INTEGER NOT NULL,
     next_step_id INTEGER NOT NULL,
     generation INTEGER NOT NULL,
-    base_json BLOB,
     external_dirty INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE history_base (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    base_json BLOB
 );
 CREATE TABLE history_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,30 +131,30 @@ CREATE TABLE history_events (
     change_delta BLOB
 );
 CREATE INDEX idx_history_events_kind_at ON history_events (kind, at_pos, seq DESC);
-CREATE TRIGGER tr_meta_i AFTER INSERT ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_meta_u AFTER UPDATE ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_meta_d AFTER DELETE ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_media_i AFTER INSERT ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_media_u AFTER UPDATE ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_media_d AFTER DELETE ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_timelines_i AFTER INSERT ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_timelines_u AFTER UPDATE ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_timelines_d AFTER DELETE ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_tracks_i AFTER INSERT ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_tracks_u AFTER UPDATE ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_tracks_d AFTER DELETE ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_clips_i AFTER INSERT ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_clips_u AFTER UPDATE ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_clips_d AFTER DELETE ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_subtitles_i AFTER INSERT ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_subtitles_u AFTER UPDATE ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_subtitles_d AFTER DELETE ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_cues_i AFTER INSERT ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_cues_u AFTER UPDATE ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_cues_d AFTER DELETE ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_compounds_i AFTER INSERT ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_compounds_u AFTER UPDATE ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
-CREATE TRIGGER tr_compounds_d AFTER DELETE ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1; END;
+CREATE TRIGGER tr_meta_i AFTER INSERT ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_meta_u AFTER UPDATE ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_meta_d AFTER DELETE ON meta BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_media_i AFTER INSERT ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_media_u AFTER UPDATE ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_media_d AFTER DELETE ON media BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_timelines_i AFTER INSERT ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_timelines_u AFTER UPDATE ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_timelines_d AFTER DELETE ON timelines BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_tracks_i AFTER INSERT ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_tracks_u AFTER UPDATE ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_tracks_d AFTER DELETE ON tracks BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_clips_i AFTER INSERT ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_clips_u AFTER UPDATE ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_clips_d AFTER DELETE ON clips BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_subtitles_i AFTER INSERT ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_subtitles_u AFTER UPDATE ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_subtitles_d AFTER DELETE ON subtitles BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_cues_i AFTER INSERT ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_cues_u AFTER UPDATE ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_cues_d AFTER DELETE ON cues BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_compounds_i AFTER INSERT ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_compounds_u AFTER UPDATE ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
+CREATE TRIGGER tr_compounds_d AFTER DELETE ON compounds BEGIN UPDATE history_meta SET external_dirty = 1 WHERE id = 1 AND external_dirty = 0; END;
 ";
 
 pub fn state_dir() -> PathBuf {
@@ -182,6 +196,7 @@ fn file_id_of(path: &Path) -> Option<FileId> {
 pub struct Store {
     path: PathBuf,
     conn: Mutex<Option<Connection>>,
+    blob_hashes: BlobHashCache,
 }
 
 impl std::fmt::Debug for Store {
@@ -195,6 +210,7 @@ impl Clone for Store {
         Self {
             path: self.path.clone(),
             conn: Mutex::new(None),
+            blob_hashes: Mutex::new(Lru::new()),
         }
     }
 }
@@ -416,7 +432,7 @@ impl Store {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| sqlite_err(temp.path(), e))?;
-            sync_project(&tx, &dir, None, project)?;
+            sync_project(&tx, &dir, None, project, None)?;
             HistoryDb::init_meta_in(&tx, project)?;
             clear_dirty(&tx, temp.path())?;
             tx.commit().map_err(|e| sqlite_err(temp.path(), e))?;
@@ -442,6 +458,7 @@ impl Store {
         Ok(Self {
             path,
             conn: Mutex::new(None),
+            blob_hashes: Mutex::new(Lru::new()),
         })
     }
 
@@ -576,7 +593,8 @@ impl Store {
     }
 
     fn load_in(&self, conn: &Connection) -> Result<Editor> {
-        let project = load_project_from_conn(conn, &self.path, self.dir())?;
+        let project =
+            load_project_from_conn(conn, &self.path, self.dir(), Some(&self.blob_hashes))?;
         let meta = HistoryDb::read_meta_in(conn)?;
         if !meta.external_dirty {
             return Ok(Editor::on_db(
@@ -614,7 +632,8 @@ impl Store {
 
     pub fn load_project(&self) -> Result<Editor> {
         let conn = open_ro_or_rw(&self.path)?;
-        let project = load_project_from_conn(&conn, &self.path, self.dir())?;
+        let project =
+            load_project_from_conn(&conn, &self.path, self.dir(), Some(&self.blob_hashes))?;
         let meta = HistoryDb::read_meta_in(&conn)?;
         Ok(Editor::on_db(
             project.clone(),
@@ -714,7 +733,13 @@ impl Store {
     }
 
     fn save_in_tx(&self, tx: &Transaction<'_>, editor: &Editor) -> Result<(Saved, SaveCommit)> {
-        sync_project(tx, self.dir(), editor.saved_state(), editor.project())?;
+        sync_project(
+            tx,
+            self.dir(),
+            editor.saved_state(),
+            editor.project(),
+            Some(&self.blob_hashes),
+        )?;
         let meta = HistoryDb::read_meta_in(tx)?;
         let moved = editor.moved();
         let mut added = Vec::new();
@@ -753,7 +778,7 @@ impl Store {
 
 fn clear_dirty(conn: &Connection, path: &Path) -> Result<()> {
     conn.execute(
-        "UPDATE history_meta SET external_dirty = 0 WHERE id = 1",
+        "UPDATE history_meta SET external_dirty = 0 WHERE id = 1 AND external_dirty != 0",
         [],
     )
     .map_err(|e| sqlite_err(path, e))?;
@@ -765,7 +790,12 @@ pub(crate) fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
     Some((meta.len(), meta.modified().ok()?))
 }
 
-fn load_project_from_conn(conn: &Connection, path: &Path, dir: &Path) -> Result<Project> {
+fn load_project_from_conn(
+    conn: &Connection,
+    path: &Path,
+    dir: &Path,
+    blob_hashes: Option<&BlobHashCache>,
+) -> Result<Project> {
     let (rev, edited, meta_json): (u64, Option<i64>, String) = conn
         .query_row("SELECT rev, edited, data FROM meta WHERE id = 1", [], |r| {
             Ok((r.get::<_, i64>(0)?.max(0) as u64, r.get(1)?, r.get(2)?))
@@ -791,7 +821,8 @@ fn load_project_from_conn(conn: &Connection, path: &Path, dir: &Path) -> Result<
         out
     };
 
-    let mut blob_cache: HashMap<String, Value> = HashMap::new();
+    let mut frame_cache: HashMap<String, Arc<Vec<[f32; 8]>>> = HashMap::new();
+    let mut sample_cache: HashMap<String, Arc<Vec<PathSample>>> = HashMap::new();
     let mut clips_by: HashMap<(String, String), Vec<Clip>> = HashMap::new();
     {
         let mut stmt = conn
@@ -802,7 +833,14 @@ fn load_project_from_conn(conn: &Connection, path: &Path, dir: &Path) -> Result<
             let owner: String = r.get(0).map_err(|e| sqlite_err(path, e))?;
             let track_id: String = r.get(1).map_err(|e| sqlite_err(path, e))?;
             let raw: String = r.get(2).map_err(|e| sqlite_err(path, e))?;
-            let clip = decode_clip(conn, path, &raw, &mut blob_cache)?;
+            let clip = decode_clip(
+                conn,
+                path,
+                &raw,
+                &mut frame_cache,
+                &mut sample_cache,
+                blob_hashes,
+            )?;
             clips_by.entry((owner, track_id)).or_default().push(clip);
         }
     }
@@ -993,6 +1031,7 @@ fn sync_project(
     dir: &Path,
     old: Option<&Project>,
     new: &Project,
+    blob_hashes: Option<&BlobHashCache>,
 ) -> Result<()> {
     let meta_changed = match old {
         None => true,
@@ -1033,8 +1072,8 @@ fn sync_project(
     }
 
     sync_media(tx, dir, old.map(|p| &p.media), &new.media)?;
-    sync_timelines(tx, old, new)?;
-    sync_compounds(tx, old, new)?;
+    sync_timelines(tx, old, new, blob_hashes)?;
+    sync_compounds(tx, old, new, blob_hashes)?;
     Ok(())
 }
 
@@ -1128,7 +1167,12 @@ fn timeline_sheet<'a>(
     }
 }
 
-fn sync_timelines(tx: &Transaction<'_>, old: Option<&Project>, new: &Project) -> Result<()> {
+fn sync_timelines(
+    tx: &Transaction<'_>,
+    old: Option<&Project>,
+    new: &Project,
+    blob_hashes: Option<&BlobHashCache>,
+) -> Result<()> {
     if let Some(old) = old {
         let keep: HashSet<&str> = new.timelines.iter().map(|t| t.id.as_str()).collect();
         for t in &old.timelines {
@@ -1221,6 +1265,7 @@ fn sync_timelines(tx: &Transaction<'_>, old: Option<&Project>, new: &Project) ->
             &owner,
             old_sheet.map(|(_, _, (t, _, _, _))| t),
             new_tracks,
+            blob_hashes,
         )?;
         sync_subtitles(
             tx,
@@ -1243,7 +1288,12 @@ fn compound_sheet<'a>(
     }
 }
 
-fn sync_compounds(tx: &Transaction<'_>, old: Option<&Project>, new: &Project) -> Result<()> {
+fn sync_compounds(
+    tx: &Transaction<'_>,
+    old: Option<&Project>,
+    new: &Project,
+    blob_hashes: Option<&BlobHashCache>,
+) -> Result<()> {
     if let Some(old) = old {
         let keep: HashSet<&str> = new.compounds.iter().map(|k| k.id.as_str()).collect();
         for k in &old.compounds {
@@ -1326,7 +1376,13 @@ fn sync_compounds(tx: &Transaction<'_>, old: Option<&Project>, new: &Project) ->
             .map_err(|e| Error::internal(e.to_string()))?;
         }
         let owner = format!("c:{}", new_k.id);
-        sync_tracks(tx, &owner, old_sheet.map(|(_, _, (t, _, _))| t), new_tracks)?;
+        sync_tracks(
+            tx,
+            &owner,
+            old_sheet.map(|(_, _, (t, _, _))| t),
+            new_tracks,
+            blob_hashes,
+        )?;
     }
     Ok(())
 }
@@ -1383,6 +1439,7 @@ fn sync_tracks(
     owner: &str,
     old: Option<&SharedVec<Track>>,
     new: &SharedVec<Track>,
+    blob_hashes: Option<&BlobHashCache>,
 ) -> Result<()> {
     if let Some(old) = old {
         if SharedVec::ptr_eq(old, new) {
@@ -1421,13 +1478,14 @@ fn sync_tracks(
                 &new_tr.id,
                 old_entry.map(|(_, t)| &t.clips),
                 &new_tr.clips,
+                blob_hashes,
             )?;
         }
         return Ok(());
     }
     for (ord, new_tr) in new.iter().enumerate() {
         upsert_track(tx, owner, ord, new_tr)?;
-        sync_clips(tx, owner, &new_tr.id, None, &new_tr.clips)?;
+        sync_clips(tx, owner, &new_tr.id, None, &new_tr.clips, blob_hashes)?;
     }
     Ok(())
 }
@@ -1438,6 +1496,7 @@ fn sync_clips(
     track_id: &str,
     old: Option<&SharedVec<Clip>>,
     new: &SharedVec<Clip>,
+    blob_hashes: Option<&BlobHashCache>,
 ) -> Result<()> {
     if let Some(old) = old {
         if SharedVec::ptr_eq(old, new) {
@@ -1472,7 +1531,7 @@ fn sync_clips(
                     .map_err(|e| Error::internal(e.to_string()))?;
                 }
                 _ => {
-                    let data = encode_clip(tx, new_c)?;
+                    let data = encode_clip(tx, new_c, blob_hashes)?;
                     tx.prepare_cached(
                         "INSERT OR REPLACE INTO clips \
                          (owner, track_id, id, ord, start, duration, media_id, data) \
@@ -1496,7 +1555,7 @@ fn sync_clips(
         return Ok(());
     }
     for (ord, new_c) in new.iter().enumerate() {
-        let data = encode_clip(tx, new_c)?;
+        let data = encode_clip(tx, new_c, blob_hashes)?;
         tx.prepare_cached(
             "INSERT INTO clips (owner, track_id, id, ord, start, duration, media_id, data) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -1713,58 +1772,156 @@ fn clip_has_heavy_blobs(clip: &Clip) -> bool {
     })
 }
 
-fn store_blob(tx: &Transaction<'_>, val: &Value) -> Result<String> {
-    let raw = serde_json::to_vec(val).map_err(json_err)?;
-    let hash = crate::fingerprint::digest(&raw);
-    let compressed = compress_bytes(&raw)?;
+fn cached_blob_hash(
+    tx: &Transaction<'_>,
+    blob_hashes: Option<&BlobHashCache>,
+    ptr: usize,
+    matches: impl FnOnce(&BlobWeak) -> bool,
+) -> Result<Option<String>> {
+    let hit = blob_hashes.and_then(|cache| {
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        let (weak, hash) = guard.get(&ptr)?;
+        matches(weak).then(|| hash.clone())
+    });
+    let Some(hash) = hit else {
+        return Ok(None);
+    };
+    let present: i64 = tx
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)")
+        .map_err(|e| Error::internal(e.to_string()))?
+        .query_row(params![&hash], |r| r.get(0))
+        .map_err(|e| Error::internal(e.to_string()))?;
+    Ok((present != 0).then_some(hash))
+}
+
+fn write_blob(tx: &Transaction<'_>, raw: &[u8]) -> Result<String> {
+    let hash = crate::fingerprint::digest(raw);
+    let compressed = compress_bytes(raw)?;
     tx.prepare_cached("INSERT OR IGNORE INTO blobs (hash, data) VALUES (?1, ?2)")
         .map_err(|e| Error::internal(e.to_string()))?
-        .execute(params![hash, compressed])
+        .execute(params![&hash, compressed])
         .map_err(|e| Error::internal(e.to_string()))?;
     Ok(hash)
 }
 
-fn encode_clip(tx: &Transaction<'_>, clip: &Clip) -> Result<String> {
+fn store_arc_blob<T: Serialize>(
+    tx: &Transaction<'_>,
+    arc: &Arc<Vec<T>>,
+    blob_hashes: Option<&BlobHashCache>,
+    matches: impl FnOnce(&BlobWeak) -> bool,
+    wrap: impl FnOnce(Weak<Vec<T>>) -> BlobWeak,
+) -> Result<String> {
+    let ptr = Arc::as_ptr(arc) as usize;
+    if let Some(hash) = cached_blob_hash(tx, blob_hashes, ptr, matches)? {
+        return Ok(hash);
+    }
+    let raw = serde_json::to_vec(&**arc).map_err(json_err)?;
+    let hash = write_blob(tx, &raw)?;
+    if let Some(cache) = blob_hashes {
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(ptr, (wrap(Arc::downgrade(arc)), hash.clone()));
+    }
+    Ok(hash)
+}
+
+fn store_samples_blob(
+    tx: &Transaction<'_>,
+    samples: &Arc<Vec<PathSample>>,
+    blob_hashes: Option<&BlobHashCache>,
+) -> Result<String> {
+    store_arc_blob(
+        tx,
+        samples,
+        blob_hashes,
+        |w| matches!(w, BlobWeak::Samples(weak) if weak.upgrade().is_some_and(|a| Arc::ptr_eq(&a, samples))),
+        BlobWeak::Samples,
+    )
+}
+
+fn store_frames_blob(
+    tx: &Transaction<'_>,
+    frames: &Arc<Vec<[f32; 8]>>,
+    blob_hashes: Option<&BlobHashCache>,
+) -> Result<String> {
+    store_arc_blob(
+        tx,
+        frames,
+        blob_hashes,
+        |w| matches!(w, BlobWeak::Frames(weak) if weak.upgrade().is_some_and(|a| Arc::ptr_eq(&a, frames))),
+        BlobWeak::Frames,
+    )
+}
+
+fn encode_clip(
+    tx: &Transaction<'_>,
+    clip: &Clip,
+    blob_hashes: Option<&BlobHashCache>,
+) -> Result<String> {
     if !clip_has_heavy_blobs(clip) {
         return serde_json::to_string(clip).map_err(json_err);
     }
-    let mut val = serde_json::to_value(clip).map_err(json_err)?;
-    if let Some(pic) = val.get_mut("picture").and_then(Value::as_object_mut) {
-        if let Some(frames) = pic
-            .get_mut("stabilization")
-            .and_then(Value::as_object_mut)
-            .and_then(|s| s.get_mut("made"))
-            .and_then(Value::as_object_mut)
-            .and_then(|m| m.get_mut("frames"))
-            && frames
-                .as_array()
-                .is_some_and(|a| a.len() >= BLOB_MIN_SAMPLES)
+    let mut light = clip.clone();
+    let mut stab_hash = None;
+    let mut sample_hashes = Vec::new();
+    if let Some(pic) = light.picture.as_deref_mut() {
+        if let Some(made) = pic
+            .stabilization
+            .as_mut()
+            .and_then(|s| s.made.as_mut())
+            .filter(|m| m.frames.len() >= BLOB_MIN_SAMPLES)
         {
-            let hash = store_blob(tx, frames)?;
-            *frames = json!({ "$blob": hash });
+            stab_hash = Some(store_frames_blob(tx, &made.frames, blob_hashes)?);
+            made.frames = Arc::new(Vec::new());
         }
-        if let Some(nodes) = pic
-            .get_mut("composition")
-            .and_then(Value::as_object_mut)
-            .and_then(|c| c.get_mut("nodes"))
-            .and_then(Value::as_array_mut)
-        {
-            for node in nodes {
-                let Some(patterns) = node.get_mut("patterns").and_then(Value::as_array_mut) else {
+        if let Some(comp) = pic.composition.as_mut() {
+            for (ni, node) in comp.nodes.iter_mut().enumerate() {
+                let Tool::Tracker(tracker) = &mut node.tool else {
                     continue;
                 };
-                for pat in patterns {
-                    if let Some(samples) = pat
-                        .get_mut("path")
-                        .and_then(Value::as_object_mut)
-                        .and_then(|p| p.get_mut("samples"))
-                        && samples
-                            .as_array()
-                            .is_some_and(|a| a.len() >= BLOB_MIN_SAMPLES)
+                for (pi, pat) in tracker.patterns.iter_mut().enumerate() {
+                    if let Some(mp) = pat
+                        .path
+                        .as_mut()
+                        .filter(|mp| mp.samples.len() >= BLOB_MIN_SAMPLES)
                     {
-                        let hash = store_blob(tx, samples)?;
-                        *samples = json!({ "$blob": hash });
+                        let hash = store_samples_blob(tx, &mp.samples, blob_hashes)?;
+                        sample_hashes.push((ni, pi, hash));
+                        mp.samples = Arc::new(Vec::new());
                     }
+                }
+            }
+        }
+    }
+    let mut val = serde_json::to_value(&light).map_err(json_err)?;
+    if let Some(pic) = val.get_mut("picture").and_then(Value::as_object_mut) {
+        if let Some(hash) = stab_hash
+            && let Some(frames) = pic
+                .get_mut("stabilization")
+                .and_then(Value::as_object_mut)
+                .and_then(|s| s.get_mut("made"))
+                .and_then(Value::as_object_mut)
+                .and_then(|m| m.get_mut("frames"))
+        {
+            *frames = json!({ "$blob": hash });
+        }
+        if !sample_hashes.is_empty()
+            && let Some(nodes) = pic
+                .get_mut("composition")
+                .and_then(Value::as_object_mut)
+                .and_then(|c| c.get_mut("nodes"))
+                .and_then(Value::as_array_mut)
+        {
+            for (ni, pi, hash) in sample_hashes {
+                if let Some(samples) = nodes
+                    .get_mut(ni)
+                    .and_then(|n| n.get_mut("patterns"))
+                    .and_then(Value::as_array_mut)
+                    .and_then(|pats| pats.get_mut(pi))
+                    .and_then(|p| p.get_mut("path"))
+                    .and_then(Value::as_object_mut)
+                    .and_then(|mp| mp.get_mut("samples"))
+                {
+                    *samples = json!({ "$blob": hash });
                 }
             }
         }
@@ -1772,53 +1929,55 @@ fn encode_clip(tx: &Transaction<'_>, clip: &Clip) -> Result<String> {
     serde_json::to_string(&val).map_err(json_err)
 }
 
-fn hydrate_blobs(
+fn take_blob_ref(slot: &mut Value) -> Option<String> {
+    let hash = slot
+        .as_object()
+        .filter(|map| map.len() == 1)
+        .and_then(|map| map.get("$blob"))
+        .and_then(Value::as_str)
+        .map(String::from)?;
+    *slot = Value::Array(Vec::new());
+    Some(hash)
+}
+
+fn load_arc_blob<T: DeserializeOwned>(
     conn: &Connection,
     path: &Path,
-    val: &mut Value,
-    cache: &mut HashMap<String, Value>,
-) -> Result<()> {
-    match val {
-        Value::Array(items) => {
-            for item in items {
-                hydrate_blobs(conn, path, item, cache)?;
-            }
-        }
-        Value::Object(map) => {
-            if map.len() == 1
-                && let Some(hash) = map.get("$blob").and_then(Value::as_str).map(String::from)
-            {
-                if let Some(hit) = cache.get(&hash) {
-                    *val = hit.clone();
-                    return Ok(());
-                }
-                let compressed: Vec<u8> = conn
-                    .prepare_cached("SELECT data FROM blobs WHERE hash = ?1")
-                    .map_err(|e| sqlite_err(path, e))?
-                    .query_row(params![hash], |r| r.get(0))
-                    .map_err(|e| {
-                        Error::invalid(format!("{} missing blob {hash}: {e}", path.display()))
-                    })?;
-                let raw = decompress_bytes(&compressed)?;
-                let parsed: Value = serde_json::from_slice(&raw).map_err(json_err)?;
-                cache.insert(hash, parsed.clone());
-                *val = parsed;
-                return Ok(());
-            }
-            for child in map.values_mut() {
-                hydrate_blobs(conn, path, child, cache)?;
-            }
-        }
-        _ => {}
+    hash: &str,
+    cache: &mut HashMap<String, Arc<Vec<T>>>,
+    blob_hashes: Option<&BlobHashCache>,
+    wrap: impl FnOnce(Weak<Vec<T>>) -> BlobWeak,
+) -> Result<Arc<Vec<T>>> {
+    if let Some(hit) = cache.get(hash) {
+        return Ok(Arc::clone(hit));
     }
-    Ok(())
+    let compressed: Vec<u8> = conn
+        .prepare_cached("SELECT data FROM blobs WHERE hash = ?1")
+        .map_err(|e| sqlite_err(path, e))?
+        .query_row(params![hash], |r| r.get(0))
+        .map_err(|e| Error::invalid(format!("{} missing blob {hash}: {e}", path.display())))?;
+    let raw = decompress_bytes(&compressed)?;
+    let items: Vec<T> = serde_json::from_slice(&raw)
+        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
+    let arc = Arc::new(items);
+    cache.insert(hash.to_string(), Arc::clone(&arc));
+    if let Some(hashes) = blob_hashes {
+        let mut guard = hashes.lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(
+            Arc::as_ptr(&arc) as usize,
+            (wrap(Arc::downgrade(&arc)), hash.to_string()),
+        );
+    }
+    Ok(arc)
 }
 
 fn decode_clip(
     conn: &Connection,
     path: &Path,
     raw: &str,
-    cache: &mut HashMap<String, Value>,
+    frame_cache: &mut HashMap<String, Arc<Vec<[f32; 8]>>>,
+    sample_cache: &mut HashMap<String, Arc<Vec<PathSample>>>,
+    blob_hashes: Option<&BlobHashCache>,
 ) -> Result<Clip> {
     if !raw.contains("\"$blob\"") {
         return serde_json::from_str(raw).map_err(|e| {
@@ -1827,9 +1986,81 @@ fn decode_clip(
     }
     let mut val: Value = serde_json::from_str(raw)
         .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
-    hydrate_blobs(conn, path, &mut val, cache)?;
-    serde_json::from_value(val)
-        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))
+    let mut stab_hash = None;
+    let mut sample_hashes = Vec::new();
+    if let Some(pic) = val.get_mut("picture").and_then(Value::as_object_mut) {
+        if let Some(frames) = pic
+            .get_mut("stabilization")
+            .and_then(Value::as_object_mut)
+            .and_then(|s| s.get_mut("made"))
+            .and_then(Value::as_object_mut)
+            .and_then(|m| m.get_mut("frames"))
+            && let Some(hash) = take_blob_ref(frames)
+        {
+            stab_hash = Some(hash);
+        }
+        if let Some(nodes) = pic
+            .get_mut("composition")
+            .and_then(Value::as_object_mut)
+            .and_then(|c| c.get_mut("nodes"))
+            .and_then(Value::as_array_mut)
+        {
+            for (ni, node) in nodes.iter_mut().enumerate() {
+                let Some(patterns) = node.get_mut("patterns").and_then(Value::as_array_mut) else {
+                    continue;
+                };
+                for (pi, pat) in patterns.iter_mut().enumerate() {
+                    if let Some(samples) = pat
+                        .get_mut("path")
+                        .and_then(Value::as_object_mut)
+                        .and_then(|p| p.get_mut("samples"))
+                        && let Some(hash) = take_blob_ref(samples)
+                    {
+                        sample_hashes.push((ni, pi, hash));
+                    }
+                }
+            }
+        }
+    }
+    let mut clip: Clip = serde_json::from_value(val)
+        .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
+    if let Some(pic) = clip.picture.as_deref_mut() {
+        if let Some(hash) = stab_hash {
+            let arc = load_arc_blob(
+                conn,
+                path,
+                &hash,
+                frame_cache,
+                blob_hashes,
+                BlobWeak::Frames,
+            )?;
+            if let Some(made) = pic.stabilization.as_mut().and_then(|s| s.made.as_mut()) {
+                made.frames = arc;
+            }
+        }
+        if !sample_hashes.is_empty()
+            && let Some(comp) = pic.composition.as_mut()
+        {
+            for (ni, pi, hash) in sample_hashes {
+                let arc = load_arc_blob(
+                    conn,
+                    path,
+                    &hash,
+                    sample_cache,
+                    blob_hashes,
+                    BlobWeak::Samples,
+                )?;
+                if let Some(node) = comp.nodes.get_mut(ni)
+                    && let Tool::Tracker(tracker) = &mut node.tool
+                    && let Some(pat) = tracker.patterns.get_mut(pi)
+                    && let Some(mp) = pat.path.as_mut()
+                {
+                    mp.samples = arc;
+                }
+            }
+        }
+    }
+    Ok(clip)
 }
 
 fn collect_blob_refs(val: &Value, used: &mut HashSet<String>) {
@@ -2322,6 +2553,52 @@ mod tests {
         assert_eq!(
             (bins, loaded.history_counts()),
             (vec!["one".into(), "two".into()], (2, 0))
+        );
+    }
+
+    #[test]
+    fn motion_samples_survive_gain_edit_missing_blob_and_undo() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(10.0, true)]);
+        let mut proj = fixture.editor.project().clone();
+        let clip = motion_clip("c1", 0, sample_path());
+        let expected_pic = clip.picture.clone();
+        proj.tracks[0].clips = vec![clip].into();
+        let path = dir.path().join("p.vidcut");
+        let store = Store::create(&path, &proj).unwrap();
+        let mut ed = store.load().unwrap();
+        let rename = Envelope::from_json(
+            json!({"method": "clip.set", "params": {"clips": ["c1"], "name": "one"}}),
+        )
+        .unwrap();
+        ed.apply(rename, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        store
+            .with_conn(|c| {
+                c.execute("DELETE FROM blobs", [])
+                    .map_err(|e| sqlite_err(&path, e))?;
+                Ok(())
+            })
+            .unwrap();
+        let rename2 = Envelope::from_json(
+            json!({"method": "clip.set", "params": {"clips": ["c1"], "name": "two"}}),
+        )
+        .unwrap();
+        ed.apply(rename2, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        let after_edit = store.load().unwrap();
+        assert_eq!(
+            after_edit.project().tracks[0].clips[0].picture,
+            expected_pic
+        );
+        let undo =
+            Envelope::from_json(json!({"method": "history.undo", "params": {"steps": 1}})).unwrap();
+        ed.apply(undo, &FakeEnv::default(), None).unwrap();
+        store.save(&mut ed).unwrap();
+        let after_undo = store.load().unwrap();
+        assert_eq!(
+            after_undo.project().tracks[0].clips[0].picture,
+            expected_pic
         );
     }
 
