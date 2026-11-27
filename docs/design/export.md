@@ -864,6 +864,9 @@ The draw:
   - `Blurred` keeps the buffers (`sharpen::Planes`) until the size changes. Each frame makes the planes again, so there is no cache to keep up to date.
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
+- A canvas with fewer pixels than the frame draws a layer with a Sharpen at the frame size (`Working::at_frame_size`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - A second `Blurred` draws that layer and runs all its effects. `Blurred::scaled` then scales the result into the layer's picture, with the layer's filter.
+  - This holds for each plain layer. An adjustment clip, a compound clip and a frame that a retime makes keep the canvas size.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.

@@ -1071,6 +1071,7 @@ pub struct Screen {
     writing: out::Writing,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
+    framed: Option<blur::Blurred>,
     adj: Option<blur::Texture>,
     adj_shot: Option<(String, blur::Texture)>,
     output_lut: Option<Lut>,
@@ -2028,13 +2029,20 @@ impl Screen {
         let exported = self.exported;
         let alpha = self.alpha;
         let clock = std::time::Instant::now();
-        self.blurred.sized(size, self.frame.unwrap_or(size), n);
+        let whole = self.frame.unwrap_or(size);
+        let fewer = size.0 < whole.0 || size.1 < whole.1;
+        self.blurred.sized(size, whole, n);
         let blurred = &mut self.blurred;
+        let mut framed = self.framed.take();
+        let mut kept = false;
         let binds: Vec<Bound> = layers
             .iter()
             .zip(&mut self.slots)
             .enumerate()
             .map(|(i, (&(picture, level, ..), slot))| {
+                if let Some(f) = framed.as_mut() {
+                    f.drop_layer(i);
+                }
                 if adj[i] {
                     blurred.drop_layer(i);
                     let chain = placed.get(i).expect("adjustment layer has placement");
@@ -2058,11 +2066,23 @@ impl Screen {
                     _ => None,
                 };
                 let full = placed.get(i).map(Vec::as_slice);
-                let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
-                    let (frame, fitted, pixels) = picture.placed_in(size);
-                    (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
-                });
+                let placing_in = |at: (u32, u32)| {
+                    made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
+                        let (frame, fitted, pixels) = picture.placed_in(at);
+                        (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
+                    })
+                };
+                let mut placing = placing_in(size);
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
+                let at_frame = fewer
+                    && made_with.is_none()
+                    && !colors_only
+                    && placing
+                        .as_ref()
+                        .is_some_and(|(p, _)| p.effects.iter().any(Working::at_frame_size));
+                if at_frame {
+                    placing = placing_in(whole);
+                }
                 let (effects, factor) = placing
                     .as_mut()
                     .map_or((Vec::new(), 1.0), |(p, l)| bared(p, l));
@@ -2093,7 +2113,8 @@ impl Screen {
                     false => OVER_ALL,
                 };
                 let how = (open.as_ref().or(placing.as_ref()), kernel, colors, adds);
-                let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
+                let drawn = if at_frame { whole } else { size };
+                let bind = slot.prepare(gpu, picture, drawn, how, &mut encoder);
                 let shown = [1.0, factor, f64::from(mode), adds];
                 let bind = match (blurs, made) {
                     (false, _) => {
@@ -2105,6 +2126,14 @@ impl Screen {
                         let (a, b, how) = blurred.made(gpu, i, (&bind, p), blurs, &mut encoder);
                         blur::shown_bind(gpu, (a, b), shown, [how, 0.0, 0.0, 0.0])
                     }
+                    (true, None) if at_frame => {
+                        let big = framed.get_or_insert_with(blur::Blurred::default);
+                        big.sized(whole, whole, n);
+                        kept = true;
+                        let from = big.layer(gpu, i, &bind, &effects, &mut encoder);
+                        let view = blurred.scaled(gpu, i, (from, whole), kernel, &mut encoder);
+                        blur::shown_bind(gpu, (view, view), shown, [3.0, 0.0, 0.0, 0.0])
+                    }
                     (true, None) => {
                         let view = blurred.layer(gpu, i, &bind, &effects, &mut encoder);
                         let only = f64::from(u8::from(colors_only));
@@ -2114,6 +2143,7 @@ impl Screen {
                 (LayerBind::Ready(bind), level, placing.is_some(), mode)
             })
             .collect();
+        self.framed = framed.filter(|_| kept);
         self.spent.0 += clock.elapsed();
         self.letters.retain(|l| titles.iter().any(|t| l.shows(t)));
         for t in titles {

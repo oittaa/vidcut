@@ -916,6 +916,10 @@ impl Working {
         })
     }
 
+    pub fn at_frame_size(&self) -> bool {
+        matches!(self.work, Work::Sharpen(_))
+    }
+
     fn of_blur(b: &Blur, blend: f64, w: f64) -> Option<Self> {
         let [x, y] = [b.across(), b.down()].map(|s| s * w);
         let channels = b.channels();

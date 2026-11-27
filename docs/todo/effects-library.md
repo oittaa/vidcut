@@ -22,8 +22,8 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
      - What a film stock does to the other values, and when Film Grain Presets shows Custom.
      - Grain Strength above 0.5. At 1, vidcut's grain is 7% to 9% stronger than the renders, with longer tails.
      - Texture under 0.25. At 0.1 and 0.2, vidcut's grain is 2% to 5% stronger, mostly at low frequencies.
-   - **Sharpen with fewer pixels than the frame, its own pull request.** The renders are the full-size Sharpen, scaled down. vidcut sharpens the pixels that it draws.
-     - The compositor draws a layer with a Sharpen at the frame size, then scales it down. This holds for the viewer, `frame render --width` and a smaller export.
+   - **Sharpen with fewer pixels than the frame, on other layers.** A clip draws at the frame size, then scales down, as measured.
+     - An adjustment clip, a compound clip and a frame that a retime makes still sharpen at the size of the picture. Measure one of them first.
    - **Vignette, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
      - Blend on the Edit page, at 0.5.
      - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.
