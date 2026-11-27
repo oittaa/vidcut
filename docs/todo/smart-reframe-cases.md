@@ -1,6 +1,6 @@
 # Smart Reframe cases
 
-**When:** Resolve batch SR4, and a choice for the start of the tracker (below). The script of SR4 is `fixtures/program/scripts/sr4_script.py` in the test data.
+**When:** Resolve batch SR4 for the freeze frame and the ramp. The script of SR4 is `fixtures/program/scripts/sr4_script.py` in the test data. The Reference Point item waits for a rule that fits its 40 boxes.
 
 Smart Reframe is complex behavior. Its move depends on the content and on the settings. One measurement records only what Resolve did for that input. A rule needs several files that differ in content, subject count, aspect, frame rate and resolution.
 
@@ -21,7 +21,11 @@ The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-95
     - The box on two seated people goes from 23 to 480 pixels, because the track takes one person.
     - A loose box on the vlog clip goes from 706 to 867 pixels. A box of 0.95 of the picture on the concert clip goes from 211 to 368.
   - The box around all found things half inside the box comes nearer on 8 boxes of SR3 and goes farther on 4.
-  - To decide: take the start on the found person with its loss on seated pairs, or look for another rule.
+  - A start on the found thing only when exactly one found thing is at least half inside the box:
+    - On SR3, it comes nearer on 7 boxes and goes farther on 3.
+    - The concert box of 0.95 goes from 211 to 368 pixels. A tight box on a hidden boy goes from 51 to 138.
+  - A rule may come nearer on some boxes, but it must go farther on none by more than a few pixels. No rule that ran does this. Thus the tracker starts on the box as drawn.
+  - The 40 boxes of SR2 W5 and SR3 W3 are the cases for the next rule. Their distances are in `fixtures/program/NOTES.md`, SR2 and SR3.
 - **Freeze frame.** Now: one clean clip of SR3. Resolve holds the move still on the frozen frames, as vidcut does.
   - On three clips whose start the freeze of the clip before had cut, the move of Resolve goes on during the freeze.
   - Test (SR4): freezes at frames 40 and 80, on clips 240 frames apart, on five files.
