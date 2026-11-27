@@ -14,16 +14,16 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 1. **Measure the effects:**
    - Measure each new effect in Resolve first: its values, their ranges and defaults, and its math.
    - **Glow, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
-     - Opacity below 1 on a picture with alpha, on the Edit page. One OpenEXR gives the color without its alpha plus Opacity × the glow. Its glow does not fit a mask of `P`.
-     - The exact sigma between 590 and 600 pixels that moves the mirror to the grid of 16, and the second step.
-     - A Zoom above 1, where the picture outside the frame adds to the glow. One picture shows it.
+     - Invert Effect on a picture with alpha.
+     - The second step of the grid. At a sigma of 1200 on 3840×2160, the glow differs from vidcut by up to 0.8%.
+     - The steps on 1280×720. They tell whether a step follows the pixels or the Spread.
+     - A Zoom above 1. On two pictures, the renders are brighter than vidcut only near the left edge of the frame.
    - **Film Grain, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
      - What a film stock does to the other values, and when Film Grain Presets shows Custom.
      - Grain Strength above 0.5. At 1, vidcut's grain is 7% to 9% stronger than the renders, with longer tails.
      - Texture under 0.25. At 0.1 and 0.2, vidcut's grain is 2% to 5% stronger, mostly at low frequencies.
-   - **Sharpen, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
-     - A viewer that draws fewer pixels than the frame.
-     - A Sharpen Chroma between 1 and 2 on a picture with hard color edges.
+   - **Sharpen with fewer pixels than the frame, its own pull request.** The renders are the full-size Sharpen, scaled down. vidcut sharpens the pixels that it draws.
+     - The compositor draws a layer with a Sharpen at the frame size, then scales it down. This holds for the viewer, `frame render --width` and a smaller export.
    - **Vignette, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
      - Blend on the Edit page, at 0.5.
      - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.

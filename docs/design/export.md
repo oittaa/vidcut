@@ -868,6 +868,8 @@ The draw:
 - `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
+- A Glow and a Sharpen also take the colors without their alpha with Use Alpha on (`glow_taken`, `fs_sharpen_taken`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - A Sharpen multiplies its result by the alpha again. A Glow with Use Alpha on mixes its result with those colors, and gives it the alpha of `fs_glow`.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
   - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 

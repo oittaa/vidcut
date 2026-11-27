@@ -436,7 +436,7 @@ pub struct GlowSpread {
 impl GlowSpread {
     const GRID: u32 = 8;
     const MOST_GRID: u32 = 1 << 16;
-    const WIDE: f64 = 600.0;
+    const WIDE: f64 = 596.25;
 
     fn grid(spreads: &[f64; 3]) -> u32 {
         let most = spreads.iter().copied().fold(0.0, f64::max);
