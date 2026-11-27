@@ -469,14 +469,14 @@ pub struct GlowNoise {
 }
 
 impl GlowNoise {
-    const CELL: f64 = 340.0 / (0.6 * 1440.0);
+    const CELL: f64 = 340.0 / (0.6 * 1080.0);
     const EVOLUTION: f64 = 1.8;
     const SEETHE: f64 = 0.0208;
     const SEETHE_POWER: f64 = 1.9;
     const DEPTHS: f64 = 4096.0;
 
-    fn of(g: &Glow, area: f64, frame: i64) -> Self {
-        let cell = Self::CELL * g.noise_scale() * area;
+    fn of(g: &Glow, height: f64, frame: i64) -> Self {
+        let cell = Self::CELL * g.noise_scale() * height;
         let moved = frame.max(0) as f64 * Self::SEETHE * g.noise_seethe().powf(Self::SEETHE_POWER);
         Self {
             strength: g.noise_strength(),
@@ -534,7 +534,7 @@ impl Glowing {
             second_color: g.second_color(),
             gamma: g.curve(),
             saturation: g.colorful(),
-            noise: g.atmosphere.then(|| GlowNoise::of(g, area, on.frame)),
+            noise: g.atmosphere.then(|| GlowNoise::of(g, on.size[1], on.frame)),
             seen_only: g.frames() == GlowFraming::OnlyAsSeen,
             mode: g.over(),
             opacity: g.shown(),
@@ -2527,6 +2527,38 @@ mod tests {
             panic!("a blur");
         };
         assert_eq!((b.across[0] * 100.0).round(), 3888.0);
+    }
+
+    #[test]
+    fn the_atmosphere_of_a_glow_grows_with_the_height_of_the_picture() {
+        let mut effect = crate::model::EffectType::Glow.made();
+        if let EffectKind::Glow(g) = &mut effect.kind {
+            g.atmosphere = true;
+        }
+        let placed = Placed {
+            clip: "c1".into(),
+            picture: Picture {
+                effects: vec![effect],
+                ..Picture::default()
+            },
+            mapped: None,
+            run: None,
+            source: 0,
+            frame: 0,
+            start: 0,
+            ready: true,
+            ramp: None,
+            crossing: false,
+            moving: None,
+            clock: Default::default(),
+            adjustment: false,
+        };
+        let placing = Placing::whole(&[placed], (1080.0, 1920.0));
+        let Work::Glow(g) = &placing.effects[0].work else {
+            panic!("a glow");
+        };
+        let cell = g.noise.expect("an atmosphere").cell;
+        assert_eq!(cell.map(|c| (c * 100.0).round()), [60444.0, 60444.0]);
     }
 
     #[test]

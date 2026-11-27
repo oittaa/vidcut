@@ -2362,7 +2362,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Invert Effect is off.
     - Source Recovery goes from 0 to 5 and is 0.
 - **How the glow works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
-  - It works after Zoom and Position, on the pixels of the frame, with colors clipped to 0..1.
+  - It works after Zoom and Position, on the pixels of the frame. The mask takes the colors clipped to 0..1.
   - The mask of each color is `m = max(0, c − t) / (1 − t + 0.001)`, with `t` the Shine Threshold.
   - The mask is `M = (1 − t) × m + t × (the mean of the three m)`. Shiny Regions shows `M`.
   - The blur is a Gaussian curve across the frame and then down it, for each color.
@@ -2381,8 +2381,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Gamma multiplies each color by `P^(1 / Gamma) / P`.
   - Source Recovery multiplies the glow by `max(0, 1 − (12/7) × Recovery × the largest M)`, with `M` not blurred.
   - Atmosphere multiplies the glow by `max(0, 1 + Strength × N)`. `N` is one noise for all three colors, in the directions of the frame.
+    - Measured in Resolve Studio 21.2 on 1280×720, 1920×1080, 3840×2160, 1080×1920 and 1440×1440, at Scale 0.6 and 2.
+    - The size of `N` follows the height of the frame. Its middle is the middle of the frame.
+    - Thus `N` of each frame is `N` of 1920×1080, scaled by the height around the middle. The correlation is 1.000.
   - Source Recovery and Atmosphere work before Gamma. Each multiplies the three colors alike, so Saturation does not change them.
-  - The glow does not stop at 1. Composite Type mixes it with the picture, and the mix stops at 0..1 after Opacity and Blend.
+  - The glow does not stop at 1. Composite Type mixes it with the picture, and Opacity and Blend follow.
+  - Measured in Resolve Studio 21.2 with float renders and Add, on 1280×720, 1920×1080 and 3840×2160:
+    - The result does not stop at 1. A flat gray of 0.5 at Shine Threshold 0.25 and Spread 0, with Atmosphere, gives a mean of 1.164.
+    - The picture under the glow keeps its values above 1. A disk of 4.0 gives 4.043.
+    - The 16-bit renders stop at 1 because their format does.
   - Two modes have their own rules at the ends of the range of the glow:
     - Color Dodge with a glow of 1 or more gives 1 where the picture is above 0, and 0 where it is 0.
     - Color Burn with a glow of 0 or less gives 1 where the picture is 1, and 0 elsewhere.
@@ -2407,16 +2414,24 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
   - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
     - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
-    - Its size is proportional to Scale × √(width × height) of the picture on the frame. The renders show only 1920×1080.
+    - Its size is proportional to Scale × the height of the picture on the frame. Its middle is the middle of the frame.
     - Follow FX Tracker changes nothing, as with no tracker in the renders.
     - Evolution and Seethe move the noise along a third direction. Seethe moves it at each frame from the start of the clip.
     - Each octave has its own scale in that direction, so Detail also changes the speed.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - Source Recovery works on the sum of the glows.
     - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
-    - The grid `g` doubles at each doubling of 600 pixels of sigma. The renders put the first step between 580.8 and 633.6.
+    - The grid `g` doubles at each doubling of 600 pixels of sigma.
+      - The float renders at 3840×2160 put the first step across the frame between a sigma of 590 and 600.
     - Opacity acts as Blend on a picture with alpha, as it does on an opaque one.
     - Color Filter values go from 0 to 1000000. No limit is measured.
+  - Cases of one picture each, measured in Resolve Studio 21.2 with float renders on 1280×720 and 1920×1080. They are not a rule yet ([todo](todo/effects-library.md)):
+    - An OpenEXR of the color (0.8, 0.4, 0.2) with an alpha ramp, read as Premultiplied, at Opacity 1 and 0.5.
+      - At an alpha of 0.1, 0.5 and 0.9, the output is the color without its alpha, plus Opacity × the glow. Its alpha is 1.
+      - The glow there is the alpha × the glow of the color without its alpha. Thus a mask of `P` does not fit this file.
+    - The spots picture at Zoom 2, with and without Secondary Glow.
+      - The parts of the picture outside the frame add to the glow and to the Secondary Glow. Near the left edge, they add up to 0.032.
+      - At Zoom 0.5, the Secondary Glow of the renders and of vidcut differ by 0.00004 on average.
 - **Film Grain** (p. 3559). Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Film Grain Presets has 17 film stocks and Custom. 16mm S1 is the default.
   - Composite Type is Overlay, Multiply, Darken, Lighten, Screen, Subtract, Hard Light, Soft Light, Linear Light, Vivid Light, Pin Light or Custom.
@@ -2452,8 +2467,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The output is `a` × the result, with `a` the alpha. `a` stays. With Grain Only it is `a` × `G`. Outside the picture nothing shows.
   - Use Alpha changes nothing. Blend mixes the input and the output.
   - Detail Loss is a Gaussian curve on the picture's colors without their alpha.
-    - Its sigma is 4.32 × Detail Loss² pixels on 1920×1080. The alpha stays sharp, and the black around a smaller picture enters the blur.
-    - On 3840×2160 the sigma is twice as large. On 1080×1920 it is the same as on 1920×1080.
+    - Its sigma is 4.32 × Detail Loss² × √(width × height) / 1440 pixels. The alpha stays sharp, and the black around a smaller picture enters the blur.
+    - Measured in Resolve Studio 21.2 with float renders at Detail Loss 0.5 and 1, on 1920×1080, 1080×1920, 1440×1440 and 3840×2160.
+    - On 1440×1440 the sigma is 4.318 at Detail Loss 1. A sigma by the short side of the frame is 5.76.
   - The noise has the spectrum `R(f) = exp(−(f − C)² / 2W²) + exp(−(f + C)² / 2W²)`.
     - `f = K × √((A × fx)² + fy²)`, with `fx` and `fy` in cycles for each pixel, and `A` the Grain Aspect Ratio.
     - `C` and `W` come from Texture, and `K` comes from Grain Size, by tables. `K` also goes with the height of the fitted picture over 1080.
@@ -2463,6 +2479,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Before Softness, its standard deviation is 0.1986 × Grain Strength. Its kurtosis is about 3.25.
   - At Saturation 0 the channels are the same. At 1, they are three separate noises, 1.334 times as strong, and their BT.709 luma is the gray noise.
   - Red, Green and Blue multiply the noise, after Saturation.
+    - They also multiply the shift that Symmetry makes. Measured in Resolve Studio 21.2 at Symmetry 0.2 and 0.8, on 1280×720 and 1920×1080.
   - Symmetry works on the noise of each channel, before Softness. It moves the noise down under 0.5 and up over 0.5, and changes its shape.
   - Softness is a Gaussian curve with a sigma of 5 × Softness^1.5 × the height of the frame / 1080. The edge is a half-sample mirror.
   - The grain stays in the pixels of the frame. Zoom and Position do not move it.
@@ -2475,6 +2492,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
     - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
+    - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
   - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
     - The table of `K` for Grain Size 0 to 0.4 comes from fits to the renders on 1280×720, 1920×1080 and 3840×2160.
     - The value at Grain Size 0.2156 comes from the values of 8mm 100D with Softness 0. The value at 0 also fits 35mm 400T.
@@ -2487,9 +2505,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
-    - The Detail Loss sigma follows the square root of the frame's area. The renders fit the short side of the frame equally well.
-    - Red, Green and Blue also multiply the shift that Symmetry makes.
-    - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
+  - Measured in Resolve Studio 21.2 with float renders of Grain Only, on 1920×1080 and 1280×720:
+    - At Grain Strength 0.25 and 0.5, with Symmetry 0.05, 0.2, 0.3, 0.7, 0.9 and 0.95, the mean agrees within 0.002.
+    - There the standard deviation agrees within 1.6%.
+    - At Grain Strength 1, with the same Symmetry values, vidcut's standard deviation is 7% to 9% larger. Its 1st and 99th percentiles are 0.02 to 0.03 farther out.
+    - At Texture 0.1 and 0.2, vidcut's standard deviation is 2% (1280×720) to 5% (1920×1080) larger. The difference is mostly below 0.1 cycles for each pixel.
+    - At Grain Aspect Ratio 0.25 and 0.4, the spectrum agrees within the noise of one render, about 10% in each band.
 - **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Operating Mode is Basic or Advanced. Basic is the default.
   - Border Shape is Oval, Triangle, Diamond, Rectangle, Hexagon or Octagon. Oval is the default.
@@ -2557,9 +2578,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The output is R′ = y′ + Pr′ / 0.65, B′ = y′ + Pb′ / 0.552 and G′ = (y′ − 0.2126 R′ − 0.0722 B′) / 0.7152.
   - Nothing stops the colors at 0 or 1 before the output.
   - It works on the premultiplied colors. The alpha does not change.
-- **Sharpen in vidcut:** vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-  - A viewer that draws fewer pixels than the frame uses the same numbers on the pixels that it draws.
-  - A Sharpen Chroma between 1 and 2 uses Sharpen Chroma × g − 1. Only 1, 2, 3 and 5 are measured.
+- **Sharpen in vidcut:**
+  - Measured in Resolve Studio 21.2 with float renders on 1280×720 and 1920×1080. vidcut gives the same pictures:
+    - Blend 0.5 on the spots picture, within 0.00001.
+    - A picture with alpha, read as Premultiplied, over black and over white, within 0.001.
+    - Fine Details 3 with Sharpen Chroma 1.01, 1.25, 1.5 and 1.75 on a smooth color picture, within 0.00002. There Sharpen Chroma × g − 1 also works between 1 and 2.
+  - vidcut's own choice, not measured ([todo](todo/effects-library.md)): a viewer that draws fewer pixels than the frame uses the same numbers on the pixels that it draws.
 - **Keyframes of effect values** (pp. 747, 1250–1251):
   - Each group of an applied effect in the Effects panel of the Inspector has a Keyframe button with Previous and Next buttons (p. 747).
   - The button adds or removes a keyframe at the playhead, on each parameter of the group (p. 747).
