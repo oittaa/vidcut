@@ -1,4 +1,4 @@
-# The lean, the anchor point in a turn, and compound clips as measured
+# The lean and compound clips as measured
 
 **When:** next.
 
@@ -11,11 +11,6 @@
   - A lean also stops the limit: Zoom X 0.9997 with Pitch or Yaw 0.0003 shows bars of 0.192.
   - The two changes go together. A change of the limit alone opens gaps under 0.5 px at small leans, where Resolve shows none.
   - Not known: how the 0.5 px works with a Rotation or a crop. Find the cause before a change.
-- **The anchor point in a turn on pixels that are not square** ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
-  - Resolve moves the point at the anchor in a Rotation. On the 2:1 file at Rotation 30, it moves 63.2 px right and 40.5 px up.
-  - The 4:3 file shows the same model. On square pixels, the point stays.
-  - vidcut keeps that point in its place, as a turn about the anchor point does on square pixels.
-  - The owner decides: copy this, or record it as a fault of Resolve in gotchas.md.
 - **A compound clip:** the outer level keeps the limit only when the clip inside has Zoom X 1. This is from 9 cases. Measure more cases for a general rule before a change.
 
-The records are sections M10, PF, PG and PH of `fixtures/program/NOTES.md` in the test data.
+The records are sections M10 and PF of `fixtures/program/NOTES.md` in the test data.
