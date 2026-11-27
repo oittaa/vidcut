@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::{
     Source, clear_range, ensure_track, locate, main_index, place, split_at, tracks, unlocked,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::{Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, TrackKind};
 
 #[derive(Debug, Default)]
@@ -293,4 +293,187 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
         }
     }
     Ok(out)
+}
+
+fn ended(p: &mut Project, links: &HashSet<u32>) {
+    for &l in links {
+        let held: Vec<(usize, usize)> = p
+            .tracks
+            .iter()
+            .enumerate()
+            .flat_map(|(ti, t)| {
+                t.clips
+                    .iter()
+                    .enumerate()
+                    .filter(move |(_, c)| c.link == Some(l))
+                    .map(move |(ci, _)| (ti, ci))
+            })
+            .collect();
+        if let [(ti, ci)] = held.as_slice() {
+            p.tracks[*ti].clips[*ci].link = None;
+        }
+    }
+}
+
+fn links_of(p: &Project, ids: &[String]) -> Result<HashSet<u32>> {
+    let mut links = HashSet::new();
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        links.extend(p.tracks[ti].clips[ci].link);
+    }
+    Ok(links)
+}
+
+pub fn link(p: &mut Project, ids: &[String]) -> Result<()> {
+    let ids: Vec<String> = ids.iter().fold(Vec::new(), |mut all, id| {
+        if !all.contains(id) {
+            all.push(id.clone());
+        }
+        all
+    });
+    if ids.len() < 2 {
+        return Err(Error::usage("Link needs two clips or more"));
+    }
+    let before = links_of(p, &ids)?;
+    let l = p.free_link();
+    for id in &ids {
+        let (ti, ci) = locate(p, id)?;
+        p.tracks[ti].clips[ci].link = Some(l);
+    }
+    ended(p, &before);
+    Ok(())
+}
+
+pub fn unlink(p: &mut Project, ids: &[String]) -> Result<()> {
+    let before = links_of(p, ids)?;
+    if before.is_empty() {
+        return Err(Error::invalid("These clips have no link"));
+    }
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        p.tracks[ti].clips[ci].link = None;
+    }
+    ended(p, &before);
+    Ok(())
+}
+
+pub fn alone<T>(
+    p: &mut Project,
+    ids: &[String],
+    edit: impl FnOnce(&mut Project) -> Result<T>,
+) -> Result<T> {
+    let mut kept = Vec::new();
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        if let Some(l) = p.tracks[ti].clips[ci].link.take() {
+            kept.push((id.clone(), l));
+        }
+    }
+    let out = edit(p);
+    for (id, l) in &kept {
+        if let Some((ti, ci)) = p.find_clip(id) {
+            p.tracks[ti].clips[ci].link = Some(*l);
+        }
+    }
+    ended(p, &kept.iter().map(|&(_, l)| l).collect());
+    out
+}
+
+fn same_source(a: &Clip, b: &Clip) -> bool {
+    let heard = |c: &Clip| !c.media.is_empty() || c.compound.is_some();
+    heard(a) && a.media == b.media && a.compound == b.compound
+}
+
+fn lag(c: &Clip, of: &Clip) -> Option<i64> {
+    (c.speed.is_none() && of.speed.is_none())
+        .then(|| (c.start - c.source_in) - (of.start - of.source_in))
+}
+
+fn in_order(p: &Project) -> impl Iterator<Item = &Clip> {
+    p.tracks_of(TrackKind::Video)
+        .into_iter()
+        .chain(p.tracks_of(TrackKind::Audio))
+        .flat_map(|i| &p.tracks[i].clips)
+}
+
+fn partner<'a>(group: impl IntoIterator<Item = &'a Clip>, c: &Clip) -> Option<&'a Clip> {
+    group
+        .into_iter()
+        .find(|o| o.video != c.video && o.tied_with(c) && same_source(o, c))
+}
+
+pub fn offset(p: &Project, c: &Clip) -> Option<i64> {
+    lag(c, partner(in_order(p), c)?).filter(|&d| d != 0)
+}
+
+pub fn offsets(p: &Project) -> HashMap<String, i64> {
+    let mut groups: HashMap<u32, Vec<&Clip>> = HashMap::new();
+    for c in in_order(p) {
+        if let Some(l) = c.link {
+            groups.entry(l).or_default().push(c);
+        }
+    }
+    groups
+        .values()
+        .flat_map(|g| {
+            g.iter().filter_map(|c| {
+                let d = lag(c, partner(g.iter().copied(), c)?).filter(|&d| d != 0)?;
+                Some((c.id.clone(), d))
+            })
+        })
+        .collect()
+}
+
+pub fn others(p: &Project, id: &str) -> Vec<(String, i64)> {
+    let Some(c) = p.clip(id) else {
+        return Vec::new();
+    };
+    p.tied(id)
+        .into_iter()
+        .filter_map(|o| {
+            let x = p.clip(&o)?;
+            let d = lag(x, c).filter(|&d| d != 0 && same_source(x, c))?;
+            Some((o, d))
+        })
+        .collect()
+}
+
+fn into_place(p: &mut Project, id: &str, d: i64, slip: bool) -> Result<()> {
+    let one = [id.to_string()];
+    alone(p, &one, |p| {
+        if slip {
+            super::slip(p, id, d)
+        } else {
+            let (ti, ci) = locate(p, id)?;
+            let to = p.tracks[ti].clips[ci].start - d;
+            super::move_clips(p, &one, to, super::MoveMode::Overwrite, None)
+        }
+    })
+}
+
+pub fn resync(p: &mut Project, id: &str, how: crate::request::Resync) -> Result<()> {
+    use crate::request::Resync;
+    locate(p, id)?;
+    let slip = matches!(how, Resync::Slip | Resync::SlipOthers);
+    match how {
+        Resync::Slip | Resync::Move => {
+            let d = p
+                .clip(id)
+                .and_then(|c| offset(p, c))
+                .ok_or_else(|| Error::invalid(format!("{id} is in sync")))?;
+            into_place(p, id, d, slip)
+        }
+        Resync::SlipOthers | Resync::MoveOthers => {
+            let off = others(p, id);
+            if off.is_empty() {
+                return Err(Error::invalid(format!(
+                    "The clips linked to {id} are in sync"
+                )));
+            }
+            for (o, d) in off {
+                into_place(p, &o, d, slip)?;
+            }
+            Ok(())
+        }
+    }
 }

@@ -387,6 +387,12 @@ The bar and the Jobs button:
   - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
   - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
 - An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
+- `Assets::sync` holds `linked::offsets` for each frame that is drawn. A clip that is out of sync shows its offset in a red badge before its name.
+- The clip menu gives Link Clips or Unlink Clips (`link_action`). With Linked Selection on, it takes the linked clips of the selection too.
+  - It gives Slip Into Place and Move Into Place when the clip has an offset. It gives the two Others commands when its linked clips have one.
+- `Options::linked_selection` is the Linked Selection switch. Off, `Rows::layout` makes no `Bands`, and a video row has no band. Thus each sound clip shows on its audio row.
+  - `Workspace::send` and `Workspace::send_drag` then add `alone` to the clip edits in `ALONE`, also inside an `apply`.
+  - The header of a main track then has no Mute.
 - The Mute of a main track header sets `muted` on each audio track that holds the linked sound of its clips (`geometry::heard_on`). One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
 
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).

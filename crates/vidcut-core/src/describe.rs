@@ -299,6 +299,14 @@ pub fn describe_at(
         "track.set" => d.track_set(),
         "clip.set" => d.clip_set(),
         "clip.normalize" => format!("Normalize the audio levels of {}", d.clips("clips")),
+        "clip.link" => format!("Link {}", d.clips("clips")),
+        "clip.unlink" => format!("Unlink {}", d.clips("clips")),
+        "edit.resync" => match d.text("how").as_str() {
+            "slip" => format!("Slip {} into place", d.clips("clip")),
+            "move" => format!("Move {} into place", d.clips("clip")),
+            "slip_others" => format!("Slip the clips linked to {} into place", d.clips("clip")),
+            _ => format!("Move the clips linked to {} into place", d.clips("clip")),
+        },
         "clip.paste_attributes" => format!("Paste Attributes to {}", d.clips("clips")),
         "clip.remove_attributes" => format!("Remove Attributes of {}", d.clips("clips")),
         "keyframes.add" => format!(

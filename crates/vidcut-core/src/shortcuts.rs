@@ -184,6 +184,8 @@ actions! {
     SelectSentence "select_sentence",
     DynamicTrim "dynamic_trim",
     Snapping "snapping",
+    LinkedSelection "linked_selection",
+    LinkClips "link_clips",
     PassThrough "pass_through",
     LockNode "lock_node",
     RenameNode "rename_node",
@@ -1201,6 +1203,20 @@ pub const SHORTCUTS: &[Shortcut] = &[
              they cross fade. Next to a gap it fades from or to black. It is shorter where the clips have fewer frames past \
              the cut. {cut_side} picks whether it ends on the cut, starts on it or sits across it.",
         ),
+    ),
+    own(
+        Clips,
+        Action::LinkedSelection,
+        &["Ctrl+Shift+L"],
+        "Linked Selection on or off",
+        Some("Off, the picture and the sound of a clip show and edit apart."),
+    ),
+    own(
+        Clips,
+        Action::LinkClips,
+        &["Ctrl+Alt+L"],
+        "Link or unlink the selected clips",
+        Some("Linked clips act as one clip in each edit."),
     ),
     own(
         Clips,

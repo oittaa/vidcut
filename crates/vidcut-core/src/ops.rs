@@ -178,9 +178,43 @@ fn clear_range(p: &mut Project, ti: usize, a: i64, b: i64) {
     if a >= b {
         return;
     }
+    let cut: Vec<(i64, u32)> = p.tracks[ti]
+        .clips
+        .iter()
+        .filter(|c| c.start < b && b < c.end())
+        .filter_map(|c| Some((c.start, c.link?)))
+        .collect();
     split_at(p, ti, a);
     split_at(p, ti, b);
     p.tracks[ti].clips.retain(|c| c.end() <= a || c.start >= b);
+    for (start, link) in cut {
+        let Some(ci) = p.tracks[ti].clips.iter().position(|c| c.start == b) else {
+            continue;
+        };
+        let l = if start >= a {
+            link
+        } else {
+            piece_link(p, ti, &p.tracks[ti].clips[ci])
+        };
+        p.tracks[ti].clips[ci].link = Some(l);
+    }
+}
+
+fn piece_link(p: &Project, ti: usize, piece: &Clip) -> u32 {
+    p.tracks
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != ti)
+        .flat_map(|(_, t)| &t.clips)
+        .find(|y| {
+            y.start == piece.start
+                && y.link.is_some()
+                && (&y.media, &y.compound) == (&piece.media, &piece.compound)
+                && y.source_in == piece.source_in
+        })
+        .and_then(|y| y.link)
+        .or(piece.link)
+        .unwrap_or_else(|| p.free_link())
 }
 
 fn clear_tied(p: &mut Project, ti: usize, a: i64, b: i64) -> Result<()> {

@@ -939,6 +939,17 @@ Import:
   - `linked::with_sound` puts the sound of each placed picture on the audio track of the same number, and each next stream on the next audio track. It writes over what is there, and links the clips.
   - `linked::sounds` gives the linked sound clips of a picture clip. The sound requests, the Inspector and the clip menu use it. Why: a picture clip has no sound of its own.
   - `follow::follow` moves a clip that is linked to a V1 clip by the change of the start of that clip. Thus a J/L cut keeps its offset.
+  - `linked::link` gives the clips one new link number. `linked::unlink` takes the link of each clip away. A group with one clip left ends.
+  - `linked::alone` takes the named clips out of their groups for one edit, then gives the links back.
+    - The requests with `alone` use it (`apart`). Thus each edit acts on the named clips only, and no edit function needs a second form.
+  - `linked::offset` gives the sync offset of a clip. It compares the clip with the first linked clip of the same media and the other kind.
+    - The offset is the frames between the start of each clip, less the frames between their source starts. A clip with a speed change has none.
+    - `linked::offsets` gives the offset of each clip of the timeline in one pass. `clip_json` writes it as `sync`.
+  - `linked::resync` slips or moves the clip, or its other linked clips of the same media, by their offsets. Each part acts alone.
+- `clear_range` keeps the link groups of the clips that it cuts:
+  - A clip that loses its head keeps its group.
+  - The right piece of a middle cut can match a piece on another track: the same media, start and source start. It then takes the group of that piece (`piece_link`).
+  - Why: an overwrite over the tracks of a linked pair keeps the pieces of the pair together.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).

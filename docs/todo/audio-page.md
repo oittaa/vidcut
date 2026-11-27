@@ -186,7 +186,7 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 - The mute of a main track header mutes each audio track that holds the linked sound of its clips (p. 647).
 - A J/L drag on the band rolls the edit of the linked sound clips.
 - The Audio part of the Inspector edits the linked sound clips of the selected item.
-- A group out of sync shows its offset, as on the Edit page (pp. 915, 3878). An OpenTimelineIO import can bring such a group. This is still to do.
+- A clip out of sync shows its offset, as on the Edit page (pp. 915, 3878). An OpenTimelineIO import can bring such a clip.
 
 **Compound clips:**
 
@@ -221,8 +221,10 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 
 1. **Link groups** (#1411). `Clip::link` holds the groups of compound clips and clips with no media. The parts still need one place. Each part moves by the change of the lead. The behavior does not change.
 2. **Sound clips** (#1420). The sound moves to the audio tracks, in each part above. The parts of a group no longer need one place. The Cut page draws a linked pair as one item, with the band, the header mute and the J/L drag. The spec, the deviations and the design docs change.
-3. **Cut page rows.** The sync offset of a group, and the rows of the audio tracks as batch 2 measures them.
-4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914) and the fixes for a group out of sync (p. 915). The fixes are Slip into place, Move into place, Slip others into place and Move others into place. Resync Clip on the Cut page (p. 646).
+3. **Cut page rows.** The rows of the audio tracks as batch 2 measures them.
+4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914), the sync offset and its four fixes (p. 915), as `edit.resync`.
+   - Open: Resync Clip on the Cut page (p. 646). Batch 1 saw no change in one case. Batch 2 measures what it changes.
+   - Open: the questions of the link run in the batch 2 runbook. They are the form of the offset, links between clips of other media, Link of grouped clips, and a split with Linked Selection off.
 
 Each pull request changes the existing tests to the new model. It adds no tests.
 

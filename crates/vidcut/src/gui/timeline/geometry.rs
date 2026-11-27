@@ -199,12 +199,20 @@ pub fn heard_on(p: &Project, t: &Track) -> Vec<String> {
         .collect()
 }
 
-pub fn band_hit(p: &Project, t: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Option<Hit> {
+pub fn band_hit(
+    p: &Project,
+    rows: &Rows,
+    t: &Track,
+    scale: &Scale,
+    tr: &TrackRect,
+    pos: Pos2,
+) -> Option<Hit> {
     if !tr.rect.contains(pos) || tr.audio_top <= tr.rect.top() || !tr.in_audio(pos.y) {
         return None;
     }
     band(p, t)
         .into_iter()
+        .filter(|b| rows.bands.has(&b.sound.id))
         .flat_map(|b| {
             [
                 (b.picture, Edge::Tail, b.sound.end()),
@@ -232,6 +240,7 @@ const ENLARGE: f32 = 3.0;
 const ENLARGED_MIN: f32 = 180.0;
 
 impl Rows {
+    #[allow(clippy::too_many_arguments)]
     pub fn layout(
         p: &Project,
         area: Rect,
@@ -240,6 +249,7 @@ impl Rows {
         strip: f32,
         enlarged: Option<&str>,
         lift: f32,
+        linked: bool,
     ) -> Self {
         let [v1, video, audio, subtitle] = heights;
         let mut order: Vec<(&str, f32, f32)> = p
@@ -255,10 +265,15 @@ impl Rows {
         };
         let share = |t: &'_ Track| match t.kind {
             TrackKind::Audio => 1.0,
+            TrackKind::Video if !linked => 0.0,
             TrackKind::Video if t.id == MAIN => 0.32,
             TrackKind::Video => 0.3,
         };
-        let bands = Bands::of(p);
+        let bands = if linked {
+            Bands::of(p)
+        } else {
+            Bands::default()
+        };
         order.extend(
             p.tracks_of(TrackKind::Video)
                 .into_iter()
@@ -836,7 +851,7 @@ pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<S
         Some(r) => {
             let what = match p.track(&r.track) {
                 None => Hit::Empty,
-                Some(t) => band_hit(p, t, scale, &r.rect, pos)
+                Some(t) => band_hit(p, rows, t, scale, &r.rect, pos)
                     .unwrap_or_else(|| hit(&rows.bands.apart(t), scale, &r.rect, pos)),
             };
             (Some(r.track.clone()), what)

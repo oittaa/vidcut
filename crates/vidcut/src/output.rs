@@ -1641,11 +1641,12 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("edits {}", edit_points(&v["edits"]));
             println!("target {}", v["target"].as_str().unwrap_or("-"));
             println!(
-                "timeline zoom {} px/frame, fixed playhead {}, snap {}, trim to audio {}, safe edit {}",
+                "timeline zoom {} px/frame, fixed playhead {}, snap {}, trim to audio {}, linked selection {}, safe edit {}",
                 t["zoom"],
                 on("fixed_playhead"),
                 on("snap"),
                 on("trim_to_audio"),
+                on("linked_selection"),
                 on("safe_edit")
             );
             println!(
@@ -1892,6 +1893,10 @@ fn clip_line(c: &Value) -> String {
         (Value::Null, Some(l)) => format!("link {l}"),
         (_, None) => "audio".to_string(),
         (_, Some(l)) => format!("audio, link {l}"),
+    };
+    let audio = match c["sync"].as_i64() {
+        Some(d) => format!("{audio}, sync {d:+}f"),
+        None => audio,
     };
     let speed = match c["speed"].as_f64() {
         Some(0.0) => ", freeze".to_string(),

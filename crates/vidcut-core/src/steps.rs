@@ -310,7 +310,7 @@ pub fn category(kind: &str) -> &'static str {
         | "edit.ripple_delete_silence"
         | "edit.cut"
         | "edit.ripple_delete_words" => "Deletes",
-        "edit.move" => "Moves",
+        "edit.move" | "edit.resync" => "Moves",
         "edit.dissolve" | "edit.remove_transition" | "edit.transition" => "Dissolves",
         k if k.starts_with("markers.") || k.starts_with("marks.") || k.contains(".marks.") => {
             "Markers and marks"

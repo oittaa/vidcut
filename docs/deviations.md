@@ -1454,18 +1454,15 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X163. A compound clip takes its clips whole
 
 - **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
-  - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
   - A range with no clips does nothing, and shows no message.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
 - **vidcut:**
-  - A clip goes in with the clips that are linked to it.
   - A clip on a locked track refuses the request.
   - A range with no clips refuses the request, with a message.
   - A dissolve goes inside when its clips go inside. It plays there.
   - `edit.decompose` brings such a dissolve back.
 - **Why:**
-  - vidcut has no Linked Selection switch. The clips of a link group act as one clip in each edit.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
