@@ -4136,9 +4136,10 @@ impl Live {
         let first = &self.clipboard.first()?.clip;
         let p = self.project.as_ref()?.project();
         self.copies += 1;
+        let source = vidcut_core::ops::attributes::source(&self.clipboard);
         Some(Arc::new(CopiedClip {
             name: p.clip_name(first).unwrap_or_default(),
-            picked: vidcut_core::ops::attributes::picked_at_open(first),
+            picked: vidcut_core::ops::attributes::picked_at_open(&source),
             copy: self.copies,
         }))
     }
@@ -4173,10 +4174,10 @@ impl Live {
             Request::ClipPasteAttributes { from, copied, .. }
                 if from.is_none() && copied.is_none() =>
             {
-                let Some(first) = self.clipboard.first() else {
+                if self.clipboard.is_empty() {
                     return Err(Error::usage("the clipboard has no clip"));
-                };
-                *copied = Some(Box::new(first.clone()));
+                }
+                *copied = Some(self.clipboard.clone());
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {

@@ -155,10 +155,7 @@ pub fn typed(text: &str, fps: Rational, in_frames: bool) -> Option<i64> {
 fn with_sound(p: &Project, track: TrackRef, at: i64) -> Option<(Transition, bool)> {
     let t = p.track(&track.id())?;
     let x = geometry::picture_transition(p, t, at)?;
-    let sound = t
-        .transitions
-        .iter()
-        .any(|y| y.sound && y.from == x.from && y.to == x.to);
+    let sound = ops::sound_paired(p, x.from.as_deref(), x.to.as_deref());
     Some((x.clone(), sound))
 }
 
@@ -186,7 +183,7 @@ impl Workspace {
         let Some((x, sound)) = with_sound(p, track, at) else {
             return;
         };
-        let room = ops::dissolve_room(p, &track.id(), at, false).unwrap_or((x.before, x.after));
+        let room = ops::dissolve_room(p, &track.id(), at).unwrap_or((x.before, x.after));
         let (before, after) = changed(x.before, x.after, length, room);
         if (before, after) == (x.before, x.after) {
             return;
@@ -670,7 +667,6 @@ mod tests {
         };
         let x = Transition {
             id: "t1".into(),
-            sound: false,
             from: Some("c1".into()),
             to: Some("c2".into()),
             before: 10,

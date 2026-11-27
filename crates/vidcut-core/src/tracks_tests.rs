@@ -36,17 +36,17 @@ fn deleting_a_range_takes_it_out_of_every_track() {
         f.v1(),
         vec![
             row("c1", 0, 50, 0),
-            row("c7", 50, 30, 70),
-            row("c2", 80, 50, 10),
-            row("c3", 130, 50, 100)
+            row("c10", 50, 30, 70),
+            row("c3", 80, 50, 10),
+            row("c5", 130, 50, 100)
         ]
     );
     assert_eq!(
         f.track("V2"),
         vec![
-            row("c4", 40, 10, 0),
-            row("c9", 50, 10, 30),
-            row("c5", 150, 20, 0)
+            row("c7", 40, 10, 0),
+            row("c12", 50, 10, 30),
+            row("c8", 150, 20, 0)
         ]
     );
 }
@@ -56,7 +56,7 @@ fn following_clips_that_collide_move_up_a_track() {
     let mut f = three_clips();
     put(&mut f, "m3", 0, 20, 110, "V2");
     put(&mut f, "m3", 30, 50, 150, "V2");
-    f.ok(req("edit.delete", json!({"clips": "c2"})));
-    assert_eq!(f.track("V2"), vec![row("c4", 100, 20, 0)]);
-    assert_eq!(f.track("V3"), vec![row("c5", 100, 20, 30)]);
+    f.ok(req("edit.delete", json!({"clips": "c3"})));
+    assert_eq!(f.track("V2"), vec![row("c7", 100, 20, 0)]);
+    assert_eq!(f.track("V3"), vec![row("c8", 100, 20, 30)]);
 }

@@ -208,11 +208,8 @@ impl Workspace {
             mark(bottom, 3.0, if shift(Side::In) <= lo { stop } else { ok });
         }
         if let Some(x) = &fade {
-            let sound = t
-                .transitions
-                .iter()
-                .any(|y| y.sound && y.from == x.from && y.to == x.to);
-            let room = vidcut_core::ops::dissolve_room(p, &e.track.id(), e.at, false)
+            let sound = vidcut_core::ops::sound_paired(p, x.from.as_deref(), x.to.as_deref());
+            let room = vidcut_core::ops::dissolve_room(p, &e.track.id(), e.at)
                 .unwrap_or((x.before, x.after));
             let bar = FadeBar {
                 x,

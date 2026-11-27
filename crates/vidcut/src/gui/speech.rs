@@ -611,9 +611,10 @@ fn heard_files(
     let mut out: Vec<String> = Vec::new();
     for t in p.tracks.iter().filter(|t| heard.contains(&t.id)) {
         for c in &t.clips {
-            let (Some(sound), Some((from, to))) = (&c.audio, c.audio_range()) else {
+            let Some(sound) = &c.audio else {
                 continue;
             };
+            let (from, to) = (c.start, c.end());
             if c.enabled
                 && !sound.muted
                 && !c.is_block()
