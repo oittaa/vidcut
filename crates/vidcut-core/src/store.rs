@@ -285,7 +285,6 @@ struct SubtitleTrackRow {
 }
 
 fn configure_journal(conn: &Connection, remote: bool, writable: bool) -> rusqlite::Result<()> {
-    conn.busy_timeout(BUSY_TIMEOUT)?;
     if writable {
         let want = if remote { "delete" } else { "wal" };
         let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
@@ -323,23 +322,22 @@ fn verify_db(conn: &Connection, path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn open_conn(path: &Path) -> Result<Connection> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let conn = Connection::open_with_flags(path, flags).map_err(|e| open_err(path, e))?;
-    configure_conn(&conn, path, true).map_err(|e| open_err(path, e))?;
+fn open_with(path: &Path, flags: OpenFlags, writable: bool) -> Result<Connection> {
+    let conn = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .map_err(|e| open_err(path, e))?;
+    conn.busy_timeout(BUSY_TIMEOUT)
+        .map_err(|e| open_err(path, e))?;
     verify_db(&conn, path)?;
+    configure_conn(&conn, path, writable).map_err(|e| open_err(path, e))?;
     Ok(conn)
 }
 
+pub(crate) fn open_conn(path: &Path) -> Result<Connection> {
+    open_with(path, OpenFlags::SQLITE_OPEN_READ_WRITE, true)
+}
+
 fn open_ro_or_rw(path: &Path) -> Result<Connection> {
-    if let Ok(conn) = open_conn(path) {
-        return Ok(conn);
-    }
-    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let conn = Connection::open_with_flags(path, flags).map_err(|e| open_err(path, e))?;
-    configure_conn(&conn, path, false).map_err(|e| open_err(path, e))?;
-    verify_db(&conn, path)?;
-    Ok(conn)
+    open_conn(path).or_else(|_| open_with(path, OpenFlags::SQLITE_OPEN_READ_ONLY, false))
 }
 
 fn query_data_version(conn: &Connection, path: &Path) -> Result<i64> {

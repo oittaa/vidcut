@@ -473,6 +473,7 @@ Ranges and resolution:
 - `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
 - `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::checkpoint` empties the WAL on close (a `TRUNCATE` checkpoint).
 - A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
+  - `open_conn` verifies the header before it sets the journal mode. Thus it does not change a file that it refuses.
 - The undo history lives in the same `.vidcut` file ([requests](requests.md#undo-history)).
 
 Temporary files:
