@@ -460,6 +460,7 @@ Ranges and resolution:
 
 - `Store` reads and writes `Project` as one SQLite database file, with `synchronous = FULL`. Why: edits come at the speed of a person, and each save must stay after a power loss.
 - On local drives, `Store` uses WAL mode. On a network drive (`dirs::on_network`), it uses the rollback `DELETE` journal mode, because WAL needs shared memory on one host.
+  - On Linux, `dirs::on_network` also counts FUSE (sshfs, gvfs, rclone, virtiofs), 9p, Ceph and AFS. WAL is not safe on them, because they do not share memory between hosts.
 - After each save, `Store` copies the WAL into the main file (`settle`, a `PASSIVE` checkpoint). Thus a copy, a backup or a sync of the `.vidcut` file alone has the saved edits.
   - A `PASSIVE` checkpoint does not wait. It leaves in the WAL the changes that a reader in another process still needs. The next checkpoint copies them.
 - Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.

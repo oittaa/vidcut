@@ -129,6 +129,11 @@ pub fn on_network(path: &Path) -> bool {
         use std::os::unix::ffi::OsStrExt;
         const CIFS: u32 = 0xFF53_4D42;
         const SMB2: u32 = 0xFE53_4D42;
+        const FUSE: u32 = 0x6573_5546;
+        const V9FS: u32 = 0x0102_1997;
+        const CEPH: u32 = 0x00C3_6400;
+        const AFS: u32 = 0x5346_414F;
+        const KAFS: u32 = 0x6B41_4653;
         let Ok(name) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
             return false;
         };
@@ -143,6 +148,11 @@ pub fn on_network(path: &Path) -> bool {
             libc::SMB_SUPER_MAGIC as u32,
             CIFS,
             SMB2,
+            FUSE,
+            V9FS,
+            CEPH,
+            AFS,
+            KAFS,
         ];
         remote.contains(&(s.f_type as u32))
     }
