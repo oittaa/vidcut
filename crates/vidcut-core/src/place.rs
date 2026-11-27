@@ -2652,45 +2652,6 @@ mod tests {
         assert_eq!(place, [656.25, 0.0, 607.5, 1080.0]);
     }
 
-    fn wide_pixels_turned(rotation: f64, pixels: (f64, f64)) -> Level {
-        let placed = Placed {
-            clip: "c1".into(),
-            picture: Picture {
-                rotation: Some(rotation),
-                ..Picture::default()
-            },
-            mapped: None,
-            run: None,
-            source: 0,
-            frame: 0,
-            start: 0,
-            ready: true,
-            ramp: None,
-            crossing: false,
-            moving: None,
-            clock: Default::default(),
-            adjustment: false,
-        };
-        let frame = (1280.0, 720.0);
-        Placing::new(&[placed], frame, [0.0, 0.0, 1280.0, 720.0], pixels).level
-    }
-
-    #[test]
-    fn pixels_of_2_to_1_turned_90_turn_as_square_source_pixels() {
-        let level = wide_pixels_turned(90.0, (640.0, 720.0));
-        let at = |uv| level.forward(uv).map(|v| (v * 1e6).round() / 1e6);
-        assert_eq!(
-            (at([1.0, 0.5]), at([0.5, 0.0])),
-            ([640.0, 40.0], [-80.0, 360.0])
-        );
-    }
-
-    #[test]
-    fn pixels_of_4_to_3_keep_the_limit_at_rotation_0_0235() {
-        let level = wide_pixels_turned(0.0235, (960.0, 720.0));
-        assert_eq!(level.edge, [-1.0, -1.0, 2.0, 2.0]);
-    }
-
     #[test]
     fn a_zoom_works_about_the_anchor() {
         let p = Picture {

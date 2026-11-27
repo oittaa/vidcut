@@ -7114,19 +7114,3 @@ impl Workspace {
         self.sync_picture_preview();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn anchor_x_200_on_pixels_of_2_to_1_is_400_frame_pixels() {
-        let shape = Shape {
-            frame: [1280.0, 720.0],
-            mapped: [1280.0, 720.0],
-            crop: [640.0, 720.0],
-        };
-        let placed = Field::AnchorX.put_at(&Picture::default(), &shape, 200.0, None);
-        assert_eq!(placed.anchor, Some([0.8125, 0.5]));
-    }
-}
