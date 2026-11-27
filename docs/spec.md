@@ -6075,7 +6075,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The presets of Adobe Premiere Pro, Apple Final Cut Pro X and Avid Media Composer leave out 20 of these commands. The Pro Tools preset leaves out 3.
   - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
   - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
-  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
+  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control.
+    - On macOS, the set gives Delete Marker Control+M. On the other systems, it gives Delete Marker no key.
   - The Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point, with a warning mark on both (measured, case 28 g).
     - Its file writes `v` for the second. Resolve shows it as V.
     - The set gives V to Smart Insert and to Nearest Cut. Thus V does nothing in this set, as in Resolve (measured).
