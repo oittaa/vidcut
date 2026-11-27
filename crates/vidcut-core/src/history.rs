@@ -147,11 +147,11 @@ impl HistoryDb {
             [],
             |r| {
                 Ok(HistoryMeta {
-                    undo: r.get::<_, i64>(0)?.max(0) as usize,
-                    redo: r.get::<_, i64>(1)?.max(0) as usize,
-                    steps: r.get::<_, i64>(2)?.max(0) as usize,
-                    next: r.get::<_, i64>(3)?.max(1) as u64,
-                    generation: r.get::<_, i64>(4)?.max(1) as u64,
+                    undo: r.get(0)?,
+                    redo: r.get(1)?,
+                    steps: r.get(2)?,
+                    next: r.get(3)?,
+                    generation: r.get(4)?,
                     external_dirty: r.get::<_, i64>(5)? != 0,
                 })
             },
@@ -551,33 +551,26 @@ impl HistoryDb {
             while let Some(r) = rows.next().map_err(|e| db_err(&self.path, e))? {
                 last_seq = r.get(0).map_err(|e| db_err(&self.path, e))?;
                 let kind: i64 = r.get(1).map_err(|e| db_err(&self.path, e))?;
-                let at_pos: Option<i64> = r.get(2).map_err(|e| db_err(&self.path, e))?;
-                let step_id: Option<i64> = r.get(3).map_err(|e| db_err(&self.path, e))?;
+                let at_pos: Option<usize> = r.get(2).map_err(|e| db_err(&self.path, e))?;
+                let step_id: Option<u64> = r.get(3).map_err(|e| db_err(&self.path, e))?;
                 let step_meta: Option<String> = r.get(4).map_err(|e| db_err(&self.path, e))?;
                 match kind {
                     KIND_STEP => {
-                        let at = at_pos.unwrap_or(1).max(0) as usize;
+                        let at = place(at_pos)?;
                         let json = step_meta
                             .ok_or_else(|| Error::internal("missing step metadata in history"))?;
-                        let mut step: Step = serde_json::from_str(&json).map_err(json_err)?;
-                        if step.id.is_none() {
-                            step.id = step_id.map(|v| v as u64);
-                        }
+                        let step: Step = serde_json::from_str(&json).map_err(json_err)?;
                         steps.place_at(at, step);
                     }
-                    KIND_UNDO => steps.back(at_pos.unwrap_or(0).max(0) as usize),
-                    KIND_REDO => steps.forward(at_pos.unwrap_or(0).max(0) as usize),
+                    KIND_UNDO => steps.back(place(at_pos)?),
+                    KIND_REDO => steps.forward(place(at_pos)?),
                     KIND_MARK => {
                         let json = step_meta
                             .ok_or_else(|| Error::internal("missing mark metadata in history"))?;
                         let mark: Mark = serde_json::from_str(&json).map_err(json_err)?;
                         steps.mark(mark);
                     }
-                    KIND_UNMARK => {
-                        if let Some(id) = step_id {
-                            steps.unmark(id as u64);
-                        }
-                    }
+                    KIND_UNMARK => steps.unmark(unmarked(step_id)?),
                     _ => {}
                 }
             }
@@ -611,30 +604,25 @@ impl HistoryDb {
         while let Some(r) = rows.next().map_err(|e| Error::internal(e.to_string()))? {
             max_seq = r.get(0).map_err(|e| Error::internal(e.to_string()))?;
             let kind: i64 = r.get(1).map_err(|e| Error::internal(e.to_string()))?;
-            let at_pos: Option<i64> = r.get(2).map_err(|e| Error::internal(e.to_string()))?;
-            let step_id: Option<i64> = r.get(3).map_err(|e| Error::internal(e.to_string()))?;
+            let at_pos: Option<usize> = r.get(2).map_err(|e| Error::internal(e.to_string()))?;
+            let step_id: Option<u64> = r.get(3).map_err(|e| Error::internal(e.to_string()))?;
             let step_meta: Option<String> = r.get(4).map_err(|e| Error::internal(e.to_string()))?;
             let change_delta: Option<Vec<u8>> =
                 r.get(5).map_err(|e| Error::internal(e.to_string()))?;
             match kind {
                 KIND_STEP => {
-                    let at = at_pos.unwrap_or(1).max(0) as usize;
-                    let entry = parse_entry(step_meta, step_id, change_delta)?;
-                    tree.place_at(at, entry);
+                    let entry = parse_entry(step_meta, change_delta)?;
+                    tree.place_at(place(at_pos)?, entry);
                 }
-                KIND_UNDO => tree.back(at_pos.unwrap_or(0).max(0) as usize),
-                KIND_REDO => tree.forward(at_pos.unwrap_or(0).max(0) as usize),
+                KIND_UNDO => tree.back(place(at_pos)?),
+                KIND_REDO => tree.forward(place(at_pos)?),
                 KIND_MARK => {
                     let json = step_meta
                         .ok_or_else(|| Error::internal("missing mark metadata in history"))?;
                     let mark: Mark = serde_json::from_str(&json).map_err(json_err)?;
                     tree.mark(mark);
                 }
-                KIND_UNMARK => {
-                    if let Some(id) = step_id {
-                        tree.unmark(id as u64);
-                    }
-                }
+                KIND_UNMARK => tree.unmark(unmarked(step_id)?),
                 _ => {}
             }
         }
@@ -748,7 +736,7 @@ impl HistoryDb {
             }
             type RawEventRow = (
                 i64,
-                Option<i64>,
+                Option<usize>,
                 Option<i64>,
                 Option<String>,
                 Option<String>,
@@ -783,7 +771,7 @@ impl HistoryDb {
             for (kind, at_pos, _, _, _, _) in &more {
                 match *kind {
                     KIND_STEP => {
-                        let at = at_pos.unwrap_or(1).max(0) as usize;
+                        let at = place(*at_pos)?;
                         if at <= gone {
                             return Ok(());
                         }
@@ -791,7 +779,7 @@ impl HistoryDb {
                         redo = 0;
                     }
                     KIND_UNDO => {
-                        let step = (at_pos.unwrap_or(0).max(0) as usize).min(pos);
+                        let step = place(*at_pos)?.min(pos);
                         pos -= step;
                         redo += step;
                         if pos < gone {
@@ -799,7 +787,7 @@ impl HistoryDb {
                         }
                     }
                     KIND_REDO => {
-                        let step = (at_pos.unwrap_or(0).max(0) as usize).min(redo);
+                        let step = place(*at_pos)?.min(redo);
                         redo -= step;
                         pos += step;
                     }
@@ -826,7 +814,7 @@ impl HistoryDb {
                     let at_pos = match kind {
                         KIND_STEP => {
                             written.steps += 1;
-                            at_pos.map(|p| (p.max(0) as usize).saturating_sub(gone) as i64)
+                            at_pos.map(|p| p.saturating_sub(gone))
                         }
                         _ => at_pos,
                     };
@@ -861,16 +849,17 @@ impl HistoryDb {
     }
 }
 
-fn parse_entry(
-    step_meta: Option<String>,
-    step_id: Option<i64>,
-    change_delta: Option<Vec<u8>>,
-) -> Result<Entry> {
+fn place(at_pos: Option<usize>) -> Result<usize> {
+    at_pos.ok_or_else(|| Error::internal("missing step place in history"))
+}
+
+fn unmarked(step_id: Option<u64>) -> Result<u64> {
+    step_id.ok_or_else(|| Error::internal("missing step id in history"))
+}
+
+fn parse_entry(step_meta: Option<String>, change_delta: Option<Vec<u8>>) -> Result<Entry> {
     let json = step_meta.ok_or_else(|| Error::internal("missing step metadata in history"))?;
-    let mut step: Step = serde_json::from_str(&json).map_err(json_err)?;
-    if step.id.is_none() {
-        step.id = step_id.map(|v| v as u64);
-    }
+    let step: Step = serde_json::from_str(&json).map_err(json_err)?;
     let delta_blob =
         change_delta.ok_or_else(|| Error::internal("missing step delta in history"))?;
     let delta_raw = decompress_bytes(&delta_blob)?;
@@ -894,14 +883,14 @@ fn read_entry_cached(
     {
         return Ok(hit.clone());
     }
-    let (step_id, step_meta, change_delta): (Option<i64>, Option<String>, Option<Vec<u8>>) = conn
+    let (step_meta, change_delta): (Option<String>, Option<Vec<u8>>) = conn
         .query_row(
-            "SELECT step_id, step_meta, change_delta FROM history_events WHERE seq = ?1",
+            "SELECT step_meta, change_delta FROM history_events WHERE seq = ?1",
             params![seq],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| db_err(path, e))?;
-    let mut entry = parse_entry(step_meta, step_id, change_delta)?;
+    let mut entry = parse_entry(step_meta, change_delta)?;
     crate::store::resolve_change(&mut entry.change, dir);
     if let Some(c) = cache {
         c.lock()
@@ -1105,31 +1094,6 @@ mod tests {
         let meta = db.meta().unwrap();
         let (undo, _) = db.top(2, 0, None).unwrap();
         assert_eq!((meta.undo, labels(&undo)), (10, vec!["step 12", "step 11"]));
-    }
-
-    #[test]
-    fn a_step_written_before_steps_had_sources_still_loads() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = history(dir.path(), 0);
-        db.with_conn_mut(|conn| {
-            let tx = conn.transaction().unwrap();
-            let blob = compress_bytes(br#"{"set":{"was":0,"is":1}}"#).unwrap();
-            tx.execute(
-                "INSERT INTO history_events (kind, at_pos, label, step_meta, change_delta) \
-                 VALUES (0, 1, 'old', '{\"label\":\"old\"}', ?1)",
-                params![blob],
-            )
-            .unwrap();
-            tx.execute(
-                "UPDATE history_meta SET undo_count = 1, total_steps = 1 WHERE id = 1",
-                [],
-            )
-            .unwrap();
-            tx.commit().unwrap();
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(steps_of(&db).line, [Step::labeled("old")]);
     }
 
     #[test]

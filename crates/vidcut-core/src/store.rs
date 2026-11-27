@@ -215,20 +215,13 @@ impl Clone for Store {
 #[derive(Serialize, Deserialize)]
 struct MetaRow {
     settings: Settings,
-    #[serde(default)]
     recent: Vec<String>,
-    #[serde(default)]
     compound_path: Vec<OpenCompound>,
-    #[serde(default)]
     tape_marks: TapeMarks,
     next_id: NextIds,
-    #[serde(default)]
     bins: Vec<String>,
-    #[serde(default)]
     groups: Vec<SyncGroup>,
-    #[serde(default)]
     speakers: Speakers,
-    #[serde(default)]
     queue: Vec<RenderJob>,
 }
 
@@ -236,20 +229,13 @@ struct MetaRow {
 struct TimelineRow {
     id: String,
     name: String,
-    #[serde(default)]
     bin: String,
     start_tc: i64,
-    #[serde(default)]
     own: Option<TimelineSettings>,
-    #[serde(default)]
     grade: Option<Grade>,
-    #[serde(default)]
     render: RenderRange,
-    #[serde(default)]
     clip_filter: ClipFilter,
-    #[serde(default)]
     marks: Marks,
-    #[serde(default)]
     markers: Vec<Marker>,
 }
 
@@ -257,22 +243,15 @@ struct TimelineRow {
 struct CompoundRow {
     id: String,
     name: String,
-    #[serde(default)]
     bin: String,
-    #[serde(default)]
     removed: bool,
     sequence_id: String,
     fps: crate::time::Rational,
-    #[serde(default)]
     drop_frame: bool,
-    #[serde(default)]
     start_tc: i64,
     frames: i64,
-    #[serde(default)]
     marks: Marks,
-    #[serde(default)]
     markers: Vec<Marker>,
-    #[serde(default)]
     kept_otio: Option<Kept>,
 }
 
@@ -282,44 +261,27 @@ struct TrackRow {
     kind: TrackKind,
     locked: bool,
     muted: bool,
-    #[serde(default)]
     solo: bool,
-    #[serde(default)]
     volume_db: f64,
-    #[serde(default)]
     voice_isolation: Option<VoiceIsolation>,
-    #[serde(default)]
     duck: Option<crate::model::Duck>,
-    #[serde(default)]
     equalizer: Option<crate::model::TrackEqualizer>,
-    #[serde(default)]
     dynamics: Option<crate::model::TrackDynamics>,
     video_enabled: bool,
-    #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
     transitions: Vec<Transition>,
-    #[serde(default = "on_true")]
     render_cache: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 struct SubtitleTrackRow {
     id: String,
-    #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
     language: Option<String>,
     shown: bool,
-    #[serde(default = "on_true")]
     destination: bool,
     locked: bool,
-    #[serde(default)]
     style: SubtitleStyle,
-}
-
-fn on_true() -> bool {
-    true
 }
 
 fn configure_journal(conn: &Connection, remote: bool, writable: bool) -> rusqlite::Result<()> {
@@ -687,14 +649,7 @@ impl Store {
         step: usize,
     ) -> Result<std::sync::Arc<Project>> {
         let db = self.history_db();
-        let meta = db.meta().unwrap_or(HistoryMeta {
-            undo: 0,
-            redo: 0,
-            steps: 0,
-            next: 1,
-            generation: 1,
-            external_dirty: false,
-        });
+        let meta = db.meta()?;
         past.project_at(
             &Editor::on_db(current, db, (meta.undo, meta.redo), meta.generation, None),
             step,
@@ -709,14 +664,7 @@ impl Store {
         k: usize,
     ) -> Result<std::sync::Arc<Project>> {
         let db = self.history_db();
-        let meta = db.meta().unwrap_or(HistoryMeta {
-            undo: 0,
-            redo: 0,
-            steps: 0,
-            next: 1,
-            generation: 1,
-            external_dirty: false,
-        });
+        let meta = db.meta()?;
         past.version_at(
             &Editor::on_db(current, db, (meta.undo, meta.redo), meta.generation, None),
             id,
@@ -902,9 +850,9 @@ fn load_project_from_conn(
     dir: &Path,
     blob_hashes: Option<&BlobHashCache>,
 ) -> Result<Project> {
-    let (rev, edited, meta_json): (u64, Option<i64>, String) = conn
+    let (rev, edited, meta_json): (u64, Option<u64>, String) = conn
         .query_row("SELECT rev, edited, data FROM meta WHERE id = 1", [], |r| {
-            Ok((r.get::<_, i64>(0)?.max(0) as u64, r.get(1)?, r.get(2)?))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
         .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
     let meta: MetaRow = serde_json::from_str(&meta_json)
@@ -1101,7 +1049,7 @@ fn load_project_from_conn(
 
     let mut project = Project {
         rev,
-        edited: edited.map(|e| e.max(0) as u64),
+        edited,
         settings: meta.settings,
         media: media.into(),
         tracks: SharedVec::new(),
