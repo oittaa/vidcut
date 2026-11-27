@@ -279,7 +279,7 @@ fn working((w, h): (u32, u32), area: [f32; 4]) -> (u32, u32) {
     (side(w), side(h))
 }
 
-fn pieces(plan: &RenderPlan, from: i64, to: i64) -> Vec<VideoPiece> {
+pub(crate) fn pieces(plan: &RenderPlan, from: i64, to: i64) -> Vec<VideoPiece> {
     let mut out = Vec::new();
     let mut at = 0;
     for piece in &plan.video {

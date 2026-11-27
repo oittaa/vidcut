@@ -5543,9 +5543,7 @@ impl Workspace {
         };
         let gained = self.inspector.gained.as_ref();
         let at = self.snap.timeline.position as f64;
-        self.snap
-            .selection
-            .clips
+        vidcut_core::ops::linked::sounds(p, &self.snap.selection.clips)
             .iter()
             .filter_map(|id| {
                 let c = p.clip(id)?;

@@ -2,10 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
 
-use super::{
-    Source, block_clip, clear_range, ensure_track, fix_audio, linked, locate, split_at, tracks,
-    unlocked,
-};
+use super::{Source, block_clip, clear_range, linked, locate, split_at, tracks, unlocked};
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, Compound, CompoundTarget, Marker, Marks, OpenCompound, Project, Settings, Track,
@@ -25,9 +22,7 @@ fn holds(t: &Track, ids: &HashSet<String>) -> bool {
 }
 
 fn extent(c: &Clip) -> (i64, i64) {
-    c.audio_range().map_or((c.start, c.end()), |(a, b)| {
-        (a.min(c.start), b.max(c.end()))
-    })
+    (c.start, c.end())
 }
 
 fn span_of(p: &Project, ids: &HashSet<String>) -> (i64, i64) {
@@ -41,16 +36,8 @@ fn span_of(p: &Project, ids: &HashSet<String>) -> (i64, i64) {
         })
 }
 
-fn picture_of(c: &Clip) -> (i64, i64) {
-    (c.start, c.end())
-}
-
-fn free(t: &Track, (a, b): (i64, i64), range: fn(&Clip) -> (i64, i64)) -> bool {
-    !t.locked
-        && t.clips.iter().all(|c| {
-            let (s, e) = range(c);
-            e <= a || s >= b
-        })
+fn free(t: &Track, (a, b): (i64, i64)) -> bool {
+    !t.locked && t.clips.iter().all(|c| c.end() <= a || c.start >= b)
 }
 
 fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> Vec<Track> {
@@ -89,109 +76,38 @@ fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> 
     lifted
 }
 
-pub(crate) fn picture_tracks(whole: &[Track]) -> Vec<Track> {
+fn kept(whole: &[Track], kind: TrackKind) -> Vec<Track> {
     whole
         .iter()
-        .filter(|t| t.kind == TrackKind::Video)
-        .filter_map(|t| {
-            let clips: Vec<Clip> = t
-                .clips
-                .iter()
-                .filter(|c| c.video)
-                .cloned()
-                .map(|mut c| {
-                    c.audio = None;
-                    c
-                })
-                .collect();
-            (!clips.is_empty()).then(|| Track {
-                clips: clips.into(),
-                transitions: t.transitions.iter().filter(|x| !x.sound).cloned().collect(),
-                locked: t.locked,
-                video_enabled: t.video_enabled,
-                render_cache: t.render_cache,
-                name: t.name.clone(),
-                ..Track::new(t.id.clone(), TrackKind::Video)
-            })
-        })
+        .filter(|t| t.kind == kind && !t.clips.is_empty())
+        .cloned()
         .collect()
 }
 
-fn sound_part(c: &Clip) -> Option<Clip> {
-    let mut part = c.clone();
-    let Some(a) = part.audio.as_mut() else {
-        return c.is_sound_block().then_some(part);
-    };
-    let (head, tail) = (a.head, a.tail);
-    a.head = 0;
-    a.tail = 0;
-    part.video = false;
-    part.picture = None;
-    part.effects = None;
-    part.move_head(head);
-    part.duration += tail;
-    Some(part)
+pub(crate) fn picture_tracks(whole: &[Track]) -> Vec<Track> {
+    kept(whole, TrackKind::Video)
 }
 
 pub(crate) fn sound_tracks(whole: &[Track]) -> Vec<Track> {
-    sounds(whole).into_iter().map(|(_, t)| t).collect()
-}
-
-fn sounds(whole: &[Track]) -> Vec<(String, Track)> {
-    let mut sound = Vec::new();
-    let mut under = 0;
-    for t in whole {
-        let clips: Vec<Clip> = t.clips.iter().filter_map(sound_part).collect();
-        if clips.is_empty() {
-            continue;
-        }
-        let n = match t.kind {
-            TrackKind::Video => {
-                under += 1;
-                under
-            }
-            TrackKind::Audio => under + t.number(),
-        };
-        sound.push((
-            t.id.clone(),
-            Track {
-                clips: clips.into(),
-                transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
-                locked: t.locked,
-                muted: t.muted,
-                solo: t.solo,
-                volume_db: t.volume_db,
-                voice_isolation: t.voice_isolation,
-                name: (t.kind == TrackKind::Audio)
-                    .then(|| t.name.clone())
-                    .flatten(),
-                ..Track::new(format!("A{n}"), TrackKind::Audio)
-            },
-        ));
-    }
-    sound
+    kept(whole, TrackKind::Audio)
 }
 
 pub(crate) fn end_of(whole: &[Track]) -> i64 {
-    let clips = whole
-        .iter()
-        .flat_map(|t| &t.clips)
-        .map(|c| c.audio_range().map_or(c.end(), |(_, e)| e.max(c.end())));
+    let clips = whole.iter().flat_map(|t| &t.clips).map(Clip::end);
     let fades = whole.iter().flat_map(|t| {
         t.transitions
             .iter()
             .filter(|x| x.to.is_none())
             .filter_map(|x| {
                 let c = t.clips.iter().find(|c| Some(&c.id) == x.from.as_ref())?;
-                let edge = if x.sound { c.audio_range()?.1 } else { c.end() };
-                Some(edge + x.after)
+                Some(c.end() + x.after)
             })
     });
     clips.chain(fades).max().unwrap_or(0)
 }
 
 fn picture_target(p: &mut Project, lowest: usize, span: (i64, i64)) -> String {
-    if free(&p.tracks[lowest], span, picture_of) {
+    if free(&p.tracks[lowest], span) {
         return p.tracks[lowest].id.clone();
     }
     tracks::insert_at(p, TrackKind::Video, lowest + 1)
@@ -202,10 +118,7 @@ fn sound_target(p: &mut Project, lowest: Option<String>, span: (i64, i64)) -> St
     let from = lowest
         .and_then(|id| order.iter().position(|&i| p.tracks[i].id == id))
         .unwrap_or(0);
-    match order[from..]
-        .iter()
-        .find(|&&i| free(&p.tracks[i], span, extent))
-    {
+    match order[from..].iter().find(|&&i| free(&p.tracks[i], span)) {
         Some(&i) => p.tracks[i].id.clone(),
         None => tracks::add_track(p, TrackKind::Audio),
     }
@@ -288,39 +201,9 @@ pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
-    if src.compound.is_none() || src.video_only {
-        return Ok(ids);
-    }
-    let mut out = ids.clone();
-    for id in &ids {
-        let (ti, ci) = locate(p, id)?;
-        let c = &p.tracks[ti].clips[ci];
-        if !c.video || !p.clip_compound(c).is_some_and(Compound::has_sound) {
-            continue;
-        }
-        let mut sound = c.clone();
-        let audio = format!("A{}", &p.tracks[ti].id[1..]);
-        let ai = ensure_track(p, &audio)?;
-        unlocked(p, ai)?;
-        clear_range(p, ai, sound.start, sound.end());
-        fix_audio(p, ai);
-        let link = p.free_link();
-        let (ti, ci) = locate(p, id)?;
-        p.tracks[ti].clips[ci].link = Some(link);
-        sound.id = p.alloc_clip_id();
-        sound.video = false;
-        sound.link = Some(link);
-        out.push(sound.id.clone());
-        p.tracks[ai].clips.push(sound);
-        p.tracks[ai].sort();
-    }
-    Ok(out)
-}
-
 pub(crate) fn landed(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
     if !src.decompose {
-        return with_sound(p, ids, src);
+        return linked::with_sound(p, ids, src);
     }
     let mut blocks = Vec::new();
     for id in &ids {
@@ -345,7 +228,13 @@ pub(crate) fn spread_blocks(
         };
         let picture = block.video.then_some(track);
         let hosts = (picture.as_deref(), sound.as_deref());
-        made.extend(spread(p, &block, hosts, Lay::OnEdit, &src.inner_tracks)?);
+        made.extend(spread(
+            p,
+            (&block, &block),
+            hosts,
+            Lay::OnEdit,
+            &src.inner_tracks,
+        )?);
     }
     otio::transitions::prune(p);
     while p.tracks_of(TrackKind::Audio).len() > audio
@@ -436,31 +325,11 @@ pub fn placeable(p: &Project, id: &str) -> Result<i64> {
     Ok(frames)
 }
 
-fn end_sound_at(t: &mut Track, at: i64) {
-    let crosses = |c: &Clip| c.audio_range().is_some_and(|(s, e)| s < at && at < e);
-    if !t.clips.iter().any(crosses) {
-        return;
-    }
-    for c in &mut t.clips {
-        let (start, end) = (c.start, c.end());
-        if let Some(a) = c.audio.as_mut() {
-            if end == at {
-                a.tail = 0;
-            }
-            if start == at {
-                a.head = 0;
-            }
-        }
-    }
-}
-
 fn cut_every_track(p: &mut Project, points: [i64; 2]) {
     for ti in 0..p.tracks.len() {
         for at in points {
             split_at(p, ti, at);
-            end_sound_at(&mut p.tracks[ti], at);
         }
-        fix_audio(p, ti);
     }
     for at in points {
         super::subtitles::cut_all(p, at);
@@ -600,14 +469,9 @@ fn slot(id: &str) -> usize {
 
 fn target(p: &mut Project, kind: TrackKind, n: usize, span: (i64, i64), lay: Lay) -> Result<usize> {
     let ti = tracks::nth(p, kind, n);
-    let range = if kind == TrackKind::Video {
-        picture_of
-    } else {
-        extent
-    };
     match lay {
         Lay::OnEdit => unlocked(p, ti)?,
-        Lay::InPlace if !free(&p.tracks[ti], span, range) => {
+        Lay::InPlace if !free(&p.tracks[ti], span) => {
             tracks::insert_at(p, kind, ti);
         }
         Lay::InPlace => {}
@@ -674,38 +538,6 @@ fn put_back(
     }
 }
 
-fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
-    let clips = &mut p.tracks[ti].clips;
-    let stayed = |c: &&Clip| !made.contains(&c.id);
-    for i in 0..clips.len() {
-        if !made.contains(&clips[i].id) {
-            continue;
-        }
-        let before = clips[..i]
-            .iter()
-            .rev()
-            .filter(stayed)
-            .find_map(Clip::audio_range);
-        let after = clips[i + 1..]
-            .iter()
-            .filter(stayed)
-            .find_map(Clip::audio_range);
-        let (start, end) = (clips[i].start, clips[i].end());
-        let Some(a) = clips[i].audio.as_mut() else {
-            continue;
-        };
-        if let Some((_, reach)) = before {
-            a.head = a.head.max(reach - start);
-        }
-        if let Some((reach, _)) = after {
-            a.tail = a.tail.min(reach - end);
-        }
-        if start + a.head >= end + a.tail {
-            clips[i].audio = None;
-        }
-    }
-}
-
 pub(crate) fn unnest(
     p: &mut Project,
     id: &str,
@@ -729,7 +561,17 @@ pub(crate) fn unnest(
             .find(|(_, c)| c.video == video)
             .map(|(t, _)| t.as_str())
     };
-    let made = spread(p, &block, (on(true), on(false)), lay, &BTreeMap::new())?;
+    let heard = hosts
+        .iter()
+        .find(|(_, c)| !c.video)
+        .map_or_else(|| block.clone(), |(_, c)| c.clone());
+    let made = spread(
+        p,
+        (&block, &heard),
+        (on(true), on(false)),
+        lay,
+        &BTreeMap::new(),
+    )?;
     let dropped = otio::transitions::prune(p);
     if dropped > 0 {
         warnings.push(otio::transitions::dropped(dropped));
@@ -739,7 +581,7 @@ pub(crate) fn unnest(
 
 fn spread(
     p: &mut Project,
-    block: &Clip,
+    (block, heard): (&Clip, &Clip),
     (picture, sound): (Option<&str>, Option<&str>),
     lay: Lay,
     inner_tracks: &BTreeMap<String, Option<String>>,
@@ -751,36 +593,25 @@ fn spread(
             super::conform::track(p, t, r);
         }
     }
-    let layout = sound.map_or_else(Vec::new, |_| sounds(&k.tracks));
-    let named = |tracks: Vec<Track>| tracks.into_iter().map(|t| (t.id.clone(), t)).collect();
-    let source: Vec<(String, Track)> = match (picture, sound) {
-        (Some(_), Some(_)) => named(k.tracks.into_vec()),
-        (Some(_), None) => named(picture_tracks(&k.tracks)),
-        _ => sounds(&k.tracks),
+    let source = match (picture, sound) {
+        (Some(_), Some(_)) => k.tracks.into_vec(),
+        (Some(_), None) => picture_tracks(&k.tracks),
+        _ => sound_tracks(&k.tracks),
     };
-    let span = (block.start, block.end());
-    let parts = pieces(block);
+    let (shown, played) = (pieces(block), pieces(heard));
+    let mut links = linked::Relink::new(p);
     let mut made = Vec::new();
     let mut taken = HashSet::new();
-    let mut heard = Vec::new();
-    for (id, inner) in source.iter().filter(|(_, t)| shows(t, &parts)) {
-        let base = match inner.kind {
-            TrackKind::Video => picture,
-            _ => sound,
+    for inner in &source {
+        let (base, host, parts) = match inner.kind {
+            TrackKind::Video => (picture, block, &shown),
+            TrackKind::Audio => (sound, heard, &played),
         };
-        let route = match (inner_tracks.get(id), inner.kind) {
-            (Some(None), TrackKind::Audio) if id.starts_with('V') => None,
-            (route, _) => route,
-        };
-        let n = match (route, base) {
-            (Some(None), _) => {
-                if let (TrackKind::Video, Some(s)) = (inner.kind, sound) {
-                    let own = layout.iter().filter(|(o, t)| o == id && shows(t, &parts));
-                    heard.extend(own.map(|(_, t)| (t, s)));
-                }
-                continue;
-            }
-            (None, None) => continue,
+        if !shows(inner, parts) {
+            continue;
+        }
+        let n = match (inner_tracks.get(&inner.id), base) {
+            (Some(None), _) | (None, None) => continue,
             (Some(Some(to)), _) => slot(to),
             (None, Some(base)) => slot(base) + inner.number() - 1,
         };
@@ -792,36 +623,15 @@ fn spread(
                 n + 1
             )));
         }
-        let ti = target(p, inner.kind, n, span, lay)?;
-        lay_down(p, (ti, lay), inner, &parts, &mut made);
+        let ti = target(p, inner.kind, n, (host.start, host.end()), lay)?;
+        put_back(p, (ti, lay), inner, parts, &mut made);
     }
-    for (track, s) in heard {
-        let mut n = slot(s) + track.number() - 1;
-        while !taken.insert((false, n)) {
-            n += 1;
-        }
-        let ti = target(p, TrackKind::Audio, n, span, lay)?;
-        lay_down(p, (ti, lay), track, &parts, &mut made);
-    }
-    let mut links = linked::Relink::new(p);
     for id in &made {
         if let Some((ti, ci)) = p.find_clip(id) {
             links.clip(&mut p.tracks[ti].clips[ci]);
         }
     }
     Ok(made)
-}
-
-fn lay_down(
-    p: &mut Project,
-    (ti, lay): (usize, Lay),
-    inner: &Track,
-    parts: &[Clip],
-    made: &mut Vec<String>,
-) {
-    put_back(p, (ti, lay), inner, parts, made);
-    fit_sound(p, ti, made);
-    fix_audio(p, ti);
 }
 
 fn open_sequence_ids(p: &Project) -> HashSet<String> {
@@ -1460,7 +1270,7 @@ mod tests {
         f.ok(req("edit.trim", trim));
         f.append("m1", 0, 15);
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
-        let range = f.editor.project().clip(&a).unwrap().audio_range();
+        let range = f.sound(&a);
         assert_eq!(range, Some((0, 55)));
     }
 
@@ -1473,7 +1283,7 @@ mod tests {
         let hosts = nest(&mut f, &[&short, &long]);
         l_cut(&mut f, &a, 10);
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
-        let range = f.editor.project().clip(&a).unwrap().audio_range();
+        let range = f.sound(&a);
         assert_eq!(range, Some((0, 60)));
     }
 
@@ -1488,10 +1298,10 @@ mod tests {
         let j_cut = json!({"clip": c, "edge": "head", "by": -3});
         f.ok(req("edit.audio_roll", j_cut));
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
-        let range = |id: &str| f.editor.project().clip(id).unwrap().audio_range();
+        let range = |id: &str| f.sound(id);
         assert_eq!(
             [range(&a), range(&short), range(&c)],
-            [Some((0, 55)), None, Some((55, 98))]
+            [Some((0, 55)), Some((55, 56)), Some((56, 98))]
         );
     }
 
@@ -1502,7 +1312,10 @@ mod tests {
         nest(&mut f, &[&a]);
         let replace = json!({"media": "m1", "range": "0f..10f", "at": 5});
         f.ok(req("edit.ripple_overwrite", replace));
-        assert_eq!(f.track("A1"), vec![]);
+        assert_eq!(
+            f.track("A1"),
+            vec![crate::test_support::row("c7", 0, 10, 0)]
+        );
     }
 
     #[test]
@@ -1513,11 +1326,7 @@ mod tests {
         let hosts = nest(&mut f, &[&b]);
         l_cut(&mut f, &a, 10);
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
-        let p = f.editor.project();
-        let ranges = (
-            p.clip(&a).unwrap().audio_range(),
-            p.clip(&b).unwrap().audio_range(),
-        );
+        let ranges = (f.sound(&a), f.sound(&b));
         assert_eq!(ranges, (Some((0, 60)), Some((60, 100))));
     }
 
@@ -1658,7 +1467,10 @@ mod tests {
         let host = p.clip(&hosts[0]).unwrap();
         let tracks = &p.clip_compound(host).unwrap().tracks;
         let shape: Vec<(&str, usize)> = tracks.iter().map(|t| (&*t.id, t.clips.len())).collect();
-        assert_eq!(shape, [("V1", 1), ("V2", 0), ("V3", 1)]);
+        assert_eq!(
+            shape,
+            [("V1", 1), ("V2", 0), ("V3", 1), ("A1", 1), ("A2", 1)]
+        );
     }
 
     #[test]
@@ -2343,10 +2155,7 @@ mod tests {
         let closed = f.ok(req("compound.close", json!({})));
         assert!(closed.warnings.is_empty());
         let p = f.editor.project();
-        assert_eq!(
-            p.tracks[0].transitions.iter().filter(|x| !x.sound).count(),
-            1
-        );
+        assert_eq!(p.track("V1").unwrap().transitions.len(), 1);
         assert_eq!(
             p.clip_compound(p.clip(&hosts[0]).unwrap()).unwrap().frames,
             50
@@ -3183,7 +2992,7 @@ mod tests {
         }
         let hosts = nest(&mut a, &[&last]);
         let src_kid = a.editor.project().compounds[0].id.clone();
-        assert_eq!(src_kid, "k12");
+        assert_eq!(src_kid, "k23");
         let copied = a.ok(req("edit.copy", json!({"clips": [hosts[0]]})));
 
         let mut b = Fixture::new(&[(4.0, true)]);

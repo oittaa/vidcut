@@ -111,7 +111,7 @@ fn the_boring_detector_flags_long_and_short_clips() {
     f.append("m1", 905, 1000);
     let r = f.ok(req("timeline.boring", json!({})));
     assert_eq!(r.result["boring"][0]["clip"], "c1", "36 s > 30 s");
-    assert_eq!(r.result["jump"][0]["clip"], "c2", "5 frames < 10");
+    assert_eq!(r.result["jump"][0]["clip"], "c3", "5 frames < 10");
     assert_eq!(r.result["boring"].as_array().unwrap().len(), 1);
     let r = f.ok(req(
         "timeline.boring",

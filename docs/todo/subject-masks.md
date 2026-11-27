@@ -56,10 +56,13 @@ Pages 3288–3304 tell of version 1. A rule from these pages has the mark "versi
 - A corrector has windows, a qualifier and a key input. `key_steps` folds them on the GPU in 32-bit float (`crates/vidcut-core/src/grade.rs`).
 - The Color page has no palette that tracks. It has no Tracker palette ([motion tracking](motion-tracking.md)).
 - `motion.track` follows a box with VitTrack, in tract on the CPU. `motion.find` finds people with YOLOX-S.
-- A corrector has a Magic Mask with clicks on one frame, Invert Mask and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
-  - SAM 2.1 tiny makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set` and `grade.mask.clear`.
+- A corrector has a Magic Mask with clicks, a track of the clicks, Invert Mask and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
+  - SAM 2.1 tiny makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set`, `grade.mask.track` and `grade.mask.clear`.
+  - A track carries the clicks of one frame forward and back, with the video memory of SAM 2.1.
+  - With `gpu.acceleration` off, the same kernels run on the software adapter of wgpu. A frame of a track takes about 50 s there.
   - The mask store keeps the maps in memory and in the disk cache (`disk_cache::Kind::Masks`). An export makes a missing map again.
   - The viewer shows no mask on a frame whose map is missing.
+  - `masks::RULES` and `MASK_CUT` hold the rules that the R runs measure. Until then they are vidcut's choice.
 - The catalog downloads each model on first use, after an ask, and checks its SHA-256 (`catalog.rs`, `models.rs`).
 - RetinaFace, NanoVSR, FlashVSR and SAM 2.1 run in vidcut's own GPU kernels. The other ONNX models run in tract on the CPU.
 - The Node Editor has no Alpha Output. A clip with its own alpha composites over the tracks below.
@@ -135,8 +138,14 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
 Each step is one pull request.
 
 - **Palette:** the Magic Mask palette, the click tools, the Click list, Mask Overlay and Quality.
-- **Tracking:** the video memory, the track buttons, `grade.mask.track` and the timeline of the Click list.
+  - The track buttons, Stop Tracking and the timeline of the Click list.
   - The viewer makes a missing map again, as the export does.
+- **The measured rules:** set `masks::RULES` and `MASK_CUT` to the results of runs R3–R6.
+  - R5 shows whether a track goes past a frame with clicks, and which map such a frame keeps.
+  - R5 also shows whether the clicks of more than one frame make one track. SAM 2.1 can take the clicks of more frames into its memory.
+- **A CPU path:** a frame of a track takes about 50 s on the software adapter. macOS has no software adapter.
+  - A port of the network to the CPU kernels of vidcut would make the CPU path usable.
+- **Speed:** a frame of a track takes about 0.2 s on the GPU of the test computer.
 - **A change before the node:** the name of a map is a digest of the input picture at the time of the click.
   - An export makes a missing map from the picture of now, under the old name (`editor::mask_remakes`).
   - Thus, after a change before the node and a lost map, the export can show another mask than the viewer showed.
@@ -172,7 +181,9 @@ These are vidcut's runs:
     - Why: one click does not test the choice of the output for more clicks, or the part that a click gives.
   - Still to do: one frame each of the five clips of the Resolve runs, with the same clicks for both.
     - Why: each DAVIS frame is 854 × 480. The scale to the input square changes with the frame size.
-  - The tracked frames wait for the Tracking step.
+  - Done for tracks of tiny on the same input: 12 frames of blackswan, and two objects on 12 frames of bike-packing.
+    - The masks of vidcut and of the official video predictor overlap 0.9999 on average.
+  - Still to do: J&F of vidcut's tracks on all 30 videos, against the official 68.0.
 - **M2, cost:** 10 s each of tos-720p-mov, pedestrian-area, stab-crowd-4k, stab-dashcam and stab-rally.
   - One click, a track forward, each model, GPU decoding on.
   - Seconds per minute of video, CPU time, GPU use and peak GPU memory.

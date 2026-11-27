@@ -325,6 +325,10 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 - `Kernels` compiles the shaders once for each `compute::Gpu`. The device must have the workgroup memory of `ops::SHARED`.
 - A layer never reads and writes one buffer in one pass. Why: wgpu refuses a buffer that is bound as read-only and as writable in one dispatch.
 - `Ops::conv_shuffled` gives a transposed convolution with a stride of 2 as a 1×1 convolution and a pixel shuffle. The Magic Mask uses it.
+- `kernels::attend_gemm` of the Magic Mask gives attention as two `CONV4` passes with a `SOFTMAX` pass between them.
+  - The keys, turned by `TRANSPOSE`, are the weights of the first pass. The values are the weights of the second pass.
+  - `kernels::attend` gives each query to one thread. The windowed and pooled blocks of the image encoder use it.
+- `Gpu::start_soft` gets the software adapter of wgpu. The kernels then run on the CPU.
 
 ## Deinterlacing and HDR
 

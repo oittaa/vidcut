@@ -129,6 +129,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.mask.click", &["clip"]),
     ("grade.mask.set", &["clip"]),
     ("grade.mask.clear", &["clip"]),
+    ("grade.mask.track", &["clip"]),
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
@@ -477,7 +478,7 @@ const EXAMPLES: &[(&str, &str)] = &[
         "track.set",
         "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true\n  vidcut track set A1 --voice-isolation 75\n  \
          vidcut track set A2 --duck '{}' --download\n  \
-         vidcut track set A2 --duck '{\"sources\":[\"V1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
+         vidcut track set A2 --duck '{\"sources\":[\"A1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
          vidcut track set A2 --duck '{\"on\":false}'\n  \
          vidcut track set A2 --duck null\n  \
          vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \

@@ -162,6 +162,17 @@ pub trait Env {
         ))
     }
 
+    fn subject_tracks(
+        &self,
+        need: &TrackNeed,
+        each: &mut dyn FnMut(i64, Vec<Arc<[f32]>>) -> Result<()>,
+    ) -> Result<()> {
+        let _ = (need, each);
+        Err(Error::usage(
+            "the Magic Mask reads the picture in the vidcut program",
+        ))
+    }
+
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
 
     fn transcribe(&self, plan: &RenderPlan, asked: &transcript::Asked) -> Result<Arc<Speech>> {
@@ -2240,9 +2251,10 @@ fn clip_speech(
             continue;
         }
         for c in &t.clips {
-            let (Some(sound), Some((from, to))) = (&c.audio, c.audio_range()) else {
+            let Some(sound) = &c.audio else {
                 continue;
             };
+            let (from, to) = (c.start, c.end());
             if !c.enabled || sound.muted || to <= a || from >= b {
                 continue;
             }
@@ -2794,6 +2806,21 @@ fn resolve_holder(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<Str
         return resolve_cue(p, r, playhead);
     }
     resolve_clip(p, r, playhead)
+}
+
+fn key_holders(
+    p: &Project,
+    refs: &[ClipRef],
+    playhead: Option<i64>,
+    param: crate::request::KeyParam,
+) -> Result<Vec<String>> {
+    let ids = resolve_holders(p, refs, playhead)?;
+    Ok(match param {
+        crate::request::KeyParam::Volume | crate::request::KeyParam::Pan => {
+            ops::linked::sounds(p, &ids)
+        }
+        _ => ids,
+    })
 }
 
 fn resolve_holders(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
@@ -4329,7 +4356,7 @@ fn mutate(
                     )?;
                     let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
                     let mut parts = Vec::new();
-                    for id in &ids {
+                    for id in &ops::linked::sounds(p, &ids) {
                         let c = p.clip(id).expect("resolved");
                         if c.is_block() || c.is_frozen() {
                             continue;
@@ -4552,12 +4579,15 @@ fn mutate(
             ripple,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let source = match (from, copied) {
+            let source: Vec<Clip> = match (from, copied) {
                 (Some(r), None) => {
                     let id = resolve_clip(p, r, playhead)?;
-                    p.clip(&id).cloned().expect("resolved")
+                    std::iter::once(id.clone())
+                        .chain(p.tied(&id))
+                        .filter_map(|x| p.clip(&x).cloned())
+                        .collect()
                 }
-                (None, Some(t)) => t.clip.clone(),
+                (None, Some(t)) => ops::attributes::source(t),
                 (None, None) => return Err(Error::invalid("no clip is copied")),
                 (Some(_), Some(_)) => {
                     return Err(Error::usage("give `from` or `copied`, not both"));
@@ -4583,6 +4613,7 @@ fn mutate(
             relative,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = ops::linked::sounds(p, &ids);
             if ids.is_empty() {
                 return Err(Error::usage("clip.normalize needs at least one clip"));
             }
@@ -4626,7 +4657,7 @@ fn mutate(
             value,
             ease,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead
@@ -4652,7 +4683,7 @@ fn mutate(
             in_handle,
             out_handle,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let change = ops::keyframes::KeyChange {
                 value: *value,
@@ -4674,7 +4705,7 @@ fn mutate(
             by,
             to,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::keyframes::on_line(p, &ids, *param, |p, param| {
@@ -4688,7 +4719,7 @@ fn mutate(
             frames,
             at,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             ops::keyframes::on_line(p, &ids, *param, |p, param| {
                 ops::keyframes::remove(p, &ids, param, &pick)
@@ -5628,6 +5659,14 @@ fn mutate(
                 for need in &edit.needs {
                     mask_made(env, need)?;
                 }
+            }
+            ops::grade_masks::put(p, &edit.of, edit.n, edit.mask)?;
+            edit.out
+        }
+        Request::GradeMaskTrack { .. } => {
+            let edit = mask_track(p, request, playhead)?;
+            if !dry_run && let Some(need) = &edit.need {
+                mask_tracked(env, need)?;
             }
             ops::grade_masks::put(p, &edit.of, edit.n, edit.mask)?;
             edit.out
@@ -7178,9 +7217,6 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
         };
         c.counted = otio::Counted::InItem;
         let (start, end) = (conv(c.start), conv(c.end()));
-        if let Some((h, tl)) = c.audio {
-            c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
-        }
         let plays = c.compound.is_some() || m.is_some_and(|m| !m.is_still());
         let paced = (keep && plays).then(|| faster(c.speed.as_ref(), ratio));
         let (was, now) = paced.as_ref().map_or((0, 0), |(_, was, now)| (*was, *now));
@@ -7407,19 +7443,6 @@ fn place_imported(
             list: list.iter().cloned().map(Kept::from).collect(),
         })
     };
-    let mut floors: HashMap<String, i64> = p
-        .tracks
-        .iter()
-        .map(|t| {
-            let end = t
-                .clips
-                .iter()
-                .filter(|c| c.start < offset)
-                .filter_map(|c| c.audio_range().map(|r| r.1))
-                .max();
-            (t.id.clone(), end.unwrap_or(0))
-        })
-        .collect();
 
     let mut clips = Vec::new();
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
@@ -7506,8 +7529,7 @@ fn place_imported(
         let mut start = offset + c.start;
         let end = offset + c.end();
         let mut source_in = c.source_in;
-        let sound_from = c.source_in + c.audio.map_or(0, |a| a.0);
-        let keys_from = c.key_origin() + c.audio.map_or(0, |a| a.0);
+        let keys_from = c.key_origin();
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -7543,74 +7565,50 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
-        let audio = match (c.audio, t.has_audio_tracks) {
-            (Some((h, tl)), _) => Some((
-                offset + c.start + h - start,
-                offset + c.end() + tl - (start + duration),
-            )),
-            (None, false) => Some((0, 0)),
-            (None, true) => None,
-        };
-        let audio = audio
-            .filter(|_| !m.info.audio.is_empty())
-            .and_then(|(h, tl)| {
-                let floor = floors.get(&track_of(&c.track)).copied().unwrap_or(0);
-                let h = match h {
-                    h if h < 0 => -reach(-h, |n| inside(-n)),
-                    h => h,
-                }
-                .max(floor - start);
-                let tl = match tl {
-                    tl if tl > 0 => reach(tl, |n| inside(duration + n - 1)),
-                    tl => tl,
-                };
-                (duration + tl - h >= 1).then_some(ClipAudio {
-                    stream: if (c.stream as usize) < m.info.audio.len() {
-                        c.stream
-                    } else {
-                        0
-                    },
-                    head: h,
-                    tail: tl,
-                    gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
-                    gain_keys: c
-                        .gain_keys
-                        .iter()
-                        .map(|k| crate::model::Keyframe {
-                            frame: k.frame + keys_from,
-                            ..*k
-                        })
-                        .collect(),
-                    muted: c.muted,
-                    pan: c.pan.clamp(*PAN.start(), *PAN.end()),
-                    pan_on: c.pan_on,
-                    pan_keys: c
-                        .pan_keys
-                        .iter()
-                        .map(|k| crate::model::Keyframe {
-                            frame: k.frame + keys_from,
-                            ..*k
-                        })
-                        .collect(),
-                    equalizer: c
-                        .equalizer
-                        .clone()
-                        .filter(|e| crate::equalizer::problem(e).is_none()),
-                    dialogue_leveler: c
-                        .dialogue_leveler
-                        .filter(|l| crate::leveler::problem(l).is_none()),
-                    compressor: c
-                        .compressor
-                        .filter(|k| crate::compressor::problem(k).is_none()),
-                    noise_reduction: c
-                        .noise_reduction
-                        .filter(|n| crate::noise_reduction::problem(n).is_none()),
-                    effects: carry(&c.audio_effects, sound_from),
-                    voice_isolation: c
-                        .voice_isolation
-                        .filter(|v| ops::ISOLATION.contains(&v.amount)),
+        let audio = (c.audio && !m.info.audio.is_empty()).then(|| ClipAudio {
+            stream: if (c.stream as usize) < m.info.audio.len() {
+                c.stream
+            } else {
+                0
+            },
+            gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
+            gain_keys: c
+                .gain_keys
+                .iter()
+                .map(|k| crate::model::Keyframe {
+                    frame: k.frame + keys_from,
+                    ..*k
                 })
-            });
+                .collect(),
+            muted: c.muted,
+            pan: c.pan.clamp(*PAN.start(), *PAN.end()),
+            pan_on: c.pan_on,
+            pan_keys: c
+                .pan_keys
+                .iter()
+                .map(|k| crate::model::Keyframe {
+                    frame: k.frame + keys_from,
+                    ..*k
+                })
+                .collect(),
+            equalizer: c
+                .equalizer
+                .clone()
+                .filter(|e| crate::equalizer::problem(e).is_none()),
+            dialogue_leveler: c
+                .dialogue_leveler
+                .filter(|l| crate::leveler::problem(l).is_none()),
+            compressor: c
+                .compressor
+                .filter(|k| crate::compressor::problem(k).is_none()),
+            noise_reduction: c
+                .noise_reduction
+                .filter(|n| crate::noise_reduction::problem(n).is_none()),
+            effects: carry(&c.audio_effects, c.source_in),
+            voice_isolation: c
+                .voice_isolation
+                .filter(|v| ops::ISOLATION.contains(&v.amount)),
+        });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(
                 "{label}: gain {:.1} dB set to the nearest of -100..30 dB",
@@ -7620,9 +7618,6 @@ fn place_imported(
         if !c.video && audio.is_none() {
             warnings.push(format!("{label}: {} has no audio; left out", m.name));
             continue;
-        }
-        if let Some(a) = &audio {
-            floors.insert(track_of(&c.track), start + duration + a.tail);
         }
         let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
             .then(|| c.name.clone());
@@ -7658,7 +7653,7 @@ fn place_imported(
             retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
-            link: None,
+            link: c.link.map(|l| links.of(l)),
         });
         placed.insert(track_of(&c.track));
     }
@@ -7668,6 +7663,20 @@ fn place_imported(
         }
     }
     ops::linked::link_blocks(p, &clips);
+    if !t.has_audio_tracks {
+        let pictures: Vec<String> = clips
+            .iter()
+            .filter(|id| {
+                p.find_clip(id).is_some_and(|(ti, ci)| {
+                    let c = &p.tracks[ti].clips[ci];
+                    c.video && !c.is_block()
+                })
+            })
+            .cloned()
+            .collect();
+        let sounds = ops::linked::with_sound(p, pictures.clone(), &ops::Source::default())?;
+        clips.extend(sounds.into_iter().skip(pictures.len()));
+    }
     for x in &t.transitions {
         let side = |k: Option<usize>| match k {
             None => Some(None),
@@ -7695,7 +7704,6 @@ fn place_imported(
             .transitions
             .push(Transition {
                 id,
-                sound: x.sound,
                 from: from.map(|f| f.0.clone()),
                 to: to.map(|g| g.0.clone()),
                 before: x.before,
@@ -7786,10 +7794,7 @@ fn stack_imported(
     let mut t = otio::import(&doc, base)?;
     if video == Some(true) {
         t.has_audio_tracks = true;
-        for c in &mut t.clips {
-            c.audio = None;
-            c.audio_effects.clear();
-        }
+        t.clips.retain(|c| c.video);
     }
     Ok(t)
 }
@@ -8777,17 +8782,20 @@ fn auto_color_plan(
         None => return Err(ops::grade::no_node(n)),
     }
     g.output = Some(crate::model::GradeLink::picture(n));
-    solo_plan(p, (id, *layer), (frame, t), g)
+    solo_plan(p, (id, *layer), (Some(frame), (t, t + 1)), g)
 }
 
 fn solo_plan(
     p: &Project,
     (id, layer): (&str, usize),
-    (frame, t): (i64, i64),
+    (frame, (t0, t1)): (Option<i64>, (i64, i64)),
     g: crate::model::Grade,
 ) -> Result<RenderPlan> {
     let size = p.frame_size();
-    let below = ops::grade::whole(p, id)?.map(|w| w.at(frame as f64).into_owned());
+    let below = ops::grade::whole(p, id)?.map(|w| match frame {
+        Some(f) => w.at(f as f64).into_owned(),
+        None => w,
+    });
     let g = below
         .unwrap_or_else(|| crate::model::Grade::usual(size))
         .below(layer, g, size);
@@ -8812,7 +8820,7 @@ fn solo_plan(
     picture.opacity_keys.clear();
     picture.composite_mode = None;
     picture.grade = Some(g);
-    let mut plan = crate::render::flatten(&solo, t, t + 1)?;
+    let mut plan = crate::render::flatten(&solo, t0, t1)?;
     plan.timeline_grade = None;
     Ok(plan)
 }
@@ -8838,7 +8846,27 @@ fn mask_plan(p: &Project, of: &ops::grade::GradeOf, n: u32, t: i64) -> Result<Re
     let input = (d.inputs.first().copied().flatten())
         .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
     g.output = Some(input);
-    solo_plan(p, (id, *layer), (frame, t), g)
+    solo_plan(p, (id, *layer), (Some(frame), (t, t + 1)), g)
+}
+
+fn mask_track_plan(
+    p: &Project,
+    of: &ops::grade::GradeOf,
+    n: u32,
+    frames: (i64, i64),
+) -> Result<RenderPlan> {
+    let ops::grade::GradeOf::Clip(id, layer) = of else {
+        return Err(Error::invalid(
+            "the Magic Mask works on the grade of a clip",
+        ));
+    };
+    let mut g = ops::grade::stored(p, of)?;
+    let d = g.node_mut(n).ok_or_else(|| ops::grade::no_node(n))?;
+    d.magic_mask = None;
+    let input = (d.inputs.first().copied().flatten())
+        .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
+    g.output = Some(input);
+    solo_plan(p, (id, *layer), (None, frames), g)
 }
 
 #[derive(Debug, Clone)]
@@ -8960,6 +8988,10 @@ fn mask_maps(
     let mut frames: Vec<i64> = touched.iter().map(|v| v.0).collect();
     frames.sort_unstable();
     frames.dedup();
+    if crate::masks::RULES.clicks_drop_tracked {
+        mask.maps
+            .retain(|m| m.from.is_none_or(|f| !touched.contains(&(f, m.subject))));
+    }
     let mut needs = Vec::new();
     for frame in frames {
         let Ok(t) = ops::grade_masks::time_at(p, of, frame) else {
@@ -8985,6 +9017,7 @@ fn mask_maps(
                 frame,
                 subject: s,
                 name,
+                from: None,
             });
         }
         if !subjects.is_empty() {
@@ -8997,6 +9030,170 @@ fn mask_maps(
     }
     mask.maps.sort_by_key(|m| (m.frame, m.subject));
     Ok(needs)
+}
+
+#[derive(Debug, Clone)]
+pub struct TrackNeed {
+    pub plan: RenderPlan,
+    pub source: std::path::PathBuf,
+    pub at: i64,
+    pub backward: bool,
+    pub forward: bool,
+    pub subjects: Vec<Vec<crate::masks::Point>>,
+    pub names: Vec<(i64, usize, String)>,
+    pub download: bool,
+}
+
+struct TrackEdit {
+    of: ops::grade::GradeOf,
+    n: u32,
+    mask: crate::model::MagicMask,
+    need: Option<TrackNeed>,
+    out: Value,
+}
+
+fn mask_track(p: &Project, request: &Request, playhead: Option<i64>) -> Result<TrackEdit> {
+    let Request::GradeMaskTrack {
+        clip,
+        layer,
+        node,
+        at,
+        way,
+        length,
+        download,
+    } = request
+    else {
+        return Err(Error::invalid("not a grade.mask.track request"));
+    };
+    if *length == Some(0) {
+        return Err(Error::usage("a track's length is from 1"));
+    }
+    let of = grade_of(p, clip, (false, *layer), playhead)?;
+    let n = node.unwrap_or(1);
+    let mut mask = ops::grade_masks::mask_of(p, &of, n)?;
+    let t = time_or_playhead(p, at.as_ref(), playhead)?
+        .ok_or_else(|| Error::usage("grade.mask.track needs `at` (--at): there is no playhead"))?;
+    let ops::grade::GradeOf::Clip(id, _) = &of else {
+        return Err(Error::invalid(
+            "the Magic Mask works on the grade of a clip",
+        ));
+    };
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    if t < c.start || t >= c.end() {
+        return Err(Error::invalid(format!(
+            "{id} is not at frame {t}: the Magic Mask tracks from a frame of the clip"
+        )));
+    }
+    let frame = ops::grade::frame_of(p, &of, t)?;
+    let subjects = ops::grade_masks::clicked_subjects(&mask, frame);
+    if subjects.is_empty() {
+        return Err(Error::invalid(format!(
+            "the Magic Mask of node {n} has no click on frame {frame}: click first"
+        )));
+    }
+    let reach = length.map_or(i64::MAX, i64::from);
+    let t0 = match way.backward() {
+        true => t.saturating_sub(reach).max(c.start),
+        false => t,
+    };
+    let t1 = match way.forward() {
+        true => t.saturating_add(reach).min(c.end() - 1) + 1,
+        false => t + 1,
+    };
+    let source = (p.media(&c.media).map(|m| m.path.clone())).unwrap_or_default();
+    let plan = mask_track_plan(p, &of, n, (t0, t1))?;
+    let picture = crate::fingerprint::digest(&serde_json::to_vec(&plan).unwrap_or_default());
+    let mut seen = std::collections::BTreeSet::from([frame]);
+    let mut reached = Vec::new();
+    for u in (t + 1..t1).chain((t0..t).rev()) {
+        let f = ops::grade::frame_of(p, &of, u)?;
+        if seen.insert(f) {
+            reached.push((u - t0, f));
+        }
+    }
+    let clicked: Vec<Vec<crate::masks::Point>> = (subjects.iter())
+        .map(|s| ops::grade_masks::points(&mask, frame, *s))
+        .collect();
+    let mut names = Vec::new();
+    let mut made = Vec::new();
+    for &(i, f) in &reached {
+        for (k, &s) in subjects.iter().enumerate() {
+            let stays = !ops::grade_masks::points(&mask, f, s).is_empty();
+            if stays && crate::masks::RULES.clicked_stays {
+                continue;
+            }
+            let looked = format!("{picture}\ntrack {frame} {f}");
+            let name = crate::masks::name(crate::catalog::SAM21_TINY.id, &looked, &clicked[k]);
+            names.push((i, k, name.clone()));
+            made.push(crate::model::MaskMap {
+                frame: f,
+                subject: s,
+                name,
+                from: Some(frame),
+            });
+        }
+    }
+    let over: std::collections::BTreeSet<(i64, u32)> =
+        made.iter().map(|m| (m.frame, m.subject)).collect();
+    mask.maps.retain(|m| {
+        let again = m.from == Some(frame) && subjects.contains(&m.subject);
+        !again && !over.contains(&(m.frame, m.subject))
+    });
+    let count = made.len();
+    mask.maps.extend(made);
+    mask.maps.sort_by_key(|m| (m.frame, m.subject));
+    let ends = reached.iter().map(|v| v.1).chain([frame]);
+    let out = json!({
+        "subjects": subjects,
+        "first": ends.clone().min(),
+        "last": ends.max(),
+        "maps": count,
+    });
+    let need = (!names.is_empty()).then(|| TrackNeed {
+        plan,
+        source,
+        at: t - t0,
+        backward: way.backward(),
+        forward: way.forward(),
+        subjects: clicked,
+        names,
+        download: *download,
+    });
+    Ok(TrackEdit {
+        of,
+        n,
+        mask,
+        need,
+        out,
+    })
+}
+
+pub fn mask_tracked(env: &dyn Env, need: &TrackNeed) -> Result<()> {
+    if need
+        .names
+        .iter()
+        .all(|(_, _, name)| crate::masks::has(name))
+    {
+        return Ok(());
+    }
+    env.subject_tracks(need, &mut |f, maps| {
+        for (_, k, name) in need.names.iter().filter(|v| v.0 == f) {
+            if let Some(map) = maps.get(*k) {
+                crate::masks::put(name, map.clone());
+            }
+        }
+        Ok(())
+    })
+}
+
+pub fn mask_track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackNeed> {
+    mask_track(p, request, playhead)
+        .ok()
+        .and_then(|e| e.need)
+        .into_iter()
+        .collect()
 }
 
 pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
@@ -9024,19 +9221,77 @@ fn played_compounds(p: &Project) -> Vec<String> {
     found
 }
 
-pub fn mask_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
+pub fn mask_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
     let mut needs = sheet_remakes(p, download);
     for id in played_compounds(p) {
         let mut inside = p.clone();
         if ops::compound::open_alone(&mut inside, &id).is_ok() {
-            needs.extend(sheet_remakes(&inside, download));
+            let (clicks, tracks) = sheet_remakes(&inside, download);
+            needs.0.extend(clicks);
+            needs.1.extend(tracks);
         }
     }
     needs
 }
 
-fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
+fn track_remake(
+    p: &Project,
+    (of, n): (&ops::grade::GradeOf, u32),
+    mask: &crate::model::MagicMask,
+    (from, download): (i64, bool),
+) -> Option<TrackNeed> {
+    let ops::grade::GradeOf::Clip(id, _) = of else {
+        return None;
+    };
+    let ours: Vec<&crate::model::MaskMap> =
+        (mask.maps.iter().filter(|m| m.from == Some(from))).collect();
+    let missing: Vec<&crate::model::MaskMap> = (ours.iter().copied())
+        .filter(|m| !crate::masks::has(&m.name))
+        .collect();
+    if !(missing.iter()).any(|m| ops::grade_masks::time_at(p, of, m.frame).is_ok()) {
+        return None;
+    }
+    let lo = ours.iter().map(|m| m.frame).chain([from]).min()?;
+    let hi = ours.iter().map(|m| m.frame).chain([from]).max()?;
+    let wide = widened(p, id, (lo, hi))?;
+    let c = wide.clip(id)?;
+    let plan = mask_track_plan(&wide, of, n, (c.start, c.end())).ok()?;
+    let subjects = ops::grade_masks::clicked_subjects(mask, from);
+    let clicked: Vec<Vec<crate::masks::Point>> = (subjects.iter())
+        .map(|s| ops::grade_masks::points(mask, from, *s))
+        .collect();
+    let names: Vec<(i64, usize, String)> = (missing.iter())
+        .filter_map(|m| {
+            let k = subjects.iter().position(|s| *s == m.subject)?;
+            Some((m.frame - lo, k, m.name.clone()))
+        })
+        .collect();
+    let source = (p.media(&c.media).map(|m| m.path.clone())).unwrap_or_default();
+    Some(TrackNeed {
+        plan,
+        source,
+        at: from - lo,
+        backward: lo < from,
+        forward: from < hi,
+        subjects: clicked,
+        names,
+        download,
+    })
+}
+
+fn widened(p: &Project, id: &str, (lo, hi): (i64, i64)) -> Option<Project> {
+    let mut wide = p.clone();
+    let c = (wide.tracks.iter_mut())
+        .flat_map(|t| t.clips.iter_mut())
+        .find(|c| c.id == id)?;
+    c.walk(lo - c.content_at(c.start));
+    c.duration = hi - lo + 1;
+    Some(wide)
+}
+
+fn sheet_remakes(p: &Project, download: bool) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
     let mut needs = Vec::new();
+    let mut tracks = Vec::new();
     let clips = p.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
     for c in clips {
         let Some(whole) = c.picture.as_ref().and_then(|v| v.grade.as_ref()) else {
@@ -9049,8 +9304,20 @@ fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
                 let Some(mask) = &d.magic_mask else {
                     continue;
                 };
-                let missing: Vec<&crate::model::MaskMap> =
-                    (mask.maps.iter().filter(|m| !crate::masks::has(&m.name))).collect();
+                let mut froms: Vec<i64> = (mask.maps.iter())
+                    .filter(|m| !crate::masks::has(&m.name))
+                    .filter_map(|m| m.from)
+                    .collect();
+                froms.sort_unstable();
+                froms.dedup();
+                let on = (&of, k as u32 + 1);
+                let remade = froms
+                    .into_iter()
+                    .filter_map(|f| track_remake(p, on, mask, (f, download)));
+                tracks.extend(remade);
+                let missing: Vec<&crate::model::MaskMap> = (mask.maps.iter())
+                    .filter(|m| m.from.is_none() && !crate::masks::has(&m.name))
+                    .collect();
                 let mut frames: Vec<i64> = missing.iter().map(|m| m.frame).collect();
                 frames.sort_unstable();
                 frames.dedup();
@@ -9079,7 +9346,7 @@ fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
             }
         }
     }
-    needs
+    (needs, tracks)
 }
 
 pub fn mask_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<MaskNeed> {
@@ -10652,18 +10919,24 @@ fn targets<'a>(
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             Ok(vec![Target::Media(m)])
         }
-        (None, Some(refs)) => resolve_clips(p, &refs.to_vec(), playhead)?
-            .iter()
-            .map(|id| {
-                let c = p.clip(id).expect("resolved");
-                if c.is_block() {
-                    return Err(Error::invalid(format!(
-                        "{id} is a block from another editor: it has no media"
-                    )));
-                }
-                Ok(Target::Clip(c))
-            })
-            .collect(),
+        (None, Some(refs)) => {
+            let ids = resolve_clips(p, &refs.to_vec(), playhead)?;
+            match audio {
+                true => ops::linked::sounds(p, &ids),
+                false => ids,
+            }
+        }
+        .iter()
+        .map(|id| {
+            let c = p.clip(id).expect("resolved");
+            if c.is_block() {
+                return Err(Error::invalid(format!(
+                    "{id} is a block from another editor: it has no media"
+                )));
+            }
+            Ok(Target::Clip(c))
+        })
+        .collect(),
         (None, None) => Ok(p
             .tracks
             .iter()
@@ -11402,6 +11675,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         "source_in_tc": p.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
+    if let Some(link) = c.link {
+        v["link"] = json!(link);
+    }
     if let Some(color) = c.shown_color(media) {
         v["color"] = json!(color);
     }
@@ -11426,7 +11702,7 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         v["effects"] = json!(e.names());
     }
     if let Some(a) = &c.audio {
-        v["audio"] = json!({ "stream": a.stream, "head": a.head, "tail": a.tail, "gain_db": a.gain_db, "muted": a.muted });
+        v["audio"] = json!({ "stream": a.stream, "gain_db": a.gain_db, "muted": a.muted });
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
         }
@@ -11497,7 +11773,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                     let at = cuts.place(p, x)?;
                     (at >= a && at <= b).then(|| {
                         json!({ "id": x.id, "name": otio::transitions::name(x), "at": at, "before": x.before,
-                            "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
+                            "after": x.after, "from": x.from, "to": x.to })
                     })
                 })
                 .collect();

@@ -2159,6 +2159,19 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::GradeMaskTrack { .. } = &envelope.request {
+            let looks = vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                let env = AvEnv::new();
+                for need in &looks {
+                    vidcut_core::editor::mask_tracked(&env, need)?;
+                }
+                Ok(())
+            }));
+        }
         if let Request::PictureStabilize { .. } = &envelope.request {
             let looks = vidcut_core::editor::stabilize_looks(p, &envelope.request, playhead);
             if looks.is_empty() {
@@ -3926,6 +3939,15 @@ impl Live {
                 Some(measure) => Step::Encode(measure, Box::new(envelope), "Track".into(), "track"),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
+            Request::GradeMaskTrack { .. } if !envelope.dry_run => {
+                match self.measuring(&envelope) {
+                    Some(measure) => {
+                        let title = "Track Mask".into();
+                        Step::Encode(measure, Box::new(envelope), title, "mask_track")
+                    }
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::PictureStabilize { .. } if !envelope.dry_run => {
                 match self.measuring(&envelope) {
                     Some(measure) => {
@@ -3942,6 +3964,7 @@ impl Live {
             | Request::GradeMaskClick { .. }
             | Request::GradeMaskSet { .. }
             | Request::GradeMaskClear { .. }
+            | Request::GradeMaskTrack { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
@@ -4136,9 +4159,10 @@ impl Live {
         let first = &self.clipboard.first()?.clip;
         let p = self.project.as_ref()?.project();
         self.copies += 1;
+        let source = vidcut_core::ops::attributes::source(&self.clipboard);
         Some(Arc::new(CopiedClip {
             name: p.clip_name(first).unwrap_or_default(),
-            picked: vidcut_core::ops::attributes::picked_at_open(first),
+            picked: vidcut_core::ops::attributes::picked_at_open(&source),
             copy: self.copies,
         }))
     }
@@ -4173,10 +4197,10 @@ impl Live {
             Request::ClipPasteAttributes { from, copied, .. }
                 if from.is_none() && copied.is_none() =>
             {
-                let Some(first) = self.clipboard.first() else {
+                if self.clipboard.is_empty() {
                     return Err(Error::usage("the clipboard has no clip"));
-                };
-                *copied = Some(Box::new(first.clone()));
+                }
+                *copied = Some(self.clipboard.clone());
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
@@ -6045,6 +6069,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::GradeMaskClick { .. }
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. }
+        | Request::GradeMaskTrack { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }

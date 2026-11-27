@@ -1,11 +1,11 @@
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, scaled};
-use crate::model::{Clip, ClipRetime, Picture, Project};
+use crate::model::{Clip, ClipRetime, Picture, Project, TrackClip};
 use crate::render::FileClock;
 use crate::request::{ClipAttribute, KeyTiming};
 
-use super::locate;
 use super::picture::takes;
+use super::{linked, locate};
 
 type A = ClipAttribute;
 
@@ -36,10 +36,37 @@ fn made_only(a: A) -> bool {
     matches!(a, A::VideoEffects | A::Grade | A::Composition)
 }
 
-pub fn picked_at_open(c: &Clip) -> Vec<ClipAttribute> {
+pub fn source(clips: &[TrackClip]) -> Vec<Clip> {
+    let Some(first) = clips.first() else {
+        return Vec::new();
+    };
+    let one = |c: &&TrackClip| {
+        c.clip.id == first.clip.id || (first.clip.link.is_some() && c.clip.link == first.clip.link)
+    };
+    clips.iter().filter(one).map(|c| c.clip.clone()).collect()
+}
+
+fn heard(from: &[Clip]) -> Option<&Clip> {
+    from.iter().find(|c| c.audio.is_some())
+}
+
+fn with_sounds(p: &Project, ids: &[String]) -> Vec<String> {
+    let mut all = ids.to_vec();
+    for id in linked::sounds(p, ids) {
+        if !all.contains(&id) {
+            all.push(id);
+        }
+    }
+    all
+}
+
+pub fn picked_at_open(from: &[Clip]) -> Vec<ClipAttribute> {
+    let Some(c) = from.first() else {
+        return Vec::new();
+    };
     let usual = Picture::default();
     let picture = c.picture.clone().unwrap_or_default();
-    let audio = c.audio.as_ref();
+    let audio = heard(from).and_then(|h| h.audio.as_ref());
     let differs = |v: PictureValue, axis: Option<usize>| {
         let (now, was) = (plain_channel(&picture, v), plain_channel(&usual, v));
         picture.has_keys(v)
@@ -98,20 +125,31 @@ fn opening(p: &Project, c: &Clip) -> i64 {
     FileClock::of(p, c).frame(c.content_at(c.start))
 }
 
-fn put(p: &Project, ti: usize, from: &Clip, to: &mut Clip, attributes: &[A], timing: KeyTiming) {
+fn timed(from: &Clip, to: &Clip, timing: KeyTiming) -> (impl Fn(i64) -> i64 + use<>, f64) {
     let a = from.content_at(from.start);
     let b = to.content_at(to.start);
     let ratio = match timing {
         KeyTiming::Maintain => 1.0,
         KeyTiming::Stretch => to.duration as f64 / from.duration.max(1) as f64,
     };
-    let conv = |f: i64| b + ((f - a) as f64 * ratio).round() as i64;
-    let mut moved = from.picture.clone().unwrap_or_default();
+    (
+        move |f: i64| b + ((f - a) as f64 * ratio).round() as i64,
+        ratio,
+    )
+}
+
+fn put(p: &Project, ti: usize, from: &[Clip], to: &mut Clip, attributes: &[A], timing: KeyTiming) {
+    let Some(first) = from.first() else {
+        return;
+    };
+    let from = (first, heard(from));
+    let (conv, ratio) = timed(from.0, to, timing);
+    let mut moved = from.0.picture.clone().unwrap_or_default();
     moved.scale_times(&conv, &|_| ratio);
     let shows = takes(p, ti, to).is_ok();
     let made = shows && !to.generates();
     let both_zooms = attributes.contains(&A::ZoomX) && attributes.contains(&A::ZoomY);
-    let comp_start = opening(p, to) - opening(p, from);
+    let comp_start = opening(p, to) - opening(p, from.0);
     for &attribute in attributes {
         if (picture_only(attribute) && !shows) || (made_only(attribute) && !made) {
             continue;
@@ -133,14 +171,18 @@ fn put(p: &Project, ti: usize, from: &Clip, to: &mut Clip, attributes: &[A], tim
                     c
                 })
             }
-            (A::ClipColor, _) => to.color = p.clip_color(from).map(str::to_owned),
+            (A::ClipColor, _) => to.color = p.clip_color(from.0).map(str::to_owned),
             (A::RetimeProcess, _) => {
                 if to.video && !to.media.is_empty() {
-                    to.retime = from.retime;
+                    to.retime = from.0.retime;
                 }
             }
             (A::Volume | A::AudioEffects | A::Equalizer, _) => {
-                let (Some(had), Some(sound)) = (&from.audio, to.audio.as_mut()) else {
+                let Some(source) = from.1 else {
+                    continue;
+                };
+                let (conv, ratio) = timed(source, to, timing);
+                let (Some(had), Some(sound)) = (&source.audio, to.audio.as_mut()) else {
                     continue;
                 };
                 match attribute {
@@ -227,7 +269,7 @@ fn save(p: &mut Project, ti: usize, ci: usize, mut c: Clip) -> Result<()> {
 
 pub fn paste(
     p: &mut Project,
-    from: &Clip,
+    from: &[Clip],
     ids: &[String],
     attributes: &[ClipAttribute],
     timing: KeyTiming,
@@ -238,14 +280,17 @@ pub fn paste(
             "voice_isolation and dialogue_leveler go only to clip.remove_attributes",
         ));
     }
-    if attributes.contains(&A::Speed) && from.takes_speed() {
-        let speed = from.constant_speed().ok_or_else(|| {
+    let Some(first) = from.first() else {
+        return Err(Error::invalid("no clip is copied"));
+    };
+    if attributes.contains(&A::Speed) && first.takes_speed() {
+        let speed = first.constant_speed().ok_or_else(|| {
             Error::invalid("the copied clip's speed has keyframes: it does not paste")
         })?;
         speeds(p, ids, speed, ripple)?;
     }
-    for id in ids {
-        let (ti, ci) = locate(p, id)?;
+    for id in with_sounds(p, ids) {
+        let (ti, ci) = locate(p, &id)?;
         let mut c = p.tracks[ti].clips[ci].clone();
         put(p, ti, from, &mut c, attributes, timing);
         save(p, ti, ci, c)?;
@@ -262,8 +307,8 @@ pub fn remove(
     if attributes.contains(&A::Speed) {
         speeds(p, ids, 1.0, ripple)?;
     }
-    for id in ids {
-        let (ti, ci) = locate(p, id)?;
+    for id in with_sounds(p, ids) {
+        let (ti, ci) = locate(p, &id)?;
         let mut c = p.tracks[ti].clips[ci].clone();
         cleared(p, ti, &mut c, attributes);
         save(p, ti, ci, c)?;

@@ -9,7 +9,7 @@ use crate::model::{
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
-use super::{block_clip, clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
+use super::{block_clip, clear_range, is_main, locate, place, tracks, unlocked};
 
 pub const DEFAULT_SECS: f64 = 5.0;
 
@@ -417,7 +417,6 @@ pub(super) fn add_block(
         ti,
         block_clip(id.clone(), (start, duration), title, generator, adjustment),
     );
-    fix_audio(p, ti);
     Ok((id, p.tracks[ti].id.clone()))
 }
 

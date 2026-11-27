@@ -56,7 +56,7 @@ fn a_stills_head_trims_before_its_source_start() {
     f.ok(req("edit.append", json!({"media": "m2"})));
     f.ok(req(
         "edit.trim",
-        json!({"clip": "c2", "edge": "head", "by": -10, "ripple": true}),
+        json!({"clip": "c3", "edge": "head", "by": -10, "ripple": true}),
     ));
-    assert_eq!(f.v1(), vec![row("c1", 0, 50, 0), row("c2", 50, 135, -10)]);
+    assert_eq!(f.v1(), vec![row("c1", 0, 50, 0), row("c3", 50, 135, -10)]);
 }

@@ -498,7 +498,7 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 - A piece has the `equalizer` of its clip when it changes the sound.
   - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
   - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
-- Each track with sound gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer and its fader.
+- Each audio track gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer and its fader.
   - A piece carries only the gain of its clip. The fader of its track is the `gain_db` of the bus.
   - The inner tracks of a compound clip get the track that holds it as their `host` (`Inner`).
   - The bus of an inner track goes `into` the bus of its host. `render::bus_for` makes the bus of a host before the buses that go into it.

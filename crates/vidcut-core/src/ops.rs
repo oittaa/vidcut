@@ -38,7 +38,7 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 pub use transition::{
     Align, Made, Shape, cross_fade_joins, default_length as default_transition_length, dissolve,
     dissolve_clips, planned as dissolve_sides, room_at as dissolve_room, set_transition,
-    split as dissolve_frames, to_cut,
+    sound_paired, split as dissolve_frames, to_cut,
 };
 
 use crate::error::{Error, Result};
@@ -124,37 +124,41 @@ fn ripples(p: &Project, ti: usize, from: i64, ripple: Option<bool>) -> bool {
     ripple.unwrap_or(p.settings.ripple_on) && (ti == main_index(p) || main_empty_from(p, from))
 }
 
+fn right_link(p: &Project, ti: usize, link: u32, t: i64) -> u32 {
+    let continues = |x: &Clip, y: &Clip| {
+        x.link == Some(link)
+            && x.end() == t
+            && y.start == t
+            && y.link.is_some_and(|l| l != link)
+            && (&x.media, &x.compound) == (&y.media, &y.compound)
+            && y.source_in == x.source_at(t)
+    };
+    p.tracks
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != ti)
+        .flat_map(|(_, o)| o.clips.windows(2))
+        .find(|w| continues(&w[0], &w[1]))
+        .and_then(|w| w[1].link)
+        .unwrap_or_else(|| p.free_link())
+}
+
 fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     let ci = p.tracks[ti]
         .clips
         .iter()
         .position(|c| c.start < t && t < c.end())?;
-    if let Some((audio_start, audio_end)) = p.tracks[ti].clips[ci].audio_range() {
-        let clips = &mut p.tracks[ti].clips;
-        if t <= audio_start {
-            clips[ci].audio.as_mut().expect("audio").head = 0;
-            if let Some(prev) = ci.checked_sub(1).and_then(|i| clips[i].audio.as_mut()) {
-                prev.tail = 0;
-            }
-        }
-        if t >= audio_end {
-            clips[ci].audio.as_mut().expect("audio").tail = 0;
-            if let Some(next) = clips.get_mut(ci + 1).and_then(|c| c.audio.as_mut()) {
-                next.head = 0;
-            }
-        }
-    }
     let new_id = p.alloc_clip_id();
+    let link = (p.tracks[ti].clips[ci].link).map(|l| right_link(p, ti, l, t));
     let track = &mut p.tracks[ti];
     let left = &mut track.clips[ci];
     let offset = t - left.start;
     let mut right = left.clone();
     right.id = new_id.clone();
+    right.link = link;
     right.move_head(offset);
     left.duration = offset;
     if let (Some(la), Some(ra)) = (left.audio.as_mut(), right.audio.as_mut()) {
-        la.tail = 0;
-        ra.head = 0;
         cut(&mut la.effects, false, true);
         cut(&mut ra.effects, true, false);
     }
@@ -208,59 +212,6 @@ fn place(p: &mut Project, ti: usize, clip: Clip) {
     let track = &mut p.tracks[ti];
     let at = track.clips.partition_point(|c| c.start < clip.start);
     track.clips.insert(at, clip);
-}
-
-fn fix_audio(p: &mut Project, ti: usize) {
-    let clips = &mut p.tracks[ti].clips;
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for i in 0..clips.len() {
-            if clips[i].audio.is_none() {
-                continue;
-            }
-            let adjacent_next = i + 1 < clips.len()
-                && clips[i + 1].start == clips[i].end()
-                && clips[i + 1].audio.is_some();
-            let adjacent_prev =
-                i > 0 && clips[i - 1].end() == clips[i].start && clips[i - 1].audio.is_some();
-            let (prev_tail, next_head) = (
-                if adjacent_prev {
-                    clips[i - 1].audio.as_ref().map(|a| a.tail)
-                } else {
-                    None
-                },
-                if adjacent_next {
-                    clips[i + 1].audio.as_ref().map(|a| a.head)
-                } else {
-                    None
-                },
-            );
-            let before = clips[..i].iter().rev().find_map(Clip::audio_range);
-            let after = clips[i + 1..].iter().find_map(Clip::audio_range);
-            let (start, end, duration) = (clips[i].start, clips[i].end(), clips[i].duration);
-            if let Some(a) = clips[i].audio.as_mut() {
-                let head = match prev_tail {
-                    Some(tail) if tail != a.head => 0,
-                    Some(_) => a.head,
-                    None => a.head.max(before.map_or(0, |r| r.1) - start),
-                };
-                let tail = match next_head {
-                    Some(head) if head != a.tail => 0,
-                    Some(_) => a.tail,
-                    None => after.map_or(a.tail, |r| a.tail.min((r.0 - end).max(0))),
-                };
-                if (head, tail) != (a.head, a.tail) {
-                    (a.head, a.tail) = (head, tail);
-                    changed = true;
-                }
-                if a.head >= duration + a.tail && (a.head, a.tail) != (0, 0) {
-                    (a.head, a.tail) = (0, 0);
-                    changed = true;
-                }
-            }
-        }
-    }
 }
 
 pub(crate) fn block_clip(
@@ -371,23 +322,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         source_in: a,
         phase: src.phase,
         video,
-        audio: audio.then_some(ClipAudio {
-            stream: 0,
-            head: 0,
-            tail: 0,
-            gain_db: 0.0,
-            gain_keys: Vec::new(),
-            muted: false,
-            pan: 0.0,
-            pan_on: true,
-            pan_keys: Vec::new(),
-            equalizer: None,
-            dialogue_leveler: None,
-            compressor: None,
-            noise_reduction: None,
-            effects: None,
-            voice_isolation: None,
-        }),
+        audio: (audio && !video).then(|| ClipAudio::of(0)),
         enabled: true,
         name: None,
         effects: None,
@@ -432,10 +367,15 @@ fn compound_clip(p: &mut Project, src: &Source, cid: &str) -> Result<Clip> {
 }
 
 fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
+    let picture = clips.iter().any(|c| c.video);
     let ti = match &src.track {
         Some(id) => tracks::resolve(p, id)?,
-        None if clips.iter().any(|c| c.video) => main_index(p),
+        None if picture => main_index(p),
         None => tracks::nth(p, TrackKind::Audio, 0),
+    };
+    let ti = match p.tracks[ti].kind {
+        TrackKind::Video if !picture => tracks::nth(p, TrackKind::Audio, 0),
+        _ => ti,
     };
     if p.tracks[ti].kind == TrackKind::Audio {
         for clip in clips.iter_mut().filter(|c| c.video) {
@@ -453,7 +393,12 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
             }
             let (what, sound) = match p.clip_compound(clip) {
                 Some(k) => (k.name.clone(), k.has_sound()),
-                None => (clip.media.clone(), clip.audio.is_some()),
+                None => (
+                    clip.media.clone(),
+                    !src.video_only
+                        && p.media(&clip.media)
+                            .is_some_and(|m| !m.info.audio.is_empty()),
+                ),
             };
             if !sound {
                 return Err(Error::invalid(format!(
@@ -462,6 +407,9 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
                 )));
             }
             clip.video = false;
+            if clip.compound.is_none() {
+                clip.audio = Some(ClipAudio::of(0));
+            }
         }
     }
     unlocked(p, ti)?;
@@ -514,7 +462,6 @@ fn put(
         return compound::spread_blocks(p, blocks, src);
     }
     let ids = place_block(p, ti, clips, start);
-    fix_audio(p, ti);
     compound::landed(p, ids, src)
 }
 
@@ -635,7 +582,6 @@ pub fn insert_at_block(
     split_at(p, ti, at);
     shift_from(p, ti, at, lead + len);
     let ids = place_block(p, ti, clips, at + lead);
-    fix_audio(p, ti);
     follow::follow(
         p,
         &before,
@@ -771,7 +717,6 @@ pub fn ripple_overwrite_block(
     clear_range(p, ti, a, b);
     shift_from(p, ti, b, lead + len - (b - a));
     let ids = place_block(p, ti, clips, a + lead);
-    fix_audio(p, ti);
     follow::follow(
         p,
         &before,
@@ -849,7 +794,6 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
     let mut points: Vec<i64> = at.to_vec();
     points.sort_unstable();
     points.dedup();
-    let mut touched = Vec::new();
     for t in points {
         let covering: Vec<(usize, String)> = (0..p.tracks.len())
             .filter(|&ti| !p.tracks[ti].locked)
@@ -874,7 +818,6 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
         for ti in targets {
             if let Some(id) = split_at(p, ti, t) {
                 created.push(id);
-                touched.push(ti);
             }
         }
     }
@@ -882,11 +825,6 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
         return Err(Error::invalid(
             "nothing to split: no clip strictly covers the split point",
         ));
-    }
-    touched.sort_unstable();
-    touched.dedup();
-    for ti in touched {
-        fix_audio(p, ti);
     }
     Ok(created)
 }
@@ -900,21 +838,18 @@ fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
     }
     let effects = effects::join(&a.effects, &b.effects)?;
     let sound = match (&a.audio, &b.audio) {
-        (Some(x), Some(y)) if x.tail == y.head => Some(effects::join(&x.effects, &y.effects)?),
+        (Some(x), Some(y)) => Some(effects::join(&x.effects, &y.effects)?),
         (None, None) => None,
         _ => return None,
     };
     let mut whole = a.clone();
     whole.duration += b.duration;
-    if let (Some(w), Some(y)) = (whole.audio.as_mut(), &b.audio) {
-        w.tail = y.tail;
-    }
     let mut rest = whole.clone();
     rest.move_head(a.duration);
     rest.id.clone_from(&b.id);
+    rest.link = b.link;
     rest.effects.clone_from(&b.effects);
     if let (Some(r), Some(y)) = (rest.audio.as_mut(), &b.audio) {
-        r.head = y.head;
         r.effects.clone_from(&y.effects);
     }
     if rest != *b {
@@ -948,7 +883,7 @@ pub fn join(p: &mut Project, at: Option<i64>, selected: &[String]) -> Result<Vec
         .collect();
     if chosen.is_empty() {
         let at = at.ok_or_else(|| Error::usage("edit.join needs `at` or two clips"))?;
-        let there: Vec<_> = pairs.into_iter().filter(|x| x.3 == at).collect();
+        let there: Vec<_> = pairs.iter().filter(|x| x.3 == at).cloned().collect();
         chosen = there
             .iter()
             .filter(|(_, a, b, _)| has(a) || has(b))
@@ -963,6 +898,18 @@ pub fn join(p: &mut Project, at: Option<i64>, selected: &[String]) -> Result<Vec
             "nothing to join: no clip there continues the one before it",
         ));
     }
+    let linked: Vec<_> = pairs
+        .iter()
+        .filter(|x| !chosen.contains(x))
+        .filter(|(_, a, b, _)| {
+            chosen
+                .iter()
+                .any(|(_, x, y, _)| p.tied(x).contains(a) && p.tied(y).contains(b))
+        })
+        .cloned()
+        .collect();
+    chosen.extend(linked);
+    chosen.sort_by_key(|x| (x.0, x.3));
     let (mut kept, mut gone) = (Vec::new(), Vec::new());
     for (ti, a, b, _) in chosen.iter().rev() {
         let t = &mut p.tracks[*ti];
@@ -1015,7 +962,6 @@ fn delete_clips(p: &mut Project, ids: &[String], ripple: bool) -> Result<()> {
                 shift_from(p, ti, end, -(end - start));
             }
         }
-        fix_audio(p, ti);
     }
     if main_spans.is_empty() {
         return Ok(());
@@ -1029,7 +975,6 @@ fn delete_clips(p: &mut Project, ids: &[String], ripple: bool) -> Result<()> {
             shift_from(p, main, end, -(end - start));
         }
     }
-    fix_audio(p, main);
     if ripple {
         follow::follow(p, &before, &Edit::default());
     }
@@ -1053,7 +998,6 @@ pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> 
         .into_iter()
         .filter_map(|t| split_at(p, ti, t))
         .collect();
-    fix_audio(p, ti);
     Ok(created)
 }
 
@@ -1074,10 +1018,13 @@ fn merged(mut spans: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
 pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<(usize, i64)>> {
     let mut owned = Vec::new();
     for (id, spans) in parts {
-        let (ti, ci) = locate(p, id)?;
+        let (ti, _) = locate(p, id)?;
         unlocked(p, ti)?;
-        let c = &p.tracks[ti].clips[ci];
-        owned.extend(spans.iter().map(|&span| (ti, c.start, c.end(), span)));
+        for x in std::iter::once(id.clone()).chain(p.tied(id)) {
+            let (ti, ci) = locate(p, &x)?;
+            let c = &p.tracks[ti].clips[ci];
+            owned.extend(spans.iter().map(|&span| (ti, c.start, c.end(), span)));
+        }
     }
     let gone = merged(owned.iter().map(|o| o.3).filter(|(a, b)| a < b).collect());
     for &(a, b) in gone.iter().rev() {
@@ -1165,7 +1112,6 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     if let (Some(r), Some(c)) = (right, after_c) {
         track.clips[r] = c;
     }
-    fix_audio(p, ti);
     if let Some(before) = before {
         follow::follow(p, &before, &Edit::default());
     }
@@ -1231,7 +1177,6 @@ fn take_out(p: &mut Project, a: i64, b: i64, ripple: bool) {
         if ripple {
             shift_from(p, ti, b, -(b - a));
         }
-        fix_audio(p, ti);
     }
     subtitles::remap(p, |x| match x {
         x if a <= x && x < b => None,
@@ -1256,7 +1201,6 @@ pub fn close_gap(p: &mut Project, at: i64) -> Result<()> {
     let (a, b) = gap.ok_or_else(|| Error::invalid(format!("no gap at frame {at}")))?;
     let before = Before::of(p);
     shift_from(p, ti, b, -(b - a));
-    fix_audio(p, ti);
     follow::follow(p, &before, &Edit::default());
     Ok(())
 }
@@ -1477,7 +1421,6 @@ fn move_leads(
                 }
             }
         }
-        fix_all(p);
         follow::follow(p, &before, &Edit::default());
         return Ok(());
     }
@@ -1493,7 +1436,6 @@ fn move_leads(
         for (a, b) in spans.into_iter().rev() {
             shift_from(p, main, b, -(b - a));
         }
-        fix_all(p);
         follow::follow(
             p,
             &before,
@@ -1504,14 +1446,7 @@ fn move_leads(
         );
         return Ok(());
     }
-    fix_all(p);
     Ok(())
-}
-
-fn fix_all(p: &mut Project) {
-    for ti in 0..p.tracks.len() {
-        fix_audio(p, ti);
-    }
 }
 
 fn move_insert(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<()> {
@@ -1527,7 +1462,6 @@ fn move_insert(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<()
         at += c.duration;
         place(p, ti, c);
     }
-    fix_audio(p, ti);
     Ok(())
 }
 
@@ -1574,7 +1508,6 @@ fn move_overwrite(p: &mut Project, ti: usize, clips: &[Clip], to: i64) {
             }
         }
     }
-    fix_audio(p, ti);
 }
 
 pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
@@ -1603,7 +1536,6 @@ pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
     clear_range(p, main, a, b);
     shift_from(p, main, b, clip.duration - (b - a));
     place(p, main, Clip { start: a, ..clip });
-    fix_audio(p, main);
     follow::follow(
         p,
         &before,
@@ -1664,10 +1596,9 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
             )
         }));
     }
-    if let Some((a, b)) = c.audio_range() {
+    if c.audio.is_some() {
         let span = c.sound_span();
-        let outside = span.is_some_and(|(s, e)| s < -1e-6 || e > frames as f64 + 1e-6);
-        if outside || b - a < 1 {
+        if span.is_some_and(|(s, e)| s < -1e-6 || e > frames as f64 + 1e-6) {
             let (s, e) = span.map_or((lo, hi), |(s, e)| (s.floor() as i64, e.ceil() as i64));
             return Err(Error::invalid(format!(
                 "{}'s audio would need source frames {s}..{e}, but {} has 0..{frames}",
@@ -1741,7 +1672,6 @@ fn trim_one(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     let ci = clip_index(&p.tracks[ti], id);
     p.tracks[ti].clips[ci] = new;
     p.tracks[ti].sort();
-    fix_audio(p, ti);
     if let Some(before) = before {
         follow::follow(
             p,
@@ -1767,28 +1697,18 @@ fn edit_pair(t: &Track, ci: usize, edge: Edge) -> Option<(usize, usize)> {
 fn roll_next_to_gap(p: &mut Project, ti: usize, ci: usize, edge: Edge, delta: i64) -> Result<()> {
     let t = &p.tracks[ti];
     let mut c = t.clips[ci].clone();
-    let video = c.video;
     match edge {
         Edge::Head => {
             let first = ci.checked_sub(1).map_or(0, |i| t.clips[i].end() + 1);
-            let by = delta.max((first - c.start).min(0));
-            c.move_head(by);
-            if let Some(a) = c.audio.as_mut().filter(|_| video) {
-                a.head -= by;
-            }
+            c.move_head(delta.max((first - c.start).min(0)));
         }
         Edge::Tail => {
             let last = t.clips.get(ci + 1).map_or(i64::MAX, |n| n.start - 1);
-            let by = delta.min((last - c.end()).max(0));
-            c.duration += by;
-            if let Some(a) = c.audio.as_mut().filter(|_| video) {
-                a.tail -= by;
-            }
+            c.duration += delta.min((last - c.end()).max(0));
         }
     }
     check_source(p, &c)?;
     p.tracks[ti].clips[ci] = c;
-    fix_audio(p, ti);
     Ok(())
 }
 
@@ -1842,6 +1762,22 @@ struct AudioEdit {
     most: i64,
 }
 
+fn sound_clips(p: &Project, id: &str) -> Result<Vec<String>> {
+    let (ti, _) = locate(p, id)?;
+    if p.tracks[ti].kind == TrackKind::Audio {
+        return Ok(vec![id.to_string()]);
+    }
+    let on_audio = |x: &String| {
+        p.find_clip(x)
+            .is_some_and(|(t, _)| p.tracks[t].kind == TrackKind::Audio)
+    };
+    let sounds: Vec<String> = p.tied(id).into_iter().filter(on_audio).collect();
+    if sounds.is_empty() {
+        return Err(Error::invalid("no clip at this edit has sound"));
+    }
+    Ok(sounds)
+}
+
 fn audio_edit(p: &Project, id: &str, edge: Edge) -> Result<AudioEdit> {
     let (ti, ci) = locate(p, id)?;
     let t = &p.tracks[ti];
@@ -1850,23 +1786,25 @@ fn audio_edit(p: &Project, id: &str, edge: Edge) -> Result<AudioEdit> {
         (None, Edge::Tail) => (Some(ci), None),
         (None, Edge::Head) => (None, Some(ci)),
     };
-    let sound = |i: Option<usize>| i.and_then(|i| Some((i, t.clips[i].audio_range()?)));
-    let (least, most) = match (sound(out), sound(inc)) {
-        (None, None) => return Err(Error::invalid("no clip at this edit has sound")),
-        (Some((_, (a, b))), Some((_, (c, d)))) => (1 - (b - a), d - c - 1),
-        (Some((i, (a, b))), None) => {
-            let next = t.clips[i + 1..].iter().find_map(Clip::audio_range);
-            (1 - (b - a), next.map_or(i64::MAX, |r| r.0 - b))
-        }
-        (None, Some((i, (a, b)))) => {
-            let before = t.clips[..i].iter().rev().find_map(Clip::audio_range);
-            (before.map_or(0, |r| r.1) - a, b - a - 1)
-        }
+    let c = |i: usize| &t.clips[i];
+    let (least, most) = match (out, inc) {
+        (Some(a), Some(b)) => (1 - c(a).duration, c(b).duration - 1),
+        (Some(i), _) => (
+            1 - c(i).duration,
+            t.clips
+                .get(i + 1)
+                .map_or(i64::MAX, |n| n.start - c(i).end()),
+        ),
+        (_, Some(i)) => (
+            t.clips[..i].last().map_or(0, Clip::end) - c(i).start,
+            c(i).duration - 1,
+        ),
+        (None, None) => (0, 0),
     };
     Ok(AudioEdit {
         ti,
-        out: sound(out).map(|s| s.0),
-        inc: sound(inc).map(|s| s.0),
+        out,
+        inc,
         least: least.min(0),
         most: most.max(0),
     })
@@ -1879,11 +1817,10 @@ fn audio_moved(p: &Project, e: &AudioEdit, by: i64) -> Result<Vec<(usize, Clip)>
             continue;
         };
         let mut c = p.tracks[e.ti].clips[i].clone();
-        let a = c.audio.as_mut().expect("has audio");
         if tail {
-            a.tail += by;
+            c.duration += by;
         } else {
-            a.head += by;
+            c.move_head(by);
         }
         check_source(p, &c)?;
         moved.push((i, c));
@@ -1910,16 +1847,23 @@ pub fn furthest(from: i64, dir: i64, fits: impl Fn(i64) -> bool) -> i64 {
 }
 
 pub fn audio_roll_room(p: &Project, id: &str, edge: Edge) -> Result<(i64, i64)> {
-    let e = audio_edit(p, id, edge)?;
-    let fits = |by: i64| (e.least..=e.most).contains(&by) && audio_moved(p, &e, by).is_ok();
-    Ok((furthest(0, -1, fits), furthest(0, 1, fits)))
+    let (mut least, mut most) = (i64::MIN, i64::MAX);
+    for s in sound_clips(p, id)? {
+        let e = audio_edit(p, &s, edge)?;
+        let fits = |by: i64| (e.least..=e.most).contains(&by) && audio_moved(p, &e, by).is_ok();
+        least = least.max(furthest(0, -1, fits));
+        most = most.min(furthest(0, 1, fits));
+    }
+    Ok((least, most))
 }
 
 pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
-    let e = audio_edit(p, id, edge)?;
     let (least, most) = audio_roll_room(p, id, edge)?;
-    for (i, c) in audio_moved(p, &e, delta.clamp(least, most))? {
-        p.tracks[e.ti].clips[i] = c;
+    for s in sound_clips(p, id)? {
+        let e = audio_edit(p, &s, edge)?;
+        for (i, c) in audio_moved(p, &e, delta.clamp(least, most))? {
+            p.tracks[e.ti].clips[i] = c;
+        }
     }
     Ok(())
 }
@@ -2019,7 +1963,6 @@ fn gap_after(p: &mut Project, id: &str, frames: i64, ripple: Option<bool>) -> Re
     }
     let before = (ti == main_index(p)).then(|| Before::of(p));
     shift_from(p, ti, end, frames);
-    fix_audio(p, ti);
     if let Some(before) = before {
         follow::follow(p, &before, &Edit::default());
     }
@@ -2275,16 +2218,29 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
     }
+    let sound = props.muted.is_some()
+        || props.gain_db.is_some()
+        || props.pan.is_some()
+        || props.pan_on.is_some()
+        || props.equalizer.is_some()
+        || props.dialogue_leveler.is_some()
+        || props.compressor.is_some()
+        || props.noise_reduction.is_some()
+        || props.voice_isolation.is_some()
+        || props.voice_isolation_on.is_some();
+    let heard = match sound {
+        true => linked::sounds(p, ids),
+        false => Vec::new(),
+    };
     if props.gain_db.is_some() {
-        keyframes::check_keyed_gain(p, ids, props.at)?;
+        keyframes::check_keyed_gain(p, &heard, props.at)?;
     }
     if props.pan.is_some() {
-        keyframes::check_keyed_pan(p, ids, props.at)?;
+        keyframes::check_keyed_pan(p, &heard, props.at)?;
     }
     for id in ids {
         let (ti, ci) = locate(p, id)?;
         let c = &mut p.tracks[ti].clips[ci];
-        let at = props.at.map(|t| c.content_at(t));
         if let Some(e) = props.enabled {
             c.enabled = e;
         }
@@ -2306,16 +2262,11 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             }
             c.render_cache = r;
         }
-        if props.muted.is_some()
-            || props.gain_db.is_some()
-            || props.pan.is_some()
-            || props.pan_on.is_some()
-            || props.equalizer.is_some()
-            || props.dialogue_leveler.is_some()
-            || props.compressor.is_some()
-            || props.noise_reduction.is_some()
-            || props.voice_isolation.is_some()
-            || props.voice_isolation_on.is_some()
+    }
+    for id in &heard {
+        let (ti, ci) = locate(p, id)?;
+        let c = &mut p.tracks[ti].clips[ci];
+        let at = props.at.map(|t| c.content_at(t));
         {
             let a = c
                 .audio
@@ -3270,7 +3221,6 @@ pub fn cut_to(clips: &[TrackClip], len: i64) -> Vec<TrackClip> {
             if c.clip.end() > end {
                 c.clip.duration = end - c.clip.start;
                 if let Some(a) = c.clip.audio.as_mut() {
-                    a.tail = 0;
                     cut(&mut a.effects, false, true);
                 }
                 cut(&mut c.clip.effects, false, true);
@@ -3298,7 +3248,6 @@ pub fn paste_insert(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec
         }
         split_at(p, ti, at);
         shift_from(p, ti, at, len);
-        fix_audio(p, ti);
     }
     subtitles::remap(p, |x| Some(if x >= at { x + len } else { x }));
     paste(p, clips, at)
@@ -3373,6 +3322,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         if !clip.video {
             clip.picture = None;
         }
+        if on_video {
+            clip.audio = None;
+        }
         if let Some(why) = motion::violation(&clip) {
             return Err(Error::invalid(format!(
                 "pasted clip has an invalid motion path: {why}"
@@ -3384,15 +3336,10 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
                 p.tracks[ti].id
             )));
         }
-        if let Some(a) = clip.audio.as_mut() {
-            a.head = 0;
-            a.tail = 0;
-        }
         clear_range(p, ti, start, start + clip.duration);
         ids.push(clip.id.clone());
         place(p, ti, clip);
     }
-    fix_all(p);
     Ok(ids)
 }
 

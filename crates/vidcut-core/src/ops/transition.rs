@@ -185,90 +185,67 @@ fn checked(kind: &PictureTransition) -> Result<()> {
     Ok(())
 }
 
-fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
-    if sound {
-        c.audio_range()
-            .or_else(|| c.compound.is_some().then(|| (c.start, c.end())))
-    } else {
-        c.video.then(|| (c.start, c.end()))
-    }
+fn is_sound(p: &Project, ti: usize) -> bool {
+    p.tracks[ti].kind == TrackKind::Audio
 }
 
-fn edits(p: &Project, ti: usize, sound: bool) -> Vec<i64> {
+fn edits(p: &Project, ti: usize) -> Vec<i64> {
     let mut points: Vec<i64> = p.tracks[ti]
         .clips
         .iter()
-        .filter_map(|c| span(c, sound))
-        .flat_map(|(a, b)| [a, b])
+        .flat_map(|c| [c.start, c.end()])
         .collect();
     points.sort_unstable();
     points.dedup();
     points
 }
 
-fn nearest(p: &Project, ti: usize, sound: bool, at: i64) -> Option<i64> {
-    edits(p, ti, sound)
+fn nearest(p: &Project, ti: usize, at: i64) -> Option<i64> {
+    edits(p, ti)
         .into_iter()
         .min_by_key(|&e| ((e - at).abs(), e))
 }
 
-fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option<String>) {
+fn sides(p: &Project, ti: usize, e: i64) -> (Option<String>, Option<String>) {
     let clips = &p.tracks[ti].clips;
     let find = |end: bool| {
         clips
             .iter()
-            .find(|c| span(c, sound).is_some_and(|(a, b)| if end { b == e } else { a == e }))
+            .find(|c| if end { c.end() == e } else { c.start == e })
             .map(|c| c.id.clone())
     };
     (find(true), find(false))
 }
 
-fn room(
-    p: &Project,
-    ti: usize,
-    sound: bool,
-    e: i64,
-    from: Option<&str>,
-    to: Option<&str>,
-) -> (i64, i64) {
+fn room(p: &Project, ti: usize, e: i64, from: Option<&str>, to: Option<&str>) -> (i64, i64) {
     let clips = &p.tracks[ti].clips;
     let clip = |id: Option<&str>| id.and_then(|id| clips.iter().find(|c| c.id == id));
     let (f, g) = (clip(from), clip(to));
-    let spans: Vec<(i64, i64)> = clips.iter().filter_map(|c| span(c, sound)).collect();
-    let free_before = e - spans
+    let free_before = e - clips
         .iter()
-        .map(|s| s.1)
+        .map(Clip::end)
         .filter(|&b| b <= e)
         .max()
         .unwrap_or(0);
-    let free_after = spans
+    let free_after = clips
         .iter()
-        .map(|s| s.0)
+        .map(|c| c.start)
         .filter(|&a| a >= e)
         .min()
         .map_or(i64::MAX / 4, |a| a - e);
-    let moved = |c: &Clip, tail: bool| match c.audio.as_ref().filter(|_| sound) {
-        Some(a) if tail => -a.tail,
-        Some(a) => a.head,
-        None => 0,
-    };
     let media = |c: &Clip, tail: bool| match p.source_range(c) {
         _ if c.is_generator() => i64::MAX / 4,
-        Some(have) => c.room(tail, have) + moved(c, tail),
+        Some(have) => c.room(tail, have),
         None => 0,
     };
-    let before = match f {
-        Some(f) => span(f, sound).map_or(0, |(a, _)| e - a),
-        None => free_before,
-    }
-    .min(g.map_or(i64::MAX / 4, |g| media(g, false)));
-    let after = match g {
-        Some(g) => span(g, sound).map_or(0, |(_, b)| b - e),
-        None => free_after,
-    }
-    .min(f.map_or(i64::MAX / 4, |f| media(f, true)));
+    let before = f
+        .map_or(free_before, |f| e - f.start)
+        .min(g.map_or(i64::MAX / 4, |g| media(g, false)));
+    let after = g
+        .map_or(free_after, |g| g.end() - e)
+        .min(f.map_or(i64::MAX / 4, |f| media(f, true)));
     let (mut before, mut after) = (before, after);
-    for t in transitions::playing(p, &p.tracks[ti], sound, |_| true) {
+    for t in transitions::playing(p, &p.tracks[ti], |_| true) {
         let (w0, w1) = t.frames;
         if w0 + t.transition.before == e {
         } else if w1 <= e {
@@ -282,15 +259,16 @@ fn room(
     (before.max(0), after.max(0))
 }
 
-pub fn room_at(p: &Project, track: &str, at: i64, sound: bool) -> Option<(i64, i64)> {
+pub fn room_at(p: &Project, track: &str, at: i64) -> Option<(i64, i64)> {
     let ti = p.track_index(track)?;
-    let (from, to) = sides(p, ti, sound, at);
-    Some(room(p, ti, sound, at, from.as_deref(), to.as_deref()))
+    let (from, to) = sides(p, ti, at);
+    Some(room(p, ti, at, from.as_deref(), to.as_deref()))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Made {
     pub id: String,
+    pub track: String,
     pub sound: bool,
     pub cut: i64,
     pub before: i64,
@@ -299,36 +277,30 @@ pub struct Made {
 
 type Plan = (Option<String>, Option<String>, i64, i64);
 
-fn plan(p: &Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<Plan> {
-    let (from, to) = sides(p, ti, sound, e);
+fn plan(p: &Project, ti: usize, e: i64, shape: Shape) -> Option<Plan> {
+    let (from, to) = sides(p, ti, e);
     if from.is_none() && to.is_none() {
         return None;
     }
     let (want_before, want_after) = wanted(shape, from.is_some(), to.is_some())?;
-    let (room_before, room_after) = room(p, ti, sound, e, from.as_deref(), to.as_deref());
+    let (room_before, room_after) = room(p, ti, e, from.as_deref(), to.as_deref());
     let (before, after) = (want_before.min(room_before), want_after.min(room_after));
     (before + after > 0).then_some((from, to, before, after))
 }
 
 pub fn planned(p: &Project, track: &str, e: i64, shape: Shape) -> Option<(i64, i64)> {
     let ti = p.track_index(track)?;
-    plan(p, ti, false, e, shape).map(|(_, _, before, after)| (before, after))
+    plan(p, ti, e, shape).map(|(_, _, before, after)| (before, after))
 }
 
-fn put(
-    p: &mut Project,
-    ti: usize,
-    sound: bool,
-    e: i64,
-    shape: Shape,
-    kind: &PictureTransition,
-) -> Option<Made> {
-    let (from, to, before, after) = plan(p, ti, sound, e, shape)?;
+fn put(p: &mut Project, ti: usize, e: i64, shape: Shape, kind: &PictureTransition) -> Option<Made> {
+    let sound = is_sound(p, ti);
+    let (from, to, before, after) = plan(p, ti, e, shape)?;
     let cuts = Cuts::of(p, &p.tracks[ti]);
     let gone: Vec<bool> = p.tracks[ti]
         .transitions
         .iter()
-        .map(|x| x.sound == sound && cuts.place(p, x) == Some(e))
+        .map(|x| cuts.place(p, x) == Some(e))
         .collect();
     let old = p.tracks[ti].transitions.iter().zip(&gone).find(|g| *g.1);
     let kind = match old {
@@ -337,7 +309,6 @@ fn put(
     };
     let mut t = Transition {
         id: String::new(),
-        sound,
         from,
         to,
         before,
@@ -356,6 +327,7 @@ fn put(
     p.tracks[ti].transitions.push(t);
     Some(Made {
         id,
+        track: p.tracks[ti].id.clone(),
         sound,
         cut: e,
         before,
@@ -395,28 +367,20 @@ pub fn dissolve(
     let ti = p
         .track_index(track)
         .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
-    let pictures = picture && p.tracks[ti].kind == TrackKind::Video;
     let mut made = Vec::new();
     if all {
-        for band in [false, true] {
-            if (band && !sound) || (!band && !pictures) {
-                continue;
-            }
-            for e in edits(p, ti, band) {
-                if let (Some(_), Some(_)) = sides(p, ti, band, e)
-                    && let Some(m) = put(p, ti, band, e, shape, kind)
-                {
-                    made.push(m);
-                }
+        for e in edits(p, ti) {
+            if let (Some(_), Some(_)) = sides(p, ti, e) {
+                made.extend(at_edit(p, ti, picture, sound, e, shape, kind));
             }
         }
         return Ok(made);
     }
-    let e = nearest(p, ti, !pictures, at)
+    let e = nearest(p, ti, at)
         .ok_or_else(|| Error::invalid(format!("{track} has no edit to dissolve")))?;
-    let made = at_edit(p, ti, pictures, sound, e, shape, kind);
+    let made = at_edit(p, ti, picture, sound, e, shape, kind);
     if made.is_empty() {
-        let (from, to) = sides(p, ti, !pictures, e);
+        let (from, to) = sides(p, ti, e);
         return Err(Error::invalid(
             if wanted(shape, from.is_some(), to.is_some()).is_none() {
                 "the edit has no clip on that side to dissolve"
@@ -431,8 +395,11 @@ pub fn dissolve(
 pub fn cross_fade_joins(p: &mut Project, joins: &[(usize, i64)]) -> Vec<Made> {
     let mut made = Vec::new();
     for &(ti, e) in joins {
+        if !is_sound(p, ti) {
+            continue;
+        }
         let shape = Shape::Length(2, Align::Center);
-        let Some(m) = put(p, ti, true, e, shape, &PictureTransition::Dissolve) else {
+        let Some(m) = put(p, ti, e, shape, &PictureTransition::Dissolve) else {
             continue;
         };
         if let Some(t) = p.tracks[ti].transitions.iter_mut().find(|t| t.id == m.id) {
@@ -471,26 +438,23 @@ pub fn dissolve_clips(
     kind: &PictureTransition,
 ) -> Result<Vec<Made>> {
     checked(kind)?;
-    let beside_picture =
-        |c: &Clip| picture && sound && !c.video && p.tied(&c.id).iter().any(|x| clips.contains(x));
-    let mut points: Vec<(usize, bool, i64)> = p
+    let beside_picture = |c: &Clip| !c.video && p.tied(&c.id).iter().any(|x| clips.contains(x));
+    let mut points: Vec<(usize, i64)> = p
         .tracks
         .iter()
         .enumerate()
         .flat_map(|(ti, t)| {
-            let pictures = picture && t.kind == TrackKind::Video;
             t.clips
                 .iter()
                 .filter(|c| clips.contains(&c.id) && !beside_picture(c))
-                .filter_map(move |c| span(c, !pictures))
-                .flat_map(move |(a, b)| [(ti, pictures, a), (ti, pictures, b)])
+                .flat_map(move |c| [(ti, c.start), (ti, c.end())])
         })
         .collect();
     points.sort_unstable();
     points.dedup();
     let mut made = Vec::new();
-    for &(ti, pictures, e) in &points {
-        made.extend(at_edit(p, ti, pictures, sound, e, shape, kind));
+    for &(ti, e) in &points {
+        made.extend(at_edit(p, ti, picture, sound, e, shape, kind));
     }
     if made.is_empty() {
         return Err(Error::invalid(
@@ -503,39 +467,59 @@ pub fn dissolve_clips(
 fn at_edit(
     p: &mut Project,
     ti: usize,
-    pictures: bool,
+    picture: bool,
     sound: bool,
     e: i64,
     shape: Shape,
     kind: &PictureTransition,
 ) -> Vec<Made> {
+    if is_sound(p, ti) {
+        return match sound {
+            true => put(p, ti, e, shape, kind).into_iter().collect(),
+            false => Vec::new(),
+        };
+    }
     let mut made = Vec::new();
-    let sound_e = if pictures {
-        let (from, to) = sides(p, ti, false, e);
-        made.extend(put(p, ti, false, e, shape, kind));
-        sound_edit(p, ti, from.as_deref(), to.as_deref())
-    } else {
-        Some(e)
-    };
-    if sound && let Some(e) = sound_e {
-        made.extend(put(p, ti, true, e, shape, kind));
+    let (from, to) = sides(p, ti, e);
+    if picture {
+        made.extend(put(p, ti, e, shape, kind));
+    }
+    if sound {
+        for (ai, e) in sound_edits(p, from.as_deref(), to.as_deref()) {
+            made.extend(put(p, ai, e, shape, kind));
+        }
     }
     made
 }
 
-fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> Option<i64> {
-    let clips = &p.tracks[ti].clips;
-    let range = |id: Option<&str>| {
-        id.and_then(|id| clips.iter().find(|c| c.id == id))
-            .filter(|c| c.audio.is_some() || !c.video || !p.tied(&c.id).is_empty())
-            .and_then(|c| span(c, true))
+fn sound_edits(p: &Project, from: Option<&str>, to: Option<&str>) -> Vec<(usize, i64)> {
+    let on = |id: Option<&str>, ti: usize| {
+        let id = id?;
+        let tied = p.tied(id);
+        p.tracks[ti].clips.iter().find(|c| tied.contains(&c.id))
     };
-    match (range(from), range(to), from, to) {
-        (Some((_, b)), Some((a, _)), ..) => (a == b).then_some(a),
-        (Some((_, b)), None, _, None) => Some(b),
-        (None, Some((a, _)), None, _) => Some(a),
-        _ => None,
-    }
+    (0..p.tracks.len())
+        .filter(|&ti| is_sound(p, ti))
+        .filter_map(|ti| {
+            let e = match (on(from, ti), on(to, ti)) {
+                (Some(f), Some(g)) => (f.end() == g.start).then_some(g.start)?,
+                (Some(f), None) if sides(p, ti, f.end()).1.is_none() => f.end(),
+                (None, Some(g)) if sides(p, ti, g.start).0.is_none() => g.start,
+                _ => return None,
+            };
+            Some((ti, e))
+        })
+        .collect()
+}
+
+pub fn sound_paired(p: &Project, from: Option<&str>, to: Option<&str>) -> bool {
+    sound_edits(p, from, to).into_iter().any(|(ai, e)| {
+        let cuts = Cuts::of(p, &p.tracks[ai]);
+        p.tracks[ai]
+            .transitions
+            .iter()
+            .any(|t| cuts.place(p, t) == Some(e))
+    })
 }
 
 pub fn set_transition(
@@ -548,16 +532,15 @@ pub fn set_transition(
     let ti = p
         .track_index(track)
         .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
-    if p.tracks[ti].kind != TrackKind::Video {
+    if is_sound(p, ti) {
         return Err(Error::invalid(format!("{track} has no picture transition")));
     }
-    let e =
-        nearest(p, ti, false, at).ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
+    let e = nearest(p, ti, at).ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
     let cuts = Cuts::of(p, &p.tracks[ti]);
     let slot = p.tracks[ti]
         .transitions
         .iter()
-        .position(|t| !t.sound && cuts.place(p, t) == Some(e));
+        .position(|t| cuts.place(p, t) == Some(e));
     let Some(slot) = slot else {
         return Err(Error::invalid("the edit has no picture transition"));
     };
@@ -566,6 +549,7 @@ pub fn set_transition(
     *t.otio.make_mut() = otio(false, frames, kind);
     Ok(Made {
         id: t.id.clone(),
+        track: track.to_string(),
         sound: false,
         cut: e,
         before: t.before,
@@ -584,48 +568,50 @@ pub fn to_cut(
     let ti = p
         .track_index(track)
         .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
-    let keeps = |t: &Transition| if t.sound { !sound } else { !picture };
-    let gone: Vec<bool> = if all {
-        p.tracks[ti].transitions.iter().map(|t| !keeps(t)).collect()
-    } else {
-        let video = p.tracks[ti].kind == TrackKind::Video && picture;
-        let e = nearest(p, ti, !video, at)
-            .ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
-        let (from, to) = sides(p, ti, !video, e);
+    let own = if is_sound(p, ti) { sound } else { picture };
+    let points: Vec<i64> = match all {
+        true => edits(p, ti),
+        false => {
+            vec![nearest(p, ti, at).ok_or_else(|| Error::invalid(format!("{track} has no edit")))?]
+        }
+    };
+    let mut places: Vec<(usize, i64)> = Vec::new();
+    for e in points {
+        if own {
+            places.push((ti, e));
+        }
+        if sound && !is_sound(p, ti) {
+            let (from, to) = sides(p, ti, e);
+            places.extend(sound_edits(p, from.as_deref(), to.as_deref()));
+        }
+    }
+    let mut ids = Vec::new();
+    for ti in 0..p.tracks.len() {
         let cuts = Cuts::of(p, &p.tracks[ti]);
-        let sound_e = if video {
-            sound_edit(p, ti, from.as_deref(), to.as_deref())
-        } else {
-            Some(e)
-        };
-        p.tracks[ti]
+        let gone: Vec<bool> = p.tracks[ti]
             .transitions
             .iter()
             .map(|t| {
-                let at = cuts.place(p, t);
-                let here = if t.sound {
-                    at.is_some() && at == sound_e
-                } else {
-                    at == Some(e)
-                };
-                here && !keeps(t)
+                cuts.place(p, t)
+                    .is_some_and(|at| places.contains(&(ti, at)))
             })
-            .collect()
-    };
-    let ids: Vec<String> = p.tracks[ti]
-        .transitions
-        .iter()
-        .zip(&gone)
-        .filter(|(_, g)| **g)
-        .map(|(t, _)| t.id.clone())
-        .collect();
+            .collect();
+        ids.extend(
+            p.tracks[ti]
+                .transitions
+                .iter()
+                .zip(&gone)
+                .filter(|(_, g)| **g)
+                .map(|(t, _)| t.id.clone()),
+        );
+        let mut gone = gone.into_iter();
+        p.tracks[ti]
+            .transitions
+            .retain(|_| !gone.next().unwrap_or(false));
+    }
     if ids.is_empty() {
         return Err(Error::invalid("no transition there to take away"));
     }
-    let mut gone = gone.into_iter();
-    p.tracks[ti]
-        .transitions
-        .retain(|_| !gone.next().unwrap_or(false));
     Ok(ids)
 }
 
@@ -681,7 +667,7 @@ mod tests {
             json!({"at": 50, "transition": wipe}),
         );
         let p = f.editor.project();
-        let t = p.track("V1").unwrap().transitions.iter().find(|t| !t.sound);
+        let t = p.track("V1").unwrap().transitions.first();
         assert_eq!(
             t.and_then(crate::otio::transitions::kind_of),
             Some(crate::model::PictureTransition::Wipe {
@@ -705,7 +691,7 @@ mod tests {
             json!({"at": 50, "transition": dip}),
         );
         let p = f.editor.project();
-        let t = p.track("V1").unwrap().transitions.iter().find(|t| !t.sound);
+        let t = p.track("V1").unwrap().transitions.first();
         assert_eq!(
             t.and_then(crate::otio::transitions::kind_of),
             Some(crate::model::PictureTransition::DipToColor { color: [255, 0, 0] })
@@ -800,7 +786,7 @@ mod tests {
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
         f.append("m1", 100, 150);
-        let r = req(&mut f, "edit.dissolve", json!({"at": 0, "clips": ["c2"]}));
+        let r = req(&mut f, "edit.dissolve", json!({"at": 0, "clips": ["c3"]}));
         assert_eq!(
             cuts(&r),
             [(false, 50), (true, 50), (false, 100), (true, 100)]
@@ -812,7 +798,7 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
-        let r = req(&mut f, "edit.dissolve", json!({"clips": ["c1", "c2"]}));
+        let r = req(&mut f, "edit.dissolve", json!({"clips": ["c1", "c3"]}));
         assert_eq!(
             cuts(&r),
             [
@@ -907,11 +893,11 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m1", 100, 150);
-        f.ok(json!({"method": "edit.move", "params": {"clips": "c2", "to": "20f", "track": "V2"}}));
+        f.ok(json!({"method": "edit.move", "params": {"clips": "c3", "to": "20f", "track": "V2"}}));
         let r = req(
             &mut f,
             "edit.dissolve",
-            json!({"clips": ["c2"], "sound": false}),
+            json!({"clips": ["c3"], "sound": false}),
         );
         assert_eq!(made(&r), [(false, 20, 0, 25), (false, 70, 25, 0)]);
     }
@@ -1049,13 +1035,7 @@ mod tests {
             json!({"at": 50, "transition": {"type": "wipe", "angle": 90}}),
         );
         let p = f.editor.project();
-        let t = p
-            .track("V1")
-            .unwrap()
-            .transitions
-            .iter()
-            .find(|t| !t.sound)
-            .unwrap();
+        let t = p.track("V1").unwrap().transitions.first().unwrap();
         assert_eq!(
             crate::otio::transitions::wipe_of(t).map(|w| w.angle),
             Some(90)
@@ -1132,10 +1112,7 @@ mod tests {
         f.ok(serde_json::json!({"method": "edit.audio_roll", "params": roll}));
         let at = serde_json::json!({"at": "60f", "picture": false});
         f.ok(serde_json::json!({"method": "edit.dissolve", "params": at}));
-        let t = &f.editor.project().tracks[0].transitions;
-        assert_eq!(
-            (t.len(), t[0].sound, t[0].before, t[0].after),
-            (1, true, 10, 0)
-        );
+        let t = &f.editor.project().track("A1").unwrap().transitions;
+        assert_eq!((t.len(), t[0].before, t[0].after), (1, 10, 0));
     }
 }

@@ -261,12 +261,6 @@ fn written(m: &Media, locations: Locations) -> Media {
     }
 }
 
-fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
-    let (ra, rb) = c.audio_range()?;
-    let (s, e) = (ra.max(a), rb.min(b));
-    (e > s).then_some((s, e))
-}
-
 fn played<'a>(
     p: &'a Project,
     c: &'a Clip,
@@ -300,8 +294,7 @@ pub fn played_by(p: &Project, k: &Compound) -> Vec<String> {
 }
 
 pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
-    let within = c.start.max(a) < c.end().min(b);
-    (within && (c.video || c.is_block())) || audio_part(c, a, b).is_some()
+    c.start.max(a) < c.end().min(b)
 }
 
 fn shape_of(p: &Project, c: &Clip, m: Option<&Media>) -> picture::Shape {
@@ -871,9 +864,7 @@ fn export_with(
             .and_then(otio_clip_color)
     };
     let (mut video_tracks, mut audio_tracks) = (Vec::new(), Vec::new());
-    let mut groups: i64 = 0;
     let ties = ties(p, a, b);
-    let mut tied = HashMap::new();
     for t in &p.tracks {
         let (mut video, mut audio) = (Vec::new(), Vec::new());
         let (mut tv, mut ta) = (a, a);
@@ -895,23 +886,14 @@ fn export_with(
                 .unwrap_or_default();
             let (s, e) = (c.start.max(a), c.end().min(b));
             let shows = c.video && e > s;
-            let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
+            let sounds = c.audio.as_ref().map(|_| (s.max(ta), e));
             let sounds = sounds.filter(|(s, e)| e > s);
-            let group = match ties.get(c.id.as_str()) {
-                Some(&k) => Some(*tied.entry(k).or_insert_with(|| {
-                    groups += 1;
-                    groups
-                })),
-                None => (shows && sounds.is_some()).then(|| {
-                    groups += 1;
-                    groups
-                }),
-            };
+            let group = ties.get(c.id.as_str()).copied();
             if shows {
                 if s > tv {
                     video.push(gap(s - tv, rate));
                 }
-                if let Some(x) = transitions::head(p, &edits, c, false, s, &video, rate) {
+                if let Some(x) = transitions::head(p, &edits, c, s, &video, rate) {
                     video.push(x);
                 }
                 let mut meta = json!({ "clip": c.id, "media": c.media, "color": c.color });
@@ -920,27 +902,6 @@ fn export_with(
                 }
                 if let Some(x) = &c.picture {
                     meta["picture"] = json!(x);
-                }
-                if let Some(au) = &c.audio {
-                    meta["stream"] = json!(au.stream);
-                    meta["gain_db"] = json!(au.gain_db);
-                    meta["muted"] = json!(au.muted);
-                    write_sound_meta(&mut meta, au, c.content_at(s));
-                    if let Some(eq) = &au.equalizer {
-                        meta["equalizer"] = json!(eq);
-                    }
-                    if let Some(l) = &au.dialogue_leveler {
-                        meta["dialogue_leveler"] = json!(l);
-                    }
-                    if let Some(k) = &au.compressor {
-                        meta["compressor"] = json!(k);
-                    }
-                    if let Some(n) = &au.noise_reduction {
-                        meta["noise_reduction"] = json!(n);
-                    }
-                    if let Some(v) = au.voice_isolation {
-                        meta["voice_isolation"] = json!(v);
-                    }
                 }
                 if m.is_some_and(Media::is_still) {
                     meta["source_in"] = json!(c.source_at(s));
@@ -984,7 +945,7 @@ fn export_with(
                     own_pace(&mut it["metadata"][VIDCUT], c, s);
                 }
                 video.push(it);
-                if let Some(x) = transitions::tail(p, &edits, c, false, e, rate) {
+                if let Some(x) = transitions::tail(p, &edits, c, e, rate) {
                     video.push(x);
                 }
                 tv = e;
@@ -994,7 +955,7 @@ fn export_with(
                 if s > ta {
                     audio.push(gap(s - ta, rate));
                 }
-                if let Some(x) = transitions::head(p, &edits, c, true, s, &audio, rate) {
+                if let Some(x) = transitions::head(p, &edits, c, s, &audio, rate) {
                     audio.push(x);
                 }
                 let mut editor = json!({});
@@ -1023,7 +984,7 @@ fn export_with(
                     it["color"] = x;
                 }
                 audio.push(it);
-                if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
+                if let Some(x) = transitions::tail(p, &edits, c, e, rate) {
                     audio.push(x);
                 }
                 ta = e;
@@ -1032,7 +993,7 @@ fn export_with(
                 if s > ta {
                     audio.push(gap(s - ta, rate));
                 }
-                if let Some(x) = transitions::head(p, &edits, c, true, s, &audio, rate) {
+                if let Some(x) = transitions::head(p, &edits, c, s, &audio, rate) {
                     audio.push(x);
                 }
                 let mut meta = json!({
@@ -1071,7 +1032,7 @@ fn export_with(
                 if let Some(x) = media_in(p, c, m, s) {
                     editor["Media In"] = json!(x);
                 }
-                let whole = c.audio_range().expect("has audio");
+                let whole = (c.start, c.end());
                 let effects = with_speed(
                     c,
                     m.map(|m| p.media_limit(m)),
@@ -1097,7 +1058,7 @@ fn export_with(
                     it["color"] = x;
                 }
                 audio.push(it);
-                if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
+                if let Some(x) = transitions::tail(p, &edits, c, e, rate) {
                     audio.push(x);
                 }
                 ta = e;
@@ -1108,7 +1069,7 @@ fn export_with(
                     if s > ta {
                         audio.push(gap(s - ta, rate));
                     }
-                    if let Some(x) = transitions::head(p, &edits, c, true, s, &audio, rate) {
+                    if let Some(x) = transitions::head(p, &edits, c, s, &audio, rate) {
                         audio.push(x);
                     }
                     let effects = with_speed(
@@ -1123,7 +1084,7 @@ fn export_with(
                     tie(&mut it, k, group);
                     own_pace(&mut it["metadata"][VIDCUT], c, s);
                     audio.push(it);
-                    if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
+                    if let Some(x) = transitions::tail(p, &edits, c, e, rate) {
                         audio.push(x);
                     }
                     ta = e;
@@ -1168,10 +1129,6 @@ fn export_with(
             let picture = json!({ VIDCUT: meta, EDITOR: { "Locked": t.locked } });
             let name = named("Video", video_tracks.len() + 1);
             video_tracks.push(track(&name, "Video", video, t.video_enabled, picture));
-            if !audio.is_empty() {
-                let name = named("Audio", audio_tracks.len() + 1);
-                audio_tracks.push(track(&name, "Audio", audio, !t.muted, sound));
-            }
         } else {
             let name = named("Audio", audio_tracks.len() + 1);
             audio_tracks.push(track(&name, "Audio", audio, !t.muted, sound));
@@ -1491,7 +1448,7 @@ fn plain_reference(item: &Value) -> Option<Value> {
     Some(plain)
 }
 
-fn ties(p: &Project, a: i64, b: i64) -> HashMap<&str, &str> {
+fn ties(p: &Project, a: i64, b: i64) -> HashMap<&str, i64> {
     let mut by_link: HashMap<u32, Vec<&Clip>> = HashMap::new();
     for c in p
         .tracks
@@ -1503,20 +1460,11 @@ fn ties(p: &Project, a: i64, b: i64) -> HashMap<&str, &str> {
             by_link.entry(l).or_default().push(c);
         }
     }
-    let mut ties = HashMap::new();
-    for list in by_link.values() {
-        for c in list {
-            let group: Vec<&str> = list
-                .iter()
-                .filter(|o| o.tied_with(c))
-                .map(|o| o.id.as_str())
-                .collect();
-            if let Some(&first) = group.iter().min().filter(|_| group.len() > 1) {
-                ties.insert(c.id.as_str(), first);
-            }
-        }
-    }
-    ties
+    by_link
+        .into_iter()
+        .filter(|(_, list)| list.len() > 1)
+        .flat_map(|(l, list)| list.into_iter().map(move |c| (c.id.as_str(), i64::from(l))))
+        .collect()
 }
 
 pub(crate) fn is_compound_stack(v: &Value) -> bool {
@@ -1615,7 +1563,7 @@ pub struct ImportedClip {
     pub counted: Counted,
     pub video: bool,
     pub enabled: bool,
-    pub audio: Option<(i64, i64)>,
+    pub audio: bool,
     pub stream: u32,
     pub gain_db: f64,
     pub gain_keys: Vec<Keyframe>,
@@ -1711,7 +1659,7 @@ impl ImportedClip {
             counted: Counted::InItem,
             video: true,
             enabled: item["enabled"].as_bool().unwrap_or(true),
-            audio: None,
+            audio: false,
             stream: 0,
             gain_db: 0.0,
             gain_keys: Vec::new(),
@@ -1738,10 +1686,6 @@ impl ImportedClip {
             color: clip_color(item),
             own_color: kept_color(item),
         }
-    }
-
-    fn audio_range(&self) -> Option<(i64, i64)> {
-        self.audio.map(|(h, t)| (self.start + h, self.end() + t))
     }
 }
 
@@ -1783,20 +1727,25 @@ impl ImportedTrack {
                 .as_bool()
                 .or(editor["Locked"].as_bool())
                 .unwrap_or(false),
-            muted: meta["muted"].as_bool().unwrap_or(audio && !enabled),
-            solo: meta["solo"]
-                .as_bool()
-                .or(editor["SoloOn"].as_bool().filter(|_| audio))
-                .unwrap_or(false),
-            volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
-            voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
-            duck: serde_json::from_value(meta["duck"].clone()).ok(),
+            muted: audio && meta["muted"].as_bool().unwrap_or(!enabled),
+            solo: audio
+                && meta["solo"]
+                    .as_bool()
+                    .or(editor["SoloOn"].as_bool())
+                    .unwrap_or(false),
+            volume_db: meta["volume_db"].as_f64().filter(|_| audio).unwrap_or(0.0),
+            voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
+                .ok()
+                .filter(|_| audio),
+            duck: serde_json::from_value(meta["duck"].clone())
+                .ok()
+                .filter(|_| audio),
             dynamics: serde_json::from_value(meta["dynamics"].clone())
                 .ok()
-                .filter(|d| crate::dynamics::problem(d).is_none()),
+                .filter(|d| audio && crate::dynamics::problem(d).is_none()),
             equalizer: serde_json::from_value(meta["equalizer"].clone())
                 .ok()
-                .filter(|e| crate::equalizer::track::problem(e).is_none()),
+                .filter(|e| audio && crate::equalizer::track::problem(e).is_none()),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             render_cache: meta["render_cache"].as_bool().unwrap_or(true),
             name: match meta.get("name") {
@@ -2259,10 +2208,6 @@ fn warn(warnings: &mut Vec<String>, w: &str) {
     }
 }
 
-fn overlaps(a: (i64, i64), b: (i64, i64)) -> bool {
-    a.0 < b.1 && b.0 < a.1
-}
-
 fn timeline_rate(tl: &Value, tracks: &[&Value]) -> Option<f64> {
     let mut counts: Vec<(f64, usize)> = Vec::new();
     for item in tracks
@@ -2410,7 +2355,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let mut clips: Vec<ImportedClip> = Vec::new();
     let mut found = Vec::new();
     let mut settings: Vec<ImportedTrack> = Vec::new();
-    let mut named: Vec<String> = Vec::new();
     for (k, v) in video_tracks.iter().enumerate() {
         let id = format!("V{}", k + 1);
         settings.push(ImportedTrack::of(v, &id, false));
@@ -2488,71 +2432,28 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     let retime = picture::take_retime(&mut effects);
                     clip_markers(item, start, len, fps, &mut markers);
                     keys[i] = Some(clips.len());
-                    clips.push(ImportedClip {
-                        key: clips.len(),
-                        id: our_str(item, "clip"),
+                    let c = ImportedClip {
                         media_id: our_str(item, "media"),
-                        track: id.clone(),
                         media,
-                        name: item["name"].as_str().unwrap_or("").to_string(),
-                        start,
-                        duration: len,
                         source_in,
                         source_rest,
                         counted,
-                        video: true,
-                        enabled: item["enabled"].as_bool().unwrap_or(true),
-                        audio: None,
-                        stream: meta["stream"].as_u64().unwrap_or(0) as u32,
-                        gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
-                        gain_keys: our_keys(meta, "gain_keys").unwrap_or_default(),
-                        muted: meta["muted"].as_bool().unwrap_or(false),
-                        pan: meta["pan"].as_f64().unwrap_or(0.0),
-                        pan_on: meta["pan_on"].as_bool().unwrap_or(true),
-                        pan_keys: our_pan_keys(meta).unwrap_or_default(),
-                        compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
-                        noise_reduction: serde_json::from_value(meta["noise_reduction"].clone())
-                            .ok(),
-                        equalizer: serde_json::from_value(meta["equalizer"].clone())
-                            .ok()
-                            .filter(|e| crate::equalizer::problem(e).is_none()),
-                        dialogue_leveler: serde_json::from_value(meta["dialogue_leveler"].clone())
-                            .ok(),
-                        voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
-                            .ok(),
-                        link: link_group(item),
                         effects,
-                        audio_effects: Vec::new(),
-                        generator: None,
-                        title: None,
-                        title_from: None,
-                        adjustment: false,
                         picture: our_picture(item),
-                        compound: None,
                         speed,
                         retime,
-                        color: clip_color(item),
-                        own_color: kept_color(item),
-                    });
+                        ..ImportedClip::block(clips.len(), &id, item, (start, len), fps)
+                    };
+                    clips.push(c);
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
             }
         }
         transitions_of(between, &keys, false, fps, &mut found);
     }
-    let mut pictures: HashMap<String, (Vec<usize>, i64)> = HashMap::new();
-    for (i, c) in clips.iter().enumerate().filter(|(_, c)| c.video) {
-        let (list, longest) = pictures.entry(c.media.url.clone()).or_default();
-        list.push(i);
-        *longest = (*longest).max(c.duration);
-    }
-    for (list, _) in pictures.values_mut() {
-        list.sort_by_key(|&i| clips[i].start);
-    }
-    let mut foreign_audio = 0;
-    for a in &audio_tracks {
-        let hint = a["metadata"][VIDCUT]["track"].as_str().map(String::from);
-        let mut own: Option<String> = None;
+    for (n, a) in audio_tracks.iter().enumerate() {
+        let id = format!("A{}", n + 1);
+        settings.push(ImportedTrack::of(a, &id, true));
         let (items, between) = walk(a, fps, &mut warnings);
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
@@ -2567,20 +2468,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if stack {
                 our_skip(&mut speed, item);
             }
-            let x = scalar(speed.as_ref());
             if block {
                 clip_markers(item, start, len, fps, &mut markers);
-                let track = match &hint {
-                    Some(h) if h.starts_with('A') => h.clone(),
-                    _ => own
-                        .get_or_insert_with(|| {
-                            foreign_audio += 1;
-                            format!("A{foreign_audio}")
-                        })
-                        .clone(),
-                };
                 keys[i] = Some(clips.len());
-                let mut c = ImportedClip::block(clips.len(), &track, item, (start, len), fps);
+                let mut c = ImportedClip::block(clips.len(), &id, item, (start, len), fps);
                 c.video = false;
                 c.effects = effects;
                 c.speed = speed;
@@ -2610,240 +2501,101 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 }
             };
             clip_markers(item, start, len, fps, &mut markers);
-            let span = (start, start + len);
             let meta = &item["metadata"][VIDCUT];
-            let muted = item["enabled"].as_bool() == Some(false);
-            let link = link_group(item);
-            let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
             let gain_keys = our_keys(meta, "gain_keys").unwrap_or_else(|| effects::gain_keys(item));
             effects::drop_gain_keys(&mut effects);
-            let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
-            let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
-            let pan_on = meta["pan_on"].as_bool().or_else(|| effects::pan_on(item));
-            let pan_keys = our_pan_keys(meta).unwrap_or_else(|| effects::pan_keys(item));
             let equalizer = serde_json::from_value(meta["equalizer"].clone())
                 .ok()
                 .filter(|e| crate::equalizer::problem(e).is_none())
                 .or_else(|| effects::equalizer(item));
-            let dialogue_leveler = serde_json::from_value(meta["dialogue_leveler"].clone()).ok();
-            let compressor = serde_json::from_value(meta["compressor"].clone()).ok();
-            let noise_reduction = serde_json::from_value(meta["noise_reduction"].clone()).ok();
-            effects::drop_pan(&mut effects);
-            effects::drop_equalizer(&mut effects, equalizer.is_some());
-            let stream = meta["stream"]
-                .as_u64()
-                .map(|s| s as u32)
-                .or_else(|| editor_stream(item));
-            let pairs = |c: &ImportedClip| {
-                c.video
-                    && c.audio.is_none()
-                    && c.media.url == media.url
-                    && c.counted == counted
-                    && match (&c.speed, &speed) {
-                        (Some(a), Some(b)) if a.scalar().is_none() || b.scalar().is_none() => {
-                            a.sections == b.sections && a.skip - c.start == b.skip - start
-                        }
-                        _ => {
-                            (c.source_in as f64
-                                - x * c.start as f64
-                                - (source_in as f64 - x * start as f64))
-                                .abs()
-                                < 1.0
-                        }
-                    }
-                    && overlaps((c.start, c.end()), span)
-                    && match (c.link, link) {
-                        (Some(x), Some(y)) => x == y,
-                        _ => true,
-                    }
-            };
-            let owner = match &hint {
-                Some(h) if h.starts_with('A') => None,
-                _ => pictures.get(&media.url).and_then(|(list, longest)| {
-                    let end = list.partition_point(|&i| clips[i].start < span.1);
-                    list[..end]
-                        .iter()
-                        .rev()
-                        .take_while(|&&i| clips[i].start + longest > span.0)
-                        .copied()
-                        .filter(|&i| {
-                            hint.as_ref().is_none_or(|h| &clips[i].track == h) && pairs(&clips[i])
-                        })
-                        .min()
-                }),
-            };
-            if let Some(c) = owner.map(|i| &mut clips[i]) {
-                c.audio = Some((start - c.start, span.1 - c.end()));
-                c.muted |= muted;
-                if let Some(g) = gain {
-                    c.gain_db = g;
-                }
-                if !gain_keys.is_empty() {
-                    c.gain_keys = gain_keys;
-                }
-                if let Some(s) = stream {
-                    c.stream = s;
-                }
-                if voice_isolation.is_some() {
-                    c.voice_isolation = voice_isolation;
-                }
-                if let Some(pan) = pan {
-                    c.pan = pan;
-                }
-                if let Some(pan_on) = pan_on {
-                    c.pan_on = pan_on;
-                }
-                if !pan_keys.is_empty() {
-                    c.pan_keys = pan_keys;
-                }
-                if equalizer.is_some() {
-                    c.equalizer = equalizer;
-                }
-                if dialogue_leveler.is_some() {
-                    c.dialogue_leveler = dialogue_leveler;
-                }
-                if compressor.is_some() {
-                    c.compressor = compressor;
-                }
-                if noise_reduction.is_some() {
-                    c.noise_reduction = noise_reduction;
-                }
-                c.audio_effects = effects;
-                if c.speed.is_none() {
-                    c.speed = speed;
-                }
-                keys[i] = Some(c.key);
-                continue;
-            }
-            let track = match &hint {
-                Some(h) => h.clone(),
-                None => own
-                    .get_or_insert_with(|| {
-                        foreign_audio += 1;
-                        format!("A{foreign_audio}")
-                    })
-                    .clone(),
-            };
-            keys[i] = Some(clips.len());
-            clips.push(ImportedClip {
-                key: clips.len(),
-                id: our_str(item, "clip"),
+            let c = ImportedClip {
                 media_id: our_str(item, "media"),
-                track,
                 media,
-                name: item["name"].as_str().unwrap_or("").to_string(),
-                start,
-                duration: len,
                 source_in,
                 source_rest,
                 counted,
                 video: false,
                 enabled: true,
-                audio: Some((0, 0)),
-                stream: stream.unwrap_or(0),
-                gain_db: gain.unwrap_or(0.0),
+                audio: true,
+                stream: meta["stream"]
+                    .as_u64()
+                    .map(|s| s as u32)
+                    .or_else(|| editor_stream(item))
+                    .unwrap_or(0),
+                gain_db: meta["gain_db"]
+                    .as_f64()
+                    .or_else(|| effects::gain(item))
+                    .unwrap_or(0.0),
                 gain_keys,
-                muted,
-                pan: pan.unwrap_or(0.0),
-                pan_on: pan_on.unwrap_or(true),
-                pan_keys,
-                equalizer,
-                dialogue_leveler,
-                compressor,
-                noise_reduction,
-                voice_isolation,
-                link,
-                effects: Vec::new(),
-                audio_effects: effects,
-                generator: None,
-                title: None,
-                title_from: None,
-                adjustment: false,
-                picture: None,
-                compound: None,
+                muted: item["enabled"].as_bool() == Some(false),
+                pan: meta["pan"]
+                    .as_f64()
+                    .or_else(|| effects::pan(item))
+                    .unwrap_or(0.0),
+                pan_on: meta["pan_on"]
+                    .as_bool()
+                    .or_else(|| effects::pan_on(item))
+                    .unwrap_or(true),
+                pan_keys: our_pan_keys(meta).unwrap_or_else(|| effects::pan_keys(item)),
+                dialogue_leveler: serde_json::from_value(meta["dialogue_leveler"].clone()).ok(),
+                compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
+                noise_reduction: serde_json::from_value(meta["noise_reduction"].clone()).ok(),
+                voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
                 speed,
-                retime: crate::model::ClipRetime::Project,
-                color: clip_color(item),
-                own_color: kept_color(item),
+                ..ImportedClip::block(clips.len(), &id, item, (start, len), fps)
+            };
+            effects::drop_pan(&mut effects);
+            effects::drop_equalizer(&mut effects, equalizer.is_some());
+            keys[i] = Some(clips.len());
+            clips.push(ImportedClip {
+                equalizer,
+                audio_effects: effects,
+                ..c
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);
-        match (&hint, own) {
-            (Some(h), _) if h.starts_with('A') => {
-                named.push(h.clone());
-                settings.push(ImportedTrack::of(a, h, true));
-            }
-            (None, Some(id)) => settings.push(ImportedTrack::of(a, &id, true)),
-            _ => {}
-        }
-    }
-    if clips.is_empty() {
-        let foreign = audio_tracks
-            .iter()
-            .filter(|a| a["metadata"][VIDCUT]["track"].is_null());
-        for (n, a) in foreign.enumerate() {
-            settings.push(ImportedTrack::of(a, &format!("A{}", n + 1), true));
-        }
     }
     clips.sort_by(|x, y| x.track.cmp(&y.track).then(x.start.cmp(&y.start)));
-    let (mut dropped, mut gone) = (0, 0);
+    let mut gone = 0;
     let mut kept: Vec<ImportedClip> = Vec::new();
-    let (mut first, mut longest) = (0, 0);
-    for mut c in clips {
-        if kept.get(first).is_some_and(|k| k.track != c.track) {
-            (first, longest) = (kept.len(), 0);
-        }
-        let reach = |k: &ImportedClip| k.end().max(k.audio_range().map_or(k.end(), |a| a.1));
-        let near = |r: (i64, i64)| {
-            kept[first..]
-                .iter()
-                .rev()
-                .take_while(move |k| k.start + longest > r.0)
-        };
-        let span = (c.start, c.end());
-        let busy = |r: (i64, i64)| {
-            near(r).any(|k| {
-                (k.video && overlaps((k.start, k.end()), r))
-                    || k.audio_range().is_some_and(|a| overlaps(a, r))
-                    || (!k.video && overlaps((k.start, k.end()), r))
-            })
-        };
-        if !c.video && busy(span) {
-            gone += 1;
-            continue;
-        }
-        if c.video && near(span).any(|k| k.video && overlaps((k.start, k.end()), span)) {
-            gone += 1;
-            continue;
-        }
-        if let Some(r) = c.audio_range()
-            && near(r).any(|k| k.audio_range().is_some_and(|a| overlaps(a, r)))
+    for c in clips {
+        if kept
+            .last()
+            .is_some_and(|k| k.track == c.track && k.end() > c.start)
         {
-            dropped += 1;
-            c.audio = None;
-            c.audio_effects.clear();
+            gone += 1;
+            continue;
         }
-        longest = longest.max(reach(&c) - c.start);
         kept.push(c);
     }
     let mut clips = kept;
     clips.sort_by_key(|c| c.start);
-    if dropped > 0 {
-        warnings.push(format!(
-            "{dropped} clip(s) lost audio that overlapped other audio on their track"
-        ));
-    }
     if gone > 0 {
         warnings.push(format!(
             "{gone} clip(s) that overlapped others on their track were left out"
         ));
     }
-    settings.retain(|t| {
-        clips.is_empty()
-            || t.id.starts_with('V')
-            || named.contains(&t.id)
-            || clips.iter().any(|c| c.track == t.id)
-    });
+    if clips.iter().all(|c| c.link.is_none()) {
+        let mut next = 0;
+        for i in 0..clips.len() {
+            if !clips[i].audio {
+                continue;
+            }
+            let Some(j) = clips.iter().position(|v| {
+                v.video
+                    && !v.is_block()
+                    && v.media.url == clips[i].media.url
+                    && (v.start, v.duration) == (clips[i].start, clips[i].duration)
+            }) else {
+                continue;
+            };
+            let link = *clips[j].link.get_or_insert_with(|| {
+                next += 1;
+                next
+            });
+            clips[i].link = Some(link);
+        }
+    }
     let mut kept: Vec<String> = Vec::new();
     for c in &clips {
         let placed = c.has_picture() && picture::taken(&c.effects, c.picture.is_some());

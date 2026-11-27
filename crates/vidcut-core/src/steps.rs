@@ -897,8 +897,8 @@ fn bare_subtitles(p: Sheet<'_>) -> Vec<SubtitleTrack> {
 fn transitions(p: Sheet<'_>, sound: bool) -> impl Iterator<Item = (&'_ str, &'_ Transition)> {
     p.tracks
         .iter()
+        .filter(move |t| (t.kind == crate::model::TrackKind::Audio) == sound)
         .flat_map(|t| t.transitions.iter())
-        .filter(move |x| x.sound == sound)
         .map(|x| (x.id.as_str(), x))
 }
 
