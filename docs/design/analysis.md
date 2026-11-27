@@ -173,7 +173,11 @@ flowchart TD
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.
     - Thus a mask of 1.2 times the box of a path covers the face on each frame where the model found it.
-  - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
+  - Then each path holds its first box for `EDGE_SECS` before that box, and its last box for `EDGE_SECS` after that box (`widened`).
+    - Why: the model finds a face only when most of it shows. A face that comes into the picture or goes out of it shows for some frames with no box.
+    - A held box stops at a shot change and at the ends of the clip.
+    - Why a still box: on the test clips, it covers more of the face than a box that keeps moving.
+  - `FoundPath` gives the gaps of a path from its boxes before these two steps, and the mean of their scores. The held frames are no gaps.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.

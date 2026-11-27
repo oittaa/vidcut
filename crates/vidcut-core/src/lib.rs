@@ -82,6 +82,8 @@ mod images_tests;
 #[cfg(test)]
 mod looks_tests;
 #[cfg(test)]
+mod motion_tests;
+#[cfg(test)]
 mod ops_tests;
 #[cfg(test)]
 mod proxy_tests;

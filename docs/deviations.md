@@ -1512,7 +1512,9 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A vehicle is a bicycle, a car, a motorcycle, a bus, a train or a truck.
     - Find in the Inspector of a Tracker node finds each subject. The Tracker gets a pattern for each thing.
   - Each thing gets a pattern of its own, with its motion path.
-  - A found path lasts from its first sample to its last. Before and after them it has no box. Thus a mask that follows it ends where its thing is gone.
+  - A found path holds its first box for 0.2 seconds before the first frame where the model finds its thing. It holds its last box for 0.2 seconds after the last such frame.
+    - It holds no box over a shot change or outside the clip.
+    - Before and after that, it has no box. Thus a mask that follows it ends soon after its thing is gone.
   - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
   - A face has two models. `fast` is a small network on the CPU. `slow` is a larger network on the GPU.
@@ -1524,6 +1526,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The manual says about 150%. A zoom that changes for the same frame cannot be repeated.
   - Each model also finds other faces: in one wide shot, vidcut found seven small faces where Resolve framed only the left ones.
   - Text is the next thing that people hide: names, addresses, documents and screens.
+  - A face that comes into the picture shows for some frames before the model finds it. The held box blurs it there.
   - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 
 ## X175. Individual clips render at the frame rate of the timeline

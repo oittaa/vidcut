@@ -84,8 +84,6 @@ In this file, a path is never a track of the timeline.
 - **Mask keyframes, what is left:**
   - The points of a polygon take no keyframes. Resolve animates a polygon window (manual p. 3273).
   - `comp.set` refuses a connection of a Center with keyframes. Measure on the Fusion page what a connection does to a Center with keyframes.
-- **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
-  - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**
   - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).
     - Measured on 2026-11-10, on 16 threads, with the file decoded on the GPU:
@@ -110,7 +108,7 @@ In this file, a path is never a track of the timeline.
 - **The values of a find in the app:** try the Advanced fields of a Tracker in the app. The fields do not stay after the app closes.
 - **Text, the open parts:**
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
-  - Text that comes into the picture has no blur on its first frames, as a face has not.
+  - Text that comes into the picture: check that the held first box of its path covers it.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **The Tracker, what is left:** one pull request for each part.
   - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
