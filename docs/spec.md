@@ -7511,7 +7511,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
         - On a file with a rotation, some crops cut another side of the upright picture ([gotchas](gotchas.md#resolves-renders)).
       - vidcut uses the rule in the pixels of the upright file. It cuts the side that each crop names, on the upright picture.
         - The Inspector and the keyframe editor count a crop in source pixels × f, with no pixel aspect ratio.
-      - A crop with keyframes was not measured.
+      - A crop with keyframes, measured in Resolve Studio 21.2. Crop Left has keys of 0 at frame 2 and 10 at frame 20, set in the Inspector:
+        - At each frame, the cut is floor(v / f) source pixels. v is the value of the crop, linear between the keys.
+        - This fits all 24 frames on 4 files, in 96 renders:
+          - a square file in 1280 x 720 (f = 1) and in 1920 x 1080 (f = 1.5);
+          - a 9:8 file in 1280 x 720 (f = 0.9);
+          - a file with a rotation of 90 in 1280 x 720 (f = 0.5625).
+        - The cut rounds down. On the file with a rotation of 90, frame 3 has v / f = 0.988 and cuts 0. Frame 4 has 1.975 and cuts 1.
+        - A curve with an ease does not fit. At frame 4 of the square file in 1280 x 720, an ease gives a cut of 0, and the render cuts 1.
+      - vidcut reads the crop on each frame, and cuts whole source pixels in the same way.
       - The crop of a compound clip (measured in Resolve Studio 21.2, in timelines 1280, 1920 and 3840 wide):
         - It can hold one clip with no change of place, size or crop. Then its crop is a crop of that clip, in that clip's source pixels.
         - A 960 x 720 picture in a 1280 x 720 timeline starts at x = 160. Crop Left 10 on the compound clip moves that edge to x = 167. Crop Left 40 moves it to x = 190.
