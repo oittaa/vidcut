@@ -7477,11 +7477,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
         - A script set Anchor Point X 200 and Y 100 with `SetProperty`. The Edit Inspector then shows 200 and 100 on the 2:1 and 4:3 files.
         - The anchor is then 400 frame pixels right of the middle on the 2:1 file, and 266.67 on the 4:3 file. It is 100 frame pixels up.
         - `GetProperty` gives X in frame pixels: 400 and 266.67. On the square file, each value is 200.
-      - The move of the anchor point in a turn on these files is not settled. These cases have the anchor that the script set:
-        - With Rotation 30, the point at the anchor moves on the 2:1 file by 63.3 px right and 40.5 px up.
-        - On the 4:3 file it also moves. On the square file it stays. The 15 cases are in section PG of `fixtures/program/NOTES.md` in the test data.
-        - An anchor typed in the Inspector was not measured.
-      - vidcut keeps the anchor point in its place in each turn. The Inspector and the keyframe editor count Anchor Point X in source pixels × f.
+      - In a turn on these files, the anchor point moves. These facts are measured in Resolve Studio 21.2 on the 2:1, 4:3 and square files:
+        - With Rotation 30, the point at the anchor moves on the 2:1 file by 63.2 px right and 40.5 px up.
+        - On the 4:3 file it also moves. On the square file it stays.
+        - An anchor typed in the Inspector gives the same renders as the same anchor set by script.
+        - 15 cases fit P′ = c + M Z (P − c) + D (I − R Z) D⁻¹ d within 0.42 px.
+        - c is the middle of the frame, and d is the offset of the anchor point. Z is the Zoom.
+        - M is the turn of those pixels, R is the plain turn, and D is diag(PAR, 1).
+        - The cases are in sections PG and PH of `fixtures/program/NOTES.md` in the test data.
+      - vidcut keeps the anchor point in its place in each turn ([todo](todo/picture-fit.md)).
+      - The Inspector and the keyframe editor count Anchor Point X in source pixels × f.
       - Not measured: Pitch, Yaw and a flip with a Rotation on these files, and a file with pixels that are not square and a rotation.
     - The crop cuts the source picture, and what is left stays where it was.
     - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
