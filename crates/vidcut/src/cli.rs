@@ -574,6 +574,9 @@ const EXAMPLES: &[(&str, &str)] = &[
            vidcut comp set c3 Blur1 --pass-through true
            vidcut comp set c3 Blur1 --size 8 --frame 60
            vidcut comp set c3 Tracker1 --add-pattern
+           vidcut comp set c3 Tracker1 --add-point
+           vidcut comp set c3 Tracker1 --pattern 2 --search-width 0.2 --pattern-channel green
+           vidcut comp set c3 Tracker1 --adaptive-mode best_match --match-tolerance 0.3
            vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --pattern-offset 0,0.05
            vidcut comp set c3 Tracker1 --operation match_move --merge fg_only --reference-time end
            vidcut comp set c3 Ellipse1 --connect '{\"tracker\":\"Tracker1\",\"pattern\":1,\"size\":true}'",

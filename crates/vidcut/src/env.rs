@@ -80,12 +80,14 @@ impl AvEnv {
         download: bool,
     ) -> Result<(MeasureKey, Arc<Tracked>)> {
         let dir = paths::models_dir();
-        vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
+        if follow.point.is_none() {
+            vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
+        }
         let area = follow.area.map(|v| (v * 1e5).round() as i64);
         let picture = serde_json::to_vec(plan).unwrap_or_default();
         let key = format!(
             "{}-{}-{}-{}-{}-{}-{}-{}-{}-{}{}",
-            vidcut_av::tracking::name(),
+            vidcut_av::tracking::name(follow.point.as_ref()),
             vidcut_core::fingerprint::digest(&picture),
             follow.at,
             follow.frames.0,
