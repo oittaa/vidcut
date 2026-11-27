@@ -346,7 +346,8 @@ flowchart TD
   - `Shape::place` turns the point into the position of the picture, as `place::level` draws it. It uses the zoom, the anchor point, the rotation and the box of the Dynamic Zoom of the frame.
     - It first finds the offset of the picture with no rotation. Then `place::turned` turns that offset by the rotation.
     - A box of the Dynamic Zoom acts as a zoom of one over its size, about its middle.
-  - `reframe::axes` gives the axes that move, by the `ReframeMode`. Auto places both axes. Pan and Tilt keep the other axis at the point that the frame shows now.
+  - `reframe::axes` gives the axes that move, by the `ReframeMode`. Auto places both axes. Pan and Tilt place both axes too. Then they keep the other axis of the position at its value on that frame.
+    - Why the axes of the position: with a rotation of 10° or 90°, Pan Only of Resolve changes only Position X (4 files). Tilt Only changes only Position Y (4 files).
   - `moved` splits the frames into runs at each shot change where the move jumps by more than `tolerance` pixels. `kept` keeps the first and the last frame of each run. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
     - Why runs, not shots: on a picture with no room, each shot change gave two keyframes at the same place.
     - The pixels are those of a frame whose long side is `LONG` pixels. Why: Resolve gives the same keyframes at two sizes of each shape of the frame.

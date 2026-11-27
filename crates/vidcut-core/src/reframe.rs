@@ -269,8 +269,8 @@ pub fn moved(frames: &[Frame], shape: &Shape, rules: &Rules) -> Moved {
         .iter()
         .zip(&views)
         .map(|(f, v)| {
-            let now = shape.view(f);
-            shape.place(f, [0, 1].map(|i| if free[i] { v[i] } else { now[i] }))
+            let to = shape.place(f, *v);
+            [0, 1].map(|i| if free[i] { to[i] } else { f.now[i] })
         })
         .collect();
     let mut out = Moved {

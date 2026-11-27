@@ -5082,6 +5082,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With no room on either axis, Reframe sets three keyframes at 0 (12 clips). They are on the first frame, near the middle and on the last frame.
     - These are clips at Fit in 9:16, 1:1 and 16:9 timelines, and 4:3 clips at Crop in a 16:9 timeline (9 files).
   - Pan Only and Tilt Only keep the other axis at its start value, also when that axis has room (4 clips each).
+    - With a rotation of 10° or 90°, Pan Only changes only Position X, and Tilt Only changes only Position Y (4 files each).
   - The keyframes are at the frames where the move bends, not on a fixed grid. A clip of about 120 frames gets 3 to 41 keyframes.
   - The same shot gives the same keyframes at two sizes of the timeline, as fractions of the picture (134 clips).
     - The sizes are 1080×1920 and 2160×3840, 1920×1080 and 3840×2160, and 1080×1080 and 2160×2160.
@@ -5101,6 +5102,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - At 200 % speed, the move follows the source frames that show (4 clips). There are about twice as many keyframes as at 100 %.
   - At 50 % speed, the move follows the source frames on two of four clips. On two crowd clips, it is a median of 86 and 214 pixels from the move at 100 %.
     - There are a quarter to a half as many keyframes as at 100 %.
+  - With a speed ramp from 100 % to 200 %, the move follows the source frames that show (4 clips).
+    - It is nearer to the plain move at the source frame that shows than at the frame of the timeline.
   - Shots with no face move too. On one shot of a logo, the picture moves by up to 0.06 of its width.
   - On one clip, with Reference Point and the box moved to the right, the move follows the box.
   - On one clip, with Reference Point and a box on a man who walks out of the frame, the move follows the man. After he leaves, the move holds its last place.
@@ -5130,6 +5133,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip. On an axis with no room, the picture goes to the middle.
     - `pan` and `tilt` move only their own axis. On an axis with no room, the picture goes to the middle.
     - With `pan` or `tilt`, the axis that does not move keeps its value at each frame.
+    - These are the axes of the frame, also with a rotation. `pan` changes only Position X, and `tilt` only Position Y.
   - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
     - Why: the head of a person is at the top of the box.
     - The point that stands out goes to the middle of the frame too. Why: on 37 runs with room up and down, a higher view does not come nearer to the Tilt of Resolve.
@@ -5147,7 +5151,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With the short side, a 1:1 timeline gets a fifth fewer keyframes than in Resolve.
     - A picture with no room gets keyframes at the first and the last frame. Resolve also sets one near the middle. It does not change the picture.
   - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point, the rotation, the flips and the Dynamic Zoom of each frame, and they stay.
-    - With a rotation, the picture moves on its own axes, and the move turns with it. On each axis of the picture, the room is what the turned frame leaves.
+    - With a rotation and `auto`, the picture moves on its own axes, and the move turns with it. On each axis of the picture, the room is what the turned frame leaves.
     - Thus with a rotation of 90°, a 16:9 clip in a 9:16 timeline moves across too. With a small rotation, the move is that of the picture with no rotation, turned by the angle.
     - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of its box at that frame.
   - Each `picture.reframe` is one undo step, "Smart Reframe".
