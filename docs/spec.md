@@ -2399,18 +2399,27 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The mirror points are `−g / 2` and the last grid point, from the grid `g × i + g / 2`.
     - The grid across and the grid down are separate. Each follows the largest sigma of the three colors in its direction.
     - On 1920×1080, 3840×2160 and 1080×1920, `g` is 8 at a sigma of 580.8 pixels and 16 at 633.6 and 844.8. `g` is 32 at 1267.2.
+    - The float renders of Resolve Studio 21.2 show each step of `g` in the glow of the usual output:
+      - On 3840×2160, the first step is between a sigma of 595 and 597.5 pixels. The second step is between 1190 and 1200.
+      - On 1920×1080, the first step is between 590 and 600.
     - Only As Seen has no mirror. It multiplies the glow near each frame edge by a soft window.
   - In Input Alpha, measured on the Edit page, with the values that an effect added in the GUI has:
-    - `P` is the color multiplied by its alpha, and `a` is the alpha.
-    - Alpha Masks Sources: the mask is `a` × the mask of `P`.
+    - `c` is the color without its alpha, and `a` is the alpha.
+    - Alpha Masks Sources: the mask is `a` × the mask of `c`.
     - Usual Behavior gives the same picture as Alpha Masks Sources.
     - Alpha Is Source: the mask is `max(0, a − th + 0.001) / (1 − th + 0.001)`, with `th` the Alpha Level Threshold, for all three colors.
-    - The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
-    - Blend mixes the input and that output, with their alphas.
-    - With Use Alpha off, the mask takes the color without its alpha, times `a`. The output is `a` × the result on that color, and `a` stays.
-    - Invert Effect takes the negative of `P` and of the output, with an alpha of 1.
+    - The glow works on `c` as on an opaque picture. The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - Opacity and Blend mix `c` and that output. Opacity 0.5 and Blend 0.5 give the same bytes.
+    - With Use Alpha off, the mask is the same. The output is `a` × the result on `c`, and `a` stays.
+    - Measured in Resolve Studio 21.2 with float renders, on three pictures read as Premultiplied:
+      - One color with an alpha ramp, at Opacity 1 and 0.5.
+      - The spots picture, tinted (1, 0.8, 0.6), with bands of alpha 1, 0.5, 0.25 and 0. Opacity 1, 0.5 and 0.25 and Blend 0.5, over black and over white.
+      - The color bars and the spots, with rings of alpha 1, 0.7, 0.6, 0.45, 0.25 and 0.1. Opacity 1 and 0.5 and Blend 0.5, on 1280×720 and 1920×1080.
+      - The glow fits within 0.0025. The mask of the color multiplied by its alpha does not fit.
+    - Invert Effect takes the negative of the input and of the output, with an alpha of 1.
 - **Glow in vidcut:**
   - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - The colors are those of the renders. Thus over black, vidcut gives the same picture, within 0.0025 on the three pictures with alpha.
   - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
   - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
     - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
@@ -2418,20 +2427,22 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Follow FX Tracker changes nothing, as with no tracker in the renders.
     - Evolution and Seethe move the noise along a third direction. Seethe moves it at each frame from the start of the clip.
     - Each octave has its own scale in that direction, so Detail also changes the speed.
+  - The grid `g` doubles at each doubling of 596.25 pixels of sigma. This is the middle of the measured steps.
+    - The spots picture at the 8 measured sigmas agrees with the renders within 0.0006, except at 1200 on 3840×2160.
+  - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
+    - Measured in Resolve Studio 21.2 with float renders on the spots and the color bars pictures, at 1280×720.
+    - At Zoom 0.5, the renders and vidcut agree within 0.002. At Zoom 2, they agree away from the left edge of the frame.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - Source Recovery works on the sum of the glows.
-    - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
-    - The grid `g` doubles at each doubling of 600 pixels of sigma.
-      - The float renders at 3840×2160 put the first step across the frame between a sigma of 590 and 600.
-    - Opacity acts as Blend on a picture with alpha, as it does on an opaque one.
+    - Invert Effect on a picture with alpha takes the negative of `c`, as the mask does.
     - Color Filter values go from 0 to 1000000. No limit is measured.
-  - Cases of one picture each, measured in Resolve Studio 21.2 with float renders on 1280×720 and 1920×1080. They are not a rule yet ([todo](todo/effects-library.md)):
-    - An OpenEXR of the color (0.8, 0.4, 0.2) with an alpha ramp, read as Premultiplied, at Opacity 1 and 0.5.
-      - At an alpha of 0.1, 0.5 and 0.9, the output is the color without its alpha, plus Opacity × the glow. Its alpha is 1.
-      - The glow there is the alpha × the glow of the color without its alpha. Thus a mask of `P` does not fit this file.
-    - The spots picture at Zoom 2, with and without Secondary Glow.
-      - The parts of the picture outside the frame add to the glow and to the Secondary Glow. Near the left edge, they add up to 0.032.
-      - At Zoom 0.5, the Secondary Glow of the renders and of vidcut differ by 0.00004 on average.
+  - Cases measured in Resolve Studio 21.2 with float renders. They are not a rule yet ([todo](todo/effects-library.md)):
+    - The spots picture at Zoom 2, with and without Secondary Glow, and the color bars picture at Zoom 2 with Secondary Glow.
+      - The renders are brighter than vidcut only near the left edge of the frame. There they add up to 0.032.
+      - At the right, top and bottom edges, the renders and vidcut agree within 0.002.
+      - A glow of the whole zoomed picture, cut to the frame, does not give the renders.
+    - The spots picture at a sigma of 1200 on 3840×2160, just past the second step of `g`.
+      - The glow of the render is 0.8% darker than vidcut's at the left edge, and 0.15% darker at the right edge.
 - **Film Grain** (p. 3559). Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Film Grain Presets has 17 film stocks and Custom. 16mm S1 is the default.
   - Composite Type is Overlay, Multiply, Darken, Lighten, Screen, Subtract, Hard Light, Soft Light, Linear Light, Vivid Light, Pin Light or Custom.
@@ -2577,13 +2588,21 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - At a Sharpen Chroma of 1, Pr and Pb do not change, whatever the Details values are.
   - The output is R′ = y′ + Pr′ / 0.65, B′ = y′ + Pb′ / 0.552 and G′ = (y′ − 0.2126 R′ − 0.0722 B′) / 0.7152.
   - Nothing stops the colors at 0 or 1 before the output.
-  - It works on the premultiplied colors. The alpha does not change.
+  - It works on the color without its alpha. The change is multiplied by the alpha, and the alpha does not change.
+    - Measured in Resolve Studio 21.2 with float renders, on two pictures read as Premultiplied, on 1280×720 and 1920×1080:
+      - The spots picture, tinted (1, 0.8, 0.6), with bands of alpha 1, 0.5, 0.25 and 0, over black and over white.
+      - The color bars and the spots, with rings of alpha 1, 0.7, 0.6, 0.45, 0.25 and 0.1. The defaults, and Fine Details 3 with Sharpen Chroma 1.5.
+      - A model of this rule fits each render within 0.00006. A Sharpen of the color multiplied by its alpha is off by up to 0.2.
 - **Sharpen in vidcut:**
   - Measured in Resolve Studio 21.2 with float renders on 1280×720 and 1920×1080. vidcut gives the same pictures:
     - Blend 0.5 on the spots picture, within 0.00001.
     - A picture with alpha, read as Premultiplied, over black and over white, within 0.001.
+    - The two pictures with alpha bands and rings, within 0.0001.
     - Fine Details 3 with Sharpen Chroma 1.01, 1.25, 1.5 and 1.75 on a smooth color picture, within 0.00002. There Sharpen Chroma × g − 1 also works between 1 and 2.
-  - vidcut's own choice, not measured ([todo](todo/effects-library.md)): a viewer that draws fewer pixels than the frame uses the same numbers on the pixels that it draws.
+    - The color bars picture with hard color edges, at the defaults, Blend 0.5, Fine Details 3 and Sharpen Chroma 1.01, 1.5 and 2, within 0.00001.
+  - A picture with fewer pixels than the frame is the full-size Sharpen, scaled down.
+    - Measured in Resolve Studio 21.2 with float renders of a 1920×1080 timeline at 960×540 and 640×360, on the spots and the color bars pictures.
+    - vidcut uses the same numbers on the pixels that it draws. There its change is 9 to 55 times too strong ([todo](todo/effects-library.md)).
 - **Keyframes of effect values** (pp. 747, 1250–1251):
   - Each group of an applied effect in the Effects panel of the Inspector has a Keyframe button with Previous and Next buttons (p. 747).
   - The button adds or removes a keyframe at the playhead, on each parameter of the group (p. 747).

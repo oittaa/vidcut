@@ -1065,12 +1065,7 @@ fn vignette_bytes(shading: &Shading, effect: &Working) -> Vec<u8> {
 }
 
 fn sharpen_bytes(sharpening: &Sharpening, effect: &Working) -> Vec<u8> {
-    float_bytes(&[
-        effect.blend,
-        flag(effect.use_alpha),
-        flag(sharpening.colors()),
-        0.0,
-    ])
+    float_bytes(&[effect.blend, flag(sharpening.colors()), 0.0, 0.0])
 }
 
 pub(super) struct Texture {

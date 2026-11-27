@@ -1280,10 +1280,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X142. A Glow keeps the tracks below around a smaller picture
 
 - **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
+  - These are measurements in Resolve Studio 21.1.2 and 21.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
   - The output of a Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.
   - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
+  - The float renders of 21.2 on two pictures with alpha bands and rings have an alpha of 1 in each pixel. Over white they give the same picture as over black.
 - **vidcut:**
+  - The colors of the output are those of Resolve. Thus over black, vidcut gives the same picture.
   - The alpha of the output is the larger of the picture's alpha and the brightest color of the output.
   - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
 - **Why:**
