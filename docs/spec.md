@@ -7530,20 +7530,23 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
         - Zoom X 1.5 and Zoom Y 1 at Rotation 30 act in the picture's own axes, before the turn. This fits within 0.5 px on the square, 4:3 and 2:1 files.
       - vidcut turns the picture in this way, with the Zoom and the Stretch scaling.
         - Its Stretch fills the frame, also on pixels that are not square ([input scaling](#input-scaling-pp-292293)). Thus its p at Stretch has no pixel aspect ratio in it.
-      - The anchor point on these files, measured in Resolve Studio 21.2, in 1280 x 720 at Fit, with f = 1:
+      - The anchor point on these files, measured in Resolve Studio 21.2, in 1280 x 720 at Fit:
         - Anchor Point X counts in source pixels × f, as the crop. Anchor Point Y counts in frame pixels.
         - A script set Anchor Point X 200 and Y 100 with `SetProperty`. The Edit Inspector then shows 200 and 100 on the 2:1 and 4:3 files.
         - The anchor is then 400 frame pixels right of the middle on the 2:1 file, and 266.67 on the 4:3 file. It is 100 frame pixels up.
-        - `GetProperty` gives X in frame pixels: 400 and 266.67. On the square file, each value is 200.
-      - In a turn on these files, the anchor point moves. These facts are measured in Resolve Studio 21.2 on the 2:1, 4:3 and square files:
+        - On the 10:9 and 9:8 files, f is 0.9. X 200 is then 222.24 and 225.25 frame pixels right of the middle. Thus X × PAR gives the frame pixels.
+        - `GetProperty` gives X × PAR × W / w. W is the width of the timeline, and w is the width of the picture in the frame.
+        - Thus it gives 400 and 266.67 on the 2:1 and 4:3 files, and 284.73 and 284.44 on the 10:9 and 9:8 files. On the square file, each value is 200.
+      - In a turn on these files, the anchor point moves. These facts are measured in Resolve Studio 21.2 on the 2:1, 4:3, 10:9, 9:8 and square files:
         - With Rotation 30, the point at the anchor moves on the 2:1 file by 63.2 px right and 40.5 px up.
-        - On the 4:3 file it also moves. On the square file it stays.
+        - On the 4:3, 10:9 and 9:8 files it also moves. On the square file it stays.
         - An anchor typed in the Inspector gives the same renders as the same anchor set by script.
-        - 15 cases fit P′ = c + M Z (P − c) + D (I − R Z) D⁻¹ d within 0.42 px.
+        - 15 cases on the 2:1, 4:3 and square files fit P′ = c + M Z (P − c) + D (I − R Z) D⁻¹ d within 0.42 px.
         - c is the middle of the frame, and d is the offset of the anchor point. Z is the Zoom.
         - M is the turn of those pixels, R is the plain turn, and D is diag(PAR, 1).
-        - The cases are in sections PG and PH of `fixtures/program/NOTES.md` in the test data.
-      - vidcut keeps the anchor point in its place in each turn ([todo](todo/picture-fit.md)).
+        - The 10:9 and 9:8 files with f = 0.9 fit it within 0.64 px, at Rotation 30 and 60, with Zoom 0.5 and two anchors.
+        - The cases are in sections PG, PH and PJ of `fixtures/program/NOTES.md` in the test data.
+      - vidcut moves the anchor point in a turn in this way. In D, it uses p, the shape of one source pixel in the frame.
       - The Inspector and the keyframe editor count Anchor Point X in source pixels × f.
       - Not measured: Pitch, Yaw and a flip with a Rotation on these files, and a file with pixels that are not square and a rotation.
     - The crop cuts the source picture, and what is left stays where it was.

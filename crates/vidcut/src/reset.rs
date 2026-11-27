@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn kept_folders_and_an_open_history_stay_and_the_rest_goes() {
+    fn kept_folders_stay_and_the_rest_goes() {
         let root = tempfile::tempdir().unwrap();
         let r = root.path();
         tree(
@@ -175,13 +175,13 @@ mod tests {
             &[
                 "config/preferences.toml",
                 "config/presets/mine.toml",
+                "cache/models/a.bin",
                 "cache/thumbs/a.jpg",
-                "state/history/open.jsonl",
-                "state/history/closed.jsonl",
+                "state/folders.json",
                 "state/recent.json",
             ],
         );
-        let keep = [r.join("config/presets"), r.join("state/history/open.jsonl")];
+        let keep = [r.join("config/presets"), r.join("cache/models")];
         let (removed, kept) = plan(&dirs(r, "config", "cache", "state"), &keep).unwrap();
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
@@ -189,13 +189,10 @@ mod tests {
                 vec![
                     "config/preferences.toml".to_string(),
                     "cache/thumbs".into(),
-                    "state/history/closed.jsonl".into(),
+                    "state/folders.json".into(),
                     "state/recent.json".into(),
                 ],
-                vec![
-                    "config/presets".to_string(),
-                    "state/history/open.jsonl".into()
-                ],
+                vec!["config/presets".to_string(), "cache/models".into()],
             )
         );
     }
@@ -265,14 +262,14 @@ mod tests {
         let r = &vidcut_core::dirs::canonical(root.path()).unwrap();
         let outside = tempfile::tempdir().unwrap();
         let target = &vidcut_core::dirs::canonical(outside.path()).unwrap();
-        std::fs::create_dir_all(target.join("project")).unwrap();
-        std::fs::write(target.join("project/open.jsonl"), "hist").unwrap();
+        std::fs::create_dir_all(target.join("proxies")).unwrap();
+        std::fs::write(target.join("proxies/a.mkv"), "proxy").unwrap();
         std::fs::write(target.join("precious.txt"), "keep-me").unwrap();
         tree(r, &["cache/thumbs/a.jpg"]);
         symlink(target, r.join("cache/link")).unwrap();
         let (d, keep) = resolved(
             dirs(r, "config", "cache", "state"),
-            vec![target.join("project/open.jsonl")],
+            vec![target.join("proxies")],
         );
         let (removed, kept) = plan(&d, &keep).unwrap();
         assert_eq!(
@@ -291,8 +288,8 @@ mod tests {
             "keep-me"
         );
         assert_eq!(
-            std::fs::read_to_string(target.join("project/open.jsonl")).unwrap(),
-            "hist"
+            std::fs::read_to_string(target.join("proxies/a.mkv")).unwrap(),
+            "proxy"
         );
         assert!(!r.join("cache/thumbs").exists());
     }
@@ -325,20 +322,27 @@ mod tests {
     }
 
     #[test]
-    fn a_state_dir_inside_the_config_dir_keeps_its_open_histories() {
+    fn a_state_dir_inside_the_config_dir_goes_by_its_own_files() {
         let root = tempfile::tempdir().unwrap();
         let r = root.path();
         tree(
             r,
-            &["vidcut/preferences.toml", "vidcut/state/history/open.jsonl"],
+            &[
+                "vidcut/preferences.toml",
+                "vidcut/presets/mine.toml",
+                "vidcut/state/recent.json",
+            ],
         );
-        let keep = [r.join("vidcut/state/history/open.jsonl")];
+        let keep = [r.join("vidcut/presets")];
         let (removed, kept) = plan(&dirs(r, "vidcut", "cache", "vidcut/state"), &keep).unwrap();
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
             (
-                vec!["vidcut/preferences.toml".to_string()],
-                vec!["vidcut/state/history/open.jsonl".to_string()],
+                vec![
+                    "vidcut/preferences.toml".to_string(),
+                    "vidcut/state/recent.json".into(),
+                ],
+                vec!["vidcut/presets".to_string()],
             )
         );
     }

@@ -280,7 +280,7 @@ The audio device:
     - The Inspector counts a crop and Anchor Point X in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
     - `Placing::new` turns a picture with pixels that are not square as the measured turn of those pixels ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
       - It takes the shape of one source pixel from the `Extent` and the fitted size. Thus the viewer and an export turn the picture in the same way.
-      - The turn is about the anchor point, and that point stays in its place.
+      - The turn moves the point at the anchor as the measured turn does. On square pixels, that point stays in its place.
     - `Placing::new` counts a crop in whole pixels of the frame that it draws (`Fit::pixels`, [spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.

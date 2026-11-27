@@ -13,8 +13,8 @@ use crate::analysis::{
 use crate::change::Change;
 use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
-use crate::history::HistoryDb;
-use crate::lru::Lru;
+use crate::history::{Added, EntryCache, HistoryDb};
+use crate::lru::ByBytes;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
     Media, MediaInfo, Picture, Project, Proxy, Subject, SubtitleTrack, Timeline, Title, Track,
@@ -462,7 +462,7 @@ pub enum Moved {
 }
 
 pub const HISTORY_CAP: usize = 1 << 17;
-pub const HISTORY_ENTRIES_KEPT: usize = 256;
+pub const HISTORY_ENTRIES_BYTES: usize = 32 << 20;
 
 pub const EXTERNAL: &str = "Changed outside vidcut";
 
@@ -482,7 +482,7 @@ pub struct Editor {
     base_counts: (usize, usize),
     db_generation: u64,
     saved: Option<Project>,
-    entry_cache: Mutex<Lru<(u64, i64), Entry, HISTORY_ENTRIES_KEPT>>,
+    entry_cache: EntryCache,
     opened: Option<u64>,
 }
 
@@ -503,7 +503,7 @@ impl Editor {
             base_counts: (0, 0),
             db_generation: 0,
             saved: None,
-            entry_cache: Mutex::new(Lru::new()),
+            entry_cache: Mutex::new(ByBytes::new()),
             opened: None,
         }
     }
@@ -564,7 +564,7 @@ impl Editor {
         base_counts: (usize, usize),
         db_generation: u64,
         project: Project,
-        added: Vec<(i64, Entry)>,
+        added: Vec<Added>,
     ) {
         self.moved.clear();
         self.history = History::default();
@@ -576,9 +576,10 @@ impl Editor {
         self.saved = Some(project);
         if !added.is_empty() {
             let mut cache = self.entry_cache.lock().unwrap_or_else(|e| e.into_inner());
-            for (seq, entry) in added {
-                cache.insert((db_generation, seq), entry);
+            for (seq, entry, bytes) in added {
+                cache.insert((db_generation, seq), entry, bytes);
             }
+            cache.fit(HISTORY_ENTRIES_BYTES);
         }
     }
 

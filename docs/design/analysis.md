@@ -173,7 +173,11 @@ flowchart TD
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.
     - Thus a mask of 1.2 times the box of a path covers the face on each frame where the model found it.
-  - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
+  - Then each path holds its first box for `EDGE_SECS` before that box, and its last box for `EDGE_SECS` after that box (`widened`).
+    - Why: the model finds a face only when most of it shows. A face that comes into the picture or goes out of it shows for some frames with no box.
+    - A held box stops at a shot change and at the ends of the clip.
+    - Why a still box: on the test clips, it covers more of the face than a box that keeps moving.
+  - `FoundPath` gives the gaps of a path from its boxes before these two steps, and the mean of their scores. The held frames are no gaps.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
@@ -396,8 +400,10 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 or more on average, with each model.
   - The cases are 12 frames of blackswan, and two objects on 12 frames of bike-packing. The logits differ by 0.06 at most.
   - Meta's predictor keeps its memories in bfloat16. vidcut keeps them in 32-bit float.
+- Two positive clicks, a negative click and a click at the edge of the frame give the masks of Meta's network: overlap 0.9999 or more.
+- One frame each of five clips from 720 × 480 to 3840 × 2160 gives the masks of Meta's network: overlap 1.0000.
 - On the software adapter, the masks match the GPU within 8e-5.
-- Two or more clicks and negative clicks are not checked yet ([todo](../todo/subject-masks.md#measurements)).
+- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run ([todo](../todo/subject-masks.md#measurements)).
 
 ## In a GUI
 
