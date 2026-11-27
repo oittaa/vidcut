@@ -481,74 +481,79 @@ impl Store {
         f(conn)
     }
 
-    pub fn reload_if_changed(
+    fn live_conn<'a>(
         &self,
+        guard: &'a mut Option<Connection>,
         last_id: &mut Option<FileId>,
-        last_dv: &mut i64,
-    ) -> Result<Option<Editor>> {
-        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        last_dv: &mut Option<i64>,
+    ) -> Result<&'a mut Connection> {
         let current_id = file_id_of(&self.path);
-        let replaced = *last_id != current_id;
-        if replaced {
+        if *last_id != current_id {
             *guard = None;
             *last_id = current_id;
         }
         if guard.is_none() {
             *guard = Some(open_conn(&self.path)?);
+            *last_dv = None;
         }
-        let conn = guard.as_mut().expect("connection opened");
+        Ok(guard.as_mut().expect("connection opened"))
+    }
+
+    pub fn reload_if_changed(
+        &self,
+        last_id: &mut Option<FileId>,
+        last_dv: &mut Option<i64>,
+    ) -> Result<Option<Editor>> {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let conn = self.live_conn(&mut guard, last_id, last_dv)?;
         let read = read_tx(conn, &self.path, |tx| {
             let dv = query_data_version(tx, &self.path)?;
-            if !replaced && dv == *last_dv {
+            if *last_dv == Some(dv) {
                 return Ok(None);
             }
             Ok(Some((self.load_in(tx)?, dv)))
         })?;
         Ok(read.map(|(editor, dv)| {
-            *last_dv = dv;
+            *last_dv = Some(dv);
             editor
         }))
     }
 
-    pub fn load_live(&self) -> Result<(Editor, Option<FileId>, i64)> {
-        let file_id = file_id_of(&self.path);
-        self.with_conn(|conn| {
-            read_tx(conn, &self.path, |tx| {
-                let dv = query_data_version(tx, &self.path)?;
-                Ok((self.load_in(tx)?, file_id, dv))
-            })
-        })
+    pub fn load_live(
+        &self,
+        last_id: &mut Option<FileId>,
+        last_dv: &mut Option<i64>,
+    ) -> Result<Editor> {
+        let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let conn = self.live_conn(&mut guard, last_id, last_dv)?;
+        let (editor, dv) = read_tx(conn, &self.path, |tx| {
+            let dv = query_data_version(tx, &self.path)?;
+            Ok((self.load_in(tx)?, dv))
+        })?;
+        *last_dv = Some(dv);
+        Ok(editor)
     }
 
     pub fn mutate_live<T>(
         &self,
         last_id: &mut Option<FileId>,
-        last_dv: &mut i64,
+        last_dv: &mut Option<i64>,
         editor: &mut Editor,
         opened: u64,
         apply: impl FnOnce(&mut Editor) -> Result<T>,
     ) -> Result<LiveOutcome<T>> {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let current_id = file_id_of(&self.path);
-        let replaced = *last_id != current_id;
-        if replaced {
-            *guard = None;
-            *last_id = current_id;
-        }
-        if guard.is_none() {
-            *guard = Some(open_conn(&self.path)?);
-        }
-        let conn = guard.as_mut().expect("connection opened");
+        let conn = self.live_conn(&mut guard, last_id, last_dv)?;
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| sqlite_err(&self.path, e))?;
         let dv = query_data_version(&tx, &self.path)?;
         let mut refreshed = false;
-        if replaced || dv != *last_dv {
+        if *last_dv != Some(dv) {
             let mut loaded = self.load_in(&tx)?;
             loaded.opened_at(opened);
             *editor = loaded;
-            *last_dv = dv;
+            *last_dv = Some(dv);
             refreshed = true;
         }
         let was = editor.unsaved();
@@ -567,7 +572,7 @@ impl Store {
                 Ok(s)
             });
             if outcome.is_ok() {
-                *last_dv = query_data_version(conn, &self.path)?;
+                *last_dv = Some(query_data_version(conn, &self.path)?);
                 settle(conn);
             }
             Some(outcome)
@@ -700,25 +705,16 @@ impl Store {
     pub fn save_if_unchanged(
         &self,
         last_id: &mut Option<FileId>,
-        last_dv: &mut i64,
+        last_dv: &mut Option<i64>,
         editor: &mut Editor,
     ) -> Result<bool> {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let current_id = file_id_of(&self.path);
-        if *last_id != current_id {
-            *guard = None;
-            *last_id = current_id;
-            return Ok(false);
-        }
-        if guard.is_none() {
-            *guard = Some(open_conn(&self.path)?);
-        }
-        let conn = guard.as_mut().expect("connection opened");
+        let conn = self.live_conn(&mut guard, last_id, last_dv)?;
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| sqlite_err(&self.path, e))?;
         let dv = query_data_version(&tx, &self.path)?;
-        if dv != *last_dv {
+        if *last_dv != Some(dv) {
             return Ok(false);
         }
         let (_, commit) = self.save_in_tx(&tx, editor)?;
@@ -730,7 +726,7 @@ impl Store {
             editor.project().clone(),
             commit.added,
         );
-        *last_dv = query_data_version(conn, &self.path)?;
+        *last_dv = Some(query_data_version(conn, &self.path)?);
         settle(conn);
         Ok(true)
     }

@@ -170,6 +170,7 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 - `OpenProject::reload` and `OpenProject::refresh` read again through `Store::reload_if_changed` when `FileId` or `data_version` changes.
   - On Unix, `FileId` is the device and the inode of the file. Thus a file that another file replaces reads again.
   - On Windows, `FileId` only tells that the file exists.
+  - A new connection always reads again (`Store::live_conn`). Why: the `data_version` of one connection does not compare with that of another.
 - `OpenProject::apply` runs mutations inside `Store::mutate_live`. History compaction (`Store::compact`) runs on `vidcut-history`.
 - A `notify` watcher on the folder watches the project file, `-wal`, and `-journal`, and sends `Msg::FileChanged`.
 - A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::checkpoint`.
