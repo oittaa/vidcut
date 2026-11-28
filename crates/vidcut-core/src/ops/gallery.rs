@@ -3,7 +3,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Album, Grade, Project, Still, TrackKind};
+use crate::model::{Album, Grade, Memory, Project, Still, TrackKind};
 use crate::request::GradeLevel;
 
 use super::grade::{self, GradeOf};
@@ -116,28 +116,210 @@ pub fn albums(p: &Project) -> Value {
     json!(albums)
 }
 
+pub enum Holder {
+    Album(String),
+    Memory(char),
+}
+
+pub fn memory_slot(slot: char) -> Result<char> {
+    match slot {
+        'A'..='Z' => Ok(slot),
+        _ => Err(Error::usage(format!(
+            "memory {slot} is not a letter from A to Z"
+        ))),
+    }
+}
+
+fn place(p: &Project, clip: &str) -> Result<(usize, usize)> {
+    let (ti, ci) = super::locate(p, clip)?;
+    let t = &p.tracks[ti];
+    let c = &t.clips[ci];
+    let before = (t.clips.iter())
+        .filter(|o| !o.is_generator() && o.start < c.start)
+        .count();
+    Ok((t.number(), before + 1))
+}
+
 pub fn grab(
     p: &mut Project,
     (clip, frame): (&str, i64),
-    (album, picture): (&str, String),
-) -> Result<String> {
+    (to, picture): (Holder, String),
+) -> Result<Value> {
     let timeline = open_timeline(p)?;
-    let album = album_found(p, album)?.id.clone();
     let grade = grade::whole(p, clip)?;
     let timeline_grade = p.timeline_grade().cloned();
-    let id = p.alloc_still_id();
-    p.stills.push(Still {
-        id: id.clone(),
-        album,
-        clip: clip.to_string(),
-        timeline,
-        frame,
-        grade,
-        timeline_grade,
-        label: String::new(),
-        picture,
-    });
-    Ok(id)
+    let layers = p.settings.node_stack_layers.len();
+    match to {
+        Holder::Album(album) => {
+            let album = album_found(p, &album)?.id.clone();
+            let (track, shot) = place(p, clip)?;
+            let id = p.alloc_still_id();
+            p.stills.push(Still {
+                id: id.clone(),
+                album,
+                clip: clip.to_string(),
+                timeline,
+                frame,
+                track,
+                shot,
+                layers,
+                grade,
+                timeline_grade,
+                label: String::new(),
+                picture,
+            });
+            Ok(json!({ "still": id }))
+        }
+        Holder::Memory(slot) => {
+            let slot = memory_slot(slot)?;
+            remember(
+                p,
+                Memory {
+                    slot,
+                    clip: clip.to_string(),
+                    timeline,
+                    frame,
+                    layers,
+                    grade,
+                    timeline_grade,
+                    picture,
+                },
+            );
+            Ok(json!({ "memory": slot }))
+        }
+    }
+}
+
+fn remember(p: &mut Project, m: Memory) {
+    p.memories.retain(|o| o.slot != m.slot);
+    p.memories.push(m);
+    p.memories.sort_by_key(|o| o.slot);
+}
+
+pub fn number(p: &Project, s: &Still) -> String {
+    let at = |id: &str| p.stills.iter().position(|o| o.id == id);
+    let key = |o: &Still| (o.frame, at(&o.id));
+    let same = |o: &&Still| {
+        (o.album == s.album && o.timeline == s.timeline)
+            && (o.track, o.shot) == (s.track, s.shot)
+            && key(o) < key(s)
+    };
+    let n = p.stills.iter().filter(same).count() + 1;
+    format!("{}.{}.{}", s.track, s.shot, n)
+}
+
+pub fn numbered<'a>(p: &'a Project, album: &str) -> Vec<(&'a Still, String)> {
+    (p.stills.iter())
+        .filter(|s| s.album == album)
+        .map(|s| (s, number(p, s)))
+        .collect()
+}
+
+pub fn label(p: &mut Project, id: &str, text: &str) -> Result<()> {
+    found(p, id)?;
+    if let Some(s) = p.stills.iter_mut().find(|s| s.id == id) {
+        s.label = text.to_string();
+    }
+    Ok(())
+}
+
+fn memory_found(p: &Project, slot: char) -> Result<&Memory> {
+    let slot = memory_slot(slot)?;
+    p.memory(slot)
+        .ok_or_else(|| Error::not_found(format!("memory {slot} is empty")))
+}
+
+pub fn copy_to_memory(p: &mut Project, id: &str, slot: char) -> Result<()> {
+    let slot = memory_slot(slot)?;
+    let s = found(p, id)?.clone();
+    remember(
+        p,
+        Memory {
+            slot,
+            clip: s.clip,
+            timeline: s.timeline,
+            frame: s.frame,
+            layers: s.layers,
+            grade: s.grade,
+            timeline_grade: s.timeline_grade,
+            picture: s.picture,
+        },
+    );
+    Ok(())
+}
+
+pub fn clear_memory(p: &mut Project, slot: char) -> Result<()> {
+    let slot = memory_found(p, slot)?.slot;
+    p.memories.retain(|m| m.slot != slot);
+    Ok(())
+}
+
+pub fn load_memory(
+    p: &mut Project,
+    slot: char,
+    (level, layer): (GradeLevel, usize),
+    clips: &[String],
+) -> Result<()> {
+    let m = memory_found(p, slot)?.clone();
+    let name = format!("memory {}", m.slot);
+    let size = p.frame_size();
+    match level {
+        GradeLevel::Clip => {
+            if clips.is_empty() {
+                return Err(Error::usage("give the clips that get the grade"));
+            }
+            let from = if m.layers > 1 { layer } else { 1 };
+            let g = (m.grade.as_ref()).map_or_else(|| Grade::usual(size), |g| g.layer(from, size));
+            if keyed(&g) {
+                return Err(refused(&name, "clip grade", "Load Memory"));
+            }
+            for id in clips {
+                grade::store(p, &GradeOf::Clip(id.clone(), layer), &g)?;
+            }
+            Ok(())
+        }
+        GradeLevel::Timeline => given(
+            p,
+            (&name, "Load Memory"),
+            (None, m.timeline_grade),
+            level,
+            clips,
+        ),
+    }
+}
+
+pub fn apply_memory(
+    p: &mut Project,
+    slot: char,
+    level: GradeLevel,
+    clips: &[String],
+) -> Result<()> {
+    let m = memory_found(p, slot)?.clone();
+    let name = format!("memory {}", m.slot);
+    given(
+        p,
+        (&name, "Apply Grade"),
+        (m.grade, m.timeline_grade),
+        level,
+        clips,
+    )
+}
+
+pub fn memories(p: &Project, dir: &Path) -> Value {
+    let memories: Vec<Value> = (p.memories.iter())
+        .map(|m| {
+            json!({
+                "slot": m.slot,
+                "clip": m.clip,
+                "timeline": m.timeline,
+                "frame": m.frame,
+                "picture": dir.join(&m.picture),
+                "keyframes": m.grade.as_ref().is_some_and(keyed),
+                "timeline_keyframes": m.timeline_grade.as_ref().is_some_and(keyed),
+            })
+        })
+        .collect();
+    json!(memories)
 }
 
 pub fn remove(p: &mut Project, ids: &[String]) -> Result<()> {
@@ -159,16 +341,32 @@ fn refused(id: &str, which: &str, what: &str) -> Error {
 
 pub fn apply(p: &mut Project, id: &str, level: GradeLevel, clips: &[String]) -> Result<()> {
     let still = found(p, id)?.clone();
+    given(
+        p,
+        (id, "Apply Grade"),
+        (still.grade, still.timeline_grade),
+        level,
+        clips,
+    )
+}
+
+fn given(
+    p: &mut Project,
+    (name, what): (&str, &str),
+    (clip_grade, timeline_grade): (Option<Grade>, Option<Grade>),
+    level: GradeLevel,
+    clips: &[String],
+) -> Result<()> {
     let size = p.frame_size();
     match level {
         GradeLevel::Clip => {
-            if still.grade.as_ref().is_some_and(keyed) {
-                return Err(refused(id, "clip grade", "Apply Grade"));
+            if clip_grade.as_ref().is_some_and(keyed) {
+                return Err(refused(name, "clip grade", what));
             }
             if clips.is_empty() {
                 return Err(Error::usage("give the clips that get the grade"));
             }
-            let g = (still.grade).unwrap_or_else(|| Grade::usual(size));
+            let g = clip_grade.unwrap_or_else(|| Grade::usual(size));
             grade::apply(p, &g, clips)?;
         }
         GradeLevel::Timeline => {
@@ -177,10 +375,10 @@ pub fn apply(p: &mut Project, id: &str, level: GradeLevel, clips: &[String]) -> 
                     "the timeline grade goes to the open timeline: leave out `clips`",
                 ));
             }
-            if still.timeline_grade.as_ref().is_some_and(keyed) {
-                return Err(refused(id, "timeline grade", "Apply Grade"));
+            if timeline_grade.as_ref().is_some_and(keyed) {
+                return Err(refused(name, "timeline grade", what));
             }
-            let g = (still.timeline_grade).unwrap_or_else(|| Grade::usual(size));
+            let g = timeline_grade.unwrap_or_else(|| Grade::usual(size));
             grade::store(p, &GradeOf::Timeline, &g)?;
         }
     }
@@ -221,6 +419,7 @@ pub fn get(p: &Project, dir: &Path) -> Value {
                 "clip": s.clip,
                 "timeline": s.timeline,
                 "frame": s.frame,
+                "number": number(p, s),
                 "label": s.label,
                 "picture": dir.join(&s.picture),
                 "keyframes": s.grade.as_ref().is_some_and(keyed),

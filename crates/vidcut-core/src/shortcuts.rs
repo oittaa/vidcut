@@ -227,6 +227,14 @@ actions! {
     GrabStill "grab_still",
     ApplyGradeOneClipPrior "apply_grade_one_clip_prior",
     ApplyGradeTwoClipsPrior "apply_grade_two_clips_prior",
+    SaveMemoryA "save_memory_a",
+    SaveMemoryB "save_memory_b",
+    SaveMemoryC "save_memory_c",
+    SaveMemoryD "save_memory_d",
+    SaveMemoryE "save_memory_e",
+    SaveMemoryF "save_memory_f",
+    SaveMemoryG "save_memory_g",
+    SaveMemoryH "save_memory_h",
     SourceStart "source_start",
     SourceEnd "source_end",
     ClipIn "clip_in",
@@ -283,7 +291,15 @@ impl Action {
             | Action::AutoColor
             | Action::GrabStill
             | Action::ApplyGradeOneClipPrior
-            | Action::ApplyGradeTwoClipsPrior => Panel::Color,
+            | Action::ApplyGradeTwoClipsPrior
+            | Action::SaveMemoryA
+            | Action::SaveMemoryB
+            | Action::SaveMemoryC
+            | Action::SaveMemoryD
+            | Action::SaveMemoryE
+            | Action::SaveMemoryF
+            | Action::SaveMemoryG
+            | Action::SaveMemoryH => Panel::Color,
             _ => Panel::App,
         }
     }
@@ -1960,6 +1976,62 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["-"],
         "Apply grade from two clips prior",
         Some("The clip at the playhead takes the grade of the clip two places before it."),
+    ),
+    own(
+        Color,
+        Action::SaveMemoryA,
+        &["Alt+1"],
+        "Save memory A",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryB,
+        &["Alt+2"],
+        "Save memory B",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryC,
+        &["Alt+3"],
+        "Save memory C",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryD,
+        &["Alt+4"],
+        "Save memory D",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryE,
+        &["Alt+5"],
+        "Save memory E",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryF,
+        &["Alt+6"],
+        "Save memory F",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryG,
+        &["Alt+7"],
+        "Save memory G",
+        None,
+    ),
+    own(
+        Color,
+        Action::SaveMemoryH,
+        &["Alt+8"],
+        "Save memory H",
+        None,
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

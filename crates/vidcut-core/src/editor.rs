@@ -2784,6 +2784,22 @@ fn layer_of(timeline: bool, layer: Option<usize>) -> Result<usize> {
     }
 }
 
+fn gallery_targets(
+    p: &Project,
+    clips: Option<&OneOrMany<ClipRef>>,
+    grade: crate::request::GradeLevel,
+    playhead: Option<i64>,
+) -> Result<Vec<String>> {
+    match (clips, grade) {
+        (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead),
+        (None, crate::request::GradeLevel::Timeline) => Ok(Vec::new()),
+        (None, crate::request::GradeLevel::Clip) => {
+            let t = playhead.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+            Ok(vec![ops::gallery::graded_clip(p, t)?])
+        }
+    }
+}
+
 fn grades_of(
     p: &mut Project,
     clips: &Option<OneOrMany<ClipRef>>,
@@ -5542,17 +5558,57 @@ fn mutate(
             let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
-        Request::GalleryGrab { at, album } => {
+        Request::GalleryGrab { at, album, memory } => {
+            use ops::gallery::Holder;
             let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
                 Error::usage("gallery.grab needs `at` (--at): there is no playhead")
             })?;
             need_timeline(p)?;
             ops::gallery::open_timeline(p)?;
-            let album = ops::gallery::album_of(p, album.as_deref())?;
+            let to = match (album, memory) {
+                (Some(_), Some(_)) => {
+                    return Err(Error::usage("give `album` or `memory`, not both"));
+                }
+                (_, Some(m)) => Holder::Memory(ops::gallery::memory_slot(*m)?),
+                (a, None) => Holder::Album(ops::gallery::album_of(p, a.as_deref())?),
+            };
             let clip = ops::gallery::graded_clip(p, t)?;
             let plan = still_plan(p, t)?;
             let picture = env.still(&plan, dry_run)?;
-            json!({ "still": ops::gallery::grab(p, (&clip, t), (&album, picture))? })
+            ops::gallery::grab(p, (&clip, t), (to, picture))?
+        }
+        Request::GalleryLabel { still, label } => {
+            ops::gallery::label(p, still, label)?;
+            Value::Null
+        }
+        Request::GalleryMemoryCopy { still, memory } => {
+            ops::gallery::copy_to_memory(p, still, *memory)?;
+            Value::Null
+        }
+        Request::GalleryMemoryClear { memory } => {
+            ops::gallery::clear_memory(p, *memory)?;
+            Value::Null
+        }
+        Request::GalleryMemoryLoad {
+            memory,
+            clips,
+            layer,
+            grade,
+        } => {
+            let timeline = matches!(grade, crate::request::GradeLevel::Timeline);
+            let layer = layer_of(timeline, *layer)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, playhead)?;
+            ops::gallery::load_memory(p, *memory, (*grade, layer), &ids)?;
+            Value::Null
+        }
+        Request::GalleryMemoryApply {
+            memory,
+            clips,
+            grade,
+        } => {
+            let ids = gallery_targets(p, clips.as_ref(), *grade, playhead)?;
+            ops::gallery::apply_memory(p, *memory, *grade, &ids)?;
+            Value::Null
         }
         Request::GalleryRemove { stills } => {
             ops::gallery::remove(p, &stills.to_vec())?;
@@ -5578,15 +5634,7 @@ fn mutate(
             clips,
             grade,
         } => {
-            let ids = match (clips, grade) {
-                (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead)?,
-                (None, crate::request::GradeLevel::Timeline) => Vec::new(),
-                (None, crate::request::GradeLevel::Clip) => {
-                    let t = playhead
-                        .ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
-                    vec![ops::gallery::graded_clip(p, t)?]
-                }
-            };
+            let ids = gallery_targets(p, clips.as_ref(), *grade, playhead)?;
             ops::gallery::apply(p, still, *grade, &ids)?;
             Value::Null
         }
@@ -10814,6 +10862,7 @@ pub fn query(
         }
         Request::GalleryGet {} => ops::gallery::get(p, &env.stills_dir()),
         Request::GalleryAlbumList {} => ops::gallery::albums(p),
+        Request::GalleryMemoryList {} => ops::gallery::memories(p, &env.stills_dir()),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?

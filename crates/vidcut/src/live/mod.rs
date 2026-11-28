@@ -124,6 +124,7 @@ pub enum GuiChange {
     Gallery {
         album: Option<String>,
         albums: Option<bool>,
+        memories: Option<bool>,
     },
     PageTime(PageTime),
 }
@@ -202,6 +203,7 @@ pub struct GuiState {
     pub node_wide: bool,
     pub album: Option<String>,
     pub albums: bool,
+    pub memories: bool,
     pub viewers: ViewerState,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
@@ -3801,8 +3803,16 @@ impl Live {
                 let change = GuiChange::Viewers { left, right, shown };
                 self.gui_change(vec![change], |s| json!(s))
             }
-            Request::GuiGallery { album, albums } => {
-                let change = GuiChange::Gallery { album, albums };
+            Request::GuiGallery {
+                album,
+                albums,
+                memories,
+            } => {
+                let change = GuiChange::Gallery {
+                    album,
+                    albums,
+                    memories,
+                };
                 self.gui_change(vec![change], |s| json!(s))
             }
             Request::GuiPageTime { at, fast, speed } => {
@@ -4338,6 +4348,16 @@ impl Live {
                 clips,
                 grade: GradeLevel::Clip,
                 ..
+            }
+            | Request::GalleryMemoryLoad {
+                clips,
+                grade: GradeLevel::Clip,
+                ..
+            }
+            | Request::GalleryMemoryApply {
+                clips,
+                grade: GradeLevel::Clip,
+                ..
             } if clips.is_none() => {
                 let p = self.project.as_ref().ok_or_else(no_project)?.project();
                 let mut targets = self.selection.thumbnails.clone();
@@ -4354,7 +4374,11 @@ impl Live {
                 }
                 *keyframes = Some(self.key_clipboard.clone());
             }
-            Request::GalleryGrab { album, .. } if album.is_none() => {
+            Request::GalleryGrab {
+                album,
+                memory: None,
+                ..
+            } if album.is_none() => {
                 *album = self.renderer.gui_state().and_then(|s| s.album);
             }
             Request::GradePaste { settings, .. } if settings.is_none() => {

@@ -5,8 +5,10 @@ use eframe::egui::{self, ColorImage, Rect, RichText, Sense, TextureOptions, pos2
 use serde_json::json;
 use vidcut_av::thumbs::Image;
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Project, Still};
+use vidcut_core::model::Project;
+use vidcut_core::ops::gallery::numbered;
 use vidcut_core::ops::grade::GradeOf;
+use vidcut_core::request::GradeLevel;
 
 use super::dialog;
 use super::theme;
@@ -15,7 +17,9 @@ use crate::threads::Work;
 
 pub(super) const STILLS_KEPT: usize = 96;
 const PICTURE: egui::Vec2 = vec2(112.0, 63.0);
+const SLOT: egui::Vec2 = vec2(56.0, 32.0);
 const CELL_GAP: f32 = 8.0;
+const SLOT_GAP: f32 = 4.0;
 const ALBUMS_WIDTH: f32 = 120.0;
 
 type Loaded = (PathBuf, Option<Image>);
@@ -31,6 +35,12 @@ struct Renaming {
     fresh: bool,
 }
 
+struct Labeling {
+    still: String,
+    text: String,
+    fresh: bool,
+}
+
 pub(super) struct Gallery {
     kept: Lru<PathBuf, Option<egui::TextureHandle>, STILLS_KEPT>,
     loading: Option<PathBuf>,
@@ -38,7 +48,9 @@ pub(super) struct Gallery {
     results: Receiver<Loaded>,
     album: Option<String>,
     pub(super) albums: bool,
+    pub(super) memories: bool,
     renaming: Option<Renaming>,
+    labeling: Option<Labeling>,
     removing: Option<String>,
 }
 
@@ -52,7 +64,9 @@ impl Default for Gallery {
             results,
             album: None,
             albums: false,
+            memories: false,
             renaming: None,
+            labeling: None,
             removing: None,
         }
     }
@@ -108,6 +122,13 @@ enum Act {
     Rename(String, String),
     StopRename,
     Remove(String),
+    Memories(bool),
+    ToMemory(String, char),
+    ApplyMemory(char),
+    ClearMemory(char),
+    StartLabel(String, String),
+    Label(String, String),
+    StopLabel,
 }
 
 impl Workspace {
@@ -121,6 +142,7 @@ impl Workspace {
         &mut self,
         album: Option<String>,
         albums: Option<bool>,
+        memories: Option<bool>,
     ) -> Result<(), String> {
         if let Some(id) = album {
             let known = self.project().is_some_and(|p| p.album(&id).is_some());
@@ -130,6 +152,7 @@ impl Workspace {
             self.gallery.album = Some(id);
         }
         self.gallery.albums = albums.unwrap_or(self.gallery.albums);
+        self.gallery.memories = memories.unwrap_or(self.gallery.memories);
         Ok(())
     }
 
@@ -140,6 +163,11 @@ impl Workspace {
             let list = egui::Button::selectable(on, egui_phosphor::regular::FOLDERS);
             if ui.add(list).on_hover_text("Albums").clicked() {
                 act = Some(Act::Albums(!on));
+            }
+            let on = self.gallery.memories;
+            let bank = egui::Button::selectable(on, egui_phosphor::regular::SQUARES_FOUR);
+            if ui.add(bank).on_hover_text("Memories").clicked() {
+                act = Some(Act::Memories(!on));
             }
             ui.label(RichText::new("Gallery").strong());
         });
@@ -153,7 +181,13 @@ impl Workspace {
                 self.album_list(ui, &p, shown.as_deref(), &mut act);
                 ui.separator();
             }
-            ui.vertical(|ui| self.still_grid(ui, &p, shown.as_deref(), &mut act));
+            ui.vertical(|ui| {
+                if self.gallery.memories {
+                    self.memory_bank(ui, &p, &mut act);
+                    ui.separator();
+                }
+                self.still_grid(ui, &p, shown.as_deref(), &mut act);
+            });
         });
         self.remove_album_window(ui.ctx(), &p);
         self.gallery_act(act);
@@ -223,6 +257,66 @@ impl Workspace {
         });
     }
 
+    fn memory_bank(&mut self, ui: &mut egui::Ui, p: &Project, act: &mut Option<Act>) {
+        let dir = self.snap.still_dir.clone();
+        let height = (PICTURE.y * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
+        let colors = theme::colors();
+        let font = egui::TextStyle::Small.resolve(ui.style());
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(SLOT_GAP, SLOT_GAP);
+            for slot in 'A'..='Z' {
+                let memory = p.memory(slot);
+                let (rect, r) = ui.allocate_exact_size(SLOT, Sense::click());
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 2.0, egui::Color32::BLACK);
+                if let Some(m) = memory
+                    && ui.is_rect_visible(rect)
+                    && let Some((texture, size)) =
+                        self.gallery
+                            .texture(ui.ctx(), &dir.join(&m.picture), height)
+                {
+                    let shown = Rect::from_center_size(rect.center(), fit(size, SLOT));
+                    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                    painter.image(texture, shown, uv, egui::Color32::WHITE);
+                }
+                let corner = rect.left_top() + vec2(3.0, 1.0);
+                let letter = slot.to_string();
+                painter.text(
+                    corner,
+                    egui::Align2::LEFT_TOP,
+                    letter,
+                    font.clone(),
+                    colors.text,
+                );
+                if r.dnd_hover_payload::<Dragged>().is_some() {
+                    let stroke = egui::Stroke::new(2.0, colors.accent);
+                    painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                }
+                if let Some(dropped) = r.dnd_release_payload::<Dragged>()
+                    && let Some(first) = dropped.0.first()
+                {
+                    *act = Some(Act::ToMemory(first.clone(), slot));
+                }
+                if memory.is_none() {
+                    continue;
+                }
+                if r.middle_clicked() {
+                    *act = Some(Act::ApplyMemory(slot));
+                }
+                r.context_menu(|ui| {
+                    if ui.button("Apply Grade").clicked() {
+                        *act = Some(Act::ApplyMemory(slot));
+                        ui.close();
+                    }
+                    if ui.button("Clear").clicked() {
+                        *act = Some(Act::ClearMemory(slot));
+                        ui.close();
+                    }
+                });
+            }
+        });
+    }
+
     fn still_grid(
         &mut self,
         ui: &mut egui::Ui,
@@ -230,16 +324,14 @@ impl Workspace {
         shown: Option<&str>,
         act: &mut Option<Act>,
     ) {
-        let stills: Vec<&Still> = (p.stills.iter())
-            .filter(|s| Some(s.album.as_str()) == shown)
-            .collect();
+        let stills = shown.map(|album| numbered(p, album)).unwrap_or_default();
         if stills.is_empty() {
             ui.label(dim("No Stills"));
             return;
         }
         let dir = self.snap.still_dir.clone();
         let selected: Vec<String> = (self.snap.selection.stills.iter())
-            .filter(|id| stills.iter().any(|s| s.id == **id))
+            .filter(|id| stills.iter().any(|(s, _)| s.id == **id))
             .cloned()
             .collect();
         let height = (PICTURE.y * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
@@ -249,7 +341,7 @@ impl Workspace {
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(CELL_GAP, CELL_GAP);
-                    for s in &stills {
+                    for (s, number) in &stills {
                         let chosen = selected.contains(&s.id);
                         let cell = ui.vertical(|ui| {
                             ui.set_width(PICTURE.x);
@@ -262,7 +354,8 @@ impl Workspace {
                                 && let Some((texture, size)) =
                                     self.gallery.texture(ui.ctx(), &path, height)
                             {
-                                let shown = Rect::from_center_size(rect.center(), fit(size));
+                                let shown =
+                                    Rect::from_center_size(rect.center(), fit(size, PICTURE));
                                 let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                                 painter.image(texture, shown, uv, egui::Color32::WHITE);
                             }
@@ -270,11 +363,17 @@ impl Workspace {
                                 let stroke = egui::Stroke::new(2.0, colors.accent);
                                 painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
                             }
-                            let name = match s.label.is_empty() {
-                                true => s.id.as_str(),
-                                false => s.label.as_str(),
-                            };
-                            ui.add(egui::Label::new(dim(name).small()).truncate());
+                            ui.add(egui::Label::new(dim(number.as_str()).small()).truncate());
+                            let labeling =
+                                (self.gallery.labeling.as_mut()).filter(|l| l.still == s.id);
+                            match labeling {
+                                Some(l) => label_field(ui, l, act),
+                                None if s.label.is_empty() => {}
+                                None => {
+                                    let label = egui::Label::new(s.label.as_str()).truncate();
+                                    ui.add(label);
+                                }
+                            }
                             picture
                         });
                         let picture = cell.inner;
@@ -304,6 +403,10 @@ impl Workspace {
                             }
                             if ui.button("Delete Selected").clicked() {
                                 *act = Some(Act::Delete(mine));
+                                ui.close();
+                            }
+                            if ui.button("Change Label").clicked() {
+                                *act = Some(Act::StartLabel(s.id.clone(), s.label.clone()));
                                 ui.close();
                             }
                         });
@@ -383,8 +486,51 @@ impl Workspace {
             }
             Some(Act::StopRename) => self.gallery.renaming = None,
             Some(Act::Remove(album)) => self.gallery.removing = Some(album),
+            Some(Act::Memories(on)) => self.send("gui.gallery", json!({ "memories": on })),
+            Some(Act::ToMemory(still, slot)) => {
+                self.send(
+                    "gallery.memory.copy",
+                    json!({ "still": still, "memory": slot }),
+                );
+            }
+            Some(Act::ApplyMemory(slot)) => {
+                let grade = self.effects_page.grading;
+                self.send(
+                    "gallery.memory.apply",
+                    json!({ "memory": slot, "grade": grade }),
+                );
+            }
+            Some(Act::ClearMemory(slot)) => {
+                self.send("gallery.memory.clear", json!({ "memory": slot }));
+            }
+            Some(Act::StartLabel(still, text)) => {
+                self.gallery.labeling = Some(Labeling {
+                    still,
+                    text,
+                    fresh: true,
+                });
+            }
+            Some(Act::Label(still, label)) => {
+                self.gallery.labeling = None;
+                self.send("gallery.label", json!({ "still": still, "label": label }));
+            }
+            Some(Act::StopLabel) => self.gallery.labeling = None,
             None => {}
         }
+    }
+
+    pub(super) fn save_memory(&self, slot: char) {
+        let at = self.snap.timeline.position;
+        self.send("gallery.grab", json!({ "at": at, "memory": slot }));
+    }
+
+    pub(super) fn load_memory(&self, slot: char) {
+        let grade = self.effects_page.grading;
+        let mut params = json!({ "memory": slot, "grade": grade });
+        if matches!(grade, GradeLevel::Clip) {
+            params["layer"] = json!(self.shown_layer());
+        }
+        self.send("gallery.memory.load", params);
     }
 
     fn append_still(&self, id: &str) {
@@ -407,10 +553,35 @@ impl Workspace {
     }
 }
 
-fn fit(size: egui::Vec2) -> egui::Vec2 {
+fn label_field(ui: &mut egui::Ui, l: &mut Labeling, act: &mut Option<Act>) {
+    let output = egui::TextEdit::singleline(&mut l.text)
+        .desired_width(PICTURE.x)
+        .show(ui);
+    let field = output.response;
+    if l.fresh {
+        field.request_focus();
+        let mut state = output.state;
+        let all = egui::text::CCursorRange::two(
+            egui::text::CCursor::new(0),
+            egui::text::CCursor::new(l.text.chars().count()),
+        );
+        state.cursor.set_char_range(Some(all));
+        state.store(ui.ctx(), field.id);
+        l.fresh = false;
+    }
+    if field.lost_focus() {
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        *act = Some(match enter {
+            true => Act::Label(l.still.clone(), l.text.clone()),
+            false => Act::StopLabel,
+        });
+    }
+}
+
+fn fit(size: egui::Vec2, into: egui::Vec2) -> egui::Vec2 {
     let aspect = size.x / size.y.max(1.0);
-    match aspect > PICTURE.x / PICTURE.y {
-        true => vec2(PICTURE.x, PICTURE.x / aspect),
-        false => vec2(PICTURE.y * aspect, PICTURE.y),
+    match aspect > into.x / into.y {
+        true => vec2(into.x, into.x / aspect),
+        false => vec2(into.y * aspect, into.y),
     }
 }
