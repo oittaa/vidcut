@@ -1,7 +1,10 @@
 # Subject masks
 
 - The Magic Mask palette of the Color page, with its click tools, track buttons and Matte Finesse.
-- Smart Refine, Consistency and paint of the mask.
-- The Alpha Output of the Node Editor, Render in Place, and a Magic Mask node on the Effects page.
-- The same mask in the viewer and the export after a lost map.
-- Tracks without a GPU, and faster tracks on the GPU.
+- Smart Refine and Consistency.
+- Paint on the mask.
+- The Alpha Output of the Node Editor.
+- Render in Place of a Magic Mask.
+- A Magic Mask node on the Effects page.
+- After a change before the node and a lost map, the export can show another mask than the viewer.
+- Tracks without a GPU are not usable yet.

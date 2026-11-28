@@ -1,5 +1,8 @@
 # Export page: File tab
 
-- File names as Resolve gives them: interlaced sources, EXR, unique file names and Source name.
-- Individual clips at the frame rate and resolution of each clip, with timeline effects.
-- The Preserved Path row, Use commercial workflow, and the file name rows of Single clip.
+- vidcut does not name the files of an interlaced source, or of an EXR sequence, as Resolve does.
+- Individual clips render at the frame rate of the timeline, not at the frame rate of each clip.
+- Render timeline effects and Render at source resolution for Individual clips.
+- The Preserved Path row.
+- Use commercial workflow.
+- The Single clip rows Filename uses Timeline name, File suffix, File subfolder, Render without timecode and Start timeline timecode at.

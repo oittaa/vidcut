@@ -1,4 +1,5 @@
 # Clip filter
 
-- The clip filter on the Export page: All Filtered Clips, its prompts and its rules.
+- All Filtered Clips in the Render menu of the Export page.
+- The prompts Unable to Apply Filter and Cannot Render Single Clip.
 - The Unrendered Clips, Selected Clips, Modified Clips, Tracked and Common Media Pool Source filters.

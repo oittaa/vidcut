@@ -1,5 +1,9 @@
 # Titles
 
-- Text titles that place each letter as Resolve does, also in scrolls and with variable fonts.
-- The same fallback font as Resolve.
-- Edit in place of a lower third line, a Tab character, and a spell check.
+- The letters of a Text title are up to one pixel out of place.
+- Scroll titles with a font size in points draw smaller letters than Resolve.
+- vidcut does not find a face of a variable font by its own family name, for example "Bahnschrift Light".
+- For a letter that the font does not have, vidcut can use another fallback font than Resolve.
+- Edit in place of one line of a lower third.
+- Tab types a tab character in a title.
+- A spell check.

@@ -1,3 +1,3 @@
-# wgpu 31: the submit gate
+# wgpu 31
 
-- Submits from the viewer thread while the surface configures.
+- Remove the submit gate of the viewer thread when eframe moves to wgpu 31.

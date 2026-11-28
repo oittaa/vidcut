@@ -1,3 +1,4 @@
-# Values outside 0 to 1
+# Float pictures
 
-- Values below 0 and above 1 in the render cache, the AI upscalers, the macOS scaler and the AI frames.
+- The render cache cuts float pictures to 0..1. Thus the viewer can show other values than the export.
+- The AI upscalers, the macOS scaler and the AI frames of Retime Process and Smooth Cut cut float pictures to 0..1.

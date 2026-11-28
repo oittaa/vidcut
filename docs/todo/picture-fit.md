@@ -1,3 +1,3 @@
 # Placement of compound clips
 
-- The placement of a compound clip as Resolve does it, when the clip inside has a Zoom X other than 1.
+- A compound clip whose inner clip has a Zoom X other than 1 is placed in another way than in Resolve.

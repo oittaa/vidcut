@@ -1,4 +1,4 @@
 # Smart Reframe
 
-- Reference Point tracking as Resolve does it, also with a loose box and after the subject leaves.
-- Smart Reframe on speed ramps as Resolve does it.
+- With a loose box, Reference Point follows the background, not the person.
+- On a speed ramp, Smart Reframe sets another number of keyframes than Resolve.
