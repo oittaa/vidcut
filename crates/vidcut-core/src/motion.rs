@@ -178,6 +178,7 @@ pub fn clear(samples: &mut Vec<PathSample>, (first, last): (i64, i64)) {
 pub const SLACK: f64 = 0.05;
 pub const LEAST_SLACK: f64 = 0.0005;
 pub const TURN_SLACK: f64 = 2.0;
+pub const EDGE_SECS: f64 = 0.2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FoundPath {
@@ -489,13 +490,42 @@ pub fn joined(
             .partial_cmp(&(b.frame, b.center[0]))
             .unwrap_or(Ordering::Equal)
     });
+    let edge = (EDGE_SECS * fps).round() as i64;
+    let shot = |f: i64| {
+        let next = shots.partition_point(|&s| s <= f);
+        (shots[next - 1], shots.get(next).copied().unwrap_or(end) - 1)
+    };
     let made = |o: Open| FoundPath {
         gaps: gaps(&o.samples),
-        samples: simplified(&o.samples),
+        samples: widened(simplified(&o.samples), shot(o.samples[0].frame), edge),
         seen: o.samples.len(),
         score: (o.total / o.samples.len() as f64 * 100.0).round() / 100.0,
     };
     done.into_iter().map(made).collect()
+}
+
+fn widened(mut samples: Vec<PathSample>, (lo, hi): (i64, i64), edge: i64) -> Vec<PathSample> {
+    let (Some(&first), Some(&last)) = (samples.first(), samples.last()) else {
+        return samples;
+    };
+    let early = (first.frame - edge).max(lo);
+    if early < first.frame {
+        samples.insert(
+            0,
+            PathSample {
+                frame: early,
+                ..first
+            },
+        );
+    }
+    let late = (last.frame + edge).min(hi);
+    if late > last.frame {
+        samples.push(PathSample {
+            frame: late,
+            ..last
+        });
+    }
+    samples
 }
 
 fn gaps(samples: &[PathSample]) -> Vec<[i64; 2]> {

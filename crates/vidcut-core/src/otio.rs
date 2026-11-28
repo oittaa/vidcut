@@ -315,7 +315,7 @@ fn with_picture(
     let out = match &c.picture {
         None => effects,
         Some(x) => {
-            let x = crate::ops::picture::working(x.clone());
+            let x = crate::ops::picture::working((**x).clone());
             let kept = effects
                 .into_iter()
                 .filter(|e| !picture::is_placing(e))
@@ -334,7 +334,7 @@ pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
         .filter(|c| c.video && exported(c, a, b))
         .filter(|c| {
             c.picture.as_ref().is_some_and(|x| {
-                let x = crate::ops::picture::working(x.clone());
+                let x = crate::ops::picture::working((**x).clone());
                 !picture::reaches(&x, &shape_of(p, c, p.media(&c.media)))
             })
         })
@@ -1180,8 +1180,8 @@ fn export_with(
             groups: p.groups.clone(),
             tape_marks: p.tape_marks.clone(),
             next_id: p.next_id.clone(),
-            subtitles: p.subtitles.clone(),
-            timelines: p.timelines.clone(),
+            subtitles: p.subtitles.to_vec(),
+            timelines: p.timelines.to_vec(),
             recent: p.recent.clone(),
             compounds: (p.compounds.iter())
                 .map(|k| written_compound(p, k, locations))
@@ -1329,7 +1329,7 @@ fn stack_for(
         drop_frame: k.counts_drop_frame(),
         ..p.flat_settings()
     });
-    inner.tracks = tracks.to_vec();
+    inner.tracks = tracks.into();
     inner.marks = k.marks.clone();
     inner.media = p.media.clone();
     inner.compounds = p
@@ -2287,7 +2287,10 @@ fn our_str(item: &Value, key: &str) -> Option<String> {
 fn our_picture(item: &Value) -> Option<Picture> {
     let p: Picture =
         serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
-    crate::ops::picture::checked(&p).ok().flatten()
+    crate::ops::picture::checked(&p)
+        .ok()
+        .flatten()
+        .map(crate::shared::Shared::into_inner)
 }
 
 fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {

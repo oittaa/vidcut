@@ -14,7 +14,7 @@ struct Params {
     part: vec4<f32>,
     site: vec4<f32>,
     shrunk: vec4<f32>,
-    levels: array<vec4<f32>, 7u>,
+    levels: array<vec4<f32>, 8u>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -295,7 +295,7 @@ fn rgb(s: vec3<f32>) -> vec3<f32> {
     return c;
 }
 
-fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
+fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>, outset: f32) -> vec3<f32> {
     if s.x >= s.z || s.y >= s.w {
         return vec3<f32>(0.0);
     }
@@ -320,7 +320,7 @@ fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
         (sizes.y + abs(s.y)) / gv,
         (sizes.y + abs(s.w)) / gv,
     );
-    let raw = edges + 0.5;
+    let raw = edges + 0.5 + outset;
     let e = clamp(select(raw, vec4<f32>(0.0), raw <= slack), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
 }
@@ -370,11 +370,12 @@ fn sample_shown(px: vec2<f32>) -> vec4<f32> {
     }
     let row0 = p.levels[0];
     let row1 = p.levels[1];
-    var edge = cut(row0, row1, p.levels[2], px);
+    let outset = p.levels[7].x;
+    var edge = cut(row0, row1, p.levels[2], px, outset);
     var at = edge.xy;
     if p.levels[4].w > 0.5 {
-        let area = cut(p.levels[5], p.levels[6], p.levels[2], px);
-        let source = cut(row0, row1, vec4<f32>(0.0, 0.0, 1.0, 1.0), px);
+        let area = cut(p.levels[5], p.levels[6], p.levels[2], px, outset);
+        let source = cut(row0, row1, vec4<f32>(0.0, 0.0, 1.0, 1.0), px, outset);
         edge = vec3<f32>(source.xy, area.z * source.z);
         at = area.xy;
     }
@@ -2192,7 +2193,7 @@ struct Sharpening {
 
 @fragment
 fn fs_sharpen_taken(in: Out) -> @location(0) vec4<f32> {
-    return effect_taken(textureLoad(blur_source, vec2<i32>(in.position.xy), 0), sharpening.more.y);
+    return effect_taken(textureLoad(blur_source, vec2<i32>(in.position.xy), 0), 0.0);
 }
 
 @fragment
@@ -2203,14 +2204,14 @@ fn fs_sharpen(in: Out) -> @location(0) vec4<f32> {
     let at = px.y * size.x + px.x;
     var red = 0.0;
     var blue = 0.0;
-    if sharpening.more.z > 0.5 {
+    if sharpening.more.y > 0.5 {
         let plane = size.x * size.y;
         red = sharpen_planes[plane + at];
         blue = sharpen_planes[2 * plane + at];
     }
     let green = -(BT709.r * red + BT709.b * blue) / BT709.g;
     let made = was.rgb + sharpen_planes[at] + vec3<f32>(red, green, blue);
-    return effect_mixed(px, vec4<f32>(made, was.a), sharpening.more.x, sharpening.more.y);
+    return effect_mixed(px, vec4<f32>(made, was.a), sharpening.more.x, 0.0);
 }
 
 struct Grading {
@@ -3159,8 +3160,7 @@ fn glow_has(flag: i32) -> bool {
 }
 
 fn glow_taken(px: vec2<i32>, picture: texture_2d<f32>) -> vec4<f32> {
-    let use_alpha = glowing.mixing.w;
-    let c = effect_taken(textureLoad(picture, px, 0), use_alpha);
+    let c = effect_taken(textureLoad(picture, px, 0), 0.0);
     if glow_has(GLOW_INVERT) {
         return vec4<f32>(1.0 - clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), c.a);
     }
@@ -3382,9 +3382,12 @@ fn fs_glow(in: Out) -> @location(0) vec4<f32> {
     if glow_has(GLOW_INVERT) {
         out = vec4<f32>(1.0 - out.rgb, out.a);
     }
-    out.a = min(max(was.a, max(out.r, max(out.g, out.b))), 1.0);
-    let last = effect_mixed(px, out, glowing.mixing.z, glowing.mixing.w);
-    return vec4<f32>(last.rgb, clamp(last.a, 0.0, 1.0));
+    if glowing.mixing.w < 0.5 {
+        return effect_mixed(px, out, glowing.mixing.z, 0.0);
+    }
+    let source = effect_taken(textureLoad(blur_start, px, 0), 0.0);
+    let shown = mix(source.rgb, out.rgb, glowing.mixing.z);
+    return vec4<f32>(shown, clamp(max(source.a, max(shown.r, max(shown.g, shown.b))), 0.0, 1.0));
 }
 
 struct Grain {

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::shared::{Shared, SharedVec};
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames, rescale};
 
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
@@ -20,15 +21,15 @@ pub struct Project {
     pub rev: u64,
     pub edited: Option<u64>,
     pub settings: Settings,
-    pub media: Vec<Media>,
-    pub tracks: Vec<Track>,
-    pub compounds: Vec<Compound>,
+    pub media: SharedVec<Media>,
+    pub tracks: SharedVec<Track>,
+    pub compounds: SharedVec<Compound>,
     pub compound_path: Vec<OpenCompound>,
     pub marks: Marks,
     pub tape_marks: TapeMarks,
     pub markers: Vec<Marker>,
-    pub subtitles: Vec<SubtitleTrack>,
-    pub timelines: Vec<Timeline>,
+    pub subtitles: SharedVec<SubtitleTrack>,
+    pub timelines: SharedVec<Timeline>,
     pub recent: Vec<String>,
     pub next_id: NextIds,
     pub bins: Vec<String>,
@@ -158,15 +159,15 @@ impl From<ProjectFile> for Project {
             rev: f.rev,
             edited: f.edited,
             settings: f.settings,
-            media: f.media,
-            tracks: Vec::new(),
-            compounds: f.compounds,
+            media: f.media.into(),
+            tracks: SharedVec::new(),
+            compounds: f.compounds.into(),
             compound_path: f.compound_path,
             marks: Marks::default(),
             tape_marks: f.tape_marks,
             markers: Vec::new(),
-            subtitles: Vec::new(),
-            timelines: f.timelines,
+            subtitles: SharedVec::new(),
+            timelines: f.timelines.into(),
             recent: f.recent,
             next_id: f.next_id,
             bins: f.bins,
@@ -207,7 +208,7 @@ pub struct Timeline {
     #[serde(default)]
     pub clip_filter: ClipFilter,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
-    pub tracks: Vec<Track>,
+    pub tracks: SharedVec<Track>,
     /// Timeline In/Out marks.
     #[serde(default)]
     pub marks: Marks,
@@ -215,7 +216,7 @@ pub struct Timeline {
     pub markers: Vec<Marker>,
     /// Subtitle tracks `S1…`, from the one nearest the video up.
     #[serde(default)]
-    pub subtitles: Vec<SubtitleTrack>,
+    pub subtitles: SharedVec<SubtitleTrack>,
 }
 
 /// What the Export page renders of a timeline.
@@ -1812,7 +1813,7 @@ pub struct Track {
     pub id: String,
     pub kind: TrackKind,
     /// Sorted by `start`, never overlapping.
-    pub clips: Vec<Clip>,
+    pub clips: SharedVec<Clip>,
     pub locked: bool,
     /// The sound of this audio track is silent. Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -2364,7 +2365,7 @@ pub struct Clip {
     /// Where its picture goes over the frame: moved, zoomed, turned,
     /// flipped and cropped. Left out, it fills the frame as it always has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Picture>,
+    pub picture: Option<Shared<Picture>>,
     /// The id of a compound clip definition in [`Project::compounds`].
     /// It is a block with no media and no audio of its own. On an audio
     /// track it stands for the sound of what it holds (`video` false).
@@ -4994,11 +4995,32 @@ pub struct MagicMask {
     /// off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
+    /// Quality: the model that makes the maps. Left out for `faster`.
+    #[serde(default, skip_serializing_if = "MaskQuality::is_usual")]
+    pub quality: MaskQuality,
     /// One map for each subject on each frame that has clicks of it that
     /// are on, and on each frame that a track of it reached. Left out when
     /// there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub maps: Vec<MaskMap>,
+}
+
+/// The Quality of a Magic Mask.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskQuality {
+    /// A looser mask, made quickly by SAM 2.1 tiny.
+    #[default]
+    Faster,
+    /// More detail, made by SAM 2.1 base+. With the preference
+    /// `color.magic_mask_large` on, SAM 2.1 large makes it.
+    Better,
+}
+
+impl MaskQuality {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A click of the Magic Mask.
@@ -8877,8 +8899,8 @@ pub struct Compound {
     pub frames: i64,
     /// The tracks inside it (video and audio, frames from 0 at `fps`).
     /// Empty while checked out as the active open sheet, or while offline.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tracks: Vec<Track>,
+    #[serde(default, skip_serializing_if = "SharedVec::is_empty")]
+    pub tracks: SharedVec<Track>,
     #[serde(default, skip_serializing_if = "Marks::is_empty")]
     pub marks: Marks,
     /// Timeline markers inside the compound clip. Left out when empty.
@@ -10089,7 +10111,7 @@ pub struct SubtitleTrack {
     #[serde(default, skip_serializing_if = "SubtitleStyle::is_empty")]
     pub style: SubtitleStyle,
     /// Sorted by `start`; cues may overlap.
-    pub cues: Vec<Cue>,
+    pub cues: SharedVec<Cue>,
 }
 
 /// One word of a cue. `at` is left out when the word has no start frame.
@@ -10164,7 +10186,7 @@ pub struct Cue {
     /// before or after the cue. The whole value is left out when nothing is
     /// changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Picture>,
+    pub picture: Option<Shared<Picture>>,
 }
 
 /// Where a cue shows on the picture.
@@ -10243,7 +10265,7 @@ impl SubtitleTrack {
             destination: true,
             locked: false,
             style: SubtitleStyle::default(),
-            cues: Vec::new(),
+            cues: SharedVec::new(),
         }
     }
 
@@ -10282,15 +10304,15 @@ impl Project {
             rev: 0,
             edited: None,
             settings,
-            media: Vec::new(),
+            media: SharedVec::new(),
             tracks: Self::fresh_tracks(),
-            compounds: Vec::new(),
+            compounds: SharedVec::new(),
             compound_path: Vec::new(),
             marks: Marks::default(),
             tape_marks: TapeMarks::default(),
             markers: Vec::new(),
-            subtitles: Vec::new(),
-            timelines: Vec::new(),
+            subtitles: SharedVec::new(),
+            timelines: SharedVec::new(),
             recent: Vec::new(),
             next_id: NextIds {
                 media: 1,
@@ -10308,8 +10330,8 @@ impl Project {
         }
     }
 
-    pub fn fresh_tracks() -> Vec<Track> {
-        vec![Track::new("V1", TrackKind::Video)]
+    pub fn fresh_tracks() -> SharedVec<Track> {
+        vec![Track::new("V1", TrackKind::Video)].into()
     }
 
     pub fn sheet(&self) -> Sheet<'_> {
@@ -10487,7 +10509,7 @@ impl Project {
                 take(&mut k.tracks),
                 take(&mut k.marks),
                 take(&mut k.markers),
-                Vec::new(),
+                SharedVec::new(),
             ))
         } else {
             self.timeline_mut().map(|t| {
@@ -10504,7 +10526,7 @@ impl Project {
                 Self::fresh_tracks(),
                 Marks::default(),
                 Vec::new(),
-                Vec::new(),
+                SharedVec::new(),
             )
         });
     }
@@ -10513,7 +10535,7 @@ impl Project {
         debug_assert!(self.timelines.is_empty());
         self.recent.insert(0, t.id.clone());
         self.timelines.push(Timeline {
-            tracks: Vec::new(),
+            tracks: SharedVec::new(),
             ..t
         });
     }
@@ -10531,17 +10553,17 @@ impl Project {
         }
     }
 
-    pub fn take_timelines(&mut self) -> Vec<Timeline> {
+    pub fn take_timelines(&mut self) -> SharedVec<Timeline> {
         self.check_in();
         std::mem::take(&mut self.timelines)
     }
 
-    pub fn put_timelines(&mut self, timelines: Vec<Timeline>) {
+    pub fn put_timelines(&mut self, timelines: SharedVec<Timeline>) {
         self.timelines = timelines;
         self.check_out();
     }
 
-    pub fn take_sheets(&mut self) -> (Vec<Timeline>, Vec<Compound>) {
+    pub fn take_sheets(&mut self) -> (SharedVec<Timeline>, SharedVec<Compound>) {
         self.check_in();
         (
             std::mem::take(&mut self.timelines),
@@ -10549,7 +10571,7 @@ impl Project {
         )
     }
 
-    pub fn put_sheets(&mut self, timelines: Vec<Timeline>, compounds: Vec<Compound>) {
+    pub fn put_sheets(&mut self, timelines: SharedVec<Timeline>, compounds: SharedVec<Compound>) {
         self.timelines = timelines;
         self.compounds = compounds;
         self.check_out();
@@ -10591,7 +10613,7 @@ impl Project {
             tracks: Self::fresh_tracks(),
             marks: Marks::default(),
             markers: Vec::new(),
-            subtitles: Vec::new(),
+            subtitles: SharedVec::new(),
         }
     }
 
@@ -11137,7 +11159,7 @@ impl Track {
         Self {
             id: id.into(),
             kind,
-            clips: Vec::new(),
+            clips: SharedVec::new(),
             locked: false,
             muted: false,
             solo: false,
