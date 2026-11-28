@@ -1535,4 +1535,4 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The FFmpeg encoders prores_ks, prores_aw and dnxhd take only 10-bit input.
   - At 10 bits, the curve of Resolve gives 0..1 only 334 codes, in place of 876. One code near 1.0 is then a step of 0.0063.
-  - The owner approved this deviation.
+  - When these FFmpeg encoders take 12-bit input, the cache keeps the values outside 0..1 with the curve of Resolve ([todo](todo/float-cache-and-ai.md)).
