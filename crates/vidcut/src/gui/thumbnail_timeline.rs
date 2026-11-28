@@ -58,8 +58,8 @@ fn thumbs(p: &Project) -> Vec<Thumb> {
     let source_rate = p.settings.fps;
     let settings = serde_json::to_vec(&p.settings).unwrap_or_default();
     let filter = p.timeline().map(|t| &t.clip_filter);
+    clips.retain(|(_, c)| filter.is_none_or(|f| clip_filter::admits(p, c, f)));
     (clips.into_iter().enumerate())
-        .filter(|(_, (_, c))| filter.is_none_or(|f| clip_filter::admits(p, c, f)))
         .map(|(i, (t, c))| {
             let media = p.media(&c.media);
             let timecode = media.map_or_else(
