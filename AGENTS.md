@@ -45,7 +45,7 @@
     - Show the conversion where the user sets the value and in the export's report.
 11. **The docs state facts about the current code. Git is the history.**
     - Write the `.md` files in ASD-STE100 Simplified Technical English (STE). Use short sentences, one fact in each sentence, active voice and the present tense. Use lists for complex text, and use the same word for the same thing.
-    - A doc tells what the code does now and why. A todo file lists what is still missing, one short line for each item.
+    - A doc tells what the code does now and why. A todo file tells what is still to do and why.
     - Do not write progress notes, earlier attempts, "before, X did Y" or why a mistake occurred. Put them in commit messages and PR descriptions.
     - A PR that changes a doc also removes the stale text in the parts that it changes.
     - `scripts/check-docs.sh` refuses a sentence of more than 25 words and a line of more than 300 characters.
@@ -104,7 +104,7 @@ The design docs name the things that a reader searches for: types, modules, requ
 - [docs/spec.md](docs/spec.md): the behavior spec. [docs/deviations.md](docs/deviations.md): where vidcut is different.
 - [docs/design/](docs/design/README.md): how vidcut is built, with charts. Start there.
 - [docs/tools.md](docs/tools.md): debug and test tools. [docs/gotchas.md](docs/gotchas.md): FFmpeg, driver and library behavior that vidcut works around.
-- [docs/roadmap.md](docs/roadmap.md): what comes next. [docs/todo/](docs/todo/): what is missing, one file for each area.
+- [docs/roadmap.md](docs/roadmap.md): what comes next. [docs/todo/](docs/todo/): open work, one file for each item.
 
 ## Cloud agents
 
