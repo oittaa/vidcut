@@ -88,8 +88,15 @@ pub(crate) fn audio_edge(p: &Project, id: &str, edge: Edge) -> Option<i64> {
         let link = c.link?;
         p.tracks_of(TrackKind::Audio)
             .into_iter()
-            .flat_map(|i| &p.tracks[i].clips)
-            .find(|x| x.link == Some(link))?
+            .map(|i| &p.tracks[i])
+            .flat_map(|t| {
+                t.clips
+                    .iter()
+                    .filter(move |x| x.link == Some(link))
+                    .map(move |x| (t.number(), x))
+            })
+            .min_by_key(|&(n, _)| std::cmp::Reverse(n))?
+            .1
     };
     Some(if edge == Edge::Tail { s.end() } else { s.start })
 }
@@ -1273,8 +1280,8 @@ impl Workspace {
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
                 let on_volume = rows.at(pos.y).and_then(|r| {
-                    let t = rows.bands.apart(p.track(&r.track)?);
-                    geometry::volume_target(&t, scale, &r.rect, pos, &self.timeline.keys)
+                    let t = p.track(&r.track)?;
+                    geometry::volume_target(t, scale, &r.rect, pos, &self.timeline.keys)
                 });
                 let on_key = on_volume
                     .as_ref()
@@ -2025,7 +2032,18 @@ impl Workspace {
             c.text_dim
         };
         let font = egui::TextStyle::Small.resolve(ui.style());
-        let galley = ui.painter().layout_no_wrap(text, font, color);
+        let under = p
+            .track(track)
+            .filter(|_| self.timeline.options.linked_selection)
+            .and_then(|t| geometry::over(p, t));
+        let lines = |s: String| ui.painter().layout_no_wrap(s, font.clone(), color);
+        let mut galley = lines(match &under {
+            Some(a) => format!("{text}\n{a}"),
+            None => text.clone(),
+        });
+        if under.is_some() && galley.size().y > at.height() + 2.0 {
+            galley = lines(text);
+        }
         if galley.size().y <= at.height() + 2.0 {
             let pos = egui::Align2::CENTER_CENTER
                 .anchor_size(at.center(), galley.size())
@@ -2155,15 +2173,13 @@ impl Workspace {
                 json!({ "track": t.id, "locked": !t.locked }),
                 parts.icons[1],
             )];
-            let heard = if t.has_sound() {
-                vec![t.id.clone()]
-            } else if self.timeline.options.linked_selection {
-                geometry::heard_on(p, t)
-            } else {
-                Vec::new()
-            };
-            if !heard.is_empty() {
-                let muted = heard.iter().all(|id| p.track(id).is_some_and(|a| a.muted));
+            if t.has_sound() || self.timeline.options.linked_selection {
+                let (shown, heard) = if t.has_sound() {
+                    (Some(t.id.clone()), vec![t.id.clone()])
+                } else {
+                    (geometry::over(p, t), geometry::heard_on(p, t))
+                };
+                let muted = shown.and_then(|id| p.track(&id)).is_some_and(|a| a.muted);
                 let sound = if muted {
                     icon::AUDIO_OFF
                 } else {
@@ -2174,6 +2190,7 @@ impl Workspace {
                     .map(|id| json!({ "track": id, "muted": !muted }))
                     .collect();
                 let change = match commands.as_slice() {
+                    [] => Value::Null,
                     [one] => one.clone(),
                     _ => json!({
                         "commands": commands
@@ -2187,7 +2204,8 @@ impl Workspace {
                         ),
                     }),
                 };
-                buttons.push(("Audio", "Mute", muted, sound, change, parts.icons[3]));
+                let tip = if muted { "Unmute Track" } else { "Mute Track" };
+                buttons.push(("Audio", tip, muted, sound, change, parts.icons[3]));
             }
             if t.kind == vidcut_core::model::TrackKind::Video {
                 let picture = if t.video_enabled {
@@ -2210,6 +2228,7 @@ impl Workspace {
                 if header_button(&mut child, at, glyph, &name, lit)
                     .on_hover_text(tip)
                     .clicked()
+                    && !change.is_null()
                 {
                     let method = if change.get("commands").is_some() {
                         "apply"
@@ -2288,8 +2307,8 @@ impl Workspace {
                 sound,
             }
         } else if let Some((clip, band, on)) = rows.at(press.y).and_then(|r| {
-            let t = rows.bands.apart(p.track(&r.track)?);
-            geometry::volume_target(&t, &scale, &r.rect, press, &self.timeline.keys)
+            let t = p.track(&r.track)?;
+            geometry::volume_target(t, &scale, &r.rect, press, &self.timeline.keys)
         }) {
             match on {
                 geometry::OnVolume::Line => {
@@ -2696,8 +2715,8 @@ impl Workspace {
         let keys = self.timeline.keys.clone();
         let on_volume = |pos: Pos2| {
             rows.at(pos.y).and_then(|r| {
-                let t = rows.bands.apart(p.track(&r.track)?);
-                geometry::volume_target(&t, &scale, &r.rect, pos, &keys)
+                let t = p.track(&r.track)?;
+                geometry::volume_target(t, &scale, &r.rect, pos, &keys)
                     .map(|(clip, _, on)| (clip, on))
             })
         };
