@@ -5,7 +5,7 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
     Background, Composition, Connect, Ease, EffectValue, FastNoise, ImageFormat, MotionPath, Node,
-    PathSample, Pattern, Project, ShadingElement, Tool, ToolType,
+    PathSample, Pattern, PatternKind, Project, ShadingElement, Tool, ToolType,
 };
 use crate::request::{NodeChange, NodeInput, PatternTrim};
 
@@ -528,7 +528,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 given(&mut left.search_height, &mut pattern.search_height);
                 given(&mut left.pattern_channel, &mut pattern.channel);
                 if left.remove_pattern {
-                    t.patterns.remove(i);
+                    t.remove_pattern(i);
                     t.pivot_tracker = match t.pivot_pattern().cmp(&k) {
                         std::cmp::Ordering::Equal => None,
                         std::cmp::Ordering::Greater => {
@@ -540,11 +540,11 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 }
             }
             if left.add_pattern {
-                t.patterns.push(Pattern::new(t.free_name()));
+                t.push_pattern(t.next_pattern(PatternKind::Model));
                 left.add_pattern = false;
             }
             if left.add_point {
-                t.patterns.push(Pattern::point(t.free_point()));
+                t.push_pattern(t.next_pattern(PatternKind::Point));
                 left.add_point = false;
             }
             given(&mut left.operation, &mut t.operation);

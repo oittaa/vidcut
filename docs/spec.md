@@ -3696,8 +3696,20 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns (p. 2845).
   - vidcut: a model tracks the patterns that Add Pattern adds. Their names are Pattern and a number.
   - Add Point adds a Point pattern (p. 2841). The first Add Point of a new Tracker gives Point 2.
-    - vidcut: the number of a new pattern is the first number that no pattern has.
+    - The name of a new pattern is its kind and a number, for example Point 2 or IntelliTrack 6.
+    - The number counts each pattern that the Tracker made, of both kinds. A deleted number does not come again. A delete does not change the other names.
+    - The place of a new pattern follows the same count. Patterns 1 to 4 are at (0.25, 0.75), (0.75, 0.75), (0.25, 0.25) and (0.75, 0.25). Each later pattern is at (0.5, 0.5).
+    - A corner that a delete makes free is not used again.
+    - The new pattern becomes the selected pattern.
   - A new Point pattern is 0.05 of the width and 0.05 of the height of the picture. Its search area is 0.125 of the width and 0.125 of the height.
+  - The trash icon of a pattern deletes it at once, with no dialog.
+    - A delete of the selected pattern selects the pattern above it. A delete of another pattern keeps the selection.
+  - A Point pattern has Pattern Width, Pattern Height, Search Width and Search Height in the Inspector. An IntelliTrack pattern has none of them.
+    - Their sliders go from 0.001 to 0.5. A search area smaller than the box stays.
+    - Search Width and Search Height have keyframes. Pattern Width and Pattern Height have none.
+    - A typed value outside the slider is not measured. A typed Pattern Width of 1000000 crashes Resolve ([gotchas](gotchas.md#resolves-fusion-page)).
+  - X Offset and Y Offset of a pattern have keyframes and no limit. A typed 1000000 and -1000000 stay.
+    - vidcut: each offset is from -1000000 to 1000000.
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - The box of a Point pattern has a small handle at the top left. A drag of it moves the box, with a zoomed view (pp. 1783–1784).
     - The path does not change.
@@ -3711,18 +3723,22 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - vidcut: a found path has no box before its first frame and after its last frame. There, the viewer shows no box for its pattern. Its masks have no effect there.
 - A track of a Point pattern looks for the pixels of its box (pp. 1785–1787, 2842–2847):
   - On the next frame, the track looks for the pattern only in the search area (p. 2842). A larger area follows a faster move, and it takes longer.
-  - The Tracker picks the channel from the contrast, the clarity and the reliability of each channel (pp. 1785, 2846). The user can pick a color channel, the luminance or the alpha instead (p. 1785).
+  - The manual says that the Tracker picks the channel from the contrast, the clarity and the reliability of each channel (pp. 1785, 2846). The user can pick a color channel, the luminance or the alpha instead (p. 1785).
+    - The channel buttons are R, G, B, Alpha, Luminance and A (Automatic). A new pattern has Luminance.
+    - A click on a button selects that channel. A track does not change it.
+    - Automatic selects at once the channel with the largest step in the box. After a change of the picture, it selects again.
     - vidcut: Channel Auto picks the channel with the most variance in the box on the first frame of the track. On a tie, it picks the luminance.
     - The luminance is 0.2126 red, 0.7152 green and 0.0722 blue.
-  - Adaptive Mode has three choices (pp. 1787, 2845). It acts on each Point pattern of a track.
+  - Adaptive Mode has three choices (pp. 1787, 2845). It acts on each Point pattern of a track. A new Tracker has None.
     - None: the track looks for the pattern of the first frame on each frame.
     - Every Frame: the track takes the pattern again on each frame, where it found it. This follows slow changes of the pattern, and it can drift.
     - Best Match: as Every Frame. But when the new pattern differs from the first one by more than Match Tolerance, the track keeps the last pattern.
+    - Match Tolerance shows only with Best Match. Its default is 0.1. Its slider goes from 0 to 0.25, and a typed value is held from 0 to 1.
+    - On a bar that grows and turns, Best Match at 0, 0.1 and 1 gives the path of Every Frame to 6 decimals. None ends about 0.006 away after 30 frames.
   - vidcut: the track compares the pattern with each place of the search area by normalized cross-correlation, in the channel.
     - A parabola through the scores next to the best place gives the place between pixels.
     - On a frame where no place matches, the pattern keeps its last place.
     - The change of Best Match is 1 minus the correlation of the new pattern with the first one, from 0 to 1.
-    - Match Tolerance is from 0 to 1. Its usual value is 0.5.
   - A Point pattern keeps its size, and it follows no turn.
 - The track buttons are at the top of the Inspector (pp. 1784–1785). The manual lists Track Reverse From Current Time and Track Forward From Current Time instead (p. 2844).
   - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.

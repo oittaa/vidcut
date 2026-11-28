@@ -202,6 +202,7 @@ impl Pattern {
     pub const SEARCH: f64 = 0.125;
     pub const SEARCHES: (f64, f64) = (0.001, 1.0);
     pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
+    pub const OFFSETS: (f64, f64) = (-1e6, 1e6);
 
     pub fn new(name: String) -> Self {
         Self {
@@ -287,22 +288,47 @@ impl Tracker {
     pub const NAME: &'static str = "Pattern";
 
     pub const POINT: &'static str = "Point";
-    pub const TOLERANCE: f64 = 0.5;
+    pub const TOLERANCE: f64 = 0.1;
+    pub const CORNERS: [[f64; 2]; 4] = [[0.25, 0.75], [0.75, 0.75], [0.25, 0.25], [0.75, 0.25]];
+    pub const LATER: [f64; 2] = [0.5, 0.5];
 
-    pub fn free_name(&self) -> String {
-        format!("{} {}", Self::NAME, self.free_number())
+    pub fn made_count(&self) -> usize {
+        let len = self.patterns.len();
+        self.made.map_or(len, |m| (m as usize).max(len))
     }
 
-    pub fn free_point(&self) -> String {
-        format!("{} {}", Self::POINT, self.free_number())
+    pub fn next_name(&self) -> String {
+        format!("{} {}", Self::NAME, self.made_count() + 1)
     }
 
-    fn free_number(&self) -> usize {
-        let taken = |n: usize| {
-            let names = [Self::NAME, Self::POINT].map(|kind| format!("{kind} {n}"));
-            self.patterns.iter().any(|p| names.contains(&p.name))
+    pub fn next_pattern(&self, kind: PatternKind) -> Pattern {
+        let n = self.made_count();
+        let place = Self::CORNERS.get(n).copied().unwrap_or(Self::LATER);
+        let made = match kind {
+            PatternKind::Model => Pattern::new(self.next_name()),
+            PatternKind::Point => Pattern::point(format!("{} {}", Self::POINT, n + 1)),
         };
-        (1..).find(|n| !taken(*n)).unwrap_or(1)
+        Pattern {
+            center: Some(place).filter(|c| *c != Pattern::CENTER),
+            ..made
+        }
+    }
+
+    pub fn push_pattern(&mut self, p: Pattern) {
+        let made = self.made_count() + 1;
+        self.patterns.push(p);
+        self.counted(made);
+    }
+
+    pub fn remove_pattern(&mut self, i: usize) {
+        let made = self.made_count();
+        self.patterns.remove(i);
+        self.counted(made);
+    }
+
+    fn counted(&mut self, made: usize) {
+        let more = made > self.patterns.len();
+        self.made = more.then(|| u32::try_from(made).unwrap_or(u32::MAX));
     }
 
     pub fn adaptive(&self) -> AdaptiveMode {
@@ -341,6 +367,7 @@ impl Tracker {
             adaptive_mode: None,
             match_tolerance: None,
             find: None,
+            made: None,
         }
     }
 
@@ -1314,12 +1341,12 @@ impl AdaptiveMode {
 
 impl PatternChannel {
     pub const ALL: [PatternChannel; 6] = [
-        PatternChannel::Auto,
         PatternChannel::Red,
         PatternChannel::Green,
         PatternChannel::Blue,
-        PatternChannel::Luminance,
         PatternChannel::Alpha,
+        PatternChannel::Luminance,
+        PatternChannel::Auto,
     ];
 
     pub fn label(self) -> &'static str {
@@ -1654,15 +1681,18 @@ impl Tool {
                 points: m.points.clone(),
                 ..Mask::default()
             }),
-            Tool::Tracker(t) => Tool::Tracker(Tracker::of(
-                t.patterns
-                    .iter()
-                    .map(|p| Pattern {
-                        offset: None,
-                        ..p.clone()
-                    })
-                    .collect(),
-            )),
+            Tool::Tracker(t) => Tool::Tracker(Tracker {
+                made: t.made,
+                ..Tracker::of(
+                    t.patterns
+                        .iter()
+                        .map(|p| Pattern {
+                            offset: None,
+                            ..p.clone()
+                        })
+                        .collect(),
+                )
+            }),
             Tool::Merge(_) => Tool::Merge(Merge::default()),
             Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
             Tool::Background(_) => Tool::Background(Background::default()),

@@ -2648,6 +2648,7 @@ mod tests {
                                 adaptive_mode: None,
                                 match_tolerance: None,
                                 find: None,
+                                made: None,
                             }),
                             input: None,
                             foreground: None,

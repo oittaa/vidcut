@@ -125,8 +125,8 @@ pub fn add(
             Tracker::PATTERNS_KEPT
         )));
     }
-    let name = name.and_then(named).unwrap_or_else(|| t.free_name());
-    t.patterns.push(Pattern {
+    let name = name.and_then(named).unwrap_or_else(|| t.next_name());
+    t.push_pattern(Pattern {
         path: Some(MotionPath {
             subject: None,
             tracked: false,
@@ -512,7 +512,7 @@ pub fn found(
                 break name;
             }
         };
-        t.patterns.push(Pattern {
+        t.push_pattern(Pattern {
             path: Some(MotionPath {
                 subject: Some(subject),
                 tracked: false,

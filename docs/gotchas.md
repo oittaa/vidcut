@@ -910,6 +910,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand.
   - Then Track Forward from frame 20 fails too. The Console says "MediaOut1 cannot get Parameter for Input at time 20".
   - The names of the Tracker and of MediaOut1 are red. A new Tracker tracks.
   - vidcut keeps no state of a failed track. A start outside the In and the Out gets an error, and the Tracker stays as it was ([spec §8.19](spec.md#the-tracker)).
+- **A typed Pattern Width of 1000000 crashes Resolve.**
+  - The slider of Pattern Width goes from 0.001 to 0.5. The field keeps a typed 1000000.
+  - About 5 seconds later, Resolve 21.2.0.0006 crashes. The project has the state of its last automatic save.
+  - vidcut refuses a pattern side outside 0.001 to 0.5, and a side of the search area outside 0.001 to 1 ([spec §8.19](spec.md#the-tracker)).
 
 ## transcribe.cpp and its models
 
