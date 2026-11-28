@@ -756,6 +756,7 @@ impl Words<'_> {
                     "locked": t.locked,
                     "muted": t.muted,
                     "solo": t.solo,
+                    "solo_safe": t.solo_safe,
                     "volume_db": t.volume_db,
                     "voice_isolation": t.voice_isolation,
                     "video_enabled": t.video_enabled,
@@ -780,6 +781,7 @@ impl Words<'_> {
         s.put("locked", "Lock", &raw, |t| t["locked"].clone());
         s.put("muted", "Mute", &raw, |t| t["muted"].clone());
         s.put("solo", "Solo", &raw, |t| t["solo"].clone());
+        s.put("solo_safe", "Solo Safe", &raw, |t| t["solo_safe"].clone());
         s.put("volume_db", "Volume", &decibels, |t| t["volume_db"].clone());
         s.put("voice_isolation", "Voice Isolation Amount", &number, |t| {
             t["voice_isolation"]["amount"].clone()

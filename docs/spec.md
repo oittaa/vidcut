@@ -5231,6 +5231,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
+  - **Solo Safe** (p. 3964):
+    - Ctrl+Shift+click (Cmd+Shift+click on a Mac) on a Solo button turns Solo Safe on or off. The button is blue while it is on (not measured).
+    - A Solo Safe track is heard also while other tracks are soloed. This applies to the export too (not measured).
+  - **Exclusive Solo** (p. 3965):
+    - It is a switch, off at first. On, a click that solos a track takes the solo off each other track (not measured).
+    - It does not take the solo off a Solo Safe track (not measured).
+  - vidcut: the menu of the Mixer has the Exclusive Solo switch. The switch stays between runs, and `gui.timeline` sets it.
+  - vidcut: `track.set` takes `solo_safe`, and `exclusive` with `solo`.
+  - vidcut: an OTIO export keeps Solo Safe in vidcut's own track metadata. While a track is soloed, the export gives the note `solo_safe_kept`.
   - FX other than the Ducker: out.
 - **Voice Isolation** (p. 774):
   - It has a switch and an Amount from 0 to 100.
@@ -5775,6 +5784,7 @@ The Audio page follows the Fairlight page of the manual.
   - The Timeline Options, Timeline Actions and Edit Actions menus and the tools of the Cut page are at the left of the ruler.
 - **Track header** (pp. 3752–3753):
   - It has the track number, the name, Lock, Solo, Mute, the fader value and a meter (not measured).
+  - Its Solo button acts as the Solo button of the Mixer, with Solo Safe and Exclusive Solo (§9).
   - The fader value is the fader of the Mixer, in dB. A drag up or right raises it. A typed value sets it (not measured).
   - A click on the header makes the track the target of the edit functions (not measured).
   - Its right-click menu has Add Audio Track and Remove Track.

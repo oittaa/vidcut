@@ -108,6 +108,14 @@ Ducking:
 - Alt+D turns ducking on or off for the track of the selected clip (`Workspace::toggle_duck`).
 - Before a change that needs the speech detector, the GUI asks to download it (`Workspace::duck`).
 
+Solo:
+
+- `solo_look` draws the Solo button of a Mixer strip and of a track header on the Audio page. It is green with `solo`, and blue with `solo_safe`.
+- `Workspace::solo_clicked` handles a click on it. Ctrl+Shift+click sends `track.set` with `solo_safe`. A click sends `solo` with `exclusive`.
+  - `exclusive` is the Exclusive Solo switch of the Mixer menu. It is in the timeline `Options`, and it stays between runs.
+- `ops::set_track` takes the solo off the other tracks for `exclusive`. Thus the change is one undo step.
+- `Track::in_mix` hears a Solo Safe track while other tracks are soloed. The playback, the export and the meters use it.
+
 Loudness meter:
 
 - `Workspace::loudness_meter` draws the loudness meter at the right of the Mix strip. It reads `Snapshot::loudness` each frame ([playback](playback.md#sound)).

@@ -200,6 +200,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                         flags.push(key.to_string());
                     }
                 }
+                if t["solo_safe"] == true {
+                    flags.push("solo safe".into());
+                }
                 if t["video_enabled"] == false {
                     flags.push("video off".into());
                 }
