@@ -1845,6 +1845,15 @@ pub struct Track {
     /// they are on, with each module off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamics: Option<TrackDynamics>,
+    /// The pan of an audio track, after its equalizer and before its
+    /// fader, from -100 (all the way left) to 100 (all the way right). The
+    /// pan of each clip adds to it. Left out at 0, the middle.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pan: f64,
+    /// The switch of the pan of an audio track. Off keeps the pan, and the
+    /// sound plays as at 0. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub pan_on: bool,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -11199,11 +11208,17 @@ impl Track {
             duck: None,
             dynamics: None,
             equalizer: None,
+            pan: 0.0,
+            pan_on: true,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),
             render_cache: true,
         }
+    }
+
+    pub fn heard_pan(&self) -> f64 {
+        if self.pan_on { self.pan } else { 0.0 }
     }
 
     pub fn number(&self) -> usize {

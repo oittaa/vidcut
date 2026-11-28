@@ -480,7 +480,10 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
   - A source of one channel goes to each side of a mix of two channels at its full level (`swr_set_matrix`).
-- A piece has the Pan of its clip (`pan` of an `AudioPiece`), or its pan keyframes (`pan_keyed`). `render::pan_gains` gives the gain of each side.
+- A piece has the Pan of its clip (`pan` of an `AudioPiece`), or its pan keyframes (`pan_keyed`). `render::clip_pan_gains` gives the gain of each side.
+  - The pan of a clip adds to the pan of its track ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), Track pan). `render::pan_gains` gives the law of the sum.
+  - The bus of the track applies the gains of the track pan. Thus each lane applies the gains of the sum, divided by the gains of the track pan.
+  - Why: the track pan comes after the equalizer of the track. A bus mixes the clips of its lanes before it, so it cannot apply the pan of each clip.
   - When `pan_keyed` is present, `AudioMix` reads `Keyed::pan_at` at each sample.
   - `AudioMix` multiplies the first two channels of a mix of two channels or more by those gains.
 - A piece has the `noise_reduction` of its clip when it changes the sound.
@@ -498,12 +501,13 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
 - A piece has the `equalizer` of its clip when it changes the sound.
   - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
   - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
-- Each audio track gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer and its fader.
+- Each audio track gets a `Bus` in the plan (`render::flatten_lanes`). It names the lanes of the track, its Dynamics, its equalizer, its pan and its fader.
   - A piece carries only the gain of its clip. The fader of its track is the `gain_db` of the bus.
   - The inner tracks of a compound clip get the track that holds it as their `host` (`Inner`).
   - The bus of an inner track goes `into` the bus of its host. `render::bus_for` makes the bus of a host before the buses that go into it.
   - A piece is `silent` when a fader in its chain of hosts is at the bottom (`fader_silent`).
-  - `AudioMix::bused` mixes the lanes of each bus apart. `Mixed::process` runs the `Dynamics`, then the `Filter`, then the fader on that mix.
+  - `AudioMix::bused` mixes the lanes of each bus apart. `Mixed::process` runs the `Dynamics`, then the `Filter`, then the pan, then the fader on that mix.
+  - The pan of a bus is the pan of its track as heard (`Track::heard_pan`). `AudioMix::bused` gives it to each lane of the bus too.
   - The buses run from the last to the first. Thus each bus gets the mixes of its inner tracks before it runs. A bus with no host goes into the mix of the plan.
   - Why: the Dynamics are not linear. They must hear the mix of the track, after the faders of its inner tracks.
   - `Dynamics::track` runs the Expander or Gate, the Compressor and the Limiter in this order, then Make Up. Each module has its own detector.

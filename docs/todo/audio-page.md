@@ -66,7 +66,7 @@ The page numbers are those of the 21.1 manual. The Fairlight chapters are pp. 37
 | Six insert slots, Effects Order, Effects In | 3938, 3941–3943 | Missing |
 | Dynamics of a track | 3944–3948 | Part: no presets, no Sidechain ([below](#track-dynamics)) |
 | Equalizer of a track | 3949–3952 | Part: no Gain fader, presets or range buttons ([below](#track-equalizer)) |
-| Pan of a track: 2D and 3D panners | 3954–3960 | Missing. A clip has a Pan |
+| Pan of a track: 2D and 3D panners | 3954–3960 | Part: Left/Right and the switch, on a mix of two channels ([§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)) |
 | Buses, Bus Format, Bus Outputs, Bus Sends | 3802–3804, 3810–3814, 3952–3953, 3960 | Missing: one main mix |
 | Patch Input/Output | 3814–3817 | Missing |
 | Nested timelines | 3960–3962 | Part: compound clips |
@@ -255,10 +255,7 @@ Each pull request changes the existing tests to the new model. It adds no tests.
 
 ### Track pan
 
-- Each track gets a Pan with a switch: the indicator on its strip, and the Pan window (pp. 3954–3955).
-- Left/Right is the control of a mix of two channels. The surround controls come with the track formats.
-- The pan comes after the equalizer and before the fader (p. 3938). The Pan run gives the law.
-- `track.set` sets `pan` and `pan_on`.
+- The [Pan run](#pan-run) settles the cases that the renders of batch 1 did not give. Until then, vidcut uses the nearest measured rule.
 
 ### Main strip and inserts
 
@@ -466,11 +463,9 @@ Script steps, about 15 min:
 
 ### Pan run
 
-- A stereo track and a mono track, each with noise.
-- Open the Pan window of each. Write each control, its default and its range, and what a typed value outside the range does.
-- Set Left/Right to −100, −50, −25, 25, 50 and 100 on each track. Render each.
-- Render a clip Pan together with a track pan. The render gives their order.
-- Click the pan indicator once to bypass the pan, and render.
+- Click the pan indicator once on three tracks with different pans, and render. One click in batch 1 did not bypass the pan.
+- Render a clip pan and a track pan with a sum past 100, for example a clip at 80 on a track at 50R. Do it on two files.
+- Render a track pan with the clip Pan switch off, and a clip pan with the track Pan switch off.
 - Export OpenTimelineIO with a track pan. Compare it with an export before.
 
 ### Main bus run

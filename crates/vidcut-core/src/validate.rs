@@ -20,7 +20,9 @@ fn sound_on_video(t: &Track, v: &mut Vec<String>) {
         || t.voice_isolation.is_some()
         || t.duck.is_some()
         || t.equalizer.is_some()
-        || t.dynamics.is_some();
+        || t.dynamics.is_some()
+        || t.pan != 0.0
+        || !t.pan_on;
     if set {
         v.push(format!("video track {} has a sound setting", t.id));
     }
@@ -152,6 +154,9 @@ pub fn violations(p: &Project) -> Vec<String> {
                 "track {} volume {} dB outside -100..10 dB",
                 t.id, t.volume_db
             ));
+        }
+        if !PAN.contains(&t.pan) {
+            v.push(format!("track {} pan {} outside -100..100", t.id, t.pan));
         }
         if let Some(d) = &t.duck
             && let Err(e) = crate::duck::checked(p, &t.id, d)

@@ -4961,6 +4961,8 @@ fn mutate(
             duck: None,
             dynamics: None,
             equalizer: None,
+            pan: None,
+            pan_on: None,
             video_enabled: None,
             render_cache: None,
             ..
@@ -5016,6 +5018,8 @@ fn mutate(
             duck,
             dynamics,
             equalizer,
+            pan,
+            pan_on,
             download,
             video_enabled,
             render_cache,
@@ -5047,6 +5051,8 @@ fn mutate(
                 duck,
                 dynamics: dynamics.clone(),
                 equalizer: equalizer.clone(),
+                pan: *pan,
+                pan_on: *pan_on,
                 video_enabled: *video_enabled,
                 render_cache: *render_cache,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
@@ -8452,6 +8458,8 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.duck = s.duck.clone();
                 track.dynamics = s.dynamics;
                 track.equalizer = s.equalizer.clone();
+                track.pan = s.pan;
+                track.pan_on = s.pan_on;
             }
         }
         crate::duck::tidy(p);
@@ -10089,6 +10097,9 @@ pub fn query(
                     if t.kind == crate::model::TrackKind::Video {
                         v["video_enabled"] = json!(t.video_enabled);
                         v["render_cache"] = json!(t.render_cache);
+                    } else {
+                        v["pan"] = json!(t.pan);
+                        v["pan_on"] = json!(t.pan_on);
                     }
                     if let Some(n) = &t.name {
                         v["name"] = json!(n);
@@ -11808,6 +11819,12 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
             }
             if t.volume_db != 0.0 {
                 v["volume_db"] = json!(t.volume_db);
+            }
+            if t.pan != 0.0 {
+                v["pan"] = json!(t.pan);
+            }
+            if !t.pan_on {
+                v["pan_on"] = json!(false);
             }
             if t.kind == crate::model::TrackKind::Video && !t.video_enabled {
                 v["video_enabled"] = json!(false);

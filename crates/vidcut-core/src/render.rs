@@ -90,7 +90,7 @@ fn colors_in(p: &Project, plan: &RenderPlan) -> Option<Hdr> {
 
 /// The mix of a track: its own lanes and the buses of the tracks inside its
 /// compound clips. The mix goes through the track's Dynamics, its
-/// equalizer and its fader, in that order.
+/// equalizer, its pan and its fader, in that order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Bus {
     /// The lanes of the plan's `audio` that it mixes: its track's own.
@@ -106,6 +106,10 @@ pub struct Bus {
     /// The equalizer of its track. Left out when it is not heard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<crate::model::TrackEqualizer>,
+    /// The pan of its track as heard, from -100 to 100: 0 when its switch
+    /// is off. The pan of each clip of its lanes adds to it. Left out at 0.
+    #[serde(default, skip_serializing_if = "is_centered")]
+    pub pan: f64,
     /// The fader of its track, in dB.
     pub gain_db: f64,
 }
@@ -1706,6 +1710,15 @@ pub fn pan_gains(pan: f64) -> (f32, f32) {
     (
         10f64.powf(left / 20.0) as f32,
         10f64.powf(right / 20.0) as f32,
+    )
+}
+
+pub fn clip_pan_gains(clip: f64, track: f64) -> (f32, f32) {
+    let (left, right) = pan_db(clip + track);
+    let (track_left, track_right) = pan_db(track);
+    (
+        10f64.powf((left - track_left) / 20.0) as f32,
+        10f64.powf((right - track_right) / 20.0) as f32,
     )
 }
 
@@ -4104,6 +4117,7 @@ fn bus_for(
         into,
         dynamics: t.dynamics.filter(crate::model::TrackDynamics::heard),
         equalizer: t.equalizer.clone().filter(|e| e.heard()),
+        pan: t.heard_pan(),
         gain_db: t.volume_db,
     });
     bus_of[ti] = Some(buses.len() - 1);
@@ -4394,6 +4408,8 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.duck = None;
         t.dynamics = None;
         t.equalizer = None;
+        t.pan = 0.0;
+        t.pan_on = true;
         for x in &mut t.clips {
             x.enabled = true;
             if let Some(s) = x.audio.as_mut() {
