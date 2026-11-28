@@ -275,6 +275,15 @@ impl FindValues {
         }
     }
 
+    pub fn fitted(mut self) -> Self {
+        let join = Join::of(self.subject.unwrap_or_default()).with(&self);
+        if join.keep > join.start {
+            self.start = None;
+            self.keep = None;
+        }
+        self
+    }
+
     pub fn problem(&self) -> Option<String> {
         let subject = self.subject.unwrap_or_default();
         if let Some(why) = Join::of(subject).with(self).problem() {

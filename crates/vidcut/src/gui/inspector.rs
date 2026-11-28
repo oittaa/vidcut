@@ -3134,6 +3134,7 @@ impl Workspace {
                 find_rows(ui, (&clip.id, &node.name), (subject, side), &mut find);
             }
         });
+        let find = find.fitted();
         if find != kept {
             acts.push(node_set(slot, "find", json!(find)));
         }
@@ -5186,15 +5187,22 @@ fn find_rows(
     let pixels = (f64::from(sides.0), f64::from(sides.1));
     let secs = (0.0, vidcut_core::motion::Join::MOST_SECS);
     let share = (0.0, 1.0);
+    let scores = usual.with(find);
+    let (start, keep) = (f64::from(scores.start), f64::from(scores.keep));
     let rows = [
         (find.size.map(f64::from), f64::from(side), pixels, 10.0),
         (
             find.start.map(f64::from),
             f64::from(usual.start),
-            share,
+            (keep, 1.0),
             0.01,
         ),
-        (find.keep.map(f64::from), f64::from(usual.keep), share, 0.01),
+        (
+            find.keep.map(f64::from),
+            f64::from(usual.keep),
+            (0.0, start),
+            0.01,
+        ),
         (find.overlap, usual.overlap, share, 0.01),
         (find.wait, usual.wait_secs, secs, 0.05),
         (find.shortest, usual.shortest_secs, secs, 0.05),

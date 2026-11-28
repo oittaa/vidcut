@@ -677,6 +677,9 @@ The bar and the Jobs button:
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better sets the size `BETTER_SIDE`. Faster removes the size.
     - Advanced shows a number row for the size of the picture and for each value of the path rules (`FIND_VALUES`). The reset of a row gives the usual value.
     - A row at its usual value (`FIND_SAME`) keeps no value. Thus the usual value of a new subject applies.
+    - Min Score To Start does not go below Min Score To Follow. Min Score To Follow does not go above Min Score To Start.
+    - A change of Subject or a reset can put the score to follow over the score to start. Then the Inspector removes both scores (`FindValues::fitted`), and the usual scores of the subject apply.
+    - Why: `comp.set` refuses such values. Thus a change of Subject is never refused.
     - Each row tells on hover what it sets, and what a lower or a higher number does.
   - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject. `motion.find` takes the other values from the Tracker.
   - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
