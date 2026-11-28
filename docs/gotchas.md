@@ -215,6 +215,11 @@ This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut
 
 ## GPU drivers
 
+- **A GPU can cut a float toward zero when it writes a half float** (NVIDIA GeForce RTX 4080 SUPER, Windows, driver 32.0.16.2140).
+  - The render cache in Uncompressed 16-bit Float writes each 32-bit value into an `R16Float` target (`fs_encode_float`).
+  - In a test of 196,608 random values, each value that a half float cannot hold came out closer to zero.
+  - OpenEXR rounds to the nearest half float.
+  - Thus the shader rounds each value to the nearest half float first (`half_rounded`). The GPU then writes that value exactly.
 - **NVIDIA's exit handlers break a close during the exit** (Linux, driver 580).
   - The handler of libnvcuvid runs from `_dl_fini`. If a decoder still lives, the handler joins a thread of the library.
   - A decoder that closes on another thread also joins that thread. Both wait forever.
@@ -697,7 +702,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
 - **Ctrl+Z did not take back Grab Still or Delete Selected of a still, in one case each.**
   - Ctrl+Z after one grab kept the still. Delete Selected of one still asked nothing, and Ctrl+Z did not bring it back.
-  - vidcut: `gallery.grab` and `gallery.remove` are undo steps, and Undo takes them back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
+  - vidcut: `gallery.grab` and `gallery.remove` are undo steps, and Undo takes them back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
+- **Ctrl+Z does not take back Change Label of a still.**
+  - Change Label set the label of a still to "lbl1". Ctrl+Z after it kept "lbl1".
+  - vidcut: `gallery.label` is one undo step, and Undo takes it back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
 - **A typed Soft of the HSL qualifier shows 0.1 more.**
   - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
   - Grade copies and Gallery stills show the same values. A typed Width shows as typed.

@@ -910,7 +910,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Playback does not write the cache. Only the background render writes it ([D98](spec.md#12-decisions-on-gaps-and-contradictions)).
   - The render cache is outside the cache dir. It does not count in the limit of the disk cache. No preference deletes old files. Delete Render Cache removes them.
   - Preferences hold the codec, the background render, its time and the kinds of User mode. They are the settings of this computer.
-  - The codecs are the ProRes and DNxHR grades, HEVC and AV1, and Automatic. There is no uncompressed format.
+  - The codecs are Uncompressed 16-bit Float, the ProRes and DNxHR grades, HEVC and AV1, and Automatic. There is no Uncompressed 10-bit format.
   - Smart finds the media that are slow to decode by the decoder and by the proxy rules, not by a list of formats:
     - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode
     - media that the proxy rules pick (spec D41), while the original plays
@@ -946,8 +946,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Uncompressed 10-bit, Uncompressed 16-bit Float, ProRes 4444, ProRes 4444 XQ and DNxHR 444 keep the alpha channel of a cached clip (p. 201).
   - Thus Resolve can cache a clip with an alpha channel at the clip level in these formats.
 - **vidcut:**
-  - Only ProRes 4444 and ProRes 4444 XQ keep the alpha channel. Media with an alpha channel is at the clip level only with these codecs ([spec D98](spec.md#12-decisions-on-gaps-and-contradictions)).
-  - DNxHR 444 keeps no alpha channel. vidcut has no uncompressed codec ([X103](#x103-the-render-cache-is-made-in-the-background)).
+  - Only Uncompressed 16-bit Float, ProRes 4444 and ProRes 4444 XQ keep the alpha channel. Media with an alpha channel is at the clip level only with these codecs ([spec D98](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - DNxHR 444 keeps no alpha channel. vidcut has no Uncompressed 10-bit codec ([X103](#x103-the-render-cache-is-made-in-the-background)).
   - At the timeline level, the cache holds the frame after the tracks mix. The frame looks the same.
   - The name of such a frame comes from all its layers, not from its time (`Cache::keys`). Thus its cache stays while its layers stay the same.
   - A change on another track at the time of the frame renders it again. A move of the clip renders it again where other frames are under the clip.

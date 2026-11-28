@@ -4,7 +4,7 @@ pub mod bypass;
 pub mod encode;
 pub(crate) mod make;
 pub(crate) mod normalize;
-mod openexr;
+pub(crate) mod openexr;
 pub mod renderer;
 pub mod still;
 pub mod subtitles;

@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
 use crate::lru::Lru;
 use crate::model::{
-    Album, Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds,
+    Album, Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, Memory, NextIds,
     OpenCompound, PathSample, Project, RenderJob, RenderRange, Settings, SharedNode, Speakers,
     Still, SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool,
     Track, TrackKind, Transition, VoiceIsolation,
@@ -227,6 +227,7 @@ struct MetaRow<'a> {
     stills: Cow<'a, [Still]>,
     shared_nodes: Cow<'a, [SharedNode]>,
     albums: Cow<'a, [Album]>,
+    memories: Cow<'a, [Memory]>,
 }
 
 impl<'a> MetaRow<'a> {
@@ -253,6 +254,7 @@ impl<'a> MetaRow<'a> {
             stills,
             shared_nodes,
             albums,
+            memories,
         } = p;
         Self {
             settings: Cow::Borrowed(settings),
@@ -267,6 +269,7 @@ impl<'a> MetaRow<'a> {
             stills: Cow::Borrowed(stills.as_slice()),
             shared_nodes: Cow::Borrowed(shared_nodes.as_slice()),
             albums: Cow::Borrowed(albums.as_slice()),
+            memories: Cow::Borrowed(memories.as_slice()),
         }
     }
 }
@@ -1256,6 +1259,7 @@ fn load_project_from_conn(
         stills: meta.stills.into_owned(),
         shared_nodes: meta.shared_nodes.into_owned(),
         albums: meta.albums.into_owned(),
+        memories: meta.memories.into_owned(),
     };
     project.check_out();
     resolve_paths(&mut project, dir);

@@ -186,6 +186,10 @@ pub enum CacheCodec {
     /// first that the GPU makes and plays.
     #[default]
     Auto,
+    /// Uncompressed 16-bit Float: RGB in half floats, with the alpha of a
+    /// clip that has one. It keeps the values below 0 and above 1. In
+    /// software.
+    Float16,
     /// ProRes 422 Proxy. On Apple's ProRes hardware (VideoToolbox) when
     /// there is one, else on the GPU through Vulkan, else in software.
     ProresProxy,
@@ -223,8 +227,9 @@ pub enum CacheCodec {
 }
 
 impl CacheCodec {
-    pub const ALL: [CacheCodec; 14] = [
+    pub const ALL: [CacheCodec; 15] = [
         Self::Auto,
+        Self::Float16,
         Self::ProresProxy,
         Self::ProresLt,
         Self::Prores422,
@@ -243,6 +248,7 @@ impl CacheCodec {
     pub fn name(self) -> &'static str {
         match self {
             Self::Auto => "Automatic",
+            Self::Float16 => "Uncompressed 16-bit Float",
             Self::ProresProxy => "ProRes 422 Proxy",
             Self::ProresLt => "ProRes 422 LT",
             Self::Prores422 => "ProRes 422",
