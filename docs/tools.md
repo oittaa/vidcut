@@ -209,6 +209,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `field_check SOURCE|REFERENCE FOLDER`: compares the frames in `FOLDER` with a reference, frame by frame in name order.
   - With `SOURCE`, the reference is FFmpeg's `bwdif` in field mode on that interlaced file. With a folder, it is the frames in that folder.
   - It prints the largest and the mean difference in each frame, with the place of the largest.
+  - It compares float values with no clip, and prints the range of the values on each side. FFmpeg's conversion to RGB clips the `SOURCE` reference to 0 to 1.
   - It gives them in three parts: the top and bottom 4 rows, moving areas and still areas.
   - A pixel moves when its luma in `FOLDER` differs by more than 2 levels from the frame before or after.
 - `decode_speed FILE [FRAMES] [START_S]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
