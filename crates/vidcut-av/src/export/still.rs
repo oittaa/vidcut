@@ -35,6 +35,23 @@ pub fn floats(
     Ok(floats_sized(piece, fps, size, colors, decoder)?.2)
 }
 
+fn float_frame(
+    piece: &VideoPiece,
+    fps: Rational,
+    size: (u32, u32),
+    colors: super::renderer::Finish<'_>,
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<ffmpeg::frame::Video> {
+    crate::cancel::stop()?;
+    crate::init();
+    let pixel = format::Pixel::GBRPF32LE;
+    let mut frames = super::renderer::frames(fps, size, pixel, colors, decoder)?.in_frame(size);
+    frames.read_piece(piece);
+    frames
+        .next_frame()?
+        .ok_or_else(|| Error::Invalid("no frame to render".into()))
+}
+
 pub fn floats_sized(
     piece: &VideoPiece,
     fps: Rational,
@@ -42,14 +59,7 @@ pub fn floats_sized(
     colors: super::renderer::Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(u32, u32, Vec<[f32; 3]>)> {
-    crate::cancel::stop()?;
-    crate::init();
-    let pixel = format::Pixel::GBRPF32LE;
-    let mut frames = super::renderer::frames(fps, size, pixel, colors, decoder)?.in_frame(size);
-    frames.read_piece(piece);
-    let frame = frames
-        .next_frame()?
-        .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
+    let frame = float_frame(piece, fps, size, colors, decoder)?;
     Ok(floats_of(&frame))
 }
 
@@ -114,6 +124,76 @@ fn encoded(mut frame: ffmpeg::frame::Video) -> Result<Vec<u8>> {
     enc.receive_packet(&mut packet)
         .ctx(|| "encoding PNG".into())?;
     Ok(packet.data().unwrap_or_default().to_vec())
+}
+
+pub fn write_exr(
+    piece: &VideoPiece,
+    fps: Rational,
+    size: (u32, u32),
+    colors: super::renderer::Finish<'_>,
+    path: &Path,
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<()> {
+    let frame = float_frame(piece, fps, size, colors, decoder)?;
+    let (w, h) = (frame.width(), frame.height());
+    let row = w as usize * 4;
+    let mut planes = Vec::with_capacity(row * h as usize * 3);
+    for plane in 0..3 {
+        let (stride, data) = (frame.stride(plane), frame.data(plane));
+        for y in 0..h as usize {
+            planes.extend_from_slice(&data[y * stride..y * stride + row]);
+        }
+    }
+    let (temp, file) = vidcut_core::temp::file(path)?;
+    drop(file);
+    super::openexr::Writer::still((w, h), fps).write(&planes, None, temp.path())?;
+    temp.keep(path)?;
+    Ok(())
+}
+
+struct Shrunk {
+    size: (usize, usize),
+    from: (usize, usize),
+    sums: Vec<[f32; 4]>,
+}
+
+pub fn exr_rgba(path: &Path, height: u32) -> Result<crate::thumbs::Image> {
+    use ::exr::prelude::{RgbaChannels, Vec2, read_first_rgba_layer_from_file};
+    let tall = height.max(1) as usize;
+    let image = read_first_rgba_layer_from_file(
+        path,
+        move |from: Vec2<usize>, _: &RgbaChannels| {
+            let h = tall.min(from.1.max(1));
+            let w = (from.0 * h).div_ceil(from.1.max(1)).max(1);
+            Shrunk {
+                size: (w, h),
+                from: (from.0.max(1), from.1.max(1)),
+                sums: vec![[0.0; 4]; w * h],
+            }
+        },
+        |s: &mut Shrunk, at: Vec2<usize>, (r, g, b, _): (f32, f32, f32, f32)| {
+            let x = at.0 * s.size.0 / s.from.0;
+            let y = at.1 * s.size.1 / s.from.1;
+            let sum = &mut s.sums[y * s.size.0 + x];
+            for (k, v) in [r, g, b].into_iter().enumerate() {
+                sum[k] += if v.is_finite() { v } else { 0.0 };
+            }
+            sum[3] += 1.0;
+        },
+    )
+    .map_err(|e| Error::Invalid(format!("reading {}: {e}", path.display())))?;
+    let s = image.layer_data.channel_data.pixels;
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let mut rgba = Vec::with_capacity(s.sums.len() * 4);
+    for [r, g, b, n] in s.sums {
+        let n = n.max(1.0);
+        rgba.extend([byte(r / n), byte(g / n), byte(b / n), 255]);
+    }
+    Ok(crate::thumbs::Image {
+        width: s.size.0 as u32,
+        height: s.size.1 as u32,
+        rgba,
+    })
 }
 
 pub fn write_png(

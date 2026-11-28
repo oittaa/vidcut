@@ -16,7 +16,10 @@ fn rows(p: &Project) -> Vec<usize> {
             .filter(move |(_, t)| t.kind == kind)
             .map(|(i, _)| i)
     };
-    of(TrackKind::Video).rev().chain(of(TrackKind::Audio)).collect()
+    of(TrackKind::Video)
+        .rev()
+        .chain(of(TrackKind::Audio))
+        .collect()
 }
 
 fn distance(c: &Clip, at: i64) -> i64 {

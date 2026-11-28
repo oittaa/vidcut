@@ -8,6 +8,7 @@ pub mod conform;
 pub mod effect;
 pub mod filmstrip;
 mod follow;
+pub mod gallery;
 pub mod generators;
 pub mod grade;
 pub mod grade_keys;

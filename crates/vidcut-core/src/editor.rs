@@ -150,6 +150,16 @@ pub trait Env {
         ))
     }
 
+    fn still(&self, plan: &RenderPlan, dry_run: bool) -> Result<String> {
+        let _ = (plan, dry_run);
+        Err(Error::usage("stills are drawn by the vidcut program"))
+    }
+
+    fn stills_dir(&self) -> PathBuf {
+        self.proxy_dir()
+            .with_file_name(crate::preferences::STILLS_FOLDER)
+    }
+
     fn subject_masks(
         &self,
         plan: &RenderPlan,
@@ -206,6 +216,13 @@ pub trait Env {
         let _ = (media, subject, look, download);
         Err(Error::usage(
             "the things in a picture are found by the vidcut program",
+        ))
+    }
+
+    fn salience(&self, media: &Media, look: Look, download: bool) -> Result<Arc<Detections>> {
+        let _ = (media, look, download);
+        Err(Error::usage(
+            "what stands out in a picture is found by the vidcut program",
         ))
     }
 
@@ -1960,6 +1977,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Marker(&'a crate::model::Marker),
         Cue(&'a str, &'a crate::model::Cue),
         Group(&'a crate::model::SyncGroup),
+        Still(&'a crate::model::Still),
         Timeline(
             &'a str,
             &'a str,
@@ -1972,6 +1990,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         sheet: bool,
         media: bool,
         groups: bool,
+        stills: bool,
         timelines: bool,
         markers: bool,
         tracks: HashSet<&'a str>,
@@ -1987,6 +2006,11 @@ fn diff(before: &Project, after: &Project) -> Changes {
         if !skip.groups {
             for g in &p.groups {
                 m.insert(g.id.as_str(), Named::Group(g));
+            }
+        }
+        if !skip.stills {
+            for s in &p.stills {
+                m.insert(s.id.as_str(), Named::Still(s));
             }
         }
         if !skip.timelines {
@@ -2064,6 +2088,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         sheet: same,
         media: SharedVec::ptr_eq(&before.media, &after.media),
         groups: before.groups == after.groups,
+        stills: before.stills == after.stills,
         timelines: SharedVec::ptr_eq(&before.timelines, &after.timelines),
         markers: before.markers == after.markers,
         tracks: skip_tracks,
@@ -5341,6 +5366,14 @@ fn mutate(
             let made = crate::stabilize::steadied(&shake, &s.stabilization.values, s.shot);
             ops::picture::stabilized(p, &s.id, s.stabilization, made)?
         }
+        Request::PictureReframe { .. } => {
+            let mut done = Vec::new();
+            for r in reframe_plans(p, request, playhead)? {
+                let moved = reframe_move(env, &r)?;
+                done.push(ops::picture::reframed(p, &r.id, moved)?);
+            }
+            json!({ "clips": done })
+        }
         Request::GradeSet {
             clips,
             timeline,
@@ -5426,6 +5459,38 @@ fn mutate(
         } => {
             let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
+        }
+        Request::GalleryGrab { at } => {
+            let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
+                Error::usage("gallery.grab needs `at` (--at): there is no playhead")
+            })?;
+            need_timeline(p)?;
+            ops::gallery::open_timeline(p)?;
+            let clip = ops::gallery::graded_clip(p, t)?;
+            let plan = still_plan(p, t)?;
+            let picture = env.still(&plan, dry_run)?;
+            json!({ "still": ops::gallery::grab(p, (&clip, t), picture)? })
+        }
+        Request::GalleryRemove { stills } => {
+            ops::gallery::remove(p, &stills.to_vec())?;
+            Value::Null
+        }
+        Request::GalleryApply {
+            still,
+            clips,
+            grade,
+        } => {
+            let ids = match (clips, grade) {
+                (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead)?,
+                (None, crate::request::GradeLevel::Timeline) => Vec::new(),
+                (None, crate::request::GradeLevel::Clip) => {
+                    let t = playhead
+                        .ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+                    vec![ops::gallery::graded_clip(p, t)?]
+                }
+            };
+            ops::gallery::apply(p, still, *grade, &ids)?;
+            Value::Null
         }
         Request::GradeRemove {
             clip,
@@ -8737,6 +8802,24 @@ fn track_start(
 
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
+pub fn still_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
+    let Request::GalleryGrab { at } = request else {
+        return Vec::new();
+    };
+    let t = time_or_playhead(p, at.as_ref(), playhead).ok().flatten();
+    let t = t.filter(|t| ops::gallery::color_clip(p, *t).is_some());
+    let t = t.filter(|_| p.compound_path.is_empty());
+    t.and_then(|t| still_plan(p, t).ok()).into_iter().collect()
+}
+
+fn still_plan(p: &Project, t: i64) -> Result<RenderPlan> {
+    let mut plan = crate::render::flatten(p, t, t + 1)?;
+    plan.audio.clear();
+    plan.ducking.clear();
+    plan.buses.clear();
+    Ok(plan)
+}
+
 pub fn auto_color_looks(
     p: &Project,
     request: &Request,
@@ -9465,19 +9548,7 @@ fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Fi
     if let Some(why) = rules.problem() {
         return Err(Error::usage(why));
     }
-    if !model.finds(*subject) {
-        return Err(Error::usage(format!(
-            "the {} model (--model) finds only faces",
-            model.name()
-        )));
-    }
-    let sides = crate::analysis::SIDES;
-    if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
-        return Err(Error::usage(format!(
-            "size (--size) is from {} to {} pixels",
-            sides.0, sides.1
-        )));
-    }
+    finder_checked(*model, *subject, *size)?;
     let id = resolve_clip(p, clip, playhead)?;
     ops::motion::findable(p, &id, node, *subject, *replace)?;
     let c = p.clip(&id);
@@ -9582,6 +9653,341 @@ pub fn stabilize_looks(
     let plan = stabilize_plan(p, request, playhead).ok();
     plan.map(|s| (s.media, s.plan, s.look))
         .into_iter()
+        .collect()
+}
+
+enum Follows {
+    Subject {
+        subject: Option<Subject>,
+        look: Look,
+        span: (i64, i64),
+        rate: f64,
+    },
+    Reference {
+        plan: Box<RenderPlan>,
+        follow: crate::analysis::Follow,
+        base: i64,
+    },
+}
+
+struct ReframePlan {
+    id: String,
+    media: Media,
+    follows: Follows,
+    files: Vec<i64>,
+    frames: Vec<crate::reframe::Frame>,
+    shape: crate::reframe::Shape,
+    rules: crate::reframe::Rules,
+    download: bool,
+}
+
+fn finder_checked(
+    model: crate::model::FindModel,
+    subject: Subject,
+    size: Option<u32>,
+) -> Result<()> {
+    if !model.finds(subject) {
+        return Err(Error::usage(format!(
+            "the {} model (--model) finds only faces",
+            model.name()
+        )));
+    }
+    let sides = crate::analysis::SIDES;
+    if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
+        return Err(Error::usage(format!(
+            "size (--size) is from {} to {} pixels",
+            sides.0, sides.1
+        )));
+    }
+    Ok(())
+}
+
+fn reframe_rules(request: &Request) -> Result<crate::reframe::Rules> {
+    let Request::PictureReframe {
+        mode,
+        smooth,
+        tolerance,
+        ..
+    } = request
+    else {
+        return Err(Error::invalid("not a picture.reframe request"));
+    };
+    let (sl, sh) = crate::reframe::SMOOTH;
+    let smooth = smooth.unwrap_or(crate::reframe::USUAL_SMOOTH);
+    if !(sl..=sh).contains(&smooth) {
+        return Err(Error::usage(format!(
+            "smooth (--smooth) is from {sl} to {sh} seconds"
+        )));
+    }
+    let (tl, th) = crate::reframe::TOLERANCE;
+    let tolerance = tolerance.unwrap_or(crate::reframe::USUAL_TOLERANCE);
+    if !(tl..=th).contains(&tolerance) {
+        return Err(Error::usage(format!(
+            "tolerance (--tolerance) is from {tl} to {th} pixels"
+        )));
+    }
+    Ok(crate::reframe::Rules {
+        mode: *mode,
+        smooth,
+        tolerance,
+    })
+}
+
+fn reframe_frames(p: &Project, c: &Clip) -> (Vec<i64>, Vec<crate::reframe::Frame>) {
+    let f = crate::composition::Frames::of(p, c);
+    let (fps, pace) = (p.fps().as_f64(), c.pace());
+    let picture = c.picture.clone().unwrap_or_default();
+    let mut files = Vec::new();
+    let mut frames = Vec::new();
+    let whole = crate::model::ZoomBox {
+        center: crate::model::Picture::MIDDLE,
+        size: 1.0,
+    };
+    for t in c.start..c.end() {
+        let key = c.key_at(t as f64).round() as i64;
+        let at = key as f64;
+        let share = (t - c.start) as f64 / c.duration.max(1) as f64;
+        files.push(f.file(f.at(t)));
+        frames.push(crate::reframe::Frame {
+            key,
+            source: (c.source_in as f64 + c.phase + pace.exact(t - c.start)) / fps,
+            seen: None,
+            cut: false,
+            zoom: picture.scale_at(at),
+            anchor: picture.pivot_at(at),
+            turn: picture.turn_at(at).to_radians(),
+            zoomed: picture.dynamic_zoom.map_or(whole, |z| z.at(share)),
+            now: picture.place_at(at),
+        });
+    }
+    (files, frames)
+}
+
+fn reframe_shape(p: &Project, c: &Clip, media: &Media) -> crate::reframe::Shape {
+    let (w, h) = (p.width(), p.height());
+    let picture = c.picture.clone().unwrap_or_default();
+    let size = media.info.video.as_ref().map_or([1.0; 2], |v| {
+        let scaling = picture.scaling.or(p.scaling());
+        let sar = (v.sar[0], v.sar[1]);
+        let [_, _, mw, mh] =
+            crate::place::mapped(scaling, (v.width, v.height), sar, v.rotation, (w, h));
+        [mw / f64::from(w), mh / f64::from(h)]
+    });
+    crate::reframe::Shape {
+        size,
+        flip: [picture.flip_horizontal, picture.flip_vertical],
+        pixels: [f64::from(w), f64::from(h)],
+        fps: p.fps().as_f64(),
+    }
+}
+
+fn reframe_reference(
+    p: &Project,
+    c: &Clip,
+    (shape, frames): (&crate::reframe::Shape, &[crate::reframe::Frame]),
+    area: &crate::request::ReframeBox,
+    at: i64,
+) -> Result<Follows> {
+    let inside = |v: f64| v.is_finite() && v > 0.0 && v <= 1.0;
+    if !area.center.iter().all(|v| v.is_finite()) || !area.size.iter().all(|&v| inside(v)) {
+        return Err(Error::usage(
+            "the reference box (--reference) has a center and a size above 0 and at most 1",
+        ));
+    }
+    if at < c.start || at >= c.end() {
+        return Err(Error::invalid(format!(
+            "{} is not at frame {at}: the reference box is on a frame of the clip",
+            c.id
+        )));
+    }
+    let frame = frames[(at - c.start) as usize];
+    let seen = crate::reframe::Seen {
+        center: area.center,
+        size: area.size,
+    };
+    let picked = shape.picked(&frame, seen);
+    let f = crate::composition::Frames::of(p, c);
+    let base = f.file(f.first);
+    let follow = crate::analysis::Follow {
+        at: f.file(f.at(at)) - base,
+        frames: (f.file(f.mark_in) - base, f.file(f.mark_out) + 1 - base),
+        area: [
+            picked.center[0],
+            picked.center[1],
+            picked.size[0],
+            picked.size[1],
+        ]
+        .map(|v| v as f32),
+        backward: true,
+        forward: true,
+        point: None,
+    };
+    let plan = Box::new(crate::render::own_picture(p, &c.id)?);
+    Ok(Follows::Reference { plan, follow, base })
+}
+
+fn reframe_plans(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+) -> Result<Vec<ReframePlan>> {
+    let Request::PictureReframe {
+        clips,
+        reference,
+        at,
+        subject,
+        model,
+        size,
+        download,
+        ..
+    } = request
+    else {
+        return Err(Error::invalid("not a picture.reframe request"));
+    };
+    let rules = reframe_rules(request)?;
+    if reference.is_some() && subject.is_some() {
+        return Err(Error::usage(
+            "give a reference box (--reference) or a subject (--subject), not both",
+        ));
+    }
+    if at.is_some() && reference.is_none() {
+        return Err(Error::usage(
+            "a frame (--at) goes with a reference box (--reference)",
+        ));
+    }
+    match subject {
+        Some(subject) => finder_checked(*model, *subject, *size)?,
+        None if size.is_some() || *model != crate::model::FindModel::Fast => {
+            return Err(Error::usage(
+                "model (--model) and size (--size) go with a subject (--subject)",
+            ));
+        }
+        None => {}
+    }
+    let mut ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+    let mut seen = HashSet::new();
+    ids.retain(|id| seen.insert(id.clone()));
+    if reference.is_some() && ids.len() != 1 {
+        return Err(Error::usage(
+            "a reference box (--reference) frames one clip",
+        ));
+    }
+    let mut out = Vec::new();
+    for id in ids {
+        let media = ops::picture::reframable(p, &id)?;
+        let c = p
+            .clip(&id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        let (files, frames) = reframe_frames(p, c);
+        let shape = reframe_shape(p, c, &media);
+        let follows = match reference {
+            Some(area) => {
+                let at = match at {
+                    Some(t) => resolve(p, t, playhead)?,
+                    None => need(playhead, "at")?,
+                };
+                reframe_reference(p, c, (&shape, &frames), area, at)?
+            }
+            None => {
+                let (span, rate) = ops::motion::file_frames(p, c);
+                let look = Look {
+                    side: *size,
+                    model: *model,
+                    ..subject_look(&media, rate, span)
+                };
+                Follows::Subject {
+                    subject: *subject,
+                    look,
+                    span,
+                    rate,
+                }
+            }
+        };
+        out.push(ReframePlan {
+            id,
+            media,
+            follows,
+            files,
+            frames,
+            shape,
+            rules,
+            download: *download,
+        });
+    }
+    Ok(out)
+}
+
+fn reframe_move(env: &dyn Env, r: &ReframePlan) -> Result<crate::reframe::Moved> {
+    let mut frames = r.frames.clone();
+    let seen = match &r.follows {
+        Follows::Subject {
+            subject,
+            look,
+            span,
+            rate,
+        } => {
+            let found = match subject {
+                Some(s) => env.subjects(&r.media, *s, *look, r.download)?,
+                None => env.salience(&r.media, *look, r.download)?,
+            };
+            let origin = r.media.origin();
+            let shown = |f: i64| crate::motion::shown_time(origin, *rate, f);
+            let cuts: Vec<bool> = (0..r.files.len())
+                .map(|t| t > 0 && found.cut(shown(r.files[t - 1]), shown(r.files[t])))
+                .collect();
+            for (f, cut) in frames.iter_mut().zip(&cuts) {
+                f.cut = *cut;
+            }
+            match subject {
+                Some(s) => {
+                    let rules = crate::motion::Join::of(*s);
+                    let paths = crate::motion::joined(&found, origin, *rate, *span, &rules);
+                    crate::reframe::found(&paths, &r.files, &cuts)
+                }
+                None => {
+                    let times: Vec<f64> = r.files.iter().map(|&f| shown(f)).collect();
+                    crate::reframe::salient(&found, &times)
+                }
+            }
+        }
+        Follows::Reference { plan, follow, base } => {
+            let found = env.tracked(&r.media, plan, *follow, r.download)?;
+            crate::reframe::tracked(&found, *base, &r.files)
+        }
+    };
+    for (f, s) in frames.iter_mut().zip(seen) {
+        f.seen = s;
+    }
+    Ok(crate::reframe::moved(&frames, &r.shape, &r.rules))
+}
+
+pub type SalientLook = (Media, Look, bool);
+
+pub enum ReframeLook {
+    Subject(SubjectLook),
+    Salient(SalientLook),
+    Track(Box<TrackLook>),
+}
+
+pub fn reframe_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<ReframeLook> {
+    let plans = reframe_plans(p, request, playhead).unwrap_or_default();
+    plans
+        .into_iter()
+        .map(|r| match r.follows {
+            Follows::Subject {
+                subject: Some(subject),
+                look,
+                ..
+            } => ReframeLook::Subject((r.media, subject, look, r.download)),
+            Follows::Subject {
+                subject: None,
+                look,
+                ..
+            } => ReframeLook::Salient((r.media, look, r.download)),
+            Follows::Reference { plan, follow, .. } => {
+                ReframeLook::Track(Box::new((r.media, *plan, follow, r.download)))
+            }
+        })
         .collect()
 }
 
@@ -10141,6 +10547,7 @@ pub fn query(
             let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::grade::get(p, &of, at)?
         }
+        Request::GalleryGet {} => ops::gallery::get(p, &env.stills_dir()),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?
