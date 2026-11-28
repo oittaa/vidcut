@@ -211,7 +211,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The tray has a track for each value of the item selected first that has keyframes. Its time is the time of the lower timeline.
     - Its tracks work as the tracks of the Keyframes tab, with Reset Keyframes and without the curve. They share the selection of the tab.
     - `gui.show keyframe_tray` opens the tray. `gui.close keyframe_tray` closes it.
-    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md#buildable)):
+    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md)):
       - A divider that changes the height of the tray.
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
@@ -1966,7 +1966,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A drag of a side handle does not change the link.
     - One `titles.set` follows on release. Thus each drag is one undo step.
     - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title.
-    - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md#zoom-x-and-zoom-y)).
+    - The pixels of a stretched title in Resolve are not measured.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
@@ -2165,7 +2165,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The groups with buttons are Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, and Volume and Pan.
     - The text of the Video panel names no Keyframe buttons for Transform, Cropping or Dynamic Zoom (pp. 734–737).
     - The button of a group adds or removes a keyframe at the playhead on each value of the group. The manual tells this for the groups of the Effects panel (p. 747).
-    - vidcut does not have a group button for Volume and Pan yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+    - vidcut does not have a group button for Volume and Pan yet ([todo](todo/keyframes.md)).
   - The Transform, Crop and Composite sections have the group button, with one clip selected:
     - On a frame with a keyframe of the section, it removes each keyframe of the section on that frame.
     - On any other frame, it adds a keyframe on each value of the section, at the value of that frame.
@@ -2321,7 +2321,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On a rotated clip, the Position point turns with the picture. The cells keep the directions of the frame.
     - A crop does not change the size or the place of the cells.
     - On a compound clip, the effect gives the same picture as on a plain clip with the same values.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - A Dynamic Zoom box does not change the size or the place of the cells.
     - The Zoom of each compound clip around the picture multiplies the size on the frame.
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
@@ -2432,11 +2432,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
     - Measured in Resolve Studio 21.2 with float renders on the spots and the color bars pictures, at 1280×720.
     - At Zoom 0.5, the renders and vidcut agree within 0.002. At Zoom 2, they agree away from the left edge of the frame.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - Source Recovery works on the sum of the glows.
     - Invert Effect on a picture with alpha takes the negative of `c`, as the mask does.
     - Color Filter values go from 0 to 1000000. No limit is measured.
-  - Cases measured in Resolve Studio 21.2 with float renders. They are not a rule yet ([todo](todo/effects-library.md)):
+  - Cases measured in Resolve Studio 21.2 with float renders. They are not a rule yet:
     - The spots picture at Zoom 2, with and without Secondary Glow, and the color bars picture at Zoom 2 with Secondary Glow.
       - The renders are brighter than vidcut only near the left edge of the frame. There they add up to 0.032.
       - At the right, top and bottom edges, the renders and vidcut agree within 0.002.
@@ -2513,7 +2513,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A picture with fewer pixels than the frame shows the full-size export, scaled down. The viewer, `frame render --width` and a smaller export draw such pictures.
     - Each of its pixels is the mean of the pixels of the frame that it covers. vidcut puts that mean and Softness into the spectrum of the noise.
     - At 960 and 640 pixels wide, Grain Size 0 to 1 with Softness 0 and 0.2984 agree with the scaled export within 2%.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
   - Measured in Resolve Studio 21.2 with float renders of Grain Only, on 1920×1080 and 1280×720:
@@ -2554,7 +2554,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Vignette in vidcut:**
   - A source that fits with a half pixel takes the next whole pixel as its size. Only 607.5 and 608 were tried.
   - The GUI shows only the values that work in the Operating Mode.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - Beyond the cells, a pixel takes the value of the nearest cell.
     - With an odd width or height, B0 is the cell one pixel to the left of or above the middle.
     - Hue gives the fixed hue at each gray between 0 and 1. A gray of 0 or less, or of 1 or more, takes the hue of red.
@@ -4458,7 +4458,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: at one layer, the switch has Clip and Timeline. At more, it is a menu with the measured items.
   - vidcut: the dots, Switch to Node Layer and the Keyframes panel are as measured. `gui.page` with `layer` shows a layer, and `gui.state` gives it.
   - vidcut: `grade.clear` with `all_layers` resets each layer. Undo gives the grades back ([gotchas](gotchas.md#resolves-edits)).
-  - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still need groups and a Gallery ([gaps](todo/gaps.md)).
+  - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still are not built yet ([todo](todo/color-gallery.md)).
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
@@ -4477,7 +4477,7 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
   - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
-  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([gaps](todo/gaps.md)).
+  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([todo](todo/color-page.md)).
   - The header of a node track has an Enable/Disable button, a Lock button and an Auto-Keyframe button (p. 3454).
   - Enable/Disable turns the node off or on. A locked node takes no changes, and the Node Editor shows a lock on it (p. 3454).
   - With Auto-Keyframe on, each change to a value of the node adds a Dynamic keyframe (pp. 3454, 3461).
@@ -5114,7 +5114,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The mask of a node is the union of its subjects (p. 3296).
   - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
   - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
-  - No measurement of version 2 checks these three rules yet ([todo](todo/subject-masks.md#measurements)).
+  - No measurement of version 2 checks these three rules yet.
 - vidcut:
   - The Magic Mask is a part of a corrector of the grade of a clip ([design](design/analysis.md#subject-masks)).
   - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask, Quality or one click. `grade.mask.clear` deletes one click or all of them.
@@ -5130,7 +5130,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Each frame that the track reaches gets a map of each subject.
     - A track is a job with progress. A cancel stops it, and the clip keeps no map of it.
   - The model reads the picture that comes into the corrector, on the frame of the click and on each tracked frame.
-  - The rules with the mark "vidcut's choice" are not measured yet. Runs R3–R6 measure them ([todo](todo/subject-masks.md#measurements)).
+  - The rules with the mark "vidcut's choice" are not measured yet.
   - A positive click outside the mask starts a new subject. A click on the mask of a subject goes to that subject (vidcut's choice).
   - A negative click outside the mask goes to the last subject of its frame.
   - For each subject on each frame, the model gives 256 by 256 values over the frame. The values scale to the frame size, bilinear.
@@ -5177,7 +5177,6 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The files have one person or many people. Their frame rates are from 24 to 59.94 fps, and their sizes from 1280×534 to 3840×2160.
     - The timelines are 1080×1920, 1920×1080 and 1080×1080, and each of them at twice that size.
     - A line that names one clip or one file records only that measurement.
-    - [todo](todo/smart-reframe-cases.md) lists the cases that need more files.
   - Reframe sets Position keyframes. The zoom stays, with no keyframes.
   - The picture moves only on an axis where it is larger than the frame. It always covers the frame on that axis.
     - 16:9 and 2.39:1 clips in 9:16 and 1:1 timelines move across only (34 shots).
@@ -5287,7 +5286,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Apply Grade in the menu of a still, or a middle-click on it, gives the grade to the selected clips (pp. 3364–3365).
   - The mode of the Node Editor selects the grade that changes: Clip or Timeline (pp. 3362, 3405).
   - The grade replaces the grade of each target clip (p. 3365).
-- [The todo](todo/color-gallery.md#what-resolve-does) has the other items of the Gallery and the measured results.
+- [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
@@ -5404,10 +5403,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Reset and Close are at the bottom of the window.
   - vidcut uses the measured processor with the typed values. The ranges are those of the window, and the defaults are the shown values.
   - vidcut: Mix goes in a straight line from the compressed sound at 0 to the input at 100, as the manual says.
-    - Two renders of one setting do not override the manual. More cases are to measure ([todo](todo/audio-page.md#track-dynamics)).
-  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/audio-page.md#track-dynamics)):
+    - Two renders of one setting do not override the manual.
+  - Where a case is not measured, vidcut uses the nearest measured rule:
     - Other sample rates also run the detector once in each 3 samples.
-  - vidcut has no presets and no Sidechain ([todo](todo/audio-page.md#track-dynamics)).
+  - vidcut has no presets and no Sidechain ([todo](todo/audio-page.md)).
   - vidcut: the Dynamics of a track work on the mix of its clips, after their ducking and with their fades.
   - vidcut: the Dynamics of a track that holds a compound clip also work on the sound of the compound clip.
   - vidcut: the fader of a track comes after its Dynamics and its equalizer. The meter of a track shows the sound after its fader.
@@ -5485,7 +5484,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut uses the measured filters and the measured rule from a Q to its step (`track::stepped`):
     - A request or a typed value keeps the Q of its step, (n − 10) / 15, at most 10.3.
     - Step 21 shows 0.7 ([gotchas](gotchas.md#resolves-edits)).
-  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/audio-page.md#track-equalizer)):
+  - Where a case is not measured, vidcut uses the nearest measured rule:
     - The Low Pass of Fire at the slopes 6 and 18 adds a filter of the first order, as its High Pass does.
     - Other sample rates use the same rules.
   - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
@@ -7978,7 +7977,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A square marks each keyframe. A drag on it moves the position of that keyframe, and the path and the picture follow.
       - One `keyframes.set` with the `frames` of the keyframe follows on release.
       - The right-click menu of a square has Delete Keyframe. It sends `keyframes.remove`.
-      - Smooth points are not in vidcut yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+      - Smooth points are not in vidcut yet ([todo](todo/keyframes.md)).
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
     - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
     - With Shift too, Alt+wheel turns it to the next multiple of 15°.
@@ -8001,7 +8000,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The anchor point of Transform becomes the `anchor`.
     - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
     - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
-      - X and Y keys on different frames are such keyframes ([todo](todo/keyframes.md#needs-a-resolve-run)). So are anchor point keys with Bezier handles.
+      - X and Y keys on different frames are such keyframes ([todo](todo/keyframes.md)). So are anchor point keys with Bezier handles.
     - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys, and gives the same keys.
     - Resolve Studio 21.2 imports a file that vidcut writes with these keys. It renders and exports the same keys.
     - Pitch and yaw are played, with or without keyframes (D93).

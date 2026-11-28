@@ -478,7 +478,7 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - Two positive clicks, a negative click and a click at the edge of the frame give the masks of Meta's network: overlap 0.9999 or more.
 - One frame each of five clips from 720 × 480 to 3840 × 2160 gives the masks of Meta's network: overlap 1.0000.
 - On the software adapter, the masks match the GPU within 8e-5.
-- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run ([todo](../todo/subject-masks.md#measurements)).
+- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run.
 
 ## In a GUI
 
