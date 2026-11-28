@@ -630,7 +630,7 @@ pub fn take(
         return Err(placing());
     };
     match crate::ops::picture::checked(&picture) {
-        Ok(picture) => Ok((rest(), picture)),
+        Ok(picture) => Ok((rest(), picture.map(crate::shared::Shared::into_inner))),
         Err(_) => Err(placing()),
     }
 }

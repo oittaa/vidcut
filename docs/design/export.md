@@ -234,7 +234,7 @@ Notes:
   - The audio of output 1 goes in when the container takes that codec (`Container::takes_audio`). Else the file has no audio.
   - The `quality` of output 1 goes in. The encoder of the additional output applies it.
   - With a `bitrate` on output 1, the quality and the bitrate are not set. Thus the codec gives its default quality.
-  - Why: the measurements show the audio and the quality of output 1 in each output. An output 1 with a bitrate is not measured.
+  - Why: the measurements show the audio and the quality of output 1 in each output. They show no bit rate of output 1 in another output.
 - `written_twice` finds two outputs with the same path. It compares the paths part by part, in lowercase. Why: Windows and macOS do not see the case of a name, and Windows takes both / and \ between folders.
   - `refuse_written_twice` refuses them in `render.add` and `render.update` (`queue::existing`), and in `export.start` (`session::export_media`).
   - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.
@@ -593,7 +593,7 @@ The render queue:
 - Each change of the queue is an undo step. `mutate` sends each request of `Request::in_queue` to `ops::render::change`, as it sends other edits to their ops.
   - `render.ended` is not a step. `Editor::recorded` changes the project and its `rev`, and it adds no step. Why: a render is not an edit of the user. A step for it would clear the redo list, and Ctrl+Z after a render would take back only a status.
   - An undo step changes only the fields of its edit. Thus an undo of a timeline edit keeps the queue, and an undo of a queue step keeps the status of the other jobs.
-  - When another program changes the project file, `Store::load_text` copies the status of each job into the last saved project. Thus the statuses are not in the step of that change.
+  - When another program changes the project file, `Store::load` copies the status of each job into the last saved project. Thus the statuses are not in the step of that change.
   - `apply` refuses these requests in a batch. Why: `Live` and the headless session check the files of `render.add` and `render.update` before the core gets them.
 
 Cancel:
@@ -864,10 +864,15 @@ The draw:
   - `Blurred` keeps the buffers (`sharpen::Planes`) until the size changes. Each frame makes the planes again, so there is no cache to keep up to date.
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
+- A canvas with fewer pixels than the frame draws a layer with a Sharpen at the frame size (`Working::at_frame_size`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - A second `Blurred` draws that layer and runs all its effects. `Blurred::scaled` then scales the result into the layer's picture, with the layer's filter.
+  - This holds for each plain layer. An adjustment clip, a compound clip and a frame that a retime makes keep the canvas size.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
+- A Glow and a Sharpen also take the colors without their alpha with Use Alpha on (`glow_taken`, `fs_sharpen_taken`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - A Sharpen multiplies its result by the alpha again. A Glow with Use Alpha on mixes its result with those colors, and gives it the alpha of `fs_glow`.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
   - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 

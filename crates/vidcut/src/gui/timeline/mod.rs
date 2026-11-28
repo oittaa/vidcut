@@ -4721,7 +4721,8 @@ mod tests {
                 clip("c1", 0, 68, true),
                 clip("c2", 68, 52, false),
                 clip("c3", 120, 60, false),
-            ],
+            ]
+            .into(),
             ..Track::new("A1", TrackKind::Audio)
         };
         assert_eq!(nearest_edit(&t, 110, Side::Audio), Some(68));

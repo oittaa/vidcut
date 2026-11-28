@@ -305,9 +305,12 @@ pub fn end_lone(p: &mut Project) {
     {
         *held.entry(l).or_default() += 1;
     }
-    for c in p.tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if c.link.is_some_and(|l| held[&l] == 1) {
-            c.link = None;
+    let lone = |c: &Clip| c.link.is_some_and(|l| held[&l] == 1);
+    for t in p.tracks.iter_mut().filter(|t| t.clips.iter().any(lone)) {
+        for c in &mut t.clips {
+            if lone(c) {
+                c.link = None;
+            }
         }
     }
 }
@@ -359,14 +362,14 @@ pub fn alone<T>(
     let links: HashSet<u32> = kept.iter().map(|&(_, l)| l).collect();
     let main = main_index(p);
     let mut aside = Vec::new();
+    let partner = |c: &Clip| c.link.is_some_and(|l| links.contains(&l));
     for (ti, t) in p.tracks.iter_mut().enumerate() {
-        if ti == main {
+        if ti == main || !t.clips.iter().any(partner) {
             continue;
         }
-        let (out, stay): (Vec<Clip>, Vec<Clip>) = std::mem::take(&mut t.clips)
-            .into_iter()
-            .partition(|c| c.link.is_some_and(|l| links.contains(&l)));
-        t.clips = stay;
+        let (out, stay): (Vec<Clip>, Vec<Clip>) =
+            std::mem::take(&mut t.clips).into_iter().partition(partner);
+        t.clips = stay.into();
         aside.extend(out.into_iter().map(|c| (t.id.clone(), t.kind, c)));
     }
     let out = edit(p);

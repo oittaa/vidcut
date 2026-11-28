@@ -1378,8 +1378,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Resolve Studio 20.3 and later have named timeline backups, as copies beside the project.
 - A new change discards the steps that could be redone. vidcut keeps them as a version (vidcut's versions, below).
 - Details: D55.
-- **vidcut's history file:**
-  - The history is a file in the state folder. Thus it stays after a restart and between separate CLI runs.
+- **vidcut's undo history:**
+  - The history lives inside the `.vidcut` file. Thus it stays after a restart, between CLI runs, and when the file moves.
   - It keeps up to 131,072 steps ([design/requests.md](design/requests.md#undo-history)).
 - **vidcut's step labels:**
   - A step tells what it did and by how much. It gives the place as a timecode and a track.
@@ -2376,7 +2376,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Invert Effect is off.
     - Source Recovery goes from 0 to 5 and is 0.
 - **How the glow works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
-  - It works after Zoom and Position, on the pixels of the frame, with colors clipped to 0..1.
+  - It works after Zoom and Position, on the pixels of the frame. The mask takes the colors clipped to 0..1.
   - The mask of each color is `m = max(0, c − t) / (1 − t + 0.001)`, with `t` the Shine Threshold.
   - The mask is `M = (1 − t) × m + t × (the mean of the three m)`. Shiny Regions shows `M`.
   - The blur is a Gaussian curve across the frame and then down it, for each color.
@@ -2395,8 +2395,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Gamma multiplies each color by `P^(1 / Gamma) / P`.
   - Source Recovery multiplies the glow by `max(0, 1 − (12/7) × Recovery × the largest M)`, with `M` not blurred.
   - Atmosphere multiplies the glow by `max(0, 1 + Strength × N)`. `N` is one noise for all three colors, in the directions of the frame.
+    - Measured in Resolve Studio 21.2 on 1280×720, 1920×1080, 3840×2160, 1080×1920 and 1440×1440, at Scale 0.6 and 2.
+    - The size of `N` follows the height of the frame. Its middle is the middle of the frame.
+    - Thus `N` of each frame is `N` of 1920×1080, scaled by the height around the middle. The correlation is 1.000.
   - Source Recovery and Atmosphere work before Gamma. Each multiplies the three colors alike, so Saturation does not change them.
-  - The glow does not stop at 1. Composite Type mixes it with the picture, and the mix stops at 0..1 after Opacity and Blend.
+  - The glow does not stop at 1. Composite Type mixes it with the picture, and Opacity and Blend follow.
+  - Measured in Resolve Studio 21.2 with float renders and Add, on 1280×720, 1920×1080 and 3840×2160:
+    - The result does not stop at 1. A flat gray of 0.5 at Shine Threshold 0.25 and Spread 0, with Atmosphere, gives a mean of 1.164.
+    - The picture under the glow keeps its values above 1. A disk of 4.0 gives 4.043.
+    - The 16-bit renders stop at 1 because their format does.
   - Two modes have their own rules at the ends of the range of the glow:
     - Color Dodge with a glow of 1 or more gives 1 where the picture is above 0, and 0 where it is 0.
     - Color Burn with a glow of 0 or less gives 1 where the picture is 1, and 0 elsewhere.
@@ -2406,31 +2413,50 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The mirror points are `−g / 2` and the last grid point, from the grid `g × i + g / 2`.
     - The grid across and the grid down are separate. Each follows the largest sigma of the three colors in its direction.
     - On 1920×1080, 3840×2160 and 1080×1920, `g` is 8 at a sigma of 580.8 pixels and 16 at 633.6 and 844.8. `g` is 32 at 1267.2.
+    - The float renders of Resolve Studio 21.2 show each step of `g` in the glow of the usual output:
+      - On 3840×2160, the first step is between a sigma of 595 and 597.5 pixels. The second step is between 1190 and 1200.
+      - On 1920×1080, the first step is between 590 and 600.
     - Only As Seen has no mirror. It multiplies the glow near each frame edge by a soft window.
   - In Input Alpha, measured on the Edit page, with the values that an effect added in the GUI has:
-    - `P` is the color multiplied by its alpha, and `a` is the alpha.
-    - Alpha Masks Sources: the mask is `a` × the mask of `P`.
+    - `c` is the color without its alpha, and `a` is the alpha.
+    - Alpha Masks Sources: the mask is `a` × the mask of `c`.
     - Usual Behavior gives the same picture as Alpha Masks Sources.
     - Alpha Is Source: the mask is `max(0, a − th + 0.001) / (1 − th + 0.001)`, with `th` the Alpha Level Threshold, for all three colors.
-    - The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
-    - Blend mixes the input and that output, with their alphas.
-    - With Use Alpha off, the mask takes the color without its alpha, times `a`. The output is `a` × the result on that color, and `a` stays.
-    - Invert Effect takes the negative of `P` and of the output, with an alpha of 1.
+    - The glow works on `c` as on an opaque picture. The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - Opacity and Blend mix `c` and that output. Opacity 0.5 and Blend 0.5 give the same bytes.
+    - With Use Alpha off, the mask is the same. The output is `a` × the result on `c`, and `a` stays.
+    - Measured in Resolve Studio 21.2 with float renders, on three pictures read as Premultiplied:
+      - One color with an alpha ramp, at Opacity 1 and 0.5.
+      - The spots picture, tinted (1, 0.8, 0.6), with bands of alpha 1, 0.5, 0.25 and 0. Opacity 1, 0.5 and 0.25 and Blend 0.5, over black and over white.
+      - The color bars and the spots, with rings of alpha 1, 0.7, 0.6, 0.45, 0.25 and 0.1. Opacity 1 and 0.5 and Blend 0.5, on 1280×720 and 1920×1080.
+      - The glow fits within 0.0025. The mask of the color multiplied by its alpha does not fit.
+    - Invert Effect takes the negative of the input and of the output, with an alpha of 1.
 - **Glow in vidcut:**
   - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - The colors are those of the renders. Thus over black, vidcut gives the same picture, within 0.0025 on the three pictures with alpha.
   - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
   - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
     - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
-    - Its size is proportional to Scale × √(width × height) of the picture on the frame. The renders show only 1920×1080.
+    - Its size is proportional to Scale × the height of the picture on the frame. Its middle is the middle of the frame.
     - Follow FX Tracker changes nothing, as with no tracker in the renders.
     - Evolution and Seethe move the noise along a third direction. Seethe moves it at each frame from the start of the clip.
     - Each octave has its own scale in that direction, so Detail also changes the speed.
+  - The grid `g` doubles at each doubling of 596.25 pixels of sigma. This is the middle of the measured steps.
+    - The spots picture at the 8 measured sigmas agrees with the renders within 0.0006, except at 1200 on 3840×2160.
+  - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
+    - Measured in Resolve Studio 21.2 with float renders on the spots and the color bars pictures, at 1280×720.
+    - At Zoom 0.5, the renders and vidcut agree within 0.002. At Zoom 2, they agree away from the left edge of the frame.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - Source Recovery works on the sum of the glows.
-    - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
-    - The grid `g` doubles at each doubling of 600 pixels of sigma. The renders put the first step between 580.8 and 633.6.
-    - Opacity acts as Blend on a picture with alpha, as it does on an opaque one.
+    - Invert Effect on a picture with alpha takes the negative of `c`, as the mask does.
     - Color Filter values go from 0 to 1000000. No limit is measured.
+  - Cases measured in Resolve Studio 21.2 with float renders. They are not a rule yet ([todo](todo/effects-library.md)):
+    - The spots picture at Zoom 2, with and without Secondary Glow, and the color bars picture at Zoom 2 with Secondary Glow.
+      - The renders are brighter than vidcut only near the left edge of the frame. There they add up to 0.032.
+      - At the right, top and bottom edges, the renders and vidcut agree within 0.002.
+      - A glow of the whole zoomed picture, cut to the frame, does not give the renders.
+    - The spots picture at a sigma of 1200 on 3840×2160, just past the second step of `g`.
+      - The glow of the render is 0.8% darker than vidcut's at the left edge, and 0.15% darker at the right edge.
 - **Film Grain** (p. 3559). Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Film Grain Presets has 17 film stocks and Custom. 16mm S1 is the default.
   - Composite Type is Overlay, Multiply, Darken, Lighten, Screen, Subtract, Hard Light, Soft Light, Linear Light, Vivid Light, Pin Light or Custom.
@@ -2466,8 +2492,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The output is `a` × the result, with `a` the alpha. `a` stays. With Grain Only it is `a` × `G`. Outside the picture nothing shows.
   - Use Alpha changes nothing. Blend mixes the input and the output.
   - Detail Loss is a Gaussian curve on the picture's colors without their alpha.
-    - Its sigma is 4.32 × Detail Loss² pixels on 1920×1080. The alpha stays sharp, and the black around a smaller picture enters the blur.
-    - On 3840×2160 the sigma is twice as large. On 1080×1920 it is the same as on 1920×1080.
+    - Its sigma is 4.32 × Detail Loss² × √(width × height) / 1440 pixels. The alpha stays sharp, and the black around a smaller picture enters the blur.
+    - Measured in Resolve Studio 21.2 with float renders at Detail Loss 0.5 and 1, on 1920×1080, 1080×1920, 1440×1440 and 3840×2160.
+    - On 1440×1440 the sigma is 4.318 at Detail Loss 1. A sigma by the short side of the frame is 5.76.
   - The noise has the spectrum `R(f) = exp(−(f − C)² / 2W²) + exp(−(f + C)² / 2W²)`.
     - `f = K × √((A × fx)² + fy²)`, with `fx` and `fy` in cycles for each pixel, and `A` the Grain Aspect Ratio.
     - `C` and `W` come from Texture, and `K` comes from Grain Size, by tables. `K` also goes with the height of the fitted picture over 1080.
@@ -2477,6 +2504,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Before Softness, its standard deviation is 0.1986 × Grain Strength. Its kurtosis is about 3.25.
   - At Saturation 0 the channels are the same. At 1, they are three separate noises, 1.334 times as strong, and their BT.709 luma is the gray noise.
   - Red, Green and Blue multiply the noise, after Saturation.
+    - They also multiply the shift that Symmetry makes. Measured in Resolve Studio 21.2 at Symmetry 0.2 and 0.8, on 1280×720 and 1920×1080.
   - Symmetry works on the noise of each channel, before Softness. It moves the noise down under 0.5 and up over 0.5, and changes its shape.
   - Softness is a Gaussian curve with a sigma of 5 × Softness^1.5 × the height of the frame / 1080. The edge is a half-sample mirror.
   - The grain stays in the pixels of the frame. Zoom and Position do not move it.
@@ -2489,6 +2517,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
     - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
+    - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
   - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
     - The table of `K` for Grain Size 0 to 0.4 comes from fits to the renders on 1280×720, 1920×1080 and 3840×2160.
     - The value at Grain Size 0.2156 comes from the values of 8mm 100D with Softness 0. The value at 0 also fits 35mm 400T.
@@ -2501,9 +2530,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
-    - The Detail Loss sigma follows the square root of the frame's area. The renders fit the short side of the frame equally well.
-    - Red, Green and Blue also multiply the shift that Symmetry makes.
-    - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
+  - Measured in Resolve Studio 21.2 with float renders of Grain Only, on 1920×1080 and 1280×720:
+    - At Grain Strength 0.25 and 0.5, with Symmetry 0.05, 0.2, 0.3, 0.7, 0.9 and 0.95, the mean agrees within 0.002.
+    - There the standard deviation agrees within 1.6%.
+    - At Grain Strength 1, with the same Symmetry values, vidcut's standard deviation is 7% to 9% larger. Its 1st and 99th percentiles are 0.02 to 0.03 farther out.
+    - At Texture 0.1 and 0.2, vidcut's standard deviation is 2% (1280×720) to 5% (1920×1080) larger. The difference is mostly below 0.1 cycles for each pixel.
+    - At Grain Aspect Ratio 0.25 and 0.4, the spectrum agrees within the noise of one render, about 10% in each band.
 - **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Operating Mode is Basic or Advanced. Basic is the default.
   - Border Shape is Oval, Triangle, Diamond, Rectangle, Hexagon or Octagon. Oval is the default.
@@ -2570,10 +2602,23 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - At a Sharpen Chroma of 1, Pr and Pb do not change, whatever the Details values are.
   - The output is R′ = y′ + Pr′ / 0.65, B′ = y′ + Pb′ / 0.552 and G′ = (y′ − 0.2126 R′ − 0.0722 B′) / 0.7152.
   - Nothing stops the colors at 0 or 1 before the output.
-  - It works on the premultiplied colors. The alpha does not change.
-- **Sharpen in vidcut:** vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-  - A viewer that draws fewer pixels than the frame uses the same numbers on the pixels that it draws.
-  - A Sharpen Chroma between 1 and 2 uses Sharpen Chroma × g − 1. Only 1, 2, 3 and 5 are measured.
+  - It works on the color without its alpha. The change is multiplied by the alpha, and the alpha does not change.
+    - Measured in Resolve Studio 21.2 with float renders, on two pictures read as Premultiplied, on 1280×720 and 1920×1080:
+      - The spots picture, tinted (1, 0.8, 0.6), with bands of alpha 1, 0.5, 0.25 and 0, over black and over white.
+      - The color bars and the spots, with rings of alpha 1, 0.7, 0.6, 0.45, 0.25 and 0.1. The defaults, and Fine Details 3 with Sharpen Chroma 1.5.
+      - A model of this rule fits each render within 0.00006. A Sharpen of the color multiplied by its alpha is off by up to 0.2.
+- **Sharpen in vidcut:**
+  - Measured in Resolve Studio 21.2 with float renders on 1280×720 and 1920×1080. vidcut gives the same pictures:
+    - Blend 0.5 on the spots picture, within 0.00001.
+    - A picture with alpha, read as Premultiplied, over black and over white, within 0.001.
+    - The two pictures with alpha bands and rings, within 0.0001.
+    - Fine Details 3 with Sharpen Chroma 1.01, 1.25, 1.5 and 1.75 on a smooth color picture, within 0.00002. There Sharpen Chroma × g − 1 also works between 1 and 2.
+    - The color bars picture with hard color edges, at the defaults, Blend 0.5, Fine Details 3 and Sharpen Chroma 1.01, 1.5 and 2, within 0.00001.
+  - A picture with fewer pixels than the frame is the full-size Sharpen, scaled down.
+    - Measured in Resolve Studio 21.2 with float renders of a 1920×1080 timeline at 960×540 and 640×360, on the spots and the color bars pictures.
+    - vidcut draws such a clip and its effects at the frame size, then scales the result down with the clip's filter. It gives the renders within 0.0003.
+    - A picture with alpha at Zoom 1 and 0.6, at 960×540 and 640×360, is the scaled full-size result in vidcut, alpha too, within 0.0001.
+    - In vidcut, an adjustment clip, a compound clip and a frame that a retime makes sharpen at the size of the picture ([todo](todo/effects-library.md)).
 - **Keyframes of effect values** (pp. 747, 1250–1251):
   - Each group of an applied effect in the Effects panel of the Inspector has a Keyframe button with Previous and Next buttons (p. 747).
   - The button adds or removes a keyframe at the playhead, on each parameter of the group (p. 747).
@@ -3737,8 +3782,11 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
-  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
-  - vidcut: a model tracks each pattern. The patterns are Pattern 1, Pattern 2 and so on. Add Pattern adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
+  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns (p. 2845).
+  - vidcut: a model tracks the patterns that Add Pattern adds. Their names are Pattern and a number.
+  - Add Point adds a Point pattern (p. 2841). Measured: the first Add Point of a new Tracker gives Point 2.
+    - vidcut: the number of a new pattern is the first number that no pattern has.
+  - Measured: a new Point pattern is 0.05 of the width and 0.05 of the height of the picture. Its search area is 0.125 of the width and 0.125 of the height.
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - The box of a Point pattern has a small handle at the top left. A drag of it moves the box, with a zoomed view (pp. 1783–1784).
     - The path does not change.
@@ -3746,8 +3794,25 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - A drag of an edge resizes the box from its middle (p. 1783).
   - The middle of the box is a point of the path. On a frame of the path, a drag of this point changes the path on that frame only.
   - Before the path and after it, the drag changes the first or the last frame of the path. It adds no frame to the path.
-  - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
+  - The search area of a Point pattern is a dashed box around its box. It shows when the pointer is over the box (pp. 1783, 2842).
+    - A drag of an edge of the search area, or Search Width and Search Height in the Inspector, change its size (p. 2847).
+    - vidcut: a drag resizes the search area from its middle, as for the box. Each side is from 0.001 to 1.
   - vidcut: a found path has no box before its first frame and after its last frame. There, the viewer shows no box for its pattern. Its masks have no effect there.
+- A track of a Point pattern looks for the pixels of its box (pp. 1785–1787, 2842–2847):
+  - On the next frame, the track looks for the pattern only in the search area (p. 2842). A larger area follows a faster move, and it takes longer.
+  - The Tracker picks the channel from the contrast, the clarity and the reliability of each channel (pp. 1785, 2846). The user can pick a color channel, the luminance or the alpha instead (p. 1785).
+    - vidcut: Channel Auto picks the channel with the most variance in the box on the first frame of the track. On a tie, it picks the luminance.
+    - The luminance is 0.2126 red, 0.7152 green and 0.0722 blue.
+  - Adaptive Mode has three choices (pp. 1787, 2845). It acts on each Point pattern of a track.
+    - None: the track looks for the pattern of the first frame on each frame.
+    - Every Frame: the track takes the pattern again on each frame, where it found it. This follows slow changes of the pattern, and it can drift.
+    - Best Match: as Every Frame. But when the new pattern differs from the first one by more than Match Tolerance, the track keeps the last pattern.
+  - vidcut: the track compares the pattern with each place of the search area by normalized cross-correlation, in the channel.
+    - A parabola through the scores next to the best place gives the place between pixels.
+    - On a frame where no place matches, the pattern keeps its last place.
+    - The change of Best Match is 1 minus the correlation of the new pattern with the first one, from 0 to 1.
+    - Match Tolerance is from 0 to 1. Its usual value is 0.5.
+  - A Point pattern keeps its size, and it follows no turn.
 - The track buttons are at the top of the Inspector (pp. 1784–1785). The rows below are measured in Resolve Studio 21.2. The 21.1 manual lists Track Reverse From Current Time and Track Forward From Current Time instead (p. 2844).
   - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.
   - Track Reverse tracks backward from the playhead. Track Forward tracks forward from the playhead to the end of the render range.
@@ -5058,14 +5123,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a part of a person gives that part, for example the face or the hair (p. 3281).
   - After a track of the clicks, each frame of the shot gets its mask. A change of a click changes the mask at once (p. 3283).
   - Invert Mask inverts the mask (p. 3286).
+  - Quality: Faster gives a looser mask quickly, for garbage mattes. Better gives more detail and takes more work (p. 3286).
   - Pages 3288–3304 tell of version 1. The next three rules are from these pages.
   - The mask of a node is the union of its subjects (p. 3296).
   - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
   - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
   - No measurement of version 2 checks these three rules yet ([todo](todo/subject-masks.md#measurements)).
 - vidcut:
-  - The Magic Mask is a part of a corrector of the grade of a clip. SAM 2.1 tiny makes the mask ([design](design/analysis.md#subject-masks)).
-  - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask or one click. `grade.mask.clear` deletes one click or all of them.
+  - The Magic Mask is a part of a corrector of the grade of a clip ([design](design/analysis.md#subject-masks)).
+  - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask, Quality or one click. `grade.mask.clear` deletes one click or all of them.
+  - Quality selects the model:
+    - Faster: SAM 2.1 tiny. Better: SAM 2.1 base+.
+    - With the preference `color.magic_mask_large` on, SAM 2.1 large makes Better.
+    - The usual Quality is Faster (vidcut's choice).
+    - A change of Quality makes the maps of all the clicks again with the other model.
+    - A change of the preference acts on the maps that come after it.
   - `grade.mask.track` carries the subjects of the clicks on one frame to the frames before and after it.
     - `way` and `length` select the frames, as for `motion.track`. Without `length`, the track goes to the start or the end of the clip.
     - The model remembers each subject on the frames that it saw. It finds the subject again on the next frame.
@@ -5081,7 +5153,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - These rules of a track are vidcut's choice:
     - A frame with clicks of a subject keeps the map of its clicks. A track does not replace it.
     - A track replaces the maps of the earlier tracks of its subjects on the frames that it reaches.
-    - A change of the clicks of a subject on a frame removes the maps that a track carried from them.
+    - A change of the clicks of a subject on a frame removes the maps that a track carried from them. A change of Quality does the same on all the frames with clicks.
     - A change before the node keeps the tracked maps. A track again reads the new picture.
   - The mask folds into the key of the corrector after the windows and the qualifier, with Matte when a window or a qualifier is on.
     - With a window and a qualifier, the key is the intersection of all three. The manual names two at a time ([todo](todo/subject-masks.md)).
@@ -5090,7 +5162,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `grade.clear` of a node, or of all nodes with `keep_nodes`, also deletes the Magic Mask.
   - Only a corrector of the grade of a clip has a Magic Mask. Each click is from 0 to 1 across and down the frame.
   - A click on a frame outside the clip, for example after a split, makes no mask. An export skips it.
-  - The palette, Quality, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
+  - The palette, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -5817,9 +5889,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: All Filtered Clips sets the In and the Out at the span of the filtered clips. The job renders each filtered clip, whole, to a file of its own.
   - Measured: after a pick of All Filtered Clips, the Render button shows "Entire Timeline". This was seen 3 times.
   - Measured: with a filter on and Single clip set, the Deliver page opens the prompt "Unable to Apply Filter". Apply Filter sets Individual clips.
+  - Measured: its text is "Clip filters can't be applied to single clips. Do you want to apply your clip filter and switch to individual clips?"
+  - Measured: Cancel keeps Single clip, and the strip of the Deliver page shows all clips. Apply Filter shows only the filtered clips there.
   - Measured: with a filter on, a click on Single clip opens "Cannot Render Single Clip", with Cancel and Clear Filter. Cancel keeps Individual clips and the filter.
+  - Measured: its text is "To render selection as a single clip, please clear your clip filter."
+  - Measured: Clear Filter sets Single clip, and the strip of the Deliver page shows all clips. The Color page keeps its filter, also after Cancel of the other prompt.
+  - Measured: when a filter leaves no clip, the Deliver page shows no strip. Add to Render Queue is greyed, and Estimated File Size shows 0.00 MB.
   - Measured: Unrendered Clips looks at each timeline clip. An Individual clips render marks the clips that it renders. A Single clip render marks no clip.
-  - Measured: in two runs, Individual clips with In/Out rendered only the clips wholly inside the range.
+  - Measured: a grade change makes a rendered clip unrendered. A trim, a move and the removal of the job do not.
+  - Measured: a job that was stopped after all its files were complete marks its clips.
+  - Measured: Selected Clips shows the clips selected in the strip at the pick. A later selection on the Edit page does not change it.
+  - Measured: in one run, a Ctrl+click in the strip did not add a clip to the selection.
+  - Measured: Modified Clips counted a Lift change. A trim on the Edit page and a Zoom set by a script did not count.
+  - Measured: Common Media Pool Source shows the clips of the media of the current clip. A move of the playhead on the ruler does not change the current clip.
+  - Measured: Tracked counts a window track, the Stabilizer of the Tracker palette and Stabilize of the Inspector. A Tracker node of a composition does not count.
+  - Measured: a pick of a filter is not an undo step ([gotchas](gotchas.md#resolves-edits)).
+  - Measured: with one video track, Individual clips renders each clip with a frame in the In/Out range. Each file holds the whole clip.
+  - Measured: with two video tracks, some ranges gave no file, or the clip of one track only. The runs show no rule ([gotchas](gotchas.md#resolves-renders)).
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5882,6 +5968,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: each output has the audio of output 1, with its codec and its bit rate. A QuickTime output also has the AAC of an MP4 output 1.
   - Measured: each output has the Quality of output 1, and its own encoder applies it. In the run, Auto used NVIDIA (High profile), and output 1 used Native (Main profile).
   - Measured: with Best, output 1 had 118 kb/s and the others 332 kb/s each. With Least, output 1 had 104 kb/s and the others 88 kb/s each.
+  - Measured: with a bit rate on output 1, the other outputs do not take it. An additional output has no rate setting.
   - Measured: two outputs with the same path stop Add. The prompt is "Duplicate Render Paths", with one button, OK. No job is added.
   - Measured: its text is "Please enter unique sub-folder names for each additional output in the render settings".
   - Measured: the queue has one job, and one render writes all outputs. The row of the job shows the path and the details of output 1.
@@ -5950,7 +6037,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Type shows for each format with fixed profiles: ProRes, DNxHR, TIFF and OpenEXR. Only ProRes is measured.
   - With additional outputs, the Format menu of tab 1 has only the formats that hold video. The Preset menu greys the presets with no video.
   - An additional output gets the audio of output 1 when its format takes that codec, else no audio.
-  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, its codec gives its default quality. That case is not measured.
+  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, it gets no bit rate, as measured.
+  - Its codec then gives its default quality. The quality that Resolve gives it then is not measured.
   - An additional output gets the subtitle streams of output 1. Burned-in subtitles are in the picture of each output.
   - `render.add`, `render.update` and `export.start` refuse two outputs with the same path. `export.plan` gives the note `written_twice`.
   - The text of the prompt has no "Please", because GUI text has 12 words at most.
@@ -5988,7 +6076,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A graded clip has a grade that is not the usual grade. A clip with a composition has a node other than MediaIn and MediaOut.
   - Marked Clips looks at the markers of the media in the part that the clip shows. Edit Sizing looks at the transform and the crop.
   - The other filters are greyed. Those of features that vidcut does not have are in [gaps](todo/gaps.md).
-  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source wait for measurements ([todo](todo/clip-filter.md)).
+  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source are greyed ([todo](todo/clip-filter.md)).
+  - Individual clips renders each clip with a frame in the range, on each track. Each file holds the whole clip.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
@@ -6089,7 +6178,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The presets of Adobe Premiere Pro, Apple Final Cut Pro X and Avid Media Composer leave out 20 of these commands. The Pro Tools preset leaves out 3.
   - A command that a preset leaves out has no key in that preset (measured, case 25). Thus the set gives that action no key.
   - The sets do not have the keypad keys of the presets ([todo](todo/egui-keypad-keys.md)).
-  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control. The set gives Delete Marker no key ([todo](todo/shortcuts.md)).
+  - The Apple Final Cut Pro X preset gives Meta+M to Delete Marker. On macOS, Meta is Control.
+    - On macOS, the set gives Delete Marker Control+M. On the other systems, it gives Delete Marker no key.
   - The Avid Media Composer preset gives V to Insert and to Select Nearest Edit Point, with a warning mark on both (measured, case 28 g).
     - Its file writes `v` for the second. Resolve shows it as V.
     - The set gives V to Smart Insert and to Nearest Cut. Thus V does nothing in this set, as in Resolve (measured).
@@ -7506,8 +7596,31 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - In its own axes, it scales by √(cos²θ + sin²θ / p²) across and by √(cos²θ + p² sin²θ) down. It stays rectangular.
       - The marks fit this within 0.4 px over about 1000 px. At Rotation 2, the edge slopes are tan 2° / p.
       - Thus a small Rotation on these files leaves corner gaps of W / 2 × θ / p and H / 2 × θ / p, with θ in radians.
-      - vidcut turns the shown picture by θ, with no change of shape ([todo](todo/picture-fit.md)).
-      - Not measured: Zoom, Pitch and Yaw with a Rotation on these files, and a file with pixels that are not square and a rotation.
+      - p is the shape of one source pixel in the frame, width over height. These facts are also measured in Resolve Studio 21.2:
+        - With the Stretch scaling, p is the shape of the stretched pixel. Five cases fit, on square, 4:3, 2:1 and 10:9 files.
+        - Example: the square 1280 x 720 file in 1280 x 960 at Stretch has p = 0.75. Rotation 30 then turns the picture by 37.6°, as the model gives.
+        - Zoom X 1.5 and Zoom Y 1 at Rotation 30 act in the picture's own axes, before the turn. This fits within 0.5 px on the square, 4:3 and 2:1 files.
+      - vidcut turns the picture in this way, with the Zoom and the Stretch scaling.
+        - Its Stretch fills the frame, also on pixels that are not square ([input scaling](#input-scaling-pp-292293)). Thus its p at Stretch has no pixel aspect ratio in it.
+      - The anchor point on these files, measured in Resolve Studio 21.2, in 1280 x 720 at Fit:
+        - Anchor Point X counts in source pixels × f, as the crop. Anchor Point Y counts in frame pixels.
+        - A script set Anchor Point X 200 and Y 100 with `SetProperty`. The Edit Inspector then shows 200 and 100 on the 2:1 and 4:3 files.
+        - The anchor is then 400 frame pixels right of the middle on the 2:1 file, and 266.67 on the 4:3 file. It is 100 frame pixels up.
+        - On the 10:9 and 9:8 files, f is 0.9. X 200 is then 222.24 and 225.25 frame pixels right of the middle. Thus X × PAR gives the frame pixels.
+        - `GetProperty` gives X × PAR × W / w. W is the width of the timeline, and w is the width of the picture in the frame.
+        - Thus it gives 400 and 266.67 on the 2:1 and 4:3 files, and 284.73 and 284.44 on the 10:9 and 9:8 files. On the square file, each value is 200.
+      - In a turn on these files, the anchor point moves. These facts are measured in Resolve Studio 21.2 on the 2:1, 4:3, 10:9, 9:8 and square files:
+        - With Rotation 30, the point at the anchor moves on the 2:1 file by 63.2 px right and 40.5 px up.
+        - On the 4:3, 10:9 and 9:8 files it also moves. On the square file it stays.
+        - An anchor typed in the Inspector gives the same renders as the same anchor set by script.
+        - 15 cases on the 2:1, 4:3 and square files fit P′ = c + M Z (P − c) + D (I − R Z) D⁻¹ d within 0.42 px.
+        - c is the middle of the frame, and d is the offset of the anchor point. Z is the Zoom.
+        - M is the turn of those pixels, R is the plain turn, and D is diag(PAR, 1).
+        - The 10:9 and 9:8 files with f = 0.9 fit it within 0.64 px, at Rotation 30 and 60, with Zoom 0.5 and two anchors.
+        - The cases are in sections PG, PH and PJ of `fixtures/program/NOTES.md` in the test data.
+      - vidcut moves the anchor point in a turn in this way. In D, it uses p, the shape of one source pixel in the frame.
+      - The Inspector and the keyframe editor count Anchor Point X in source pixels × f.
+      - Not measured: Pitch, Yaw and a flip with a Rotation on these files, and a file with pixels that are not square and a rotation.
     - The crop cuts the source picture, and what is left stays where it was.
     - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
       - The number of pixels that a side loses is its crop in source pixels, rounded down.
@@ -8510,6 +8623,9 @@ These facts are measured in Resolve Studio 21.1.2, in a default project that sca
   - Fit: the scale is min(W / sw, H / sh) on both axes ([the fit to the timeline](#the-fit-to-the-timeline)).
   - Fill: the scale is max(W / sw, H / sh) on both axes.
   - Stretch: the scale is W / sw across and H / sh down.
+  - On pixels that are not square, Stretch also applies the pixel aspect ratio. The picture is W × PAR wide and H high ([gotchas](gotchas.md#resolves-renders)).
+    - This is measured on files with pixels of 4:3, 2:1 and 10:9. The 4:3 file is 1706.67 px wide in a frame of 1280 x 720 or 1280 x 960.
+    - The marks of the 2:1 file are 2 times as far apart across as at Fit. The 10:9 file is 1422.4 px wide in 1280 x 960, and W × PAR is 1422.2.
   - Zoom multiplies the scale of the map on each axis.
   - Position X moves the picture by X × (mapped width / W). Position Y moves it by Y × (mapped height / H).
   - The mapped size is the size before the zoom.
@@ -8517,6 +8633,7 @@ These facts are measured in Resolve Studio 21.1.2, in a default project that sca
   - `project.set`, `timeline.new` and `timeline.set` take `scaling`: `crop`, `fit`, `fill` or `stretch`. Usual: `fit`.
   - `picture.set` takes `scaling` for its clips: `project`, `crop`, `fit`, `fill` or `stretch`.
   - The map uses the size of the media file. A proxy or an upscale does not change it.
+  - Stretch fills the frame on each axis, also on pixels that are not square.
   - The crop, the anchor point and the Dynamic Zoom boxes are in fractions of the mapped picture.
   - Position X and Y are in frame pixels (X70). Thus a new scaling keeps the place of a moved picture.
   - Bypass re-encode copies no frame of a clip with another map than the fit.
@@ -8558,7 +8675,25 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
     - Yaw in 1280 x 720 gives the same values as Pitch, at the two right corners. A 2:1 file gives the same values as the square file.
     - The top edge is at y = 3.064 at Pitch 0.01, and at y = 16.643 at Pitch 0.05. A projective lean about the middle gives 3.564 and 17.143.
     - These cases fit one reading. The gap that a lean opens is 0.5 px less than the projective lean gives, and not less than 0.
-    - Other bars add to that gap. With Zoom X 0.9997 and Pitch 0.0003, the corners read 0.808, as the bars of the Zoom alone.
+    - With Zoom X 0.9997 and Pitch 0.0003, the columns and the corners read 0.808, as the bars of the Zoom alone.
+  - The edge of a leaned picture, measured in Resolve Studio 21.2 in 29 cases at Zoom 0.5:
+    - The leans are Pitch 0.01, 0.05, 0.2 and −0.05, Yaw 0.05 and 0.2, and Pitch 0.05 with Yaw 0.05.
+    - The files have square pixels and pixels of 4:3, 2:1 and 9:8. The timelines are 1280 x 720 and 1920 x 1080.
+    - Each edge is 0.5 px farther out than the projective lean gives, along its normal. This includes the far, the near and the side edges.
+    - The 0.5 px is in frame pixels. It does not change with the lean, the Zoom, the timeline or the pixel aspect ratio.
+    - The slopes of the edges are those of the projective lean.
+    - Each edge has one partial pixel. Its value is the covered area. There is no blur.
+    - The picture inside the edges follows the projective lean. The markers fit it within 0.74 px.
+    - With Pitch 0 and Yaw 0, each edge is at its exact place.
+    - The 0.5 px also fits the corners at Pitch 0.0005 to 0.002, and the top edge at Pitch 0.01 and 0.05, at Zoom 1.
+  - Small leans, and a lean with a Rotation or a crop, measured in Resolve Studio 21.2 at Zoom 0.5:
+    - Pitch 0.0003 does not lean the picture, and its edges do not move out. The edges are where Pitch 0 puts them.
+    - Pitch 0.0005, 0.0007 and 0.001 lean the picture, and each edge is 0.5 px out. Thus the lean starts between 0.0003 and 0.0005.
+    - Zoom X 0.9997 with Pitch 0.0003, at Zoom Y 1, gives 0.808 in column 0 on each row. That is the bar of the Zoom, with no lean.
+    - Zoom X 0.9997 with Pitch 0.01 gives the lean, and the edges 0.5 px out cover the bar of the Zoom.
+    - Rotation 10 with Pitch 0.05 puts each edge 0.5 px out along its normal, on the square and the 2:1 files. Rotation 10 alone puts no edge out.
+    - Crop Left 100 with Pitch 0.05 puts the cut edge 0.5 px out too. Some rows near its ends read up to 0.27 px farther out.
+    - The cases are in sections PF, PI and PK of `fixtures/program/NOTES.md` in the test data.
   - The fit into the even size of an encoder does not use the limit. At Fill, timelines of 2001 x 1601, 3001 x 2001 and 4001 x 3001 give bars of 0.1, 0.167 and 0.125.
   - A compound clip, in 9 cases with Zoom X on the clip inside and on the compound clip:
     - The clip inside keeps the limit for its own bars.
@@ -8566,6 +8701,10 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
     - With another Zoom X inside, the compound clip shows its bar at its exact width. The 9 cases give no general rule.
 - vidcut:
   - A crop on any side and Crop Softness below 0 stop the limit, as measured. A Softness below 0 that gives no fade was not measured.
-  - It uses the same rule on the corners of a leaned picture, with the gaps of the projective lean ([todo](todo/picture-fit.md)).
+  - A Pitch or Yaw other than 0 stops the limit, as measured.
+  - A Pitch or Yaw under 0.0005 does not lean the picture. The measured change is between 0.0003 and 0.0005.
+  - It draws each edge of a leaned picture 0.5 px farther out than the projective lean gives, along its normal. The picture inside follows the lean.
+  - This includes a cut edge and the edges of a turned picture, as measured.
   - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
   - It does not use the limit in the fit for an encoder.
+  - On pixels that are not square, a Rotation leaves the gaps of the turn of those pixels. Thus the limit acts at W / 2 × θ / p under 0.2, as measured.

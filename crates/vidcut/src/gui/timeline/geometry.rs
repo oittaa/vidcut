@@ -1008,7 +1008,8 @@ mod tests {
                 clip("c1", 0, 100),
                 clip("c2", 100, 50),
                 clip("c3", 200, 100),
-            ],
+            ]
+            .into(),
             ..Track::new("V1", TrackKind::Video)
         }
     }

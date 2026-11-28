@@ -1,7 +1,7 @@
 # Project model
 
-- A project is one `Project` value in vidcut-core: settings, its media, bins and timelines. A timeline holds tracks of clips, subtitle tracks of cues, marks and markers.
-- It is saved as one `.vidcut` JSON file. Only the editor changes it ([requests](requests.md)).
+- A project is one `Project` value in vidcut-core: settings, its media, bins and timelines. Large collections use `Shared` and `SharedVec` for copy-on-write sharing. A timeline holds tracks of clips, subtitle tracks of cues, marks and markers.
+- It is saved as one `.vidcut` SQLite file. Only the editor changes it ([requests](requests.md)).
 - This page tells about the types, time, ids, the file, OpenTimelineIO and the preferences.
 
 ```mermaid
@@ -458,15 +458,28 @@ Ranges and resolution:
 
 ## The `.vidcut` file
 
-- `Store` reads and writes the `Project` as pretty JSON (serde).
+- `Store` reads and writes `Project` as one SQLite database file, with `synchronous = FULL`. Why: edits come at the speed of a person, and each save must stay after a power loss.
+- On local drives, `Store` uses WAL mode. On a network drive (`dirs::on_network`), it uses the rollback `DELETE` journal mode, because WAL needs shared memory on one host.
+  - On Linux, `dirs::on_network` also counts FUSE (sshfs, gvfs, rclone, virtiofs), 9p, Ceph and AFS. WAL is not safe on them, because they do not share memory between hosts.
+- After each save, `Store` copies the WAL into the main file (`settle`, a `PASSIVE` checkpoint). Thus a copy, a backup or a sync of the `.vidcut` file alone has the saved edits.
+  - A `PASSIVE` checkpoint does not wait. It leaves in the WAL the changes that a reader in another process still needs. The next checkpoint copies them.
+- Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.
+  - `MetaRow`, `TimelineRow`, `CompoundRow`, `TrackRow` and `SubtitleTrackRow` borrow their fields from the model. `Store::save` compares them to find a dirty row.
+  - Each row takes all the fields of its model struct by name, with no rest pattern. Thus a new field does not compile until the store writes it.
+- `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
+  - `gc_blobs` removes the blobs that no clip row names. A compaction and `Store::close` run it. A save writes a blob again when a clip needs it.
+- `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
+  - When only `rev` and `edited` change, it updates those two columns of `meta`, and does not write its `data` again.
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
   - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut`, `color_viewer_lut` and `scopes_lut` of the settings.
+  - `history_base` and `history_events` store those project-folder paths relative too, so undo and external diffs stay valid after moving the folder.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
-- A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
-- `Store::transact`, `Store::compact` and `OpenProject::apply` hold the lock file of the project (`Store::lock`). `Store::create` and `Store::replace` write a new file without the lock.
-- A load runs `validate::violations`, and refuses an inconsistent file.
-- The undo history is kept apart, in the state dir ([requests](requests.md#undo-history)).
+- `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
+- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::close` removes unreferenced `blobs` and empties the WAL (a `TRUNCATE` checkpoint).
+- A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
+  - `open_conn` verifies the header before it sets the journal mode. Thus it does not change a file that it refuses.
+- The undo history lives in the same `.vidcut` file ([requests](requests.md#undo-history)).
 
 Temporary files:
 
@@ -725,6 +738,9 @@ Writing:
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - `Tool::takes_from` adds one case: the effect mask of a tool takes a picture too (`Tool::takes_picture_mask`). `Node.mask_channel`, `Node.mask_range` and `Node.mask_clip` then make the mask from it.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
+    - Its `PatternKind` tells how a track follows it. A `point` pattern also has a search area and a `PatternChannel` ([analysis](analysis.md#tracks)).
+    - `Tracker::free_name` and `Tracker::free_point` name a new pattern with the first number that no pattern has.
+    - The `AdaptiveMode` and the Match Tolerance of the `Tracker` act on its `point` patterns.
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
     - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.
@@ -1072,6 +1088,8 @@ Requests:
   - `keys.sets` lists the built-in sets (`key_sets::built_in`) and the files in `keys` in the config dir (`key_sets::dir`).
   - The sets of other editors are data files in the `keys` folder of `vidcut-core`, in the same form as a set file. The build puts them in the program.
   - A set file holds one table, `keys`, in the form of `Preferences.keys`.
+    - A key of a set file can also name Meta, the Control key of macOS. Why: one file serves all systems, and a preset can use Control on macOS.
+    - On the other systems, `key_sets::parse` leaves out a key with Meta.
   - A set file also holds `base`, the built-in set that it changes (`KeySet::base`). The file leaves it out for vidcut's own set.
     - `keys.save` gives the new set the base of the set in its `from`. An import gives the base of the set that the file names.
   - `keys.export` and `keys.import` use the key file of other editors (`key_file`). `key_file::text` writes it, and `key_file::parse` reads it.
@@ -1097,7 +1115,6 @@ Reset:
   - presets, themes, looks and the LUT folder of vidcut (unless `saved`)
   - the downloaded models and kept paid replies (with `keep_downloads`)
   - the folders of playback files set as absolute paths (`PlaybackFiles`)
-  - the undo history of the project that its own GUI has open (`Store::history_path`)
 - It compares the paths after it resolves links (`dirs::canonical`). It does not follow a link to reach a kept path. When it removes a link, the folder that the link names stays.
 - It refuses while another GUI runs (the registry). Why: that GUI keeps view settings and folders in memory, and writes them back.
 - A folder that the reset cannot read fails the reset. The folder does not pass for empty.

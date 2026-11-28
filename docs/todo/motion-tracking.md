@@ -46,7 +46,7 @@ In this file, a path is never a track of the timeline.
 - The Center of a mask of a composition can follow a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
   - The values of a mask have keyframes ([model](../design/model.md#compositions)).
 - `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-- `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
+- `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)). A model follows a pattern that Add Pattern adds. A Point pattern is looked for in its search area.
 - A title follows no motion path. A composition has no text node.
 - `picture.stabilize` analyzes the motion of the camera ([spec §8.27](../spec.md#827-stabilization-pp-295-737738-769-923924-12091210-35023503-measured-in-resolve-studio-212)). The Color page has no Tracker palette.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
@@ -84,8 +84,6 @@ In this file, a path is never a track of the timeline.
 - **Mask keyframes, what is left:**
   - The points of a polygon take no keyframes. Resolve animates a polygon window (manual p. 3273).
   - `comp.set` refuses a connection of a Center with keyframes. Measure on the Fusion page what a connection does to a Center with keyframes.
-- **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
-  - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**
   - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).
     - Measured on 2026-11-10, on 16 threads, with the file decoded on the GPU:
@@ -110,10 +108,10 @@ In this file, a path is never a track of the timeline.
 - **The values of a find in the app:** try the Advanced fields of a Tracker in the app. The fields do not stay after the app closes.
 - **Text, the open parts:**
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
-  - Text that comes into the picture has no blur on its first frames, as a face has not.
+  - Text that comes into the picture: check that the held first box of its path covers it.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **The Tracker, what is left:** one pull request for each part.
-  - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
+  - Point patterns, what is left: the pattern flipbooks and the channel bars of the Inspector (pp. 1785–1786).
     - The handle at the top left of the box of a Point pattern (pp. 1783–1784).
     - Path Center with Track Center (Append) (p. 1788), and the path tools of the viewer (p. 1787).
   - A track follows no turn and no change of perspective.

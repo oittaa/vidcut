@@ -626,7 +626,7 @@ fn take(p: &mut Project, ids: &[String]) -> Result<Vec<(usize, Cue)>> {
         let (out, keep): (Vec<Cue>, Vec<Cue>) = std::mem::take(&mut t.cues)
             .into_iter()
             .partition(|c| doomed.contains(c.id.as_str()));
-        t.cues = keep;
+        t.cues = keep.into();
         taken.extend(out.into_iter().map(|c| (ti, c)));
     }
     Ok(taken)
@@ -1135,7 +1135,7 @@ pub fn remap(p: &mut Project, map: impl Fn(i64) -> Option<i64>) {
                 }
             }
         }
-        t.cues = kept;
+        t.cues = kept.into();
         t.sort();
     }
     for (ti, mut c) in extra {

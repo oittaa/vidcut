@@ -8,15 +8,16 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter, Border,
-    BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel,
-    EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
-    GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
+    AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
+    Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
+    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
+    GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PictureTool, PictureTransition,
-    PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
-    SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
-    TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind, ZoomBox,
+    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel, PictureTool,
+    PictureTransition, PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing,
+    SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType,
+    TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind,
+    ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3725,15 +3726,16 @@ pub enum Request {
         /// it. One more than the last subject starts a new subject.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<u32>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256. Without it, a missing
         /// model is an error that tells its size.
         #[serde(default)]
         download: bool,
     },
     /// Change the Magic Mask of a corrector of the grade of a clip: Invert
-    /// Mask, or one click. The masks of the changed click's subject come
-    /// again from its clicks.
+    /// Mask, Quality, or one click. The masks of the changed click's subject
+    /// come again from its clicks. A change of Quality makes the masks of
+    /// all the clicks again with the other model.
     #[serde(rename = "grade.mask.set")]
     GradeMaskSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3748,6 +3750,10 @@ pub enum Request {
         /// Invert Mask: the mask is where the subjects are not.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         invert: Option<bool>,
+        /// Quality: `faster` gives a looser mask quickly, `better` more
+        /// detail.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quality: Option<crate::model::MaskQuality>,
         /// The number of the click that changes, from 1, in the order of the
         /// clicks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3761,7 +3767,7 @@ pub enum Request {
         /// With `click`: a negative or a positive click.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         negative: Option<bool>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -3784,7 +3790,7 @@ pub enum Request {
         /// clicks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         click: Option<usize>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -3820,7 +3826,7 @@ pub enum Request {
         /// Without it, the track goes to the start or the end of the clip.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<u32>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -4185,10 +4191,12 @@ pub enum Request {
     /// (`c3`, or `V2@15s`). The track looks at the picture that comes into
     /// the tracker, on each frame of the file of the clip. It starts with
     /// the box of the pattern on `frame`, and goes from there in its `way`
-    /// to the In or the Out, or for its `length`. It follows the place and
-    /// the size of the thing in the box. A shot change or a thing that goes
-    /// out of sight does not stop it. `jobs.cancel` stops it, and the frames
-    /// that it tracked stay.
+    /// to the In or the Out, or for its `length`. A `model` pattern
+    /// follows the place and the size of the thing in the box. A `point`
+    /// pattern follows the place of the pixels of the box, in the search
+    /// area of the pattern, with the `adaptive_mode` of the tracker. A shot
+    /// change or a thing that goes out of sight does not stop it.
+    /// `jobs.cancel` stops it, and the frames that it tracked stay.
     ///
     /// The pattern then follows its path: before the first sample of the
     /// path and after its last, it stays where that sample puts it. When
@@ -4198,7 +4206,7 @@ pub enum Request {
     /// Returns the `node`, the `pattern`, its `name`, the `count` of the
     /// samples of its path and their frames of the file `first` and `last`.
     /// It also gives the
-    /// `score` (how sure the model is, from 0 to 1, the mean of the
+    /// `score` (how sure the track is, from 0 to 1, the mean of the
     /// frames), and where the track ended `backward` and `forward`: `clip`
     /// (the In or the Out), `length` (after its `length`), `stopped`
     /// (`jobs.cancel`) or `off`.
@@ -4220,9 +4228,10 @@ pub enum Request {
         /// `way`, from 1. Without it, the track goes to the In or the Out.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<u32>,
-        /// Download the tracking model (715 kB) when it is not on this
-        /// computer, checked against its SHA-256. Without it, a missing
-        /// model is an error that tells its size.
+        /// Download the tracking model (715 kB) when a `model` pattern
+        /// needs it and it is not on this computer, checked against its
+        /// SHA-256. Without it, a missing model is an error that tells its
+        /// size. A `point` pattern needs no model.
         #[serde(default)]
         download: bool,
     },
@@ -4511,8 +4520,8 @@ pub enum Request {
         /// The action, as `keys.list` names it.
         action: crate::shortcuts::Action,
         /// Its keys, like `Ctrl+Shift+Z`, `F5` or `+`. Cmd and Option are
-        /// other names for Ctrl and Alt. On macOS, Control is the Control
-        /// key. With no keys, the action has no key.
+        /// other names for Ctrl and Alt. On macOS, Control and Meta are the
+        /// Control key. With no keys, the action has no key.
         #[serde(default)]
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,
@@ -7608,10 +7617,23 @@ pub struct NodeChange {
     /// pattern, `[x, y]` as fractions of the picture, up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_offset: Option<[f64; 2]>,
-    /// On, a tracker gets a new pattern at the end of its list, with the
-    /// first free name.
+    /// The width of the search area of a `point` pattern, from 0.001 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_width: Option<f64>,
+    /// The height of the search area of a `point` pattern, from 0.001 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_height: Option<f64>,
+    /// The channel in which a track of a `point` pattern looks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_channel: Option<PatternChannel>,
+    /// On, a tracker gets a new `model` pattern at the end of its list,
+    /// with the first free name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub add_pattern: bool,
+    /// On, a tracker gets a new `point` pattern at the end of its list,
+    /// with the first free name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub add_point: bool,
     /// On, the pattern goes from the tracker. A node that follows it then
     /// has its own center again. A later pattern keeps its nodes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -7660,6 +7682,14 @@ pub struct NodeChange {
     /// goes from 0 to 1, from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade_frames: Option<f64>,
+    /// How a track of a tracker takes the picture of a `point` pattern
+    /// again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_mode: Option<AdaptiveMode>,
+    /// The most that the picture of a `point` pattern can change on a frame
+    /// for `best_match` to take it again, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_tolerance: Option<f64>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern

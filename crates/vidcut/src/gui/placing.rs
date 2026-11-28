@@ -903,7 +903,10 @@ impl Workspace {
             Some(c) => c,
             None => p.clip(&topmost(&p, at)?)?,
         };
-        Some((c.id.clone(), c.picture.clone().unwrap_or_default()))
+        Some((
+            c.id.clone(),
+            c.picture.as_deref().cloned().unwrap_or_default(),
+        ))
     }
 
     pub(super) fn picture_tools_row(&mut self, ui: &mut egui::Ui) {
@@ -1096,7 +1099,7 @@ impl Workspace {
                     of: c.duration,
                     held: false,
                 };
-                let picture = c.picture.clone().unwrap_or_default();
+                let picture = c.picture.as_deref().cloned().unwrap_or_default();
                 let fit = mapped_content(&p, c, picture.scaling, (w, h));
                 let pixels = pixels_of(&p, &c.media, (w, h));
                 let placed = Placed::at(c, picture, run, at);
@@ -1124,7 +1127,7 @@ impl Workspace {
             .find(|(id, _)| *id == c.id)
         {
             Some((_, x)) => x,
-            None => c.picture.clone().unwrap_or_default(),
+            None => c.picture.as_deref().cloned().unwrap_or_default(),
         };
         shape_of(&p, c, shown, picture, at)
     }

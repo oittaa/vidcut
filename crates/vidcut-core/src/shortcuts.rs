@@ -545,6 +545,7 @@ impl FromStr for Combo {
                 "ctrl" | "cmd" | "command" => held.ctrl = true,
                 "control" if cfg!(target_os = "macos") => held.control = true,
                 "control" => held.ctrl = true,
+                "meta" if cfg!(target_os = "macos") => held.control = true,
                 "alt" | "option" => held.alt = true,
                 "shift" => held.shift = true,
                 _ => {

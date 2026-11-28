@@ -280,6 +280,8 @@ flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 # lacks, and half floats rounded to the nearest. BSD-3-Clause.
 exr = "1.74.2"
 tar = { version = "0.4", default-features = false }
+# Project files (.vidcut): SQLite WAL database with integrated undo history. MIT.
+rusqlite = { version = "0.43", features = ["bundled", "fallible_uint"] }
 
 [patch.crates-io]
 transcribe-cpp-sys = { path = "crates/transcribe-cpp-sys" }

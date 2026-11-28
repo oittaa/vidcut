@@ -608,7 +608,7 @@ impl Words<'_> {
         let pictures: Vec<Picture> = self
             .clip_list("clips")
             .iter()
-            .map(|c| c.picture.clone().unwrap_or_default())
+            .map(|c| c.picture.as_deref().cloned().unwrap_or_default())
             .collect();
         let (w, h) = self.project.map_or((1920.0, 1080.0), |pr| {
             (f64::from(pr.width()), f64::from(pr.height()))
