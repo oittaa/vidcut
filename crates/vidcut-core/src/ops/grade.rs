@@ -512,6 +512,7 @@ pub fn printed(
 }
 
 pub const NODE_STACK_LAYERS: usize = 8;
+pub const PRESERVED_NODES: u8 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GradeOf {
@@ -1708,14 +1709,76 @@ pub fn copy_whole(p: &Project, id: &str) -> Result<Grade> {
     Ok(whole(p, id)?.unwrap_or_else(|| Grade::usual(p.frame_size())))
 }
 
+fn kept_nodes(s: &Grade, t: &Grade, n: usize, frame: [f64; 2]) -> Result<Grade> {
+    let count = s.nodes.len().max(n.min(t.nodes.len()));
+    let corrector = |d: &GradeNode| matches!(d.tool, GradeTool::Corrector(_));
+    let mut out = s.clone();
+    for k in 1..=n.min(count) {
+        let from = (t.nodes.get(k - 1).cloned())
+            .unwrap_or_else(|| GradeNode::corrector(None, [0.0, 0.0], frame));
+        if !corrector(&from) || out.nodes.get(k - 1).is_some_and(|d| !corrector(d)) {
+            return Err(Error::invalid(format!(
+                "Preserve Number Of Nodes keeps correctors: node {k} is a mixer"
+            )));
+        }
+        match out.nodes.get_mut(k - 1) {
+            Some(d) => {
+                *d = GradeNode {
+                    inputs: std::mem::take(&mut d.inputs),
+                    place: d.place,
+                    key_from: d.key_from,
+                    ..from
+                };
+            }
+            None => {
+                let one = Grade {
+                    nodes: vec![GradeNode {
+                        inputs: vec![Some(GradeLink::picture(0))],
+                        key_from: None,
+                        ..from
+                    }],
+                    output: Some(GradeLink::picture(1)),
+                    layers: Vec::new(),
+                    kept_layers: Vec::new(),
+                };
+                appended(&mut out, &one);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn preserved(
+    fitted: &Grade,
+    was: &Grade,
+    (n, layers): (usize, usize),
+    frame: [f64; 2],
+) -> Result<Grade> {
+    let mut out = fitted.clone();
+    for l in 1..=layers {
+        let kept = kept_nodes(&fitted.layer(l, frame), &was.layer(l, frame), n, frame)?;
+        out = out.with_layer(l, kept, frame);
+    }
+    Ok(out)
+}
+
 pub fn apply(p: &mut Project, grade: &Grade, to: &[String]) -> Result<()> {
     checked(grade)?;
     let frame = p.frame_size();
+    let layers = p.settings.node_stack_layers.len();
+    let n = usize::from(p.settings.preserve_nodes);
     let mut fitted = grade.clone();
-    fitted.counted(p.settings.node_stack_layers.len(), frame);
+    fitted.counted(layers, frame);
     for id in to {
-        whole(p, id)?;
-        put_whole(p, id, fitted.clone())?;
+        let was = whole(p, id)?;
+        let g = match n {
+            0 => fitted.clone(),
+            n => {
+                let was = was.unwrap_or_else(|| Grade::usual(frame));
+                preserved(&fitted, &was, (n, layers), frame)?
+            }
+        };
+        put_whole(p, id, g)?;
     }
     Ok(())
 }
