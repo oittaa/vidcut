@@ -5578,6 +5578,42 @@ fn mutate(
             ops::grade::paste(p, &of, *node, settings)?;
             Value::Null
         }
+        Request::GradeApply {
+            from,
+            prior,
+            grade,
+            clips,
+        } => {
+            let at = || playhead.ok_or_else(|| Error::usage("give `clips`: there is no playhead"));
+            let (given, to) = match (prior, clips) {
+                (Some(_), Some(_)) => {
+                    return Err(Error::usage("give `prior` or `clips`, not both"));
+                }
+                (Some(back @ 1..=2), None) => {
+                    let (from, to) = ops::clip_filter::prior(p, at()?, *back)?;
+                    (Some(ops::grade::copy_whole(p, &from)?), vec![to])
+                }
+                (Some(_), None) => return Err(Error::usage("give `prior` 1 or 2")),
+                (None, Some(refs)) => (None, resolve_clips(p, &refs.to_vec(), playhead)?),
+                (None, None) => (None, vec![ops::gallery::graded_clip(p, at()?)?]),
+            };
+            let grade = match (given, from, grade) {
+                (Some(g), None, None) => g,
+                (None, Some(r), None) => {
+                    let id = resolve_clip(p, r, playhead)?;
+                    ops::grade::copy_whole(p, &id)?
+                }
+                (None, None, Some(g)) => g.clone(),
+                (None, None, None) => {
+                    return Err(Error::usage(
+                        "give `from`, `prior` or `grade`: the clipboard has no grade",
+                    ));
+                }
+                _ => return Err(Error::usage("give one of `from`, `prior` and `grade`")),
+            };
+            ops::grade::apply(p, &grade, &to)?;
+            json!({ "clips": to })
+        }
         Request::GradeCleanup {
             clip,
             timeline,
@@ -10566,10 +10602,24 @@ pub fn query(
             timeline,
             layer,
             node,
-        } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
-            json!({ "settings": ops::grade::copy(p, &of, *node)? })
-        }
+        } => match node {
+            Some(n) => {
+                let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+                json!({ "settings": ops::grade::copy(p, &of, *n)? })
+            }
+            None => {
+                let r = match (clip, timeline, layer) {
+                    (Some(r), false, None) => r,
+                    _ => {
+                        return Err(Error::usage(
+                            "give `node`, or only `clip` to copy the whole clip grade",
+                        ));
+                    }
+                };
+                let id = resolve_clip(p, r, playhead)?;
+                json!({ "clip": id, "grade": ops::grade::copy_whole(p, &id)? })
+            }
+        },
         Request::GradeWindowCopy {
             clip,
             timeline,

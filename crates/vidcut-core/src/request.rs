@@ -11,13 +11,13 @@ use crate::model::{
     AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
     Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
     EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
-    GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
-    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel, PictureTool,
-    PictureTransition, PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing,
-    SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType,
-    TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind,
-    ZoomBox,
+    GlowFraming, GlowOutput, Grade, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop,
+    GradientType, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel,
+    MergeEdges, MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel,
+    PictureTool, PictureTransition, PivotType, Place, ReferenceTime, Stabilization, StabilizeMode,
+    Stabilizing, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
+    ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape,
+    WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3381,8 +3381,10 @@ pub enum Request {
     /// Copy the settings of a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade (Ctrl+C on the Color page): its
     /// values, its keyframes, its label and whether it is on. Returns them
-    /// as `settings`, ready for `grade.paste`. The GUI also keeps them on
-    /// its clipboard.
+    /// as `settings`, ready for `grade.paste`. Without `node`, copy the
+    /// whole clip grade of `clip`, with each node stack layer (Ctrl+C in
+    /// the Thumbnail timeline). Returns it as `grade`, ready for
+    /// `grade.apply`. The GUI also keeps them on its clipboard.
     #[serde(rename = "grade.copy")]
     GradeCopy {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3394,7 +3396,32 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
-        node: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+    },
+    /// Give clips the whole clip grade of another clip, with each node
+    /// stack layer, in place of their own (Apply Grade). Each keyframe
+    /// stays on its source frame. Give one of `from`, `prior` and `grade`.
+    /// With none of them: the GUI's copied grade (Ctrl+V in the Thumbnail
+    /// timeline).
+    #[serde(rename = "grade.apply")]
+    GradeApply {
+        /// The clip that gives its grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<ClipRef>,
+        /// 1 or 2: the clip at the playhead takes the grade of the clip one
+        /// or two places before it in the Thumbnail timeline (Apply Grade
+        /// From One Clip Prior, Apply Grade From Two Clips Prior). Not with
+        /// `clips`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prior: Option<u32>,
+        /// A whole clip grade, as `grade.copy` without `node` gives it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grade: Option<Grade>,
+        /// The clips that take the grade. Left out: the clip of the
+        /// Thumbnail timeline at the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
     },
     /// Give a corrector of the grade of clips, or with `timeline` of the
     /// timeline grade, copied settings in place of its own (Ctrl+V on the

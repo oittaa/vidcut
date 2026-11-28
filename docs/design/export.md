@@ -581,6 +581,9 @@ Voice Isolation:
   - `pick` gives the `thumbnails` of a click. A plain click gives an empty list and seeks the timeline player when the playhead is not in the clip.
   - `top_at` gives the clip of the top track at a frame. A plain click on a clip under another clip keeps that clip in `thumbnails`. Why: the outline stays on the top clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
+  - `ops::clip_filter::prior` finds the clip one or two places before the clip at the playhead, with `ops::clip_filter::top_at`. Why: `grade.apply` with `prior` needs the order of the strip in the core.
+  - `ExportUi::strip_focus` is on after a press in the strip and off after a press in another place. `Workspace::strip_grades` then gives the clip at the playhead and the clips that take a grade.
+    - Why: Ctrl+C and Ctrl+V copy the whole grade when the strip has the focus, and one node when it does not.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
   - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips that meet it, from 1, as measured.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
@@ -918,6 +921,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
+  - `grade.apply` puts a whole clip grade in other clips (`ops::grade::apply`). The keyframes keep their source frames, because a clip grade keeps its keyframes on source frames.
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
   - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
   - A serial node takes the picture of the node before it. The oldest link that took that picture then takes the picture of the new node (`oldest_taker`).

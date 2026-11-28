@@ -5322,6 +5322,33 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
   - Still IDs of the form Track.Shot.Version, labels, keyframe modes and the drag into the viewer come later ([todo](todo/color-gallery.md)).
 
+### 8.32 Copying grades between clips (pp. 3361–3364, 3464)
+
+- The manual:
+  - Copy and Paste with a clip of the Thumbnail timeline in focus copy the whole grade. In the Node Editor, they copy one node (pp. 3361–3362).
+  - A middle-click on a thumbnail, or Apply Grade in its menu, gives its grade to the selected clips (pp. 3363–3364).
+  - Color > Apply Grade From One Clip Prior (=) copies the grade of the clip before the current clip (p. 3364).
+  - Color > Apply Grade From Two Clips Prior (−) copies the grade of the clip two places before it (p. 3364).
+  - From a clip, the keyframes of the grade go on the same source timecode (p. 3464).
+- vidcut:
+  - `grade.apply` gives clips the whole clip grade of another clip, with each node stack layer. It is one undo step.
+    - The grade replaces the whole grade of each target, as with `gallery.apply` ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
+    - The grade comes from `from` (a clip), from `prior` (1 or 2), or from `grade` (a grade that `grade.copy` gave).
+    - With no `clips`, the target is the clip at the playhead.
+  - Each keyframe stays on its source frame. Thus on another clip of the same media, it is on the same source timecode.
+  - With `prior`, the clip at the playhead takes the grade of the clip one or two places before it in the Thumbnail timeline.
+    - The order is the order of the strip, with its clip filter.
+    - With no clip at that place, the request gives an error.
+  - `grade.copy` without `node` copies the whole clip grade. It gives the grade as `grade`, and the GUI keeps it on its clipboard.
+  - On the Color page, a press in the Thumbnail timeline gives it the focus. A press in another place takes the focus away.
+    - With the focus there, Ctrl+C copies the whole grade of the clip at the playhead. Ctrl+V gives it to that clip and the selected clips.
+    - Else Ctrl+C and Ctrl+V copy and paste one node ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - On the Color page, the menu of a thumbnail has Apply Grade. A middle-click on a thumbnail does the same.
+    - The clip at the playhead and the selected clips take the grade of the thumbnail. Apply Grade is greyed when no other clip is there.
+  - Color > Apply Grade From One Clip Prior (=) and Apply Grade From Two Clips Prior (−) send `grade.apply` with `prior`.
+    - On the Color page, these keys go before Go to Timecode and Jump Back.
+  - The copies give the clip grade, also in the Timeline mode of the Node Editor.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -6269,6 +6296,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `thumbnails` of `selection.set` sets the clips with a red outline, and `selection.get` gives them. A change of the open timeline clears them.
   - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
+  - On the Color page, the menu also has Apply Grade ([§8.32](#832-copying-grades-between-clips-pp-33613364-3464)).
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.
   - `clip_filter` of `timeline.set` sets the filter of a timeline. A pick of a filter is an undo step.
   - The Thumbnail timeline of both pages shows only the clips that meet the filter. It numbers them from 1.
@@ -6429,6 +6457,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |
 | Ctrl+Alt+G | Color page: Grab Still ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)) |
+| = / − | Color page: Apply Grade From One Clip Prior / Two Clips Prior ([§8.32](#832-copying-grades-between-clips-pp-33613364-3464)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |
