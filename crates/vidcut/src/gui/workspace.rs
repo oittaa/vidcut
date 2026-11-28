@@ -160,6 +160,7 @@ pub struct Workspace {
     pub(super) sync_bin: super::sync_bin::SyncBin,
     pub(super) sync_clips: super::sync_clips::SyncClips,
     pub(super) gallery: super::gallery::Gallery,
+    pub(super) color_groups: super::color_groups::ColorGroups,
 }
 
 const ALONE: [&str; 8] = [
@@ -299,6 +300,7 @@ impl Workspace {
             sync_bin: Default::default(),
             sync_clips: Default::default(),
             gallery: Default::default(),
+            color_groups: Default::default(),
         }
     }
 
@@ -449,6 +451,7 @@ impl Workspace {
                     albums,
                     memories,
                 } => self.set_gallery(album, albums, memories)?,
+                live::GuiChange::ColorGroup(group) => self.set_color_group(group)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -592,16 +595,16 @@ impl Workspace {
         let page = self.effects_page.page;
         live::GuiState {
             page,
-            grade: self.effects_page.grading,
+            grade: self.shown_level(),
             layer: self.shown_layer(),
             palette: self.effects_page.palette,
             primaries: self.effects_page.primaries,
             window: self.effects_page.window,
-            clip: match (page, self.effects_page.grading) {
+            clip: match (page, self.shown_level()) {
                 (Page::Effects, _) => self.effects_clip(),
-                (Page::Color, GradeLevel::Clip) => self.color_clip(),
                 (Page::Color, GradeLevel::Timeline)
                 | (Page::Cut | Page::Export | Page::Audio, _) => None,
+                (Page::Color, _) => self.color_clip(),
             },
             nodes: self.effects_page.nodes.clone(),
             node: self.effects_page.picked().map(str::to_owned),
@@ -619,6 +622,7 @@ impl Workspace {
             node_wide: self.effects_page.grade_wide,
             album: self.shown_album(),
             albums: self.gallery.albums,
+            color_group: self.current_color_group(),
             memories: self.gallery.memories,
             viewers: self.viewer_state(),
             time: self.page_clock(),
@@ -2500,6 +2504,10 @@ impl Workspace {
         let wanted = self.timeline_wanted().unwrap_or(300.0) + chrome;
         let least = self.timeline_least(&spacing).map_or(140.0, |h| h + chrome);
         let color = self.effects_page.page == Page::Color;
+        if color {
+            self.keep_color_group();
+            self.color_group_windows(&ctx);
+        }
         let pool = match self.left {
             LeftTab::Hidden => 0.0,
             _ => self.pool_least + frame.total_margin().sum().y,

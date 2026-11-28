@@ -9,6 +9,7 @@ use vidcut_core::render::VideoPiece;
 use vidcut_core::request::{ClipLabel, Page};
 use vidcut_core::time::format_timecode;
 
+use super::color_groups::group_items;
 use super::theme;
 use super::tiles;
 use super::workspace::{Workspace, dim};
@@ -37,11 +38,13 @@ struct Thumb {
     timecode: String,
     name: String,
     codec: Option<String>,
+    group: Option<String>,
 }
 
 fn look(p: &Project, settings: &[u8], c: &Clip, m: Option<&Media>) -> String {
     let mut bytes = settings.to_vec();
-    bytes.extend(serde_json::to_vec(&(c, m)).unwrap_or_default());
+    let group = c.color_group.as_deref().and_then(|g| p.color_group(g));
+    bytes.extend(serde_json::to_vec(&(c, m, group)).unwrap_or_default());
     if let Some(m) = m {
         let lut = m.input_lut_in(&p.settings);
         bytes.extend(crate::thumbcache::look(m, lut).as_bytes());
@@ -84,6 +87,7 @@ fn thumbs(p: &Project, filtered: bool) -> Vec<Thumb> {
                 timecode,
                 name: p.clip_name(c).unwrap_or_default(),
                 codec,
+                group: c.color_group.clone(),
             }
         })
         .collect()
@@ -116,6 +120,8 @@ impl Workspace {
         let grading = self.effects_page.page == Page::Color;
         let takers = |from: &str| targets(list, selected, current, from);
         let mut apply = None;
+        let group = self.current_color_group();
+        let mut grouping = None;
         let shown = egui::ScrollArea::horizontal()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -165,6 +171,11 @@ impl Workspace {
                                 true => colors.text,
                                 false => colors.text_dim,
                             };
+                            let linked = grading && group.is_some() && t.group == group;
+                            let text = match linked {
+                                true => format!("{}  {text}", egui_phosphor::regular::LINK),
+                                false => text.to_string(),
+                            };
                             let under = ui.add(
                                 egui::Label::new(RichText::new(text).small().color(shade))
                                     .truncate()
@@ -183,7 +194,12 @@ impl Workspace {
                             apply = Some(t.clip.clone());
                         }
                         picture.context_menu(|ui| {
-                            if grading {
+                            if grading && current == Some(i) {
+                                let mut act = None;
+                                group_items(ui, p, (&t.clip, group.as_deref()), &mut act);
+                                grouping = act.map(|a| (a, t.clip.clone()));
+                                ui.separator();
+                            } else if grading {
                                 let can = !takers(&t.clip).is_empty();
                                 if ui
                                     .add_enabled(can, egui::Button::new("Apply Grade"))
@@ -220,9 +236,13 @@ impl Workspace {
             let clips = takers(&from);
             json!({ "from": from, "clips": clips })
         });
+        let grouping = grouping.map(|(act, clip)| (act, (clip, takers(""))));
         self.export.strip = Some(strip);
         if let Some(params) = apply {
             self.send("grade.apply", params);
+        }
+        if let Some((act, clips)) = grouping {
+            self.group_act(act, clips);
         }
         if cycle {
             self.export.clip_label = match label {

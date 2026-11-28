@@ -134,8 +134,8 @@ struct Span {
 
 impl Span {
     fn of(p: &Project, of: &GradeOf) -> Option<Self> {
-        match of {
-            GradeOf::Clip(id, _) => {
+        match of.clip() {
+            Some(id) => {
                 let c = p.clip(id)?;
                 Some(Self {
                     lo: c.start as f64,
@@ -143,7 +143,7 @@ impl Span {
                     clip: Some(c.clone()),
                 })
             }
-            GradeOf::Timeline => Some(Self {
+            None => Some(Self {
                 lo: 0.0,
                 hi: p.end().max(1) as f64,
                 clip: None,
@@ -300,9 +300,9 @@ impl Workspace {
     }
 
     fn no_grade(&self) -> &'static str {
-        match self.effects_page.grading {
-            GradeLevel::Clip => "Move the playhead over a clip",
+        match self.shown_level() {
             GradeLevel::Timeline => "Open a timeline",
+            _ => "Move the playhead over a clip",
         }
     }
 

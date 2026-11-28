@@ -39,6 +39,7 @@ pub struct Project {
     pub stills: Vec<Still>,
     pub shared_nodes: Vec<SharedNode>,
     pub albums: Vec<Album>,
+    pub color_groups: Vec<ColorGroup>,
     pub memories: Vec<Memory>,
 }
 
@@ -104,6 +105,10 @@ pub struct ProjectFile {
     /// The still albums of the Gallery, in the order they were made. A
     /// project has one or more.
     pub albums: Vec<Album>,
+    /// The color groups of the Color page, in the order they were made.
+    /// Left out while there are none.
+    #[serde(default)]
+    pub color_groups: Vec<ColorGroup>,
     /// The memories of the Gallery, in the order of their slots. Left out
     /// while there are none.
     #[serde(default)]
@@ -141,6 +146,8 @@ struct ProjectOut<'a> {
     #[serde(skip_serializing_if = "<[SharedNode]>::is_empty")]
     shared_nodes: &'a [SharedNode],
     albums: &'a [Album],
+    #[serde(skip_serializing_if = "<[ColorGroup]>::is_empty")]
+    color_groups: &'a [ColorGroup],
     #[serde(skip_serializing_if = "<[Memory]>::is_empty")]
     memories: &'a [Memory],
 }
@@ -177,6 +184,7 @@ impl Serialize for Project {
             stills: &self.stills,
             shared_nodes: &self.shared_nodes,
             albums: &self.albums,
+            color_groups: &self.color_groups,
             memories: &self.memories,
         }
         .serialize(s)
@@ -207,6 +215,7 @@ impl From<ProjectFile> for Project {
             stills: f.stills,
             shared_nodes: f.shared_nodes,
             albums: f.albums,
+            color_groups: f.color_groups,
             memories: f.memories,
         };
         p.check_out();
@@ -329,6 +338,45 @@ pub struct Album {
     pub name: String,
 }
 
+/// A color group of the Color page: clips that share a Pre-Clip and a
+/// Post-Clip grade. The picture of each clip in the group goes through the
+/// Pre-Clip grade, then each node stack layer of its clip grade, then the
+/// Post-Clip grade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ColorGroup {
+    /// `cg<N>`, never reused.
+    pub id: String,
+    pub name: String,
+    /// The Pre-Clip grade. Its keyframes count in the frames of each clip,
+    /// as those of a clip grade do. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre: Option<Grade>,
+    /// The Post-Clip grade. Its keyframes count in the frames of each clip.
+    /// Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<Grade>,
+}
+
+impl ColorGroup {
+    pub fn grade(&self, side: crate::request::GroupGrade) -> Option<&Grade> {
+        match side {
+            crate::request::GroupGrade::Pre => self.pre.as_ref(),
+            crate::request::GroupGrade::Post => self.post.as_ref(),
+        }
+    }
+
+    pub fn grade_mut(&mut self, side: crate::request::GroupGrade) -> &mut Option<Grade> {
+        match side {
+            crate::request::GroupGrade::Pre => &mut self.pre,
+            crate::request::GroupGrade::Post => &mut self.post,
+        }
+    }
+
+    pub fn acts(&self) -> bool {
+        self.pre.is_some() || self.post.is_some()
+    }
+}
+
 /// A still of the Gallery: a picture of a frame of a timeline, and the
 /// grades of the clip that the Color page graded on that frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -350,7 +398,8 @@ pub struct Still {
     /// number of the still ID. Generators, titles and adjustment clips do
     /// not count.
     pub shot: usize,
-    /// The number of node stack layers of the project at the grab.
+    /// The number of node stack layers of its clip grade: those of the
+    /// project at the grab, or 1 for a grade of a color group.
     pub layers: usize,
     /// The frames of the clip, counted as the keyframes of its grade are.
     pub source: StillSource,
@@ -385,7 +434,8 @@ pub struct Memory {
     pub frame: i64,
     /// The frames of the clip, counted as the keyframes of its grade are.
     pub source: StillSource,
-    /// The number of node stack layers of the project at the grab.
+    /// The number of node stack layers of its clip grade: those of the
+    /// project at the grab, or 1 for a grade of a color group.
     pub layers: usize,
     /// The whole grade of the clip: each node stack layer, with its
     /// keyframes. Left out at its usual value.
@@ -2928,6 +2978,9 @@ pub struct Clip {
     /// offset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linked_at: Option<i64>,
+    /// The id of its color group (`cg1`). Left out when it is in none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_group: Option<String>,
 }
 
 /// The motion path of a pattern of a tracker: where its thing is on the
@@ -4696,6 +4749,11 @@ pub struct Picture {
     /// values with no correction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stabilization: Option<Stabilization>,
+    /// The Pre-Clip grade of the color group of the clip, before its
+    /// effects. Only a render plan has it, from the group: a clip leaves it
+    /// out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_clip_grade: Option<Grade>,
 }
 
 /// The stabilization of a clip's picture.
@@ -10970,6 +11028,7 @@ impl Cue {
             render_cache: ClipCache::Auto,
             link: None,
             linked_at: None,
+            color_group: None,
         }
     }
 
@@ -11020,6 +11079,7 @@ pub struct NextIds {
     pub still: u64,
     pub shared: u64,
     pub album: u64,
+    pub color_group: u64,
 }
 
 fn first_id() -> u64 {
@@ -11053,6 +11113,7 @@ impl Project {
                 still: 1,
                 shared: 1,
                 album: 2,
+                color_group: 1,
             },
             bins: Vec::new(),
             groups: Vec::new(),
@@ -11064,6 +11125,7 @@ impl Project {
                 id: "a1".into(),
                 name: "Stills 1".into(),
             }],
+            color_groups: Vec::new(),
             memories: Vec::new(),
         }
     }
@@ -11900,6 +11962,20 @@ impl Project {
 
     pub fn album(&self, id: &str) -> Option<&Album> {
         self.albums.iter().find(|a| a.id == id)
+    }
+
+    pub fn alloc_color_group_id(&mut self) -> String {
+        let id = format!("cg{}", self.next_id.color_group);
+        self.next_id.color_group += 1;
+        id
+    }
+
+    pub fn color_group(&self, id: &str) -> Option<&ColorGroup> {
+        self.color_groups.iter().find(|g| g.id == id)
+    }
+
+    pub fn color_group_mut(&mut self, id: &str) -> Option<&mut ColorGroup> {
+        self.color_groups.iter_mut().find(|g| g.id == id)
     }
 
     pub fn memory(&self, slot: char) -> Option<&Memory> {

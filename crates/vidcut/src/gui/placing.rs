@@ -674,9 +674,9 @@ impl Workspace {
             return vec![graded];
         }
         if let Some(moved) = self.path_wanted() {
-            return vec![moved];
+            return vec![self.with_group(moved)];
         }
-        match self.grab_wanted() {
+        let wanted = match self.grab_wanted() {
             Some((id, picture, baseline)) => vec![preview(&id, &baseline, &picture)],
             None => self
                 .inspector_wanted()
@@ -690,7 +690,8 @@ impl Workspace {
                     preview(&id, &stored, &picture)
                 })
                 .collect(),
-        }
+        };
+        wanted.into_iter().map(|w| self.with_group(w)).collect()
     }
 
     fn path_wanted(&self) -> Option<(String, Picture)> {
@@ -1093,9 +1094,9 @@ impl Workspace {
     pub(super) fn window_framing(&self, of: &GradeOf, picture: Rect) -> Option<Framing> {
         let p = self.project_shared()?;
         let (w, h) = (f64::from(p.width()), f64::from(p.height()));
-        let windows = match of {
-            GradeOf::Timeline => frame_back((w, h)),
-            GradeOf::Clip(id, _) => {
+        let windows = match of.clip() {
+            None => frame_back((w, h)),
+            Some(id) => {
                 let c = p.clip(id)?;
                 let at = self.snap.timeline.position;
                 let run = Run {

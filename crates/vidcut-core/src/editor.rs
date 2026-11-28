@@ -1981,6 +1981,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Group(&'a crate::model::SyncGroup),
         Still(&'a crate::model::Still),
         Album(&'a crate::model::Album),
+        ColorGroup(&'a crate::model::ColorGroup),
         Timeline(
             &'a str,
             &'a str,
@@ -1994,6 +1995,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         media: bool,
         groups: bool,
         stills: bool,
+        color_groups: bool,
         timelines: bool,
         markers: bool,
         tracks: HashSet<&'a str>,
@@ -2017,6 +2019,11 @@ fn diff(before: &Project, after: &Project) -> Changes {
             }
             for a in &p.albums {
                 m.insert(a.id.as_str(), Named::Album(a));
+            }
+        }
+        if !skip.color_groups {
+            for g in &p.color_groups {
+                m.insert(g.id.as_str(), Named::ColorGroup(g));
             }
         }
         if !skip.timelines {
@@ -2095,6 +2102,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         media: SharedVec::ptr_eq(&before.media, &after.media),
         groups: before.groups == after.groups,
         stills: before.stills == after.stills && before.albums == after.albums,
+        color_groups: before.color_groups == after.color_groups,
         timelines: SharedVec::ptr_eq(&before.timelines, &after.timelines),
         markers: before.markers == after.markers,
         tracks: skip_tracks,
@@ -2784,6 +2792,18 @@ fn layer_of(timeline: bool, layer: Option<usize>) -> Result<usize> {
     }
 }
 
+type GradeTarget = (bool, Option<usize>, Option<crate::request::GroupGrade>);
+
+fn group_of((timeline, layer, group): GradeTarget) -> Result<Option<crate::request::GroupGrade>> {
+    match (group, timeline, layer) {
+        (Some(_), true, _) => Err(Error::usage("give `group` or `timeline`, not both")),
+        (Some(_), _, Some(_)) => Err(Error::usage(
+            "a group grade has no node stack layers: leave out `layer`",
+        )),
+        (group, ..) => Ok(group),
+    }
+}
+
 fn gallery_targets(
     p: &Project,
     clips: Option<&OneOrMany<ClipRef>>,
@@ -2793,7 +2813,7 @@ fn gallery_targets(
     match (clips, grade) {
         (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead),
         (None, crate::request::GradeLevel::Timeline) => Ok(Vec::new()),
-        (None, crate::request::GradeLevel::Clip) => {
+        (None, _) => {
             let t = at.or(playhead);
             let t = t.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
             Ok(vec![ops::gallery::graded_clip(p, t)?])
@@ -2818,9 +2838,10 @@ fn gallery_keys(
 fn grades_of(
     p: &mut Project,
     clips: &Option<OneOrMany<ClipRef>>,
-    (timeline, layer): (bool, Option<usize>),
+    (timeline, layer, group): GradeTarget,
     playhead: Option<i64>,
 ) -> Result<Vec<ops::grade::GradeOf>> {
+    let group = group_of((timeline, layer, group))?;
     let layer = layer_of(timeline, layer)?;
     match (clips, timeline) {
         (Some(_), true) => Err(Error::usage("give `clips` or `timeline`, not both")),
@@ -2831,10 +2852,16 @@ fn grades_of(
             need_timeline(p)?;
             Ok(vec![ops::grade::GradeOf::Timeline])
         }
-        (Some(refs), false) => Ok(resolve_clips(p, &refs.to_vec(), playhead)?
-            .into_iter()
-            .map(|id| ops::grade::GradeOf::Clip(id, layer))
-            .collect()),
+        (Some(refs), false) => {
+            let ids = resolve_clips(p, &refs.to_vec(), playhead)?;
+            match group {
+                Some(side) => ops::color_groups::grades_of(p, &ids, side),
+                None => Ok(ids
+                    .into_iter()
+                    .map(|id| ops::grade::GradeOf::Clip(id, layer))
+                    .collect()),
+            }
+        }
     }
 }
 
@@ -2852,9 +2879,10 @@ fn time_or_playhead(
 fn grade_of(
     p: &Project,
     clip: &Option<ClipRef>,
-    (timeline, layer): (bool, Option<usize>),
+    (timeline, layer, group): GradeTarget,
     playhead: Option<i64>,
 ) -> Result<ops::grade::GradeOf> {
+    let group = group_of((timeline, layer, group))?;
     let layer = layer_of(timeline, layer)?;
     match (clip, timeline) {
         (Some(_), true) => Err(Error::usage("give `clip` or `timeline`, not both")),
@@ -2863,7 +2891,11 @@ fn grade_of(
         )),
         (None, true) => Ok(ops::grade::GradeOf::Timeline),
         (Some(r), false) => {
-            resolve_clip(p, r, playhead).map(|id| ops::grade::GradeOf::Clip(id, layer))
+            let id = resolve_clip(p, r, playhead)?;
+            match group {
+                Some(side) => ops::color_groups::grade_of(p, &id, side),
+                None => Ok(ops::grade::GradeOf::Clip(id, layer)),
+            }
         }
     }
 }
@@ -5496,12 +5528,13 @@ fn mutate(
             clips,
             timeline,
             layer,
+            group,
             node,
             at,
             node_change,
             change,
         } => {
-            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer, *group), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             ops::grade::set(p, &of, node.unwrap_or(1), (change, node_change), at)?;
             Value::Null
@@ -5510,6 +5543,7 @@ fn mutate(
             clips,
             timeline,
             layer,
+            group,
             node,
             keep_nodes,
             all_layers,
@@ -5518,16 +5552,17 @@ fn mutate(
             at,
         } => {
             if *all_layers {
-                if *timeline || node.is_some() || *keep_nodes || layer.is_some() || *auto_color {
+                let others = *timeline || node.is_some() || *keep_nodes || *auto_color;
+                if others || layer.is_some() || group.is_some() {
                     return Err(Error::usage(
-                        "`all_layers` goes alone: not with `timeline`, `node`, `keep_nodes`, `layer` or `auto_color`",
+                        "`all_layers` goes alone: not with `timeline`, `group`, `node`, `keep_nodes`, `layer` or `auto_color`",
                     ));
                 }
-                let of = grades_of(p, clips, (false, None), playhead)?;
+                let of = grades_of(p, clips, (false, None, None), playhead)?;
                 ops::grade::clear_layers(p, &of)?;
                 return Ok(Value::Null);
             }
-            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer, *group), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             match auto_color {
                 true => ops::grade::auto_color_removed(p, &of, (*node, *palette), at)?,
@@ -5539,12 +5574,13 @@ fn mutate(
             clips,
             timeline,
             layer,
+            group,
             node,
             at,
             color,
             points,
         } => {
-            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer, *group), playhead)?;
             let lights = env.printer_lights();
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let n = (node.unwrap_or(1), at);
@@ -5554,11 +5590,12 @@ fn mutate(
         Request::GradeAutoColor {
             clip,
             layer,
+            group,
             node,
             at,
             tool,
         } => {
-            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            let of = grade_of(p, clip, (false, *layer, *group), playhead)?;
             let n = node.unwrap_or(1);
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let legacy = !*tool && env.printer_lights().use_legacy_auto_color;
@@ -5570,15 +5607,21 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             add,
             node,
             place,
             window,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
-        Request::GalleryGrab { at, album, memory } => {
+        Request::GalleryGrab {
+            at,
+            album,
+            memory,
+            grade,
+        } => {
             use ops::gallery::Holder;
             let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
                 Error::usage("gallery.grab needs `at` (--at): there is no playhead")
@@ -5593,9 +5636,12 @@ fn mutate(
                 (a, None) => Holder::Album(ops::gallery::album_of(p, a.as_deref())?),
             };
             let clip = ops::gallery::graded_clip(p, t)?;
+            if grade.group().is_some() {
+                ops::color_groups::of_clip(p, &clip)?;
+            }
             let plan = still_plan(p, t)?;
             let picture = env.still(&plan, dry_run)?;
-            ops::gallery::grab(p, (&clip, t), (to, picture))?
+            ops::gallery::grab(p, (&clip, t, *grade), (to, picture))?
         }
         Request::GalleryLabel { still, label } => {
             ops::gallery::label(p, still, label)?;
@@ -5648,6 +5694,33 @@ fn mutate(
             ops::gallery::rename_album(p, album, name)?;
             Value::Null
         }
+        Request::ColorGroupAdd { clips, name } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            json!({ "group": ops::color_groups::add(p, &ids, name.as_deref())? })
+        }
+        Request::ColorGroupAssign { group, clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::color_groups::assign(p, group, &ids)?;
+            Value::Null
+        }
+        Request::ColorGroupUnassign { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::color_groups::unassign(p, &ids)?;
+            Value::Null
+        }
+        Request::ColorGroupRename { group, name } => {
+            ops::color_groups::rename(p, group, name)?;
+            Value::Null
+        }
+        Request::ColorGroupRemove { group } => {
+            ops::color_groups::remove(p, group)?;
+            Value::Null
+        }
+        Request::ColorGroupCollapse { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::color_groups::collapse(p, &ids)?;
+            Value::Null
+        }
         Request::GalleryAlbumRemove { album } => {
             ops::gallery::remove_album(p, album)?;
             Value::Null
@@ -5672,22 +5745,31 @@ fn mutate(
         } => {
             use ops::grade::GradeOf;
             let timeline = matches!(grade, crate::request::GradeLevel::Timeline);
+            let side = grade.group();
             let layer = layer_of(timeline, *layer)?;
-            let to = match (clips, timeline) {
+            let ids = match (clips, timeline) {
                 (Some(_), true) => {
                     return Err(Error::usage(
                         "the timeline grade goes to the open timeline: leave out `clips`",
                     ));
                 }
-                (None, true) => vec![GradeOf::Timeline],
-                (Some(refs), false) => (resolve_clips(p, &refs.to_vec(), playhead)?.into_iter())
-                    .map(|id| GradeOf::Clip(id, layer))
-                    .collect(),
+                (None, true) => Vec::new(),
+                (Some(refs), false) => resolve_clips(p, &refs.to_vec(), playhead)?,
                 (None, false) => {
                     let t = playhead
                         .ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
-                    vec![GradeOf::Clip(ops::gallery::graded_clip(p, t)?, layer)]
+                    vec![ops::gallery::graded_clip(p, t)?]
                 }
+            };
+            let to = match side {
+                _ if timeline => vec![GradeOf::Timeline],
+                Some(_) if layer > 1 => {
+                    return Err(Error::usage(
+                        "a group grade has no node stack layers: leave out `layer`",
+                    ));
+                }
+                Some(side) => ops::color_groups::grades_of(p, &ids, side)?,
+                None => ids.into_iter().map(|id| GradeOf::Clip(id, layer)).collect(),
             };
             ops::gallery::append(p, still, &to)?;
             Value::Null
@@ -5696,10 +5778,11 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             extract,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::remove(p, &of, *node, *extract)?;
             Value::Null
         }
@@ -5707,13 +5790,14 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             input,
             from,
             key,
             output,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::connect(p, &of, (*node, *input), (*from, *key, *output))?;
             Value::Null
         }
@@ -5721,9 +5805,10 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::remove_input(p, &of, *node)?;
             Value::Null
         }
@@ -5731,10 +5816,11 @@ fn mutate(
             clips,
             timeline,
             layer,
+            group,
             node,
             settings,
         } => {
-            let of = grades_of(p, clips, (*timeline, *layer), playhead)?;
+            let of = grades_of(p, clips, (*timeline, *layer, *group), playhead)?;
             let settings = settings
                 .as_ref()
                 .ok_or_else(|| Error::usage("give `settings`: the clipboard has no node"))?;
@@ -5742,11 +5828,11 @@ fn mutate(
             Value::Null
         }
         Request::GradeShare { clip, layer, node } => {
-            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            let of = grade_of(p, clip, (false, *layer, None), playhead)?;
             json!({ "shared": ops::shared::share(p, &of, *node)? })
         }
         Request::GradeUnshare { clip, layer, node } => {
-            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            let of = grade_of(p, clip, (false, *layer, None), playhead)?;
             ops::shared::unshare(p, &of, *node)?;
             Value::Null
         }
@@ -5756,7 +5842,7 @@ fn mutate(
             node,
             shared,
         } => {
-            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            let of = grade_of(p, clip, (false, *layer, None), playhead)?;
             json!({ "node": ops::shared::add(p, &of, *node, *shared)? })
         }
         Request::GradeSharedDelete { shared } => {
@@ -5833,9 +5919,10 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             area,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::cleanup(p, &of, *area)?;
             Value::Null
         }
@@ -5843,10 +5930,11 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             with,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::swap(p, &of, *node, *with)?;
             Value::Null
         }
@@ -5854,12 +5942,13 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             at,
             kind,
             edl,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             if *edl {
                 if of != ops::grade::GradeOf::Timeline {
                     return Err(Error::usage(
@@ -5879,6 +5968,7 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             frames,
             at,
@@ -5886,7 +5976,7 @@ fn mutate(
             start,
             end,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let change = ops::grade_keys::KindChange {
                 kind: *kind,
@@ -5900,13 +5990,14 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             frames,
             at,
             by,
             to,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::grade_keys::shift(p, &of, *node, &pick, (*by, to))?;
@@ -5916,12 +6007,13 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             frames,
             at,
             edl,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             if *edl {
                 if frames.is_some() || at.is_some() {
                     return Err(Error::usage("`edl` takes no `frames` or `at`"));
@@ -5937,10 +6029,11 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             shape,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let window = ops::grade_windows::add(p, &of, *node, *shape)?;
             json!({ "window": window })
         }
@@ -5948,6 +6041,7 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             window,
             on,
@@ -5968,7 +6062,7 @@ fn mutate(
             outer,
             at,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let change = ops::grade_windows::WindowChange {
                 on: *on,
@@ -5995,10 +6089,11 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             window,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade_windows::remove(p, &of, *node, *window)?;
             Value::Null
         }
@@ -6006,10 +6101,11 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             window,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             json!({ "window": ops::grade_windows::convert(p, &of, *node, *window)? })
         }
         Request::GradeMaskClick { .. }
@@ -6038,13 +6134,14 @@ fn mutate(
             clip,
             timeline,
             layer,
+            group,
             node,
             window,
             append,
             settings,
             at,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let copied = settings.as_ref().ok_or_else(|| {
                 Error::usage("give `settings`, a window from `grade.window.copy`")
@@ -7887,6 +7984,7 @@ fn place_imported(
                     .filter(|_| c.compound.is_some() || c.has_no_media())
                     .map(|l| links.of(l)),
                 linked_at: None,
+                color_group: c.color_group.clone().filter(|_| keep_ids),
             };
             clip.linked_at = clip.link.and(c.linked_at);
             if !clip.takes_speed() {
@@ -8045,6 +8143,7 @@ fn place_imported(
             render_cache: crate::model::ClipCache::Auto,
             link: c.link.map(|l| links.of(l)),
             linked_at: c.link.and(c.linked_at),
+            color_group: c.color_group.clone().filter(|_| keep_ids),
         });
         placed.insert(track_of(&c.track));
     }
@@ -8858,6 +8957,10 @@ pub fn open_otio(
     p.media = meta.media.into();
     p.bins = meta.bins;
     p.groups = meta.groups;
+    p.color_groups = meta.color_groups;
+    for g in &mut p.color_groups {
+        (g.pre.iter_mut().chain(&mut g.post)).for_each(crate::model::Grade::unshared);
+    }
     p.tape_marks = meta.tape_marks;
     p.timelines = meta.timelines.into();
     p.recent = meta.recent;
@@ -9149,6 +9252,7 @@ pub fn auto_color_looks(
     let Request::GradeAutoColor {
         clip,
         layer,
+        group,
         node,
         at,
         tool,
@@ -9156,7 +9260,7 @@ pub fn auto_color_looks(
     else {
         return Vec::new();
     };
-    let of = grade_of(p, clip, (false, *layer), playhead);
+    let of = grade_of(p, clip, (false, *layer, *group), playhead);
     let at = time_or_playhead(p, at.as_ref(), playhead);
     let legacy = !*tool && use_legacy;
     let plan = of.and_then(|of| auto_color_plan(p, &of, (node.unwrap_or(1), legacy), at?));
@@ -9169,7 +9273,7 @@ fn auto_color_plan(
     (n, legacy): (u32, bool),
     at: Option<i64>,
 ) -> Result<RenderPlan> {
-    let ops::grade::GradeOf::Clip(id, layer) = of else {
+    let Some(id) = of.clip() else {
         return Err(Error::invalid("Auto Color works on the grade of a clip"));
     };
     let t =
@@ -9196,23 +9300,40 @@ fn auto_color_plan(
         None => return Err(ops::grade::no_node(n)),
     }
     g.output = Some(crate::model::GradeLink::picture(n));
-    solo_plan(p, (id, *layer), (Some(frame), (t, t + 1)), g)
+    solo_plan(p, of, (Some(frame), (t, t + 1)), g)
 }
 
 fn solo_plan(
     p: &Project,
-    (id, layer): (&str, usize),
+    of: &ops::grade::GradeOf,
     (frame, (t0, t1)): (Option<i64>, (i64, i64)),
     g: crate::model::Grade,
 ) -> Result<RenderPlan> {
+    use crate::model::Grade;
+    use crate::request::GroupGrade;
+    use ops::grade::GradeOf;
+    let id = (of.clip()).ok_or_else(|| Error::invalid("the timeline grade has no clip to read"))?;
     let size = p.frame_size();
-    let below = ops::grade::whole(p, id)?.map(|w| match frame {
+    let at = |w: &Grade| match frame {
         Some(f) => w.at(f as f64).into_owned(),
-        None => w,
-    });
-    let g = below
-        .unwrap_or_else(|| crate::model::Grade::usual(size))
-        .below(layer, g, size);
+        None => w.clone(),
+    };
+    let own = ops::grade::whole(p, id)?.map(|w| at(&w));
+    let group = ops::color_groups::of_clip(p, id).ok();
+    let pre = group.and_then(|k| k.pre.as_ref()).map(at);
+    let (pre, g) = match of {
+        GradeOf::Clip(_, layer) => {
+            let clip = (own.unwrap_or_else(|| Grade::usual(size))).below(*layer, g, size);
+            (pre, Some(clip))
+        }
+        GradeOf::Group(_, GroupGrade::Pre) => (Some(g), None),
+        GradeOf::Timeline => (None, Some(g)),
+        GradeOf::Group(_, GroupGrade::Post) => (
+            pre,
+            ops::color_groups::around(None, own.as_ref(), Some(&g), size),
+        ),
+    };
+    let first = matches!(of, GradeOf::Group(_, GroupGrade::Pre));
     let mut solo = p.clone();
     solo.subtitles.clear();
     for track in &mut solo.tracks {
@@ -9221,6 +9342,7 @@ fn solo_plan(
         track.video_enabled = true;
         for k in &mut track.clips {
             k.enabled = true;
+            k.color_group = None;
         }
     }
     let picture = solo
@@ -9233,14 +9355,18 @@ fn solo_plan(
     picture.opacity = None;
     picture.opacity_keys.clear();
     picture.composite_mode = None;
-    picture.grade = Some(g);
+    picture.pre_clip_grade = pre;
+    picture.grade = g;
+    if first {
+        picture.effects.clear();
+    }
     let mut plan = crate::render::flatten(&solo, t0, t1)?;
     plan.timeline_grade = None;
     Ok(plan)
 }
 
 fn mask_plan(p: &Project, of: &ops::grade::GradeOf, n: u32, t: i64) -> Result<RenderPlan> {
-    let ops::grade::GradeOf::Clip(id, layer) = of else {
+    let ops::grade::GradeOf::Clip(id, _) = of else {
         return Err(Error::invalid(
             "the Magic Mask works on the grade of a clip",
         ));
@@ -9260,7 +9386,7 @@ fn mask_plan(p: &Project, of: &ops::grade::GradeOf, n: u32, t: i64) -> Result<Re
     let input = (d.inputs.first().copied().flatten())
         .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
     g.output = Some(input);
-    solo_plan(p, (id, *layer), (Some(frame), (t, t + 1)), g)
+    solo_plan(p, of, (Some(frame), (t, t + 1)), g)
 }
 
 fn mask_track_plan(
@@ -9269,7 +9395,7 @@ fn mask_track_plan(
     n: u32,
     frames: (i64, i64),
 ) -> Result<RenderPlan> {
-    let ops::grade::GradeOf::Clip(id, layer) = of else {
+    let ops::grade::GradeOf::Clip(..) = of else {
         return Err(Error::invalid(
             "the Magic Mask works on the grade of a clip",
         ));
@@ -9280,7 +9406,7 @@ fn mask_track_plan(
     let input = (d.inputs.first().copied().flatten())
         .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
     g.output = Some(input);
-    solo_plan(p, (id, *layer), (None, frames), g)
+    solo_plan(p, of, (None, frames), g)
 }
 
 #[derive(Debug, Clone)]
@@ -9307,7 +9433,7 @@ fn mask_edit(
 ) -> Result<MaskEdit> {
     use ops::grade_masks::{ClickChange, click_changed, click_removed, clicked, mask_of};
     let opened = |clip: &Option<ClipRef>, layer: &Option<usize>, node: &Option<u32>| {
-        let of = grade_of(p, clip, (false, *layer), playhead)?;
+        let of = grade_of(p, clip, (false, *layer, None), playhead)?;
         let n = node.unwrap_or(1);
         let mask = mask_of(p, &of, n)?;
         Ok::<_, Error>((of, n, mask))
@@ -9504,7 +9630,7 @@ fn mask_track(
     if *length == Some(0) {
         return Err(Error::usage("a track's length is from 1"));
     }
-    let of = grade_of(p, clip, (false, *layer), playhead)?;
+    let of = grade_of(p, clip, (false, *layer, None), playhead)?;
     let n = node.unwrap_or(1);
     let mut mask = ops::grade_masks::mask_of(p, &of, n)?;
     let size = crate::masks::Size::of(mask.quality, large);
@@ -10889,15 +11015,16 @@ pub fn query(
             clip,
             timeline,
             layer,
+            group,
             node,
         } => match node {
             Some(n) => {
-                let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+                let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
                 json!({ "settings": ops::grade::copy(p, &of, *n)? })
             }
             None => {
-                let r = match (clip, timeline, layer) {
-                    (Some(r), false, None) => r,
+                let r = match (clip, timeline, layer, group) {
+                    (Some(r), false, None, None) => r,
                     _ => {
                         return Err(Error::usage(
                             "give `node`, or only `clip` to copy the whole clip grade",
@@ -10912,11 +11039,12 @@ pub fn query(
             clip,
             timeline,
             layer,
+            group,
             node,
             window,
             at,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
             json!({ "settings": ops::grade_windows::copy(p, &of, (*node, *window), at)? })
         }
@@ -10924,14 +11052,16 @@ pub fn query(
             clip,
             timeline,
             layer,
+            group,
             at,
         } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+            let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::grade::get(p, &of, at)?
         }
         Request::GalleryGet {} => ops::gallery::get(p, &env.stills_dir()),
         Request::GalleryAlbumList {} => ops::gallery::albums(p),
+        Request::ColorGroupGet {} => ops::color_groups::get(p),
         Request::GalleryMemoryList {} => ops::gallery::memories(p, &env.stills_dir()),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;

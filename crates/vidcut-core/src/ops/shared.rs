@@ -16,6 +16,9 @@ fn clip_only(of: &GradeOf) -> Result<()> {
         GradeOf::Timeline => Err(Error::invalid(
             "a shared node is in clip grades, not in the timeline grade",
         )),
+        GradeOf::Group(..) => Err(Error::invalid(
+            "a shared node is in clip grades, not in a group grade",
+        )),
         GradeOf::Clip(..) => Ok(()),
     }
 }

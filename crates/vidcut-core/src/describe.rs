@@ -475,6 +475,11 @@ pub fn describe_at(
             None => format!("Reset the picture of {}", d.clips("clips")),
         },
         "grade.set" if d.flag("timeline") => "Change the timeline grade".into(),
+        "grade.set" if group_grade(&d).is_some() => format!(
+            "Change the {} grade of the color group of {}",
+            group_grade(&d).unwrap_or_default(),
+            d.clips("clips")
+        ),
         "grade.set" => format!("Change the grade of {}", d.clips("clips")),
         "grade.clear" if d.flag("auto_color") => {
             format!("Reset the Auto Color of {}", d.clips("clips"))
@@ -483,6 +488,11 @@ pub fn describe_at(
             format!("Reset all node stack layers of {}", d.clips("clips"))
         }
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
+        "grade.clear" if group_grade(&d).is_some() => format!(
+            "Reset the {} grade of the color group of {}",
+            group_grade(&d).unwrap_or_default(),
+            d.clips("clips")
+        ),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
         "gallery.grab" if d.params["memory"].is_string() => {
@@ -515,6 +525,18 @@ pub fn describe_at(
             many => format!("Move {} stills to album {}", many.len(), d.text("album")),
         },
         "gallery.album.add" => "Add Still Album".into(),
+        "color_group.add" => format!("Add {} into a new color group", d.clips("clips")),
+        "color_group.assign" => {
+            format!(
+                "Assign {} to color group {}",
+                d.clips("clips"),
+                d.text("group")
+            )
+        }
+        "color_group.unassign" => format!("Remove {} from its color group", d.clips("clips")),
+        "color_group.rename" => format!("Rename color group {}", d.text("group")),
+        "color_group.remove" => format!("Delete color group {}", d.text("group")),
+        "color_group.collapse" => format!("Collapse the group grades of {}", d.clips("clips")),
         "gallery.album.rename" => format!("Rename album {}", d.text("album")),
         "gallery.album.remove" => format!("Remove album {}", d.text("album")),
         "gallery.remove" => match d.list("stills").as_slice() {
@@ -865,6 +887,14 @@ fn asked(d: &Words) -> (&'static str, &'static str) {
         Some("slide") => ("a slide", "slides"),
         Some("smooth_cut") => ("a smooth cut", "smooth cuts"),
         _ => ("a dissolve", "dissolves"),
+    }
+}
+
+fn group_grade(d: &Words) -> Option<&'static str> {
+    match d.text("group").as_str() {
+        "pre" => Some("Pre-Clip"),
+        "post" => Some("Post-Clip"),
+        _ => None,
     }
 }
 

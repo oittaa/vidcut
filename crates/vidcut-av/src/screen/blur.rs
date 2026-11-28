@@ -1405,10 +1405,10 @@ impl Blurred {
             adj.texture.as_image_copy(),
             adj.texture.size(),
         );
-        let (ofx, grade) = match effects.split_last() {
-            Some((last, rest)) if matches!(last.work, Work::Grade { .. }) => (rest, Some(last)),
-            _ => (effects, None),
-        };
+        let first = (effects.iter())
+            .position(|e| matches!(e.work, Work::Grade { .. }))
+            .unwrap_or(effects.len());
+        let (ofx, graded) = effects.split_at(first);
         if !ofx.is_empty() {
             effects_into(gpu, (adj, None), (scratch, &mut self.worked), ofx, encoder);
         }
@@ -1419,12 +1419,12 @@ impl Blurred {
                 adj.texture.size(),
             );
         }
-        if let Some(g) = grade {
+        if !graded.is_empty() {
             effects_into(
                 gpu,
                 (adj, None),
                 (scratch, &mut self.worked),
-                std::slice::from_ref(g),
+                graded,
                 encoder,
             );
         }

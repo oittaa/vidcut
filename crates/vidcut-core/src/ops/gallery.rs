@@ -7,7 +7,7 @@ use crate::model::{
     Album, ApplyKeys, Clip, Grade, GradeNode, GradeTool, Memory, Project, Still, StillSource,
     TrackKind,
 };
-use crate::request::GradeLevel;
+use crate::request::{GradeLevel, GroupGrade};
 
 use super::grade::{self, GradeOf};
 use super::locate;
@@ -167,14 +167,23 @@ fn place(p: &Project, clip: &str) -> Result<(usize, usize)> {
 
 pub fn grab(
     p: &mut Project,
-    (clip, frame): (&str, i64),
+    (clip, frame, level): (&str, i64, GradeLevel),
     (to, picture): (Holder, String),
 ) -> Result<Value> {
     let timeline = open_timeline(p)?;
-    let grade = grade::whole(p, clip)?;
+    let (grade, timeline_grade, layers) = match level.group() {
+        Some(side) => {
+            grade::whole(p, clip)?;
+            let g = super::color_groups::of_clip(p, clip)?;
+            (g.grade(side).cloned(), None, 1)
+        }
+        None => (
+            grade::whole(p, clip)?,
+            p.timeline_grade().cloned(),
+            p.settings.node_stack_layers.len(),
+        ),
+    };
     let source = source_of(p, clip, Some(frame))?;
-    let timeline_grade = p.timeline_grade().cloned();
-    let layers = p.settings.node_stack_layers.len();
     match to {
         Holder::Album(album) => {
             let album = album_found(p, &album)?.id.clone();
@@ -292,8 +301,24 @@ pub fn load_memory(
     let m = memory_found(p, slot)?.clone();
     let name = format!("memory {}", m.slot);
     let size = p.frame_size();
-    match level {
-        GradeLevel::Clip => {
+    match (level, level.group()) {
+        (GradeLevel::Timeline, _) => {
+            to_timeline(p, (&name, "Load Memory"), m.timeline_grade, clips)
+        }
+        (_, Some(side)) => {
+            if clips.is_empty() {
+                return Err(Error::usage("give the clips that get the grade"));
+            }
+            let g = (m.grade.as_ref()).map_or_else(|| Grade::usual(size), |g| g.layer(1, size));
+            if keyed(&g) {
+                return Err(refused(&name, "clip grade", "Load Memory"));
+            }
+            for of in super::color_groups::grades_of(p, clips, side)? {
+                grade::store(p, &of, &g)?;
+            }
+            Ok(())
+        }
+        _ => {
             if clips.is_empty() {
                 return Err(Error::usage("give the clips that get the grade"));
             }
@@ -307,7 +332,6 @@ pub fn load_memory(
             }
             Ok(())
         }
-        GradeLevel::Timeline => to_timeline(p, (&name, "Load Memory"), m.timeline_grade, clips),
     }
 }
 
@@ -461,6 +485,9 @@ fn given(
     if clips.is_empty() {
         return Err(Error::usage("give the clips that get the grade"));
     }
+    if let Some(side) = level.group() {
+        return to_group(p, (clip_grade, source), (side, clips), (keys, at));
+    }
     let g = clip_grade.unwrap_or_else(|| Grade::usual(p.frame_size()));
     let fps = p.fps().as_f64();
     for clip in clips {
@@ -469,6 +496,32 @@ fn given(
         let by = shift(keys, &source, &to, fps);
         placed(&mut placed_grade, &source, &to, by);
         grade::apply(p, &placed_grade, std::slice::from_ref(clip))?;
+    }
+    Ok(())
+}
+
+fn to_group(
+    p: &mut Project,
+    (clip_grade, source): (Option<Grade>, StillSource),
+    (side, clips): (GroupGrade, &[String]),
+    (keys, at): (ApplyKeys, Option<i64>),
+) -> Result<()> {
+    let size = p.frame_size();
+    let g = (clip_grade.as_ref()).map_or_else(|| Grade::usual(size), |g| g.layer(1, size));
+    let (fps, n) = (p.fps().as_f64(), usize::from(p.settings.preserve_nodes));
+    for of in super::color_groups::grades_of(p, clips, side)? {
+        let Some(clip) = of.clip() else {
+            continue;
+        };
+        let to = target(p, clip, keys, at)?;
+        let mut placed_grade = g.clone();
+        let by = shift(keys, &source, &to, fps);
+        placed(&mut placed_grade, &source, &to, by);
+        let kept = match n {
+            0 => placed_grade,
+            n => grade::preserved(&placed_grade, &grade::stored(p, &of)?, (n, 1), size)?,
+        };
+        grade::store(p, &of, &kept)?;
     }
     Ok(())
 }
@@ -503,6 +556,10 @@ pub fn append(p: &mut Project, id: &str, to: &[GradeOf]) -> Result<()> {
             GradeOf::Clip(_, layer) => {
                 let g = still.grade.as_ref();
                 g.map_or_else(|| Grade::usual(size), |g| g.layer(*layer, size))
+            }
+            GradeOf::Group(..) => {
+                let g = still.grade.as_ref();
+                g.map_or_else(|| Grade::usual(size), |g| g.layer(1, size))
             }
             GradeOf::Timeline => {
                 let g = (still.timeline_grade.clone()).unwrap_or_else(|| Grade::usual(size));

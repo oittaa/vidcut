@@ -339,6 +339,7 @@ fn own_effects(placed: &mut [Placed]) {
         p.picture.effects.clear();
         p.picture.composition = None;
         p.picture.grade = None;
+        p.picture.pre_clip_grade = None;
     }
 }
 

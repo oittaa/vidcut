@@ -700,9 +700,16 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
   - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
   - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
-- **Ctrl+Z did not take back Grab Still or Delete Selected of a still, in one case each.**
-  - Ctrl+Z after one grab kept the still. Delete Selected of one still asked nothing, and Ctrl+Z did not bring it back.
-  - vidcut: `gallery.grab` and `gallery.remove` are undo steps, and Undo takes them back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
+- **Undo does not take back the edits of the Gallery and of the color groups.**
+  - Ctrl+Z after each of these items left the item done. Each case ran on two timelines:
+    - Grab Still, Delete Selected of a still, Add Still Album, and a drag of a still onto an album;
+    - Add into a New Group, Assign to Group, Remove from Group, Delete of a group and Collapse Group Grades.
+  - Ctrl+Z took back the grade edit before the item, where there was one.
+  - vidcut: each of these edits is an undo step, and Undo takes it back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405), [spec §8.33](spec.md#833-color-groups-pp-33763381-3400)).
+- **The scripting API does not apply a grade to node stack layer 2.**
+  - `ApplyGradeFromDRX` on the graph of `GetNodeGraph(2)` gave True, and layer 2 stayed one empty node.
+  - `ApplyGradeFromDRX` on the graph of `GetPostClipNodeGraph()` of a group gave False.
+  - vidcut: `gallery.apply` and `grade.apply` give each layer of a grade ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
 - **Ctrl+Z does not take back Change Label of a still.**
   - Change Label set the label of a still to "lbl1". Ctrl+Z after it kept "lbl1".
   - vidcut: `gallery.label` is one undo step, and Undo takes it back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).

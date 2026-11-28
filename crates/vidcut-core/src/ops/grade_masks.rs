@@ -17,7 +17,7 @@ pub struct ClickChange {
 fn clip_only(of: &GradeOf) -> Result<()> {
     match of {
         GradeOf::Clip(..) => Ok(()),
-        GradeOf::Timeline => Err(Error::invalid(
+        GradeOf::Timeline | GradeOf::Group(..) => Err(Error::invalid(
             "the Magic Mask works on the grade of a clip",
         )),
     }

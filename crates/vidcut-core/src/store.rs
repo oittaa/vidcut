@@ -15,10 +15,10 @@ use crate::error::{Error, Result};
 use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
 use crate::lru::Lru;
 use crate::model::{
-    Album, Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, Memory, NextIds,
-    OpenCompound, PathSample, Project, RenderJob, RenderRange, Settings, SharedNode, Speakers,
-    Still, SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool,
-    Track, TrackKind, Transition, VoiceIsolation,
+    Album, Clip, ClipFilter, ColorGroup, Compound, Cue, Grade, Kept, Marker, Marks, Media, Memory,
+    NextIds, OpenCompound, PathSample, Project, RenderJob, RenderRange, Settings, SharedNode,
+    Speakers, Still, SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline,
+    TimelineSettings, Tool, Track, TrackKind, Transition, VoiceIsolation,
 };
 use crate::shared::SharedVec;
 
@@ -227,6 +227,7 @@ struct MetaRow<'a> {
     stills: Cow<'a, [Still]>,
     shared_nodes: Cow<'a, [SharedNode]>,
     albums: Cow<'a, [Album]>,
+    color_groups: Cow<'a, [ColorGroup]>,
     memories: Cow<'a, [Memory]>,
 }
 
@@ -254,6 +255,7 @@ impl<'a> MetaRow<'a> {
             stills,
             shared_nodes,
             albums,
+            color_groups,
             memories,
         } = p;
         Self {
@@ -269,6 +271,7 @@ impl<'a> MetaRow<'a> {
             stills: Cow::Borrowed(stills.as_slice()),
             shared_nodes: Cow::Borrowed(shared_nodes.as_slice()),
             albums: Cow::Borrowed(albums.as_slice()),
+            color_groups: Cow::Borrowed(color_groups.as_slice()),
             memories: Cow::Borrowed(memories.as_slice()),
         }
     }
@@ -1263,6 +1266,7 @@ fn load_project_from_conn(
         stills: meta.stills.into_owned(),
         shared_nodes: meta.shared_nodes.into_owned(),
         albums: meta.albums.into_owned(),
+        color_groups: meta.color_groups.into_owned(),
         memories: meta.memories.into_owned(),
     };
     project.check_out();
@@ -2689,6 +2693,7 @@ mod tests {
             render_cache: ClipCache::Auto,
             link: None,
             linked_at: None,
+            color_group: None,
         }
     }
 

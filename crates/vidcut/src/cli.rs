@@ -146,6 +146,12 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("gallery.album.add", &["name"]),
     ("gallery.album.rename", &["album", "name"]),
     ("gallery.album.remove", &["album"]),
+    ("color_group.add", &["clips"]),
+    ("color_group.assign", &["group", "clips"]),
+    ("color_group.unassign", &["clips"]),
+    ("color_group.rename", &["group", "name"]),
+    ("color_group.remove", &["group"]),
+    ("color_group.collapse", &["clips"]),
     ("gallery.apply", &["still", "clips"]),
     ("gallery.append", &["still", "clips"]),
     ("gallery.label", &["still", "label"]),
@@ -282,6 +288,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Stills of the Color page: pictures of frames, with their grades",
     ),
     ("gallery.album", "The still albums of the Gallery"),
+    (
+        "color_group",
+        "Color groups: clips that share a Pre-Clip and a Post-Clip grade",
+    ),
     (
         "gallery.memory",
         "The memories of the Gallery: stills in slots A to Z",

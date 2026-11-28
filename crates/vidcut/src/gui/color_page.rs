@@ -8,10 +8,12 @@ use vidcut_core::model::{
     BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
     KeyOutput, Picture, Project, Qualifier, Settings, SharedNode, WindowKind,
 };
+use vidcut_core::ops::color_groups;
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::preferences::SwitchingClips;
 use vidcut_core::request::{
-    GradeAdd, GradeLevel, GradeMixer, GradePalette, NodeZoom, Page, PrimariesView, PrinterColor,
+    GradeAdd, GradeLevel, GradeMixer, GradePalette, GroupGrade, NodeZoom, Page, PrimariesView,
+    PrinterColor,
 };
 use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
@@ -901,6 +903,13 @@ struct ShotPlace {
     stand_in: Option<u32>,
 }
 
+fn place_at(whole: &Grade, layer: usize) -> ShotPlace {
+    ShotPlace {
+        start: whole.layer_start(layer),
+        stand_in: None,
+    }
+}
+
 fn shot_of(shots: &NodeShots, n: u32, at: ShotPlace) -> Shot {
     let n = at.stand_in.unwrap_or(at.start + n);
     let cell = shots.cells.iter().find(|(k, ..)| *k == n);
@@ -1367,6 +1376,31 @@ pub(super) struct GradeChoice {
     level: GradeLevel,
     layer: usize,
     names: Vec<String>,
+    grouped: bool,
+}
+
+const PRE_CLIP: &str = "Group Pre Clip";
+const POST_CLIP: &str = "Group Post Clip";
+
+fn levels(choice: &GradeChoice) -> Vec<((GradeLevel, usize), String)> {
+    let layer = choice.layer;
+    let group = |level, text: &str| (choice.grouped).then(|| ((level, layer), text.to_string()));
+    let clip = (choice.names.iter().enumerate()).map(|(i, name)| {
+        let text = match choice.names.len() {
+            1 => "Clip".to_string(),
+            _ => layer_label(name),
+        };
+        ((GradeLevel::Clip, i + 1), text)
+    });
+    (group(GradeLevel::PreClip, PRE_CLIP).into_iter())
+        .chain(clip)
+        .chain(group(GradeLevel::PostClip, POST_CLIP))
+        .chain([((GradeLevel::Timeline, layer), "Timeline".to_string())])
+        .collect()
+}
+
+fn chosen(choice: &GradeChoice, (level, layer): (GradeLevel, usize)) -> bool {
+    choice.level == level && (level != GradeLevel::Clip || choice.layer == layer)
 }
 
 pub(super) fn layer_label(name: &str) -> String {
@@ -1386,7 +1420,12 @@ fn layer_menu(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)> 
                 ui.close();
             }
         };
-        item(ui, (false, false), "Group Pre Clip".into(), None);
+        let group = |level| {
+            let to = (level, choice.layer);
+            ((chosen(choice, to), choice.grouped), Some(to))
+        };
+        let (state, to) = group(GradeLevel::PreClip);
+        item(ui, state, PRE_CLIP.into(), to);
         for n in 1..=vidcut_core::ops::grade::NODE_STACK_LAYERS {
             let name =
                 (choice.names.get(n - 1).cloned()).unwrap_or_else(|| Settings::layer_name(n));
@@ -1399,7 +1438,8 @@ fn layer_menu(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)> 
                 Some((GradeLevel::Clip, n)),
             );
         }
-        item(ui, (false, false), "Group Post Clip".into(), None);
+        let (state, to) = group(GradeLevel::PostClip);
+        item(ui, state, POST_CLIP.into(), to);
         let on = choice.level == GradeLevel::Timeline;
         let to = Some((GradeLevel::Timeline, choice.layer));
         item(ui, (on, true), "Timeline".into(), to);
@@ -1408,22 +1448,15 @@ fn layer_menu(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)> 
 }
 
 fn layer_dots(ui: &mut Ui, room: Rect, choice: &GradeChoice) -> Option<(GradeLevel, usize)> {
-    let count = choice.names.len() + 1;
+    let dots = levels(choice);
     let gap = 14.0;
-    let left = room.center().x - gap * (count - 1) as f32 / 2.0;
+    let left = room.center().x - gap * (dots.len() - 1) as f32 / 2.0;
     let painter = ui.painter_at(room);
     let c = theme::colors();
     let mut picked = None;
-    for i in 0..count {
+    for (i, (to, text)) in dots.into_iter().enumerate() {
         let at = egui::pos2(left + gap * i as f32, room.bottom() - 10.0);
-        let (to, text) = match choice.names.get(i) {
-            Some(name) => ((GradeLevel::Clip, i + 1), layer_label(name)),
-            None => ((GradeLevel::Timeline, choice.layer), "Timeline".to_string()),
-        };
-        let on = match to.0 {
-            GradeLevel::Clip => choice.level == GradeLevel::Clip && choice.layer == to.1,
-            GradeLevel::Timeline => choice.level == GradeLevel::Timeline,
-        };
+        let on = chosen(choice, to);
         let spot = Rect::from_center_size(at, Vec2::splat(12.0));
         let r = ui.interact(spot, ui.scope_id().with(("layer-dot", i)), Sense::click());
         let color = if on { Color32::WHITE } else { c.text_dim };
@@ -1436,45 +1469,36 @@ fn layer_dots(ui: &mut Ui, room: Rect, choice: &GradeChoice) -> Option<(GradeLev
 }
 
 fn grade_switch(ui: &mut Ui, choice: &GradeChoice) -> Option<(GradeLevel, usize)> {
-    let GradeChoice {
-        level,
-        layer,
-        names,
-    } = choice;
-    let (level, layer) = (*level, *layer);
+    let levels = levels(choice);
     let mut picked = None;
     let right = egui::Layout::right_to_left(egui::Align::Center);
     ui.with_layout(right, |ui| {
-        if names.len() < 2 {
+        if levels.len() < 3 {
             super::dialog::switch(ui, |ui| {
-                for (l, text) in [
-                    (GradeLevel::Clip, "Clip"),
-                    (GradeLevel::Timeline, "Timeline"),
-                ] {
-                    if ui.selectable_label(level == l, text).clicked() && level != l {
-                        picked = Some((l, layer));
+                for (to, text) in levels {
+                    let on = chosen(choice, to);
+                    if ui.selectable_label(on, text).clicked() && !on {
+                        picked = Some(to);
                     }
                 }
             });
             return;
         }
-        let shown = match level {
-            GradeLevel::Clip => layer_label(&names[layer - 1]),
-            GradeLevel::Timeline => "Timeline".to_string(),
-        };
+        let shown = (levels.iter())
+            .find(|(to, _)| chosen(choice, *to))
+            .map(|(_, text)| text.clone())
+            .unwrap_or_default();
         egui::ComboBox::from_id_salt("grade-level")
             .selected_text(shown)
             .show_ui(ui, |ui| {
-                for (i, name) in names.iter().enumerate() {
-                    let on = level == GradeLevel::Clip && layer == i + 1;
-                    if ui.selectable_label(on, layer_label(name)).clicked() && !on {
-                        picked = Some((GradeLevel::Clip, i + 1));
+                for (to, text) in levels {
+                    if to.0 == GradeLevel::Timeline {
+                        ui.separator();
                     }
-                }
-                ui.separator();
-                let on = level == GradeLevel::Timeline;
-                if ui.selectable_label(on, "Timeline").clicked() && !on {
-                    picked = Some((GradeLevel::Timeline, layer));
+                    let on = chosen(choice, to);
+                    if ui.selectable_label(on, text).clicked() && !on {
+                        picked = Some(to);
+                    }
                 }
             });
     });
@@ -1866,18 +1890,40 @@ impl Workspace {
             return None;
         }
         let h = self.effects_page.graded.as_ref()?;
-        let GradeOf::Clip(id, layer) = &h.of else {
-            return None;
-        };
+        let id = h.of.clip()?;
         let p = self.project()?;
         let c = p.clip(id)?;
         let mut picture = c.picture.as_deref().cloned().unwrap_or_default();
         checked(&h.grade).ok()?;
         let frame = p.frame_size();
-        let was = picture.grade.take().unwrap_or_else(|| Grade::usual(frame));
-        let grade = was.with_layer(*layer, h.grade.clone(), frame);
-        picture.grade = (!grade.is_usual(frame)).then_some(grade);
-        Some((id.clone(), picture))
+        let group = c.color_group.as_deref().and_then(|g| p.color_group(g));
+        let mut pre = group.and_then(|g| g.pre.clone());
+        let mut post = group.and_then(|g| g.post.clone());
+        match &h.of {
+            GradeOf::Clip(_, layer) => {
+                let was = picture.grade.take().unwrap_or_else(|| Grade::usual(frame));
+                let grade = was.with_layer(*layer, h.grade.clone(), frame);
+                picture.grade = (!grade.is_usual(frame)).then_some(grade);
+            }
+            GradeOf::Group(_, GroupGrade::Pre) => pre = Some(h.grade.clone()),
+            GradeOf::Group(_, GroupGrade::Post) => post = Some(h.grade.clone()),
+            GradeOf::Timeline => return None,
+        }
+        let own = picture.grade.take();
+        picture.grade = color_groups::around(None, own.as_ref(), post.as_ref(), frame);
+        picture.pre_clip_grade = pre;
+        Some((id.to_string(), picture))
+    }
+
+    pub(super) fn with_group(&self, (id, mut picture): (String, Picture)) -> (String, Picture) {
+        let p = self.project();
+        if let Some((p, g)) = p.and_then(|p| Some((p, color_groups::acting(p, p.clip(&id)?)?))) {
+            let own = picture.grade.take();
+            let post = g.post.as_ref();
+            picture.grade = color_groups::around(None, own.as_ref(), post, p.frame_size());
+            picture.pre_clip_grade = g.pre.clone();
+        }
+        (id, picture)
     }
 
     pub(super) fn timeline_grade_wanted(&self) -> Option<Grade> {
@@ -1921,30 +1967,53 @@ impl Workspace {
             start: 0,
             stand_in: None,
         };
-        let (GradeOf::Clip(id, layer), Some(p)) = (of, self.project()) else {
+        let Some((p, c)) = self.project().and_then(|p| Some((p, p.clip(of.clip()?)?))) else {
             return first;
         };
         let frame = p.frame_size();
-        let whole = (p.clip(id))
-            .and_then(|c| c.picture.as_ref()?.grade.clone())
-            .unwrap_or_else(|| Grade::usual(frame));
-        match *layer > 1 && whole.layers.len() + 1 < *layer {
+        let own = c.picture.as_ref().and_then(|pic| pic.grade.as_ref());
+        let group = color_groups::acting(p, c);
+        let pre = group.and_then(|g| g.pre.as_ref());
+        let post = group.and_then(|g| g.post.as_ref());
+        let made = |post| {
+            color_groups::around(pre, own, post, frame).unwrap_or_else(|| Grade::usual(frame))
+        };
+        let (before, whole) = (made(None), made(post));
+        let layer = match of {
+            GradeOf::Clip(_, layer) => *layer + usize::from(pre.is_some()),
+            GradeOf::Group(_, GroupGrade::Pre) | GradeOf::Timeline => 1,
+            GradeOf::Group(_, GroupGrade::Post) => return place_at(&whole, whole.layers.len() + 1),
+        };
+        match layer > 1 && before.layers.len() + 1 < layer {
             true => ShotPlace {
                 start: 0,
-                stand_in: whole.stacked().output.map(|l| l.node).filter(|n| *n > 0),
+                stand_in: before.stacked().output.map(|l| l.node).filter(|n| *n > 0),
             },
-            false => ShotPlace {
-                start: whole.layer_start(*layer),
-                stand_in: None,
-            },
+            false => place_at(&whole, layer),
         }
     }
 
     pub(super) fn grade_choice(&self) -> GradeChoice {
         GradeChoice {
-            level: self.effects_page.grading,
+            level: self.shown_level(),
             layer: self.shown_layer(),
             names: self.layer_names(),
+            grouped: self.color_group().is_some(),
+        }
+    }
+
+    pub(super) fn color_group(&self) -> Option<String> {
+        let p = self.project()?;
+        let id = p.clip(&self.color_clip()?)?.color_group.clone()?;
+        p.color_group(&id).map(|g| g.id.clone())
+    }
+
+    pub(super) fn shown_level(&self) -> GradeLevel {
+        match self.effects_page.grading {
+            GradeLevel::PreClip | GradeLevel::PostClip if self.color_group().is_none() => {
+                GradeLevel::Clip
+            }
+            level => level,
         }
     }
 
@@ -1955,7 +2024,16 @@ impl Workspace {
 
     pub(super) fn grade_shown(&self) -> Option<(GradeOf, String, Grade)> {
         let p = self.project()?;
-        match self.effects_page.grading {
+        let level = self.shown_level();
+        match level {
+            GradeLevel::PreClip | GradeLevel::PostClip => {
+                let id = self.color_clip()?;
+                let side = level.group()?;
+                let g = color_groups::of_clip(p, &id).ok()?;
+                let usual = || Grade::usual(p.frame_size());
+                let stored = g.grade(side).cloned().unwrap_or_else(usual);
+                Some((GradeOf::Group(id, side), g.name.clone(), stored))
+            }
             GradeLevel::Clip => {
                 let id = self.color_clip()?;
                 let c = p.clip(&id)?;
@@ -2053,11 +2131,11 @@ impl Workspace {
 
     pub(super) fn grade_frame(&self, of: &GradeOf) -> i64 {
         let at = self.snap.timeline.position;
-        match of {
-            GradeOf::Clip(id, _) => (self.project())
+        match of.clip() {
+            Some(id) => (self.project())
                 .and_then(|p| p.clip(id))
                 .map_or(at, |c| c.content_at(at)),
-            GradeOf::Timeline => at,
+            None => at,
         }
     }
 
@@ -2067,15 +2145,15 @@ impl Workspace {
     }
 
     fn palette(&mut self, ui: &mut Ui) -> bool {
-        let level = self.effects_page.grading;
+        let level = self.shown_level();
         let choice = self.grade_choice();
         let mut picked = None;
         let Some((of, name, stored)) = self.grade_shown() else {
             self.effects_page.graded = None;
             ui.horizontal(|ui| {
                 ui.label(match level {
-                    GradeLevel::Clip => "No Clip at the Playhead",
                     GradeLevel::Timeline => "No Timeline",
+                    _ => "No Clip at the Playhead",
                 });
                 picked = grade_switch(ui, &choice);
             });
@@ -2156,7 +2234,7 @@ impl Workspace {
                 }
             }
             ui.separator();
-            if let GradeOf::Clip(..) = &of {
+            if of.clip().is_some() {
                 auto = ui.button("A").on_hover_text("Auto Color").clicked();
             }
             reset = ui.button("Reset").clicked();
@@ -2905,9 +2983,9 @@ impl Workspace {
         nodes: Vec<u32>,
         current: Option<u32>,
     ) -> Result<(), String> {
-        let (of, _, g) = self.grade_shown().ok_or(match self.effects_page.grading {
-            GradeLevel::Clip => "There is no clip at the playhead",
+        let (of, _, g) = self.grade_shown().ok_or(match self.shown_level() {
             GradeLevel::Timeline => "There is no timeline",
+            _ => "There is no clip at the playhead",
         })?;
         if let Some(missing) = (nodes.iter().chain(&current)).find(|n| g.node(**n).is_none()) {
             return Err(format!("the grade has no node {missing}"));
@@ -3321,9 +3399,9 @@ impl Workspace {
         let Some((of, _, stored)) = self.grade_shown() else {
             node_editor::empty(
                 ui,
-                match self.effects_page.grading {
-                    GradeLevel::Clip => "No Clip at the Playhead",
+                match self.shown_level() {
                     GradeLevel::Timeline => "No Timeline",
+                    _ => "No Clip at the Playhead",
                 },
             );
             return;
@@ -3383,9 +3461,9 @@ impl Workspace {
             let pixels = SHOT_HEIGHT * zoom * ui.ctx().pixels_per_point();
             let playing = self.snap.timeline.playing;
             self.shots_want = Some(ShotsWanted {
-                of: match &of {
-                    GradeOf::Clip(id, _) => ShotsOf::Clip(id.clone()),
-                    GradeOf::Timeline => ShotsOf::Timeline,
+                of: match of.clip() {
+                    Some(id) => ShotsOf::Clip(id.to_string()),
+                    None => ShotsOf::Timeline,
                 },
                 height: (pixels.ceil() as u32).next_multiple_of(SHOT_STEP),
                 refresh: !(self.snap.disable_thumbnail_refresh && playing),
@@ -3396,6 +3474,7 @@ impl Workspace {
         }
         let salt = match &of {
             GradeOf::Clip(id, layer) => format!("grade-node-{id}-{layer}"),
+            GradeOf::Group(id, side) => format!("grade-node-{id}-{side:?}"),
             GradeOf::Timeline => "grade-node-timeline".to_string(),
         };
         let selected: Vec<Port> = (self.effects_page.picked_grade().iter())

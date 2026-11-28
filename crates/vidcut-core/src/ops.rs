@@ -2,6 +2,7 @@ pub mod attributes;
 pub mod beside;
 pub mod clip_filter;
 pub mod close_up;
+pub mod color_groups;
 pub mod comp;
 pub mod compound;
 pub mod conform;
@@ -284,6 +285,7 @@ pub(crate) fn block_clip(
         render_cache: crate::model::ClipCache::Auto,
         link: None,
         linked_at: None,
+        color_group: None,
     }
 }
 
@@ -379,6 +381,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         render_cache: crate::model::ClipCache::Auto,
         link: None,
         linked_at: None,
+        color_group: None,
     })
 }
 
@@ -3515,6 +3518,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         clip.id = p.alloc_clip_id();
         clip.start = start;
         links.clip(&mut clip);
+        if (clip.color_group.as_deref()).is_some_and(|g| p.color_group(g).is_none()) {
+            clip.color_group = None;
+        }
         let on_video = p.tracks[ti].kind == TrackKind::Video;
         let sound_block = clip.is_sound_block();
         clip.video = clip.video && has_video && on_video;

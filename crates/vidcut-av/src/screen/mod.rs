@@ -2751,8 +2751,9 @@ fn clip_shot(
     let i = (0..layers.len()).rev().find(ours)?;
     let p = &placed[i][0];
     let at = p.source as f64;
-    let grade =
-        (p.picture.grade.as_ref()).map_or_else(|| Grade::usual(frame), |g| g.at(at).into_owned());
+    let (pre, own) = (p.picture.pre_clip_grade.as_ref(), p.picture.grade.as_ref());
+    let grade = vidcut_core::ops::color_groups::around(pre, own, None, frame)
+        .map_or_else(|| Grade::usual(frame), |g| g.at(at).into_owned());
     if p.adjustment {
         let (_, tex) = adj_shot.filter(|(clip, _)| clip == id)?;
         let (w, h) = (tex.texture.width(), tex.texture.height());

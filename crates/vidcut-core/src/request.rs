@@ -3223,6 +3223,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// With `at`, each corrector gives the values that the picture gets
         /// at that time, and no keyframes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3253,6 +3257,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the node, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3283,6 +3291,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -3320,6 +3332,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3348,6 +3364,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1. Left out: node 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
@@ -3373,6 +3393,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         add: GradeAdd,
         /// The node it goes beside: for `serial`, `before`, `parallel`,
         /// `layer`, `outside` and `splitter_combiner`.
@@ -3406,6 +3430,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         node: u32,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extract: bool,
@@ -3431,6 +3459,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         node: u32,
         /// The input of `node`, from 0. Left out: input 0 of a corrector or
         /// of the output, and a new input of a mixer.
@@ -3462,6 +3494,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         node: u32,
     },
     /// Copy the settings of a corrector of the grade of a clip, or with
@@ -3482,6 +3518,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
     },
@@ -3524,6 +3564,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         node: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<CopiedNode>,
@@ -3630,6 +3674,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The area for the places of the nodes, `[[x, y], [x, y]]` from
         /// its top left to its bottom right, in node places. The columns go
         /// evenly from its left to its right, and the rows from its top to
@@ -3654,6 +3702,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         node: u32,
         with: u32,
     },
@@ -3677,6 +3729,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector or the key mixer, from 1. Left out:
         /// each corrector and each key mixer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3710,6 +3766,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3744,6 +3804,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3774,6 +3838,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// The frames of the keyframes: source frames on a clip, timeline
@@ -3801,6 +3869,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1.
         node: u32,
         shape: WindowKind,
@@ -3819,6 +3891,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3887,6 +3963,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3907,6 +3987,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -3933,6 +4017,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The window that takes the copy, from 0. Needed without
@@ -3962,6 +4050,10 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
+        /// The Pre-Clip or Post-Clip grade of the color group of the clip,
+        /// in place of its clip grade. Not with `timeline` or `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupGrade>,
         /// The number of the corrector, from 1.
         node: u32,
         /// The number of the window in the window list, from 0.
@@ -4129,6 +4221,11 @@ pub enum Request {
         /// GUI, the album that the Gallery shows; else the first album.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         album: Option<String>,
+        /// The mode of the node editor. With `pre_clip` or `post_clip`, the
+        /// still keeps only that grade of the color group of the clip, and
+        /// no timeline grade. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
         /// The slot of the memory that gets the still, from A to Z. Not
         /// with `album`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4180,9 +4277,11 @@ pub enum Request {
     /// the clip grade of the still, with each node stack layer, replaces
     /// the whole clip grade of each clip. `keyframes` places its keyframes.
     /// The project's `preserve_nodes` keeps the first nodes of each clip.
-    /// With the `timeline` grade, the timeline grade of the still replaces
-    /// the timeline grade of the open timeline. A timeline grade with
-    /// keyframes is refused.
+    /// With `pre_clip` or `post_clip`, layer 1 of the clip grade of the
+    /// still replaces that grade of the color group of each clip, in the
+    /// same way. With the `timeline` grade, the timeline grade of the still
+    /// replaces the timeline grade of the open timeline. A timeline grade
+    /// with keyframes is refused.
     #[serde(rename = "gallery.apply")]
     GalleryApply {
         /// The id of the still (`s1`).
@@ -4209,10 +4308,12 @@ pub enum Request {
     /// Append Node Graph: add the nodes of a still after the output of
     /// grades. They take the picture that the grade gave out, and give the
     /// picture out. With the `clip` grade, the nodes of the same node stack
-    /// layer of the clip grade of the still go to clips. With the
-    /// `timeline` grade, the nodes of the timeline grade of the still go to
-    /// the timeline grade of the open timeline. The keyframes of a clip
-    /// grade keep their frames. A timeline grade with keyframes is refused.
+    /// layer of the clip grade of the still go to clips. With `pre_clip` or
+    /// `post_clip`, the nodes of layer 1 go to that grade of the color
+    /// group of each clip. With the `timeline` grade, the nodes of the
+    /// timeline grade of the still go to the timeline grade of the open
+    /// timeline. The keyframes of a clip grade keep their frames. A
+    /// timeline grade with keyframes is refused.
     #[serde(rename = "gallery.append")]
     GalleryAppend {
         /// The id of the still (`s1`).
@@ -4222,13 +4323,60 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clips: Option<OneOrMany<ClipRef>>,
         /// The node stack layer, from 1 to the project's `node_stack_layers`
-        /// count. Not with the `timeline` grade. Left out: layer 1.
+        /// count. Only with the `clip` grade. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
         /// The grade that changes. Left out: `clip`.
         #[serde(default)]
         grade: GradeLevel,
     },
+    /// The color groups of the project, in the order they were made. Each
+    /// has its id, its name and the clips of the open timeline in it.
+    /// `pre_clip` and `post_clip` tell if it has that grade.
+    #[serde(rename = "color_group.get")]
+    ColorGroupGet {},
+    /// Add into a New Group: make a color group of clips. A clip in another
+    /// group leaves that group. Returns the id of the group as `group`.
+    #[serde(rename = "color_group.add")]
+    ColorGroupAdd {
+        clips: OneOrMany<ClipRef>,
+        /// Left out: the name of the newest group with its last number one
+        /// higher, as H3 after H2. With no such number: Group 1. A name
+        /// that a group has gets the next number.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Assign to Group: put clips in a color group. A clip in another group
+    /// leaves that group, and that group stays.
+    #[serde(rename = "color_group.assign")]
+    ColorGroupAssign {
+        /// The id of the group (`cg1`).
+        group: String,
+        clips: OneOrMany<ClipRef>,
+    },
+    /// Remove from Group: take clips out of their color groups. Each clip
+    /// keeps its clip grade, and each group stays.
+    #[serde(rename = "color_group.unassign")]
+    ColorGroupUnassign { clips: OneOrMany<ClipRef> },
+    /// Rename a color group.
+    #[serde(rename = "color_group.rename")]
+    ColorGroupRename {
+        /// The id of the group (`cg1`).
+        group: String,
+        name: String,
+    },
+    /// Delete a color group. Its clips, on each timeline, leave it and keep
+    /// their clip grades.
+    #[serde(rename = "color_group.remove")]
+    ColorGroupRemove {
+        /// The id of the group (`cg1`).
+        group: String,
+    },
+    /// Collapse Group Grades: layer 1 of the clip grade of each clip gets
+    /// the nodes of the Pre-Clip grade before its nodes, and the nodes of
+    /// the Post-Clip grade after them. Each clip then leaves its group.
+    #[serde(rename = "color_group.collapse")]
+    ColorGroupCollapse { clips: OneOrMany<ClipRef> },
     /// Change Label: give a still a label. The label shows under its still
     /// ID. An empty label takes the label away.
     #[serde(rename = "gallery.label")]
@@ -5694,6 +5842,12 @@ pub enum Request {
         /// out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         edit_job: Option<String>,
+        /// The current color group of the `color` page (`cg1`). Add into
+        /// Current Group puts clips in it. A move of the playhead onto a
+        /// clip of another group makes that group current. Left out, it
+        /// stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<String>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
     /// last one is the active node. An empty list selects none. Answers
@@ -7366,8 +7520,41 @@ pub enum GradeLevel {
     /// The grade of the topmost clip at the playhead that takes one.
     #[default]
     Clip,
+    /// The Pre-Clip grade of the color group of that clip.
+    PreClip,
+    /// The Post-Clip grade of the color group of that clip.
+    PostClip,
     /// The timeline grade, on the picture of all tracks.
     Timeline,
+}
+
+impl GradeLevel {
+    pub fn group(self) -> Option<GroupGrade> {
+        match self {
+            Self::PreClip => Some(GroupGrade::Pre),
+            Self::PostClip => Some(GroupGrade::Post),
+            Self::Clip | Self::Timeline => None,
+        }
+    }
+}
+
+/// A grade of a color group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupGrade {
+    /// The Pre-Clip grade: before the clip grade.
+    Pre,
+    /// The Post-Clip grade: after the clip grade.
+    Post,
+}
+
+impl GroupGrade {
+    pub fn level(self) -> GradeLevel {
+        match self {
+            Self::Pre => GradeLevel::PreClip,
+            Self::Post => GradeLevel::PostClip,
+        }
+    }
 }
 
 /// A window `gui.show` opens.
@@ -9554,6 +9741,7 @@ impl Request {
                     | Self::GradeWindowCopy { .. }
                     | Self::GalleryGet {}
                     | Self::GalleryAlbumList {}
+                    | Self::ColorGroupGet {}
                     | Self::GalleryMemoryList {}
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
