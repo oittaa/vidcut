@@ -17,6 +17,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `g=GOP` sets the keyframe spacing. `b=BFRAMES` sets the B-frames.
 - H.264 with B-frames has open GOPs.
 - `busy` adds new noise around the barcode in each frame. Thus the stream is heavy to decode.
+- `tff` or `bff` makes an interlaced stream, top field first or bottom field first. Each field shows the barcode block at a new place.
 
 **GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in four common exports and in the viewer.
 
@@ -204,6 +205,9 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - The workers and the job yield to players, at the lowest priority.
   - One worker at a time decodes beside the player, as timeline tiles do.
   - It prints the presents that showed the previous picture, the tiles and job frames each second, the maximum thread count and the peak memory.
+- `field_check SOURCE FOLDER`: compares the frames in `FOLDER` with FFmpeg's `bwdif` in field mode on `SOURCE`.
+  - The files in `FOLDER` are the export of an interlaced source, one frame for each field, in name order.
+  - It prints the largest difference in each frame, and the largest difference in all frames with its place.
 - `decode_speed FILE [FRAMES] [START_S]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
   - It starts at `START_S` seconds into the file. On Windows, it also prints the GPU memory that the decoding takes.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build):

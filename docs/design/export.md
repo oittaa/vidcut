@@ -46,7 +46,7 @@ flowchart TD
   - `render::flatten_clip` keeps the clip and its linked clips. A clip of a moving picture goes to the frame rate of its media: `Project::set_open_fps`, then `ops::conform::track`.
   - An interlaced clip goes to twice its frame rate, and the plan gets `RenderPlan.fields`. Thus each field is a frame ([gpu](gpu.md#deinterlacing-and-hdr)).
   - Before the conversion, the clips move back by the part of a frame before the first source frame. Thus the file starts on that frame, and the sound stays in sync.
-  - `add_subtitles` converts the cues with `ops::conform::cue`. `subtitles_beside` takes the range at the frame rate of the timeline. The record timecode of the file counts at the new frame rate.
+  - `add_subtitles` converts the cues with `ops::conform::cue`. `subtitles_beside` takes the range of the clip on the timeline (`Output.range`), at the frame rate of the timeline. The record timecode of the file counts at the new frame rate.
   - `clip_path` makes the path of each clip file from the File tab fields of `ExportParams`. `kept_levels` gives the folders of `source_levels`. `Track::number` gives the track in the folder of `separate_folders`.
   - The frame count is the source timecode of the clip's first frame: `Media::timecode_at` plus the source frame (`render::per_frame` and `render::shown_frame`). An image sequence numbers its frames from it.
   - `check_clip_names` refuses these fields without `per_clip`, and a `subfolder` that leaves the output folder.

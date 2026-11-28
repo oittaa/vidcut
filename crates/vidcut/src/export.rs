@@ -419,12 +419,10 @@ pub fn subtitles_beside(
         return Ok(all);
     }
     for o in &prepared.outputs {
-        let (a, b) = o.plan.range;
-        let range = Rates::new(o.plan.fps, p.fps()).map_or((a, b), |r| (r.frame(a), r.frame(b)));
         all.extend(vidcut_core::subtitles::beside(
             p,
             &o.path,
-            range,
+            o.range,
             params.subtitles.as_deref(),
             params.subtitle_format,
             false,
@@ -467,6 +465,7 @@ fn default_preset(output: &Path) -> &'static str {
 
 pub struct Output {
     pub plan: RenderPlan,
+    pub range: (i64, i64),
     pub path: PathBuf,
     pub numbering: Numbering,
     pub settings: ExportSettings,
@@ -1102,6 +1101,9 @@ pub fn prepare(
         offline = p.offline_in(clips.iter().filter_map(|(_, id, _, _)| p.clip(id)));
         for (i, (start, id, place, folder)) in clips.into_iter().enumerate() {
             let plan = render::flatten_clip(&proj, &id)?;
+            let range = proj
+                .clip(&id)
+                .map_or((start, start), |c| (c.start, c.end()));
             let clip = p
                 .clip(&id)
                 .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
@@ -1131,6 +1133,7 @@ pub fn prepare(
                 path,
                 numbering,
                 plan,
+                range,
                 settings: settings.clone(),
                 color: None,
                 metadata: None,
@@ -1144,8 +1147,10 @@ pub fn prepare(
     } else {
         let heard = |c: &&Clip| c.start < b && c.end() > a;
         offline = p.offline_in(p.tracks.iter().flat_map(|t| &t.clips).filter(heard));
+        let plan = render::flatten(&proj, a, b)?;
         outputs.push(Output {
-            plan: render::flatten(&proj, a, b)?,
+            range: plan.range,
+            plan,
             path: params.output.clone(),
             numbering: settings.numbering(p.start_tc() + a, drop_frame),
             settings: settings.clone(),
