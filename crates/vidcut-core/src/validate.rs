@@ -18,6 +18,7 @@ fn sound_on_video(t: &Track, v: &mut Vec<String>) {
     }
     let set = t.muted
         || t.solo
+        || t.solo_safe
         || t.volume_db != 0.0
         || t.voice_isolation.is_some()
         || t.duck.is_some()

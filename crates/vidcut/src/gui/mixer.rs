@@ -291,6 +291,39 @@ fn heard_meters(
     }
 }
 
+pub(super) fn solo_look(t: &Track, text: RichText) -> egui::Button<'static> {
+    if !(t.solo || t.solo_safe) {
+        return egui::Button::selectable(false, text);
+    }
+    let fill = if t.solo_safe {
+        theme::SOLO_SAFE
+    } else {
+        theme::colors().ok
+    };
+    egui::Button::selectable(true, text.color(Color32::BLACK)).fill(fill)
+}
+
+impl Workspace {
+    pub(super) fn solo_clicked(&mut self, r: &egui::Response, t: &Track) {
+        if !r.clicked() {
+            return;
+        }
+        let keys = r.ctx.input(|i| i.modifiers);
+        if keys.command && keys.shift {
+            self.send(
+                "track.set",
+                json!({ "track": t.id, "solo_safe": !t.solo_safe }),
+            );
+        } else {
+            let exclusive = self.timeline.options.exclusive_solo;
+            self.send(
+                "track.set",
+                json!({ "track": t.id, "solo": !t.solo, "exclusive": exclusive }),
+            );
+        }
+    }
+}
+
 fn loudest(levels: &[f32]) -> f32 {
     levels.iter().copied().fold(0.0, f32::max)
 }
@@ -493,6 +526,16 @@ impl Workspace {
         ui.horizontal(|ui| {
             ui.heading("Mixer");
             ui.label(dim("Mute and solo apply to export too"));
+            ui.menu_button(egui_phosphor::regular::DOTS_THREE, |ui| {
+                let o = &mut self.timeline.options;
+                if ui
+                    .checkbox(&mut o.exclusive_solo, "Exclusive Solo")
+                    .changed()
+                {
+                    o.save();
+                    ui.close();
+                }
+            });
         });
         ui.separator();
         let meters = self.timeline_levels();
@@ -600,9 +643,8 @@ impl Workspace {
                 if ui.selectable_label(t.muted, "M").clicked() {
                     self.send("track.set", json!({ "track": t.id, "muted": !t.muted }));
                 }
-                if ui.selectable_label(t.solo, "S").clicked() {
-                    self.send("track.set", json!({ "track": t.id, "solo": !t.solo }));
-                }
+                let solo = ui.add(solo_look(t, RichText::new("S")));
+                self.solo_clicked(&solo, t);
             });
             let on = super::isolation::Isolate::Track(t.id.clone());
             let amount = t.voice_isolation.filter(|v| v.on).map(|v| v.amount);

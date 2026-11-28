@@ -241,6 +241,7 @@ pub struct Options {
     pub dynamic_mode: tools::DynamicMode,
     pub minimize_subtitles: bool,
     pub extend_beyond: bool,
+    pub exclusive_solo: bool,
 }
 
 impl Default for Options {
@@ -263,6 +264,7 @@ impl Default for Options {
             dynamic_mode: tools::DynamicMode::Slip,
             minimize_subtitles: false,
             extend_beyond: false,
+            exclusive_solo: false,
         }
     }
 }
@@ -683,7 +685,7 @@ impl Options {
             .unwrap_or_default()
     }
 
-    fn save(&self) {
+    pub(super) fn save(&self) {
         if let Some(dir) = options_path().parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
@@ -2339,12 +2341,12 @@ impl Workspace {
             } else {
                 icon::UNLOCKED
             };
+            let [lock_at, solo_at, mute_at] = parts.buttons;
             let buttons = [
-                ("Lock", "Lock Track", lock, t.locked, "locked"),
-                ("Solo", "Solo", "S", t.solo, "solo"),
-                ("Mute", "Mute", "M", t.muted, "muted"),
+                ("Lock", "Lock Track", lock, t.locked, "locked", lock_at),
+                ("Mute", "Mute", "M", t.muted, "muted", mute_at),
             ];
-            for ((what, tip, glyph, lit, key), at) in buttons.into_iter().zip(parts.buttons) {
+            for (what, tip, glyph, lit, key, at) in buttons {
                 let name = format!("{what} {}", t.id);
                 if header_button(&mut child, at, glyph, &name, lit)
                     .on_hover_text(tip)
@@ -2353,6 +2355,16 @@ impl Workspace {
                     self.send("track.set", json!({ "track": t.id, key: !lit }));
                 }
             }
+            let solo = child.put(
+                solo_at,
+                super::mixer::solo_look(t, RichText::new("S").size(13.0)),
+            );
+            let name = format!("Solo {}", t.id);
+            solo.widget_info(|| {
+                egui::WidgetInfo::selected(egui::Role::Button, true, t.solo, &name)
+            });
+            let solo = solo.on_hover_text("Solo");
+            self.solo_clicked(&solo, t);
             self.fader_field(&mut child, parts.fader, t);
             self.track_meter(child.painter(), parts.meter, &t.id, &meters.of(&t.id));
         }
@@ -4754,6 +4766,7 @@ impl Workspace {
         o.boring_secs = set.boring_secs.unwrap_or(o.boring_secs);
         o.jump_frames = set.jump_frames.unwrap_or(o.jump_frames);
         o.minimize_subtitles = set.minimize_subtitles.unwrap_or(o.minimize_subtitles);
+        o.exclusive_solo = set.exclusive_solo.unwrap_or(o.exclusive_solo);
         if *o != before {
             o.save();
         }
@@ -4778,6 +4791,7 @@ impl Workspace {
             boring_secs: o.boring_secs,
             jump_frames: o.jump_frames,
             minimize_subtitles: o.minimize_subtitles,
+            exclusive_solo: o.exclusive_solo,
         }
     }
 

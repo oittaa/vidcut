@@ -3,7 +3,7 @@
 - A lane and a sound clip for each channel of a multichannel track.
 - Audio track layers, Range mode and sample editing.
 - Elastic Wave.
-- The Mixer strip of a track: arm, the solo modes, inserts and the Dialogue Leveler.
+- The Mixer strip of a track: arm, inserts and the Dialogue Leveler.
 - Buses, sends and VCAs.
 - Presets and Sidechain of the track equalizer and Dynamics.
 - Automation of the fader, the pan, the mute and the effects.

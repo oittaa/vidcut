@@ -14,6 +14,7 @@ pub const KEY_ON: Color32 = Color32::from_rgb(240, 140, 0);
 pub const SPEED_KEY_ON: Color32 = Color32::from_rgb(230, 50, 50);
 pub const WAVEFORM: Color32 = Color32::from_rgb(170, 230, 190);
 pub const WINDOW_ON: Color32 = Color32::from_rgb(220, 50, 50);
+pub const SOLO_SAFE: Color32 = Color32::from_rgb(70, 130, 230);
 
 thread_local! {
     static CURRENT: RefCell<Rc<Theme>> =

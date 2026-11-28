@@ -943,6 +943,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - Each target then takes the changed parts on a copy of its own settings, and `grade.paste` stores it.
     - `on_keys` puts the same parts on each keyframe of the target. A keyframe leaves out a part at its usual value, so `on_keys` adds that part first.
     - When the keyframes of the source changed, they go whole, and `on_keys` does nothing.
+  - `grade.append_node` (`ops::grade::append_node`) makes a grade of one copy of the corrector. `append_graph` adds it to each target, as for Append Node Graph.
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
   - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
   - A serial node takes the picture of the node before it. The oldest link that took that picture then takes the picture of the new node (`oldest_taker`).
@@ -1211,7 +1212,9 @@ The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-gra
   - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
   - `apply` puts a copy of the clip grade into each target with `put_whole`. It gives the copy the node stack layers of the project first (`Grade::counted`).
   - `apply` refuses a grade with keyframes. Why: Apply Grades Using is not built, and a copy of the keyframes is only one of its three modes.
-  - `append` adds the nodes of one layer of the still to each target with `ops::grade::append_graph`. A link from the picture that comes in moves to the output of the target. `append` refuses a grade with keyframes too.
+  - `append` adds the nodes of one layer of the still to each target with `ops::grade::append_graph`. A link from the picture that comes in moves to the output of the target.
+    - The keyframes of a clip grade stay as they are. Thus they keep the frames of the still in each mode of Apply Grades Using.
+    - `append` refuses a timeline grade with keyframes. Why: only the keyframes of a clip grade are measured.
 - The picture of a still:
   - `editor::still_looks` gives the plan of the frame: `render::flatten` of one frame, with no sound.
   - `Env::still` draws it, and `AvEnv` writes it with `export::still`. This path draws as the export of a frame does, with the timeline grade and the output LUT.

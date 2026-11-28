@@ -118,6 +118,8 @@ pub struct TrackProps {
     pub locked: Option<bool>,
     pub muted: Option<bool>,
     pub solo: Option<bool>,
+    pub solo_safe: Option<bool>,
+    pub exclusive: bool,
     pub volume_db: Option<f64>,
     pub voice_isolation: Option<f64>,
     pub voice_isolation_on: Option<bool>,
@@ -158,6 +160,8 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     let sound = props.muted.is_some()
         || props.solo.is_some()
+        || props.solo_safe.is_some()
+        || props.exclusive
         || props.volume_db.is_some()
         || props.voice_isolation.is_some()
         || props.voice_isolation_on.is_some()
@@ -179,6 +183,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(s) = props.solo {
         t.solo = s;
+    }
+    if let Some(s) = props.solo_safe {
+        t.solo_safe = s;
     }
     if let Some(v) = props.volume_db {
         t.volume_db = v;
@@ -217,6 +224,11 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(n) = &props.name {
         t.name = n.clone();
+    }
+    if props.exclusive && props.solo == Some(true) {
+        for other in p.tracks.iter_mut().filter(|o| o.id != id && !o.solo_safe) {
+            other.solo = false;
+        }
     }
     Ok(())
 }

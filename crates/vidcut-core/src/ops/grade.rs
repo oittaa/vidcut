@@ -1471,6 +1471,29 @@ fn grown(
     Ok(walked(g)[made as usize])
 }
 
+pub fn append_node(p: &mut Project, from: &GradeOf, n: u32, to: &[GradeOf]) -> Result<()> {
+    let g = stored(p, from)?;
+    let d = g.node(n).ok_or_else(|| no_node(n))?;
+    values(d, n)?;
+    if to.is_empty() {
+        return Err(Error::usage("give the clips that take the node"));
+    }
+    let one = Grade {
+        nodes: vec![GradeNode {
+            inputs: vec![Some(GradeLink::picture(0))],
+            key_from: None,
+            ..d.clone()
+        }],
+        output: Some(GradeLink::picture(1)),
+        layers: Vec::new(),
+        kept_layers: Vec::new(),
+    };
+    for of in to.iter().filter(|o| *o != from) {
+        append_graph(p, of, &one)?;
+    }
+    Ok(())
+}
+
 pub fn append_graph(p: &mut Project, of: &GradeOf, add: &Grade) -> Result<()> {
     edited(p, of, |g| {
         appended(g, add);

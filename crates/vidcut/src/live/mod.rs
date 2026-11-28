@@ -180,6 +180,7 @@ pub struct TimelineState {
     pub boring_secs: f64,
     pub jump_frames: i64,
     pub minimize_subtitles: bool,
+    pub exclusive_solo: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]

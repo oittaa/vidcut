@@ -1118,6 +1118,9 @@ fn export_with(
         if let Some(e) = &t.equalizer {
             meta["equalizer"] = json!(e);
         }
+        if t.solo_safe {
+            meta["solo_safe"] = json!(true);
+        }
         if t.pan != 0.0 {
             meta["pan"] = json!(t.pan);
         }
@@ -1730,6 +1733,7 @@ pub struct ImportedTrack {
     pub locked: bool,
     pub muted: bool,
     pub solo: bool,
+    pub solo_safe: bool,
     pub volume_db: f64,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub duck: Option<crate::model::Duck>,
@@ -1759,6 +1763,7 @@ impl ImportedTrack {
                     .as_bool()
                     .or(editor["SoloOn"].as_bool())
                     .unwrap_or(false),
+            solo_safe: audio && meta["solo_safe"].as_bool().unwrap_or(false),
             volume_db: meta["volume_db"].as_f64().filter(|_| audio).unwrap_or(0.0),
             voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
                 .ok()
@@ -2821,6 +2826,13 @@ pub fn unheard_track_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<
 
 pub fn unheard_track_pan(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
     track_kept(p, span, "The track pan", |t| t.heard_pan() != 0.0)
+}
+
+pub fn unheard_solo_safe(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    if !p.any_solo() {
+        return None;
+    }
+    track_kept(p, span, "Solo Safe", |t| t.solo_safe && !t.solo && !t.muted)
 }
 
 fn kept_in_metadata(

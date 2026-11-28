@@ -2680,6 +2680,14 @@ impl Workspace {
             }
             ui.close();
         }
+        let append = self.append_node_params().filter(|_| page);
+        let button = egui::Button::new("Append Node to Selected Clips");
+        if ui.add_enabled(append.is_some(), button).clicked() {
+            if let Some(params) = append {
+                self.send("grade.append_node", params);
+            }
+            ui.close();
+        }
         if !page {
             super::dialog::why(ui, "open the Color page");
         }
@@ -2825,6 +2833,21 @@ impl Workspace {
         (!clips.is_empty()).then(
             || json!({ "clip": clip, "layer": layer, "node": n, "before": before, "clips": clips }),
         )
+    }
+
+    fn append_node_params(&self) -> Option<Value> {
+        let (of, _, g) = self.grade_shown()?;
+        let GradeOf::Clip(clip, layer) = &of else {
+            return None;
+        };
+        let n = self
+            .current_grade_node(&g)
+            .filter(|n| g.corrector(*n).is_some())?;
+        let clips: Vec<&String> = (self.snap.selection.thumbnails.iter())
+            .filter(|c| *c != clip)
+            .collect();
+        (!clips.is_empty())
+            .then(|| json!({ "clip": clip, "layer": layer, "node": n, "clips": clips }))
     }
 
     fn select_added(&mut self, g: &Grade, add: GradeAdd, node: Option<u32>) {
