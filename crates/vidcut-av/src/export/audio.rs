@@ -24,6 +24,30 @@ pub(crate) fn sample_format(n: i32) -> Option<ffi::AVSampleFormat> {
     Some(unsafe { std::mem::transmute::<i32, ffi::AVSampleFormat>(n) })
 }
 
+pub fn loudness_weights(channels: u16) -> Vec<f64> {
+    use vidcut_core::loudness::SURROUND;
+    let count = usize::from(channels.max(1));
+    let mask = channel_layout(channels).bits();
+    let lfe = ffi::AV_CH_LOW_FREQUENCY | ffi::AV_CH_LOW_FREQUENCY_2;
+    let side = ffi::AV_CH_SIDE_LEFT | ffi::AV_CH_SIDE_RIGHT;
+    let back = ffi::AV_CH_BACK_LEFT | ffi::AV_CH_BACK_RIGHT;
+    let surround = if mask & side != 0 { side } else { side | back };
+    let weights: Vec<f64> = (0..64)
+        .map(|b| 1u64 << b)
+        .filter(|bit| mask & bit != 0)
+        .map(|bit| match bit {
+            _ if bit & lfe != 0 => 0.0,
+            _ if bit & surround != 0 => SURROUND,
+            _ => 1.0,
+        })
+        .collect();
+    if weights.len() == count {
+        weights
+    } else {
+        vec![1.0; count]
+    }
+}
+
 pub(crate) fn channel_layout(channels: u16) -> ffmpeg::ChannelLayout {
     let standard = ffmpeg::ChannelLayout::default(i32::from(channels));
     if !standard.is_empty() {

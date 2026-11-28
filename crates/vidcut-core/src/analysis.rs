@@ -376,7 +376,7 @@ impl Detections {
     }
 }
 
-/// Loudness of a mix (EBU R128, ITU-R BS.1770).
+/// Loudness of a mix (ITU-R BS.1770-4, EBU R128).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Loudness {
     /// Integrated loudness, LUFS (`-inf` for silence).
@@ -387,6 +387,10 @@ pub struct Loudness {
     pub true_peak: f64,
     /// Highest sample, dBFS.
     pub sample_peak: f64,
+    /// Highest momentary loudness (400 ms), LUFS.
+    pub momentary_max: f64,
+    /// Highest short-term loudness (3 s), LUFS.
+    pub short_max: f64,
 }
 
 fn linear(db: f64) -> f64 {

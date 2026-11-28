@@ -579,6 +579,16 @@ pub struct Settings {
         skip_serializing_if = "Settings::has_one_layer"
     )]
     pub node_stack_layers: Vec<String>,
+    /// The Target Loudness Level in LUFS: the 0 LU of the loudness meter.
+    /// Left out at -23.
+    #[serde(
+        default = "Settings::usual_target_loudness",
+        skip_serializing_if = "Settings::has_usual_target_loudness"
+    )]
+    pub target_loudness: f64,
+    /// The scale of the loudness meter. Left out at `ebu9`.
+    #[serde(default, skip_serializing_if = "LoudnessScale::is_usual")]
+    pub loudness_scale: LoudnessScale,
 }
 
 impl Default for Settings {
@@ -606,6 +616,39 @@ impl Default for Settings {
             scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
             node_stack_layers: Self::one_layer(),
+            target_loudness: crate::loudness::TARGET,
+            loudness_scale: LoudnessScale::Ebu9,
+        }
+    }
+}
+
+/// The scale of the loudness meter, around the Target Loudness Level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoudnessScale {
+    /// EBU +9: from 18 LU under the target to 9 LU over it.
+    #[default]
+    Ebu9,
+    /// EBU +18: from 36 LU under the target to 18 LU over it.
+    Ebu18,
+}
+
+impl LoudnessScale {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::Ebu9
+    }
+
+    pub fn span(self) -> (f64, f64) {
+        match self {
+            Self::Ebu9 => (-18.0, 9.0),
+            Self::Ebu18 => (-36.0, 18.0),
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Ebu9 => "EBU +9",
+            Self::Ebu18 => "EBU +18",
         }
     }
 }
@@ -675,6 +718,14 @@ impl Format {
 }
 
 impl Settings {
+    pub fn usual_target_loudness() -> f64 {
+        crate::loudness::TARGET
+    }
+
+    pub fn has_usual_target_loudness(target: &f64) -> bool {
+        *target == crate::loudness::TARGET
+    }
+
     pub fn one_layer() -> Vec<String> {
         vec![Self::layer_name(1)]
     }

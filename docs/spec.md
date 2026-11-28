@@ -5548,6 +5548,44 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
+- **Loudness meter** (pp. 4054–4058):
+  - It measures the mix that the timeline plays. The output mute, the output level and DIM do not change it.
+  - The options menu selects a standard. BS.1770-1 is the default. BS.1770-4 governs the other standards (p. 4055).
+  - The meter gates the loudness with each standard, also with BS.1770-1.
+  - The true peak is the highest peak between the samples, by BS.1770-4 (p. 4055).
+  - The bar M has a part for each channel, without LFE. A second bar shows the sum (p. 4056).
+  - The number over the second bar is the highest M since the reset (p. 4056).
+  - The readouts are Short, Short Max, Range and Integrated (p. 4056). The Control Room meter shows the true peak (p. 4054).
+  - M is the loudness of the last 400 ms. It changes each 100 ms (p. 4056).
+  - Short is the loudness of the last 3 s (p. 4058). Page 4056 gives 30 s, but the meter uses 3 s.
+  - Short Max is the highest Short (p. 4056).
+  - Range is the loudness range of EBU Tech 3342. It leaves out the lowest 10% and the highest 5% (p. 4056).
+  - Integrated is the gated loudness of all that played since the reset (p. 4056).
+  - The buttons are Pause and Reset (p. 4057).
+    - The meter runs at first. Reset clears all values and stops the meter. Then the first button reads Start.
+    - After a Pause, the first button reads Resume (p. 4057).
+    - A stopped meter changes M, Short and the true peak only.
+    - A running meter changes all values. All values stay when the play stops.
+  - The meter shows LU from the target. Absolute Scale in its options menu shows LUFS (p. 4056). It is off at first.
+  - A value under the bottom of the scale shows `--`.
+  - Colors:
+    - Integrated is blue under the tolerance of the standard, yellow within it, and red over it (p. 4055).
+    - Short and Short Max are blue, and red over +3 LU.
+    - The M bar is steel blue, and yellow over 0 LU.
+  - vidcut: the meter measures by ITU-R BS.1770-4, with its gates. The tolerance of Integrated is ±1 LU.
+  - vidcut: the meter is at the right of the Mix strip of the Mixer. The true peak shows under the readouts, as vidcut has no Control Room meter.
+  - vidcut: the windows of M and Short start again at each play. The time before the start of a play counts as silence.
+  - vidcut: Short ends at the last sound heard.
+  - vidcut: `loudness.get` reads the meter. `loudness.set` starts or pauses it and sets LU or LUFS. `loudness.reset` resets it.
+  - vidcut: `analyze.loudness` gives the same measurement for a range, as the Offline Loudness Analyzer does (p. 4057).
+  - vidcut does not have the standards of the options menu, Lock Metering to Transport and the Loudness History (pp. 4055–4058).
+- **Target Loudness Level** (pp. 4055, 4060):
+  - It is the loudness that the meter shows as 0 LU. A new project has −23 LUFS (p. 4055).
+  - vidcut: Project Settings has the field. `project.set` sets `target_loudness`, from −30 to 0 LUFS, the range of the Normalize target (D80).
+- **Loudness Scale** (p. 4055):
+  - EBU +9 goes from −18 to +9 LU. It is the default (p. 4055).
+  - EBU +18 goes from −36 to +18 LU.
+  - vidcut: Project Settings has the switch. `project.set` sets `loudness_scale` (`ebu9` or `ebu18`).
 - **Clip volume** (pp. 743, 1109–1110, 1112):
   - Each clip has a gain, and a mute.
   - The Inspector has the Volume of the clip, in its Audio panel. This is the value of the volume overlay of the clip (p. 743).
