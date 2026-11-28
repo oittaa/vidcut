@@ -492,7 +492,9 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut track set A2 --duck '{\"on\":false}'\n  \
          vidcut track set A2 --duck null\n  \
          vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \
-         vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'",
+         vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'\n  \
+         vidcut track set A1 --pan -50\n  \
+         vidcut track set A1 --pan-on false",
     ),
     (
         "titles.add",

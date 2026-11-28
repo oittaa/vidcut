@@ -95,6 +95,7 @@ pub enum GuiChange {
     Show(GuiPanel),
     Equalizer(String),
     Dynamics(String),
+    Pan(String),
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
@@ -3688,6 +3689,13 @@ impl Live {
             } => match track {
                 Some(t) => self.gui_change(vec![GuiChange::Dynamics(t)], |s| json!(s)),
                 None => Step::Now(Err(Error::usage("give the track of the dynamics"))),
+            },
+            Request::GuiShow {
+                panel: GuiPanel::Pan,
+                track,
+            } => match track {
+                Some(t) => self.gui_change(vec![GuiChange::Pan(t)], |s| json!(s)),
+                None => Step::Now(Err(Error::usage("give the track of the pan"))),
             },
             Request::GuiShow { panel, .. } => {
                 self.gui_change(vec![GuiChange::Show(panel)], |s| json!(s))

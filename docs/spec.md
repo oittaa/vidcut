@@ -5331,7 +5331,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
-  - Track pan, and FX other than the Ducker: out.
+  - FX other than the Ducker: out.
 - **Voice Isolation** (p. 774; measured in Resolve Studio 21.1.2, on a clip):
   - It has a switch and an Amount from 0 to 100.
   - A fresh clip turned on gives Amount 100.
@@ -5504,6 +5504,47 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
   - vidcut: the equalizer of a track that holds a compound clip also works on the sound of the compound clip.
   - vidcut: an OTIO file keeps the track equalizer in the metadata of vidcut. Its export tells that other editors do not hear it.
+- **Track pan** (pp. 3938, 3954–3955):
+  - The Pan section of each channel strip has an indicator. A drag in it moves the pan. A double click opens the Pan window (p. 3954).
+  - A single click on the indicator does not bypass the pan. The manual says that it does (p. 3954).
+  - The pan comes after the equalizer and before the fader (p. 3938).
+  - The Pan window has these controls:
+    - The Pan switch and the 3D button.
+    - Left/Right, from 100L to 100R. C, the middle, is the default.
+    - Front/Back (100F), Rotate (0 to 360), Spread (PNT to FULL, FULL) and Divergence (0 to 100, 0).
+    - Boom, from −∞ to +10 dB, with On and Pre.
+    - A track of type mono has no Spread.
+  - Typed Left/Right text such as `50R`, `100L` or `C` sets the pan:
+    - `150R` gives 100R.
+    - `150`, `50`, `-50`, `R50` and `L50` change nothing.
+  - On a stereo track, Left/Right has the law of the clip Pan. Each channel stays on its own side.
+  - On a mono track, C gives −3 dB on each side. 100L gives 0 dB on the left and silence on the right.
+  - On a mono track, the law has these values between C and 100L. 100R and the values to the right are their mirror image.
+
+    | Left/Right | Left | Right |
+    |---|---|---|
+    | 10L | −2.1 dB | −4.0 dB |
+    | 25L | −1.2 dB | −6.1 dB |
+    | 50L | −0.4 dB | −11.8 dB |
+    | 75L | −0.1 dB | −22.9 dB |
+
+  - The pan of a clip adds to the pan of its track. The law applies to the sum:
+    - A clip at −50 on a track at 50R plays as at C.
+    - A clip at −100 on a track at 50R plays as at 50L.
+  - vidcut: each audio track has a pan from −100 to 100, and a switch. `track.set` sets `pan` and `pan_on`.
+  - vidcut: the switch off keeps the pan, and the sound plays as at 0.
+  - vidcut: a track pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: the pan of a clip adds to the pan of its track. A sum past 100 plays as at 100.
+  - vidcut: `track.set` refuses a pan outside −100 to 100, as `clip.set` does.
+  - vidcut: the strip of a track in the Mixer has a Pan indicator. A drag moves the pan, and a double click opens the Pan window.
+  - vidcut: a single click on the indicator does nothing.
+  - vidcut: `gui.show` with `pan` and a `track` opens the Pan window of that track.
+  - vidcut: the window has the switch, and Left/Right as a slider and a field. The field takes typed text as above.
+    - A change applies at once. A drag on the slider makes one change when it stops.
+    - Reset and Close are at the bottom of the window.
+  - vidcut: the pan of a track works on the mix of its clips, after its equalizer and before its fader.
+  - vidcut: the pan of a track that holds a compound clip also works on the sound of the compound clip.
+  - vidcut: an OTIO file keeps the track pan in the metadata of vidcut. Its export tells that other editors do not hear it.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.

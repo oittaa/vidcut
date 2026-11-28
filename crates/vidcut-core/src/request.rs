@@ -1750,7 +1750,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). Only an audio track takes the
+    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer, pan). Only an audio track takes the
     /// sound settings. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
@@ -1810,6 +1810,15 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         equalizer: Option<Option<TrackEqualizerSet>>,
+        /// The pan, after the equalizer and before the fader, from -100
+        /// (all the way left) to 100 (all the way right). The pan of each
+        /// clip adds to it, and the sum stops at the ends.
+        #[serde(default)]
+        pan: Option<f64>,
+        /// The switch of the pan. Off keeps the pan, and the sound plays as
+        /// at 0.
+        #[serde(default)]
+        pan_on: Option<bool>,
         /// Download what this computer doesn't have yet: Voice Isolation's
         /// model, or the speech detector of ducking by speech, each checked
         /// against its SHA-256. Without it, a missing file is an error that
@@ -5235,12 +5244,13 @@ pub enum Request {
     /// buttons, `title_text` (the text of the selected title, or of the
     /// topmost title at the playhead, to edit in place in the viewer),
     /// `select_tool` (a tool to add on the effects page), `equalizer` (the
-    /// Equalizer window of `track`), or `dynamics` (the Dynamics window of
+    /// Equalizer window of `track`), `dynamics` (the Dynamics window of
+    /// `track`), or `pan` (the Pan window of
     /// `track`). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
-        /// The track of the `equalizer` or `dynamics` window.
+        /// The track of the `equalizer`, `dynamics` or `pan` window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<String>,
     },
@@ -7037,6 +7047,9 @@ pub enum GuiPanel {
     /// The Dynamics window of a track with sound: the switch, the Make Up
     /// gain and the Expander or Gate, Compressor and Limiter modules.
     Dynamics,
+    /// The Pan window of a track with sound: the switch and Left/Right of
+    /// its pan.
+    Pan,
 }
 
 /// Media tab sort orders.
