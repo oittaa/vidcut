@@ -5233,7 +5233,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
       - Resolve has no `subject`. This rule is the rule of vidcut.
       - On a frame where the main thing has no box, it follows the next thing in that order. A gap of up to a second stays on the path of the thing.
       - On 21 shots of SR2 (9 files), the view never goes to another thing and back.
-      - On 8 of the 21 shots, the main path starts after the shot starts or ends before it ends. There the view follows other people, for up to 41 frames.
+      - On 6 of the 21 shots, the main path starts after the shot starts or ends before it ends. This includes the hold at its ends. There the view follows other people, for up to 35 frames.
     - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
   - `mode` selects the axes:
     - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip. On an axis with no room, the picture goes to the middle.
