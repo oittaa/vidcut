@@ -203,6 +203,7 @@ impl Pattern {
     pub const SEARCHES: (f64, f64) = (0.001, 1.0);
     pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
     pub const OFFSETS: (f64, f64) = (-1e6, 1e6);
+    pub const SELECT_TIMES: (i64, i64) = (-1_000_000, 1_000_000);
 
     pub fn new(name: String) -> Self {
         Self {
@@ -217,6 +218,7 @@ impl Pattern {
             search_width: None,
             search_height: None,
             channel: None,
+            select_time: None,
         }
     }
 
@@ -246,6 +248,21 @@ impl Pattern {
 
     pub fn middle(&self) -> [f64; 2] {
         self.center.unwrap_or(Self::CENTER)
+    }
+
+    pub fn selected(&self) -> i64 {
+        self.select_time.unwrap_or(0)
+    }
+
+    pub fn from_own(&self, at: i64) -> bool {
+        self.kind() == PatternKind::Point && at == self.selected()
+    }
+
+    pub fn shown_at(&self, at: i64, file: f64) -> Option<Area> {
+        if self.from_own(at) {
+            return Some(self.own());
+        }
+        self.area_at(file)
     }
 
     pub fn wide(&self) -> f64 {

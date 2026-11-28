@@ -941,6 +941,10 @@ These facts come from measurements in Resolve Studio 21.2, by hand.
   - Then Track Forward from frame 20 fails too. The Console says "MediaOut1 cannot get Parameter for Input at time 20".
   - The names of the Tracker and of MediaOut1 are red. A new Tracker tracks.
   - vidcut keeps no state of a failed track. A start outside the In and the Out gets an error, and the Tracker stays as it was ([spec §8.19](spec.md#the-tracker)).
+- **After a typed time, the viewer can draw a pattern box at the place of an earlier frame.**
+  - After the times 45, 50 and 90, the box stayed at the place of frame 45. After 90 and then 25, it was at the place of frame 90.
+  - The Inspector shows the values of the current frame each time.
+  - vidcut draws each box at its place on the current frame.
 - **A typed Pattern Width of 1000000 crashes Resolve.**
   - The slider of Pattern Width goes from 0.001 to 0.5. The field keeps a typed 1000000.
   - About 5 seconds later, Resolve 21.2.0.0006 crashes. The project has the state of its last automatic save.
