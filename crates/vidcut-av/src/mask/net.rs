@@ -789,7 +789,7 @@ impl Net {
             }
             gpu.flush();
             gpu.queue.submit([enc.finish()]);
-            Ok(())
+            gpu.wait()
         })
     }
 

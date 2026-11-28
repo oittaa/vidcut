@@ -147,11 +147,13 @@ Each step is one pull request.
   - R5 also shows whether the clicks of more than one frame make one track. SAM 2.1 can take the clicks of more frames into its memory.
 - **A CPU path:** a frame of a track takes about 50 s on the software adapter. macOS has no software adapter.
   - A port of the network to the CPU kernels of vidcut would make the CPU path usable.
-- **Speed:** a frame of a track at 1080p takes about 0.13 s with tiny, 0.16 s with base+ and 0.23 s with large.
+- **Speed:** a frame of a track at 1080p takes about 0.10 s with tiny, 0.13 s with base+ and 0.20 s with large.
   - These times are for one subject, on the GPU of the test computer, with the memory full.
   - The image encoder takes about 36 ms with tiny, 63 ms with base+ and 130 ms with large.
   - The memory attention and the mask decoder take about 65 ms with each model.
-  - Still to do: read the next picture while the network works. The read takes about 25 ms of each frame.
+  - On that computer, a track of 100 frames also stops once.
+  - The stop takes about 2 s with tiny, 3 s with base+ and 7 s with large.
+  - Still to do: find the cause of this stop ([gotchas](../gotchas.md#gpu-drivers)).
 - **A change before the node:** the name of a map is a digest of the input picture at the time of the click.
   - An export makes a missing map from the picture of now, under the old name (`editor::mask_remakes`).
   - Thus, after a change before the node and a lost map, the export can show another mask than the viewer showed.

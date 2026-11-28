@@ -356,6 +356,8 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
   - On the way back, that thread reads one frame of the part before at each frame (`mask::Back`). Thus about one part is in memory.
 - `Track::start` encodes the frame of the clicks. `Net::first` decodes each subject with its clicks and remembers the result.
 - `Track::next` encodes the next frame. For each subject, `Net::next` recalls the memory, decodes with no clicks, and remembers the result.
+  - `Net::encode` waits until the GPU has done the encode. Then the work of the subjects starts.
+  - Why: without this wait, NVIDIA's Vulkan driver on Windows makes long tracks slow ([gotchas](../gotchas.md#gpu-drivers)).
 - Each subject has its own memory, a `Bank`. One encode of a frame serves all the subjects.
   - The memory holds the frame of the clicks and the last six frames, each as features of 64 × 64 × 64.
   - It also holds the object pointers of the last 16 frames: one token of the decoder of each frame.

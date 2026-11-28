@@ -244,6 +244,20 @@ This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut
   - Image sequences and MJPEG files fail the same way. H.264 on the same stream is correct.
   - On a stream made with `CU_STREAM_DEFAULT`, each JPEG picture is correct, in 8 runs of 4 clips. So is each picture on the default stream itself.
   - Thus the streams of `GpuDecoder::own` wait for the default stream (`cuda::share::Waits`). The player's decoder uses the default stream.
+- **NVIDIA's Vulkan driver on Windows makes a long Magic Mask track slow** (driver 621.40, RTX 4080 SUPER).
+  - A track submits the image encoder of a frame, and then the work of its subjects, to the queue of one device.
+  - Without a wait between the two, a track with base+ or large often goes slow after 10 to 30 s.
+  - Then each kernel takes about 30 times as long. The slow time lasts about 20 s, and comes back after about 3 s.
+  - In the slow time, the GPU is busy at full clocks. Its memory controller is about 85% busy, against 25% at other times.
+  - The memory of the process stays in video memory, and no other process uses the GPU.
+  - The slow time also comes without the read of the next picture, and without GPU decoding.
+  - It also comes without new buffers in each frame, and at normal thread priority.
+  - Most tracks of 100 frames with large then take about 114 s. A track without the slow time takes 22 s.
+  - On Direct3D 12, the same track has no slow time. It takes 32 s.
+  - With a wait for the encoder, the GPU goes slow only once in a track.
+  - That time is about 2 s with tiny, 3 s with base+ and 7 s with large.
+  - Then it stays fast. Each of 3 tracks of 100 frames with large takes 28.5 s.
+  - Thus `Net::encode` waits for its work on the GPU.
 - **FFmpeg's Vulkan ProRes decoder crashes on AMD's Windows driver** (9.0.2, Radeon iGPU, on one thread too).
   - vidcut decodes on Vulkan only on NVIDIA's GPUs (`GpuDecoder::why_not`).
   - A crash cannot be caught. Thus each other vendor needs its own check first.
