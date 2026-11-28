@@ -4,8 +4,9 @@ use crate::compute::ops::{Act, Conv, HEADER, Ops, Res, SHARED, View, tensor};
 const KEYS: u32 = 16;
 
 fn attend_layout(d: u32, bq: u32) -> (u32, u32, u32) {
-    let (ko, vo) = (bq * 9, bq * 5);
-    (ko, vo, (ko + KEYS * 9).max(vo + KEYS * (d / 4)))
+    let (ko, vo, g) = (bq * 9, bq * 5, d / 4);
+    let values = (KEYS - 1) * g + 4 * g.div_ceil(4);
+    (ko, vo, (ko + KEYS * 9).max(vo + values))
 }
 
 pub(super) fn attend_fits(d: u32) -> bool {
