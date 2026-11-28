@@ -2986,6 +2986,71 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         strength: Option<f64>,
     },
+    /// Keep what stands out, or the thing in a box, inside the frame of
+    /// clips of footage (`c3`, or `V2@15s`), and store the move as Position
+    /// keyframes. The picture moves on an axis only where it is larger than
+    /// the frame, for example a wide picture that fills a tall frame, and
+    /// always covers the frame there. The zoom stays. The new keyframes
+    /// replace the Position keyframes of each clip, one where the move
+    /// bends, and one undo takes them off. A shot change inside a clip moves
+    /// the picture at once. Each frame of each clip is read when the clip
+    /// has no analysis yet. Returns for each clip the `keys` made, the axes
+    /// it moved (`pan`, `tilt`) and the share of its frames that showed the
+    /// thing (`seen`).
+    #[serde(rename = "picture.reframe")]
+    PictureReframe {
+        clips: OneOrMany<ClipRef>,
+        /// The box around the thing to follow, on the frame `at`, as
+        /// fractions of the frame from its top left. The thing is followed
+        /// through the clip from there. One clip only. Left out, the move
+        /// follows the part of each frame that stands out most, or the main
+        /// `subject` of each shot.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<ReframeBox>,
+        /// The frame of `reference`, inside the clip. Left out, the
+        /// playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The axes that the picture moves on: `auto`, `pan` or `tilt`.
+        /// Usual: `auto`.
+        #[serde(default)]
+        mode: ReframeMode,
+        /// The kind of thing to follow without `reference`: `person`,
+        /// `face`, `text` or `vehicle`. The move follows the main one of
+        /// each shot: the one that shows largest for the longest time. Left
+        /// out, the move follows the part of each frame that stands out
+        /// most.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<Subject>,
+        /// The neural network that finds the `subject`: `fast`, or `slow`
+        /// for `face`. Usual: `fast`.
+        #[serde(default)]
+        model: FindModel,
+        /// The longer side, in pixels, of the picture that the model of the
+        /// `subject` sees, from 320 to 3840. Left out, it is 640 for `face`,
+        /// `person` and `vehicle`, and 960 for `text`. A larger size finds
+        /// smaller things and takes more time. The picture is never larger
+        /// than its source.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<u32>,
+        /// The seconds of the source over which the move evens out the
+        /// motion of the thing, from 0 to 10. At 0 it follows each frame.
+        /// Usual: 0.5.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smooth: Option<f64>,
+        /// How far the keyframes may stray from the move, in pixels of a
+        /// frame 1920 pixels on its long side, from 0.01 to 100. A larger
+        /// value gives fewer keyframes. Usual: 7.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tolerance: Option<f64>,
+        /// Download the model when it is not on this computer, checked
+        /// against its SHA-256: with `reference` the tracking model (715
+        /// kB); with `subject` the model of the subject, as `motion.find`
+        /// tells; else the saliency model (15 MB). Without it, a missing
+        /// model is an error that tells its size.
+        #[serde(default)]
+        download: bool,
+    },
     /// Put clips' pictures back at their usual values: the `transform`
     /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
@@ -5115,12 +5180,14 @@ pub enum Request {
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), the
     /// viewer's `color_tool` (the switch, Auto Color and Reset of the Auto
-    /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
-    /// Dynamic Zoom, Color and their buttons, `title_text` (the text of the
-    /// selected title, or of the topmost title at the playhead, to edit in
-    /// place in the viewer), `select_tool` (a tool to add on the effects
-    /// page), `equalizer` (the Equalizer window of `track`), or `dynamics`
-    /// (the Dynamics window of `track`). Answers what `gui.state` does.
+    /// Color tool of node 1), the viewer's `smart_reframe` box (the
+    /// `reference` that Reframe sends), `tools`, the viewer's row of
+    /// Transform, Crop, Dynamic Zoom, Color, Smart Reframe and their
+    /// buttons, `title_text` (the text of the selected title, or of the
+    /// topmost title at the playhead, to edit in place in the viewer),
+    /// `select_tool` (a tool to add on the effects page), `equalizer` (the
+    /// Equalizer window of `track`), or `dynamics` (the Dynamics window of
+    /// `track`). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
@@ -6171,6 +6238,41 @@ pub struct ClipPart {
     pub end: TimeSpec,
 }
 
+/// The axes that `picture.reframe` moves the picture on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReframeMode {
+    /// Each axis on which the picture is larger than the frame.
+    #[default]
+    Auto,
+    /// Across only.
+    Pan,
+    /// Up and down only.
+    Tilt,
+}
+
+impl ReframeMode {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Pan, Self::Tilt];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Pan => "Pan Only",
+            Self::Tilt => "Tilt Only",
+        }
+    }
+}
+
+/// A box on the frame, as fractions of the frame from its top left.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReframeBox {
+    /// Its middle, `[x, y]`.
+    pub center: [f64; 2],
+    /// Its width and its height, each above 0 and at most 1.
+    pub size: [f64; 2],
+}
+
 /// What Ripple Delete Silence counts as silence (deviation X47).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -6841,8 +6943,11 @@ pub enum GuiPanel {
     /// The viewer's Color tool on the selected clip: the switch, Auto Color
     /// and Reset of the Auto Color tool of node 1.
     ColorTool,
-    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Color, the
-    /// flips, Swap, the ease, Auto Color and Reset.
+    /// The viewer's Smart Reframe box: the box on the frame that Reframe
+    /// sends as the `reference` of `picture.reframe`.
+    SmartReframe,
+    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom, Color and
+    /// Smart Reframe, the flips, Swap, the ease, Auto Color and Reset.
     Tools,
     /// The text of a title, to edit in place in the viewer, with a caret at
     /// its end: the first selected title at the playhead, else the topmost

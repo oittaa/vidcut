@@ -226,7 +226,7 @@ The pages are of the DaVinci Resolve 21.1 manual.
     - A filter that hides a selected clip: not measured. vidcut keeps the clip selected.
     - In one Shift-click case of 30, the notes show no red tint on the current clip.
   - It has no grade items in its menu.
-- The Gallery of the Color page ([spec §8.30](../spec.md#830-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+- The Gallery of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
   - `gallery.grab` grabs a still: Color > Grab Still, Ctrl+Alt+G and the menu of the viewer.
   - A still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
   - Its picture is a 32-bit float OpenEXR file in the stills folder, beside the proxies.

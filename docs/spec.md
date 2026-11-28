@@ -31,6 +31,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - Auto Color, with neural network by default and Use Legacy Auto Color preference (§8.25)
 - the Magic Mask of a corrector: a mask of a person or a thing from clicks on one frame (§8.29)
 - stabilization of a clip of a video file (§8.27)
+- Smart Reframe of a clip of a video file (§8.30)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
@@ -46,7 +47,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - the Fusion tools that §8.19 does not have
 - LUT files other than `.cube` ([todo](todo/luts.md))
 - Lens Correction ([todo](todo/lens-correction.md))
-- Smart Reframe ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -5150,7 +5150,133 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click on a frame outside the clip, for example after a split, makes no mask. An export skips it.
   - The palette, Smart Refine, Matte Finesse and the paint brushes come later ([todo](todo/subject-masks.md)).
 
-### 8.30 Gallery and Apply Grade (pp. 3050, 3332–3341, 3361–3366, 3400, 3405)
+### 8.30 Smart Reframe (pp. 735, 771–772, 815, 920, 956–957, 1208; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Video Inspector of the Cut page and of the Edit page has a Smart Reframe section (pp. 735, 920, 1208). Only Resolve Studio has it.
+  - Smart Reframe reframes clips across a large change of the aspect ratio. Examples are a 16:9 shot in a 9:16 timeline, and a 4:3 shot in a 2.39:1 timeline (p. 735).
+  - First, the user makes a timeline of the new size. Its Mismatched Resolution is Scale full frame with crop (pp. 772, 956).
+  - Object of Interest has Auto and Reference Point (pp. 735, 920).
+    - With Auto, the Neural Engine analyzes the clip and chooses its most representative object.
+    - With more than one clip selected, Auto is the only item.
+    - With Reference Point, the user drags a box around the subject. The Target icon sets the viewer mode to Smart Reframe, which shows the box (pp. 772, 815).
+    - The Transform controls can move the picture first, when the subject is outside the frame (p. 772).
+  - Mode has Auto, Pan Only and Tilt Only (p. 735).
+    - Auto moves the picture across and up and down, as necessary.
+    - Pan Only moves it across only. Tilt Only moves it up and down only.
+  - Reframe starts the analysis. It can take some time (p. 735).
+  - The analysis locks onto the reference and tracks it where necessary. The picture pans to keep the reference in the new aspect ratio (pp. 772, 957).
+- Measured:
+  - The Edit page Inspector shows the section as "AI Smart Reframe", in the Video tab. Both menus are at Auto first.
+  - The Target icon is grey with Auto. With Reference Point and the viewer control on, the viewer shows a box with four corner handles and a center dot.
+  - The first box is at the middle of the frame. It has 0.3 of the width of the frame and 0.75 of its height. Then the box stays where the user left it, also on other clips and timelines.
+  - With two clips selected, Object of Interest is grey at Auto. Reframe reframes each clip.
+  - Reframe of one 5 s clip takes less than 1 s. No progress window shows.
+  - Reframe of many clips shows a window: "Analyzing N of N clips", the speed, the time left and Cancel.
+  - The shots of the rules below come from nine files, and from eight 9:16 and 4:3 clips made from them.
+    - The files have one person or many people. Their frame rates are from 24 to 59.94 fps, and their sizes from 1280×534 to 3840×2160.
+    - The timelines are 1080×1920, 1920×1080 and 1080×1080, and each of them at twice that size.
+    - A line that names one clip or one file records only that measurement.
+    - [todo](todo/smart-reframe-cases.md) lists the cases that need more files.
+  - Reframe sets Position keyframes. The zoom stays, with no keyframes.
+  - The picture moves only on an axis where it is larger than the frame. It always covers the frame on that axis.
+    - 16:9 and 2.39:1 clips in 9:16 and 1:1 timelines move across only (34 shots).
+    - 9:16, 4:3 and 1:1 clips in a 16:9 timeline move up and down only (9 shots).
+    - Tilt Only on four 16:9 clips in a 9:16 timeline gives keyframes at 0. Pan Only on four 9:16 clips in a 16:9 timeline gives keyframes at 0.
+    - On two 3840×2160 clips at Crop in a 1080×1920 timeline, the picture moves across and up and down. On one of them, it stays 120 pixels down, at the top of the picture.
+    - At Crop in 1:1 and 16:9 timelines, the picture moves on each axis where it is larger than the frame (6 files).
+    - With no room on either axis, Reframe sets three keyframes at 0 (12 clips). They are on the first frame, near the middle and on the last frame.
+    - These are clips at Fit in 9:16, 1:1 and 16:9 timelines, and 4:3 clips at Crop in a 16:9 timeline (9 files).
+  - Pan Only and Tilt Only keep the other axis at its start value, also when that axis has room (4 clips each).
+    - With a rotation of 10° or 90°, Pan Only changes only Position X, and Tilt Only changes only Position Y (4 files each).
+  - The keyframes are at the frames where the move bends, not on a fixed grid. A clip of about 120 frames gets 3 to 41 keyframes.
+  - The same shot gives the same keyframes at two sizes of the timeline, as fractions of the picture (134 clips).
+    - The sizes are 1080×1920 and 2160×3840, 1920×1080 and 3840×2160, and 1080×1080 and 2160×2160.
+    - At Crop, the room changes with the size of the timeline. Thus one clip at Crop gets other keyframes.
+  - Reframe replaces the Position keyframes that were on the clip.
+    - With Pan keyframes from −0.1 to 0.1 before Reframe, the move is the same as on the plain clip (4 files).
+  - A start Pan of 100 or −150, or a start Tilt of 50, does not change the move. This is so on four files in a 9:16 timeline and four in a 16:9 timeline.
+  - Auto gives keyframes at 0 on an axis with no room, also from Pan 100 or Tilt 50 (12 clips).
+  - With a zoom of 1.5, the move across is 1.5 times as large, on 13 shots. With a zoom of 2, it is 2 times as large, on 8 shots.
+  - With a zoom of 1.5, Tilt moves with the subject too, from the top limit to 0.22 of the picture's height down. On 7 of 15 shots, Tilt is at the top limit for some frames.
+    - On four shots of the press conference, the head of the person stays near the top of the frame.
+  - With a rotation of 10° or −30°, the move is that of the clip with no rotation, turned by the angle (4 clips each). Pan is that move × cos θ, and Tilt gets the part × sin θ.
+  - With a rotation of 90°, 16:9 clips in a 9:16 timeline move across and up and down (4 clips).
+  - The four eases of Dynamic Zoom give the same keyframes (4 clips). Resolve plays each ease as a straight line ([gotchas](gotchas.md#resolves-edits)).
+  - A Dynamic Zoom box that pans and zooms in, or that zooms out, changes the move (8 clips of 4 files). The change is a median of 224 to 378 pixels.
+    - The move at each frame is that of a zoom of one over the size of the box at that frame.
+  - At 200 % speed, the move follows the source frames that show (4 clips). There are about twice as many keyframes as at 100 %.
+  - At 50 % speed, the move follows the source frames on two of four clips. On two crowd clips, it is a median of 86 and 214 pixels from the move at 100 %.
+    - There are a quarter to a half as many keyframes as at 100 %.
+  - With a speed ramp from 100 % to 200 %, the move follows the source frames that show (4 clips).
+    - It is nearer to the plain move at the source frame that shows than at the frame of the timeline.
+  - Shots with no face move too. On one shot of a logo, the picture moves by up to 0.06 of its width.
+  - On one clip, with Reference Point and the box moved to the right, the move follows the box.
+  - On one clip, with Reference Point and a box on a man who walks out of the frame, the move follows the man. After he leaves, the move holds its last place.
+    - The box had 0.8 of the width of the frame and 0.93 of its height. Most of it showed the background.
+    - The middle of the box stayed at the same distance from the man, 0.15 of the width of the picture.
+  - On four files, a tight box and a loose box were set on the same person. The loose box held much of the background.
+    - On three files, the two moves are a median of 155 to 309 pixels apart. On a crowd clip, they are 1519 pixels apart.
+  - A drag of a corner of the box changes its size, and its center stays.
+  - On seven clips of the film with a shot change, no move jumps at the cut. On four of them, the picture pans across the cut over 22 to 45 frames ([gotchas](gotchas.md#resolves-edits)).
+  - On seven more clips with a shot change, of three other files, no move jumps at the cut either. On two clips of the press conference, the picture pans across the cut over about 30 and 45 frames.
+  - On one clip of the film, Reframe set no keyframes.
+  - One undo removes all the keyframes of a Reframe. The name of the undo step is "Smart Reframe".
+  - The record is sections R2, R8, R10, R12, SR1, SR2 and SR3 of `fixtures/program/NOTES.md` in the test data.
+- vidcut:
+  - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
+    - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame (X176).
+      - The point is the mean place of the map, weighted by the share of the looks at each place to the power 8.
+      - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them.
+      - Why 8: on 145 runs of SR2, the plain mean is a median of 231 pixels from the move of Resolve. The power 8 gives 88 pixels. Powers from 4 to 32 give 88 to 97 pixels.
+    - With `subject`, it follows the main thing of that subject in each shot. That is the thing that shows largest for the longest time. The finders of `motion.find` find the things, with the same rules for their paths.
+      - Resolve has no `subject`. This rule is the rule of vidcut.
+      - On a frame where the main thing has no box, it follows the next thing in that order. A gap of up to a second stays on the path of the thing.
+      - On 21 shots of SR2 (9 files), the view never goes to another thing and back.
+      - On 8 of the 21 shots, the main path starts after the shot starts or ends before it ends. There the view follows other people, for up to 41 frames.
+    - With `reference`, the tracker of `motion.track` follows the thing in a box through the clip. The box is on one frame of one clip.
+  - `mode` selects the axes:
+    - `auto` moves each axis on which the picture is larger than the frame, at one or more frames of the clip. On an axis with no room, the picture goes to the middle.
+    - `pan` and `tilt` move only their own axis. On an axis with no room, the picture goes to the middle.
+    - With `pan` or `tilt`, the axis that does not move keeps its value at each frame.
+    - These are the axes of the frame, also with a rotation. `pan` changes only Position X, and `tilt` only Position Y.
+  - The middle of the thing goes to the middle of the frame. When the thing is taller than the part of the picture that the frame shows, the top of the thing stays in the frame.
+    - Why: the head of a person is at the top of the box.
+    - The point that stands out goes to the middle of the frame too. Why: on 37 runs with room up and down, a higher view does not come nearer to the Tilt of Resolve.
+  - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
+  - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds of the source. The usual value is 0.5 s.
+    - Why the source: at 200 % speed, Resolve gives about twice as many keyframes as at 100 %. At 50 %, it gives fewer.
+  - Then the picture covers the frame on each axis where it is larger than the frame.
+  - A shot change inside the clip moves the picture at once. The move of a shot does not use frames of the next shot.
+    - Why: a pan across the cut shows the wrong part of each shot ([gotchas](gotchas.md#resolves-edits)).
+    - Where the move does not jump at a shot change, the keyframes go on across it. A jump is a step of more than `tolerance`.
+    - Why: on a picture with no room, each shot change gave two keyframes at the same place.
+  - The keyframes are at the frames where the move bends. `tolerance` is how far the move may be from the line between two keyframes. The usual value is 7 pixels.
+    - The pixels are those of a frame 1920 pixels on its long side. Thus a frame of another size and the same shape gets the same keyframes, as in Resolve.
+    - Why 7 and the long side: on 135 clips of SR2, they give as many keyframes as Resolve, in 9:16, 16:9 and 1:1 timelines. A tolerance of 2 pixels gives the same move.
+    - With the short side, a 1:1 timeline gets a fifth fewer keyframes than in Resolve.
+    - A picture with no room gets keyframes at the first and the last frame. Resolve also sets one near the middle. It does not change the picture.
+  - The new keyframes replace all Position keyframes of the clip. The move uses the zoom, the anchor point, the rotation, the flips and the Dynamic Zoom of each frame, and they stay.
+    - With a rotation and `auto`, the picture moves on its own axes, and the move turns with it. On each axis of the picture, the room is what the turned frame leaves.
+    - Thus with a rotation of 90°, a 16:9 clip in a 9:16 timeline moves across too. With a small rotation, the move is that of the picture with no rotation, turned by the angle.
+    - With a Dynamic Zoom, the move at each frame is that of a zoom of one over the size of its box at that frame.
+  - Each `picture.reframe` is one undo step, "Smart Reframe".
+  - The Video tab of the Inspector has the Smart Reframe section, below Transform: Object of Interest, Mode, Subject, Smooth and Reframe.
+    - Object of Interest is Auto or Reference Point. With more than one clip selected, it is grey at Auto.
+    - Subject has Auto first, then Person, Face, Vehicle and Text. Auto follows what stands out most.
+    - With Reference Point, Subject does not show. The Target button sets the viewer to its Smart Reframe box.
+    - Reframe asks to download the saliency model, the model of the subject, or the tracker, when it is not on this computer.
+    - Reframe is grey while a Smart Reframe runs.
+  - The viewer's Smart Reframe box has four corner handles and a center dot.
+    - A drag inside the box moves it. A drag of a corner changes its size, and its center stays.
+    - The box stays inside the frame.
+    - With Reference Point, Reframe sends the box as `reference`, with the frame at the playhead as `at`.
+    - The Tools row of the viewer has Smart Reframe too. `gui.show` with `smart_reframe` shows the box.
+    - The first box is at the middle of the frame. It has 0.3 of the width of the frame and 0.75 of its height. It stays where the user left it, also on other clips.
+  - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
+  - [design](design/analysis.md#smart-reframe) gives the method.
+
+### 8.31 Gallery and Apply Grade (pp. 3050, 3332–3341, 3361–3366, 3400, 3405)
 
 - The manual:
   - The Gallery is at the left of the viewer on the Color page (p. 3050).
@@ -5893,6 +6019,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The Color page has a Thumbnail timeline too. An arrow next to its Clips button opens the timeline filters (p. 3114).
   - A filter hides the clips that do not meet it. It does not change the edit (p. 3114).
   - Measured: the arrow is only on the Color page. Each timeline keeps its own filter, and the Thumbnail timeline of the Deliver page shows it too.
+  - Measured: a filtered strip numbers its clips from 01. A clip that is 04 under All Clips can be 01 under a filter.
   - Measured: with a filter on, a red line is under Clips on both pages. The manual says orange (p. 3114).
   - Measured: the menu has these groups, with a line between them:
     - All Clips, Selected Clips.
@@ -5903,6 +6030,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Create Smart Filter.
   - Measured: Clip Color has No Clip Color, Any Clip Color and the 16 clip colors. Marked Clips has No Marker, Any Marker and the 16 marker colors.
   - Measured: Modified Clips has Last 1 Hour, Last 2 Hours, Last 3 Hours, Last 6 Hours and Last 24 Hours.
+  - Measured: a clip with an added node that changes nothing is ungraded. So is a clip whose Lift was changed and then reset.
   - Edit Sizing finds the clips with changed Edit Sizing. These are the sizing controls of the Inspector (pp. 3115, 3498).
   - Measured: with a filter on, the Render menu has In/Out Range and All Filtered Clips. It has no Entire Timeline.
   - Measured: All Filtered Clips sets the In and the Out at the span of the filtered clips. The job renders each filtered clip, whole, to a file of its own.
@@ -6089,10 +6217,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.
   - `clip_filter` of `timeline.set` sets the filter of a timeline. A pick of a filter is an undo step.
-  - The Thumbnail timeline of both pages shows only the clips that meet the filter. Each clip keeps its number.
+  - The Thumbnail timeline of both pages shows only the clips that meet the filter. It numbers them from 1.
   - With a filter on, a red line is under Clips.
   - vidcut has Graded, Ungraded, Clips with Composition, Clip Color, Marked Clips, Video Effects, Different Frame Rate and Edit Sizing.
-  - A graded clip has a grade that is not the usual grade. A clip with a composition has a node other than MediaIn and MediaOut.
+  - A graded clip has a grade that changes its picture, or a grade with keyframes. A clip with a composition has a node other than MediaIn and MediaOut.
   - Marked Clips looks at the markers of the media in the part that the clip shows. Edit Sizing looks at the transform and the crop.
   - The other filters are greyed. Those of features that vidcut does not have are in [gaps](todo/gaps.md).
   - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source are greyed ([todo](todo/clip-filter.md)).
@@ -6246,7 +6374,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |
-| Ctrl+Alt+G | Color page: Grab Still ([§8.30](#830-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)) |
+| Ctrl+Alt+G | Color page: Grab Still ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |

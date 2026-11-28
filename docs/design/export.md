@@ -574,8 +574,9 @@ Voice Isolation:
   - `top_at` gives the clip of the top track at a frame. A plain click on a clip under another clip keeps that clip in `thumbnails`. Why: the outline stays on the top clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
-  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.
+  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips that meet it, from 1, as measured.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
+  - Graded and Ungraded use `Grade::is_active`, as the render does. Why: a node or a value that changes nothing does not grade a clip, as measured.
 
 The render queue:
 
@@ -1157,7 +1158,7 @@ The passes:
 
 ## The Gallery
 
-The stills of the Color page ([spec §8.30](../spec.md#830-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
 
 - `Project::stills` holds each `Still` in the project file. A still holds copies of the grades, not links to them. Thus a later change of the clip does not change the still.
 - `ops::gallery` holds the edits: `grab`, `remove`, `apply` and `get`.

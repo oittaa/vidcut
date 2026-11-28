@@ -39,6 +39,7 @@ pub mod past;
 pub mod place;
 pub mod preferences;
 pub mod preview;
+pub mod reframe;
 pub mod render;
 pub mod render_cache;
 pub mod request;

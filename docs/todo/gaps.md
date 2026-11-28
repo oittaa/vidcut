@@ -20,7 +20,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - The Reset of the Dialogue Leveler section, once its values are measured (p. 734; [§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779))
 - The Sizing mode and the Sizing track of the Keyframe Editor of the Color page. They key the Sizing palette, which vidcut does not have (pp. 3455, 3460; [§8.22](../spec.md#822-color-page-keyframes-pp-34533465))
 - The keyframe tracks inside a corrector track (pp. 3458–3459)
-- Apply Grade of a still whose grade has keyframes, and Apply Grades Using. vidcut refuses such a still (pp. 3340, 3363, 3464; [§8.30](../spec.md#830-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405))
+- Apply Grade of a still whose grade has keyframes, and Apply Grades Using. vidcut refuses such a still (pp. 3340, 3363, 3464; [§8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405))
 - Post Group Node Stack Layer and Copy Active Layer. vidcut has no groups and no Timelines album (pp. 3400–3401)
 - On the Export page: Estimated File Size, the Data burn-in of an additional output, and the import and export of a render preset (pp. 4112, 4127; [§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212))
 - The timeline filters for flags, node colors, keywords, people, stereo clips and groups (pp. 3114–3115)

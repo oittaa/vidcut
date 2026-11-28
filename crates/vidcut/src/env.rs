@@ -283,6 +283,16 @@ fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
     (Kind::Analysis.file(&origin, what), origin)
 }
 
+fn looked(name: String, look: &Look) -> String {
+    let us = |secs: f64| (secs * 1e6).round() as i64;
+    format!(
+        "{name}-{}-{}-{}",
+        us(look.from),
+        us(look.to),
+        us(look.every)
+    )
+}
+
 impl Env for AvEnv {
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {
         let canonical = vidcut_core::dirs::canonical(path)
@@ -516,14 +526,7 @@ impl Env for AvEnv {
     ) -> Result<Arc<Detections>> {
         let dir = paths::models_dir();
         vidcut_av::subjects::get_ready(&dir, subject, look.model, download).map_err(av_error)?;
-        let us = |secs: f64| (secs * 1e6).round() as i64;
-        let key = format!(
-            "{}-{}-{}-{}",
-            vidcut_av::subjects::name(subject, look.model),
-            us(look.from),
-            us(look.to),
-            us(look.every)
-        );
+        let key = looked(vidcut_av::subjects::name(subject, look.model), &look);
         let key = look.side.map_or(key.clone(), |s| format!("{key}-s{s}"));
         measured(
             &self.memos.subjects,
@@ -533,6 +536,23 @@ impl Env for AvEnv {
                 let input = vidcut_av::decode::Input::of_media(media);
                 let gpu = (decoder.as_ref(), crate::preferences::gpu_acceleration());
                 vidcut_av::subjects::find(&input, subject, look, gpu, &dir)
+            },
+            Detections::to_bytes,
+            Detections::from_bytes,
+        )
+    }
+
+    fn salience(&self, media: &Media, look: Look, download: bool) -> Result<Arc<Detections>> {
+        let dir = paths::models_dir();
+        vidcut_av::salience::get_ready(&dir, download).map_err(av_error)?;
+        measured(
+            &self.memos.subjects,
+            analysis_file(media, &looked(vidcut_av::salience::name(), &look)),
+            || {
+                let decoder = crate::preferences::gpu_decoding().own_decoder();
+                let input = vidcut_av::decode::Input::of_media(media);
+                let gpu = (decoder.as_ref(), crate::preferences::gpu_acceleration());
+                vidcut_av::salience::find(&input, look, gpu, &dir)
             },
             Detections::to_bytes,
             Detections::from_bytes,
