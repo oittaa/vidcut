@@ -685,7 +685,7 @@ impl Graining {
                 aspect: g.stretch(),
                 seed,
             },
-            frame: if g.freeze { 0 } else { on.frame },
+            frame: if g.freeze { on.held } else { on.frame },
             amount: Self::AMOUNT * strong,
             saturation: g.colorful(),
             curve: [c0 * (1.0 + Self::SHIFT * strong * strong), c1, c2, c3],
@@ -753,6 +753,7 @@ struct OnFrame {
     middle: [f64; 2],
     turn: f64,
     frame: i64,
+    held: i64,
     fit: [f64; 4],
     canvas: [f64; 2],
     back: [f64; 8],
@@ -1392,7 +1393,12 @@ fn matched(t: &Tracker, (w, h): (f64, f64), (start, now): (i64, f64)) -> [[f64; 
     [lookup(undone, from, to), lookup(done, to, from)]
 }
 
-pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)) -> Program {
+pub fn composed(
+    c: &Composition,
+    (w, h): (f64, f64),
+    (frame, source): (i64, f64),
+    held: &[i64],
+) -> Program {
     let Some((order, uses)) = c.picture_order() else {
         return Program::clear();
     };
@@ -1402,6 +1408,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
         middle: [w / 2.0, h / 2.0],
         turn: 0.0,
         frame,
+        held: 0,
         fit: [0.0, 0.0, w, h],
         canvas: [w, h],
         back: frame_back((w, h)),
@@ -1418,7 +1425,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
             .collect()
     };
     let masks = |n: &Node| masks_on(n, NodeInput::EffectMask);
-    let work = |n: &Node, shaped: Masks, mix: f64| {
+    let work = |n: &Node, shaped: Masks, mix: f64, held: i64| {
         let mut working = match &n.tool {
             _ if n.pass_through => return None,
             Tool::Blur(b) => Working::of_blur(b, mix, w)?,
@@ -1428,7 +1435,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
                     blend: Some(mix),
                     ..EffectType::of(kind).made()
                 };
-                let mut working = Working::of(&effect, &on)?;
+                let mut working = Working::of(&effect, &OnFrame { held, ..on })?;
                 if let (Work::Blur(b), false) = (&mut working.work, n.blur_alpha) {
                     b.across[3] = 0.0;
                     b.down[3] = 0.0;
@@ -1668,21 +1675,23 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)
                     b
                 }
             }),
-            _ => first.map(|r| match work(n, shaped, mix) {
-                None => {
-                    regs.read(r);
-                    r
-                }
-                Some(working) => {
-                    let to = regs.written(r);
-                    stages.push(Stage {
-                        op: Op::Work(working),
-                        from: vec![r],
-                        to,
-                    });
-                    to
-                }
-            }),
+            _ => first.map(
+                |r| match work(n, shaped, mix, held.get(i).copied().unwrap_or(0)) {
+                    None => {
+                        regs.read(r);
+                        r
+                    }
+                    Some(working) => {
+                        let to = regs.written(r);
+                        stages.push(Stage {
+                            op: Op::Work(working),
+                            from: vec![r],
+                            to,
+                        });
+                        to
+                    }
+                },
+            ),
         };
         let result = match (result, outer) {
             (Some(r), Some(outer)) => Some(masked(&mut stages, &mut regs, r, outer, (w, h))),
@@ -2011,6 +2020,7 @@ impl Placing {
             middle: ahead(&own.back, unzoomed),
             turn: p.picture.turn_at(p.source as f64),
             frame: p.frame,
+            held: 0,
             fit: fitted,
             canvas: [frame.0, frame.1],
             back: own.back,
@@ -2019,7 +2029,10 @@ impl Placing {
             .picture
             .effects
             .iter()
-            .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
+            .filter_map(|e| {
+                let held = e.held(p.source, p.frame);
+                Working::of(&e.sampled(p.source as f64), &OnFrame { held, ..on })
+            })
             .collect();
         let windows = window_back(&own.back, fitted, frame);
         let graded = (p.picture.grade.as_ref())
@@ -2042,8 +2055,10 @@ impl Placing {
             .as_ref()
             .map_or_else(Program::default, |c| {
                 let frame = p.clock.frame(p.source);
-                let sampled = c.sampled((frame - c.start) as f64, frame as f64);
-                composed(&sampled, pixels, (p.frame, frame as f64))
+                let at = frame - c.start;
+                let held: Vec<i64> = c.nodes.iter().map(|n| n.held(at, p.frame)).collect();
+                let sampled = c.sampled(at as f64, frame as f64);
+                composed(&sampled, pixels, (p.frame, frame as f64), &held)
             });
         Self {
             level: own,

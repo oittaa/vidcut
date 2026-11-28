@@ -236,14 +236,17 @@ pub(super) fn kind_applied(kind: &mut EffectKind, c: &mut KindChange) -> Result<
 
 fn named_values(e: &Effect, change: &EffectChange) -> Result<Vec<EffectValue>> {
     let values = e.values();
-    let mut probe = e.clone();
-    for v in &values {
-        probe.write(*v, f64::NAN);
-    }
-    let probe = applied(&probe, change)?;
+    let probe = |fill: f64| {
+        let mut probe = e.clone();
+        for v in &values {
+            probe.write(*v, if v.switch() { fill } else { f64::NAN });
+        }
+        applied(&probe, change)
+    };
+    let (off, on) = (probe(0.0)?, probe(1.0)?);
     Ok(values
         .into_iter()
-        .filter(|v| probe.takes(*v) && !probe.plain(*v).is_nan())
+        .filter(|v| off.takes(*v) && !off.plain(*v).is_nan() && off.plain(*v) == on.plain(*v))
         .collect())
 }
 

@@ -7021,6 +7021,8 @@ pub struct EffectKeys {
 /// `seethe_rate` and the four channels of `color1` and `color2`. A title has
 /// the values of its shadow and its background, from `shadow_offset` to
 /// `background_opacity`. `shadow_offset` and `background_center` are points.
+/// `freeze` of a Film Grain is a curve from 0 to 1. Freeze is on where the
+/// curve is 0.5 or more.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -7069,6 +7071,7 @@ pub enum EffectValue {
     AtmosphereSeethe,
     Recovery,
     Opacity,
+    Freeze,
     Texture,
     GrainSize,
     GrainAspect,
@@ -7652,7 +7655,9 @@ pub struct FilmGrain {
     /// Shows the grain alone, with the picture's alpha. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub grain_only: bool,
-    /// The grain of the clip's first frame on each frame. Usual: off.
+    /// The grain of the clip's first frame on each frame. With keyframes,
+    /// a frozen frame has the grain of the latest Freeze keyframe at or
+    /// before it. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub freeze: bool,
     /// The pattern of the grain, from 0 to 1: a higher value has a narrower
@@ -8021,7 +8026,9 @@ impl Effect {
     pub fn moves_by_itself(&self) -> bool {
         match &self.kind {
             EffectKind::Glow(g) => g.atmosphere,
-            EffectKind::FilmGrain(g) => !g.freeze,
+            EffectKind::FilmGrain(g) => {
+                !g.freeze || self.keys.iter().any(|k| k.value == EffectValue::Freeze)
+            }
             _ => false,
         }
     }

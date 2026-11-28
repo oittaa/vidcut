@@ -725,36 +725,42 @@ fn shading_applied(s: &mut ShadingElement, left: &mut NodeChange) -> Result<()> 
     Ok(())
 }
 
-fn probed<K: Keyed>(k: &mut K) -> Vec<EffectValue> {
+fn probed<K: Keyed>(k: &mut K, fill: f64) -> Vec<EffectValue> {
     let values: Vec<EffectValue> = (EffectValue::ALL.into_iter())
         .filter(|v| k.takes(*v))
         .collect();
     for v in &values {
-        k.write(*v, f64::NAN);
+        k.write(*v, if v.switch() { fill } else { f64::NAN });
     }
     values
 }
 
-fn named<K: Keyed>(values: Vec<EffectValue>, probe: &K) -> Vec<EffectValue> {
+fn named<K: Keyed>(values: Vec<EffectValue>, (off, on): (&K, &K)) -> Vec<EffectValue> {
     (values.into_iter())
-        .filter(|v| probe.takes(*v) && !probe.plain(*v).is_nan())
+        .filter(|v| off.takes(*v) && !off.plain(*v).is_nan() && off.plain(*v) == on.plain(*v))
         .collect()
 }
 
+type Probe = (Node, Vec<EffectValue>, Vec<EffectValue>);
+
 fn named_values(n: &Node, change: &NodeChange) -> Result<(Vec<EffectValue>, Vec<EffectValue>)> {
     let k = element_of(&mut change.clone())?;
-    let mut probe = n.clone();
-    let values = probed(&mut probe);
-    let parts = match &mut probe.tool {
-        Tool::TextPlus(t) => probed(t.element_mut(k)),
+    let probe = |fill: f64| -> Result<Probe> {
+        let mut probe = n.clone();
+        let values = probed(&mut probe, fill);
+        let parts = match &mut probe.tool {
+            Tool::TextPlus(t) => probed(t.element_mut(k), fill),
+            _ => Vec::new(),
+        };
+        Ok((applied(&probe, change)?, values, parts))
+    };
+    let (off, values, parts) = probe(0.0)?;
+    let (on, _, _) = probe(1.0)?;
+    let shaded = match (&off.tool, &on.tool) {
+        (Tool::TextPlus(a), Tool::TextPlus(b)) => named(parts, (&a.element(k), &b.element(k))),
         _ => Vec::new(),
     };
-    let probe = applied(&probe, change)?;
-    let shaded = match &probe.tool {
-        Tool::TextPlus(t) => named(parts, &t.element(k)),
-        _ => Vec::new(),
-    };
-    Ok((named(values, &probe), shaded))
+    Ok((named(values, (&off, &on)), shaded))
 }
 
 fn keyed_into<K: Keyed>(

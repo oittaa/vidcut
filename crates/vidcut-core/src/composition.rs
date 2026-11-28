@@ -2142,6 +2142,7 @@ impl Composition {
         self.nodes.iter().any(|n| match &n.tool {
             Tool::Effect(kind) => crate::model::Effect {
                 kind: kind.clone(),
+                keys: n.keys.clone(),
                 ..EffectType::of(kind).made()
             }
             .moves_by_itself(),

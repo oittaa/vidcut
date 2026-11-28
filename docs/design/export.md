@@ -808,7 +808,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
   - `place::GlowSpread` holds the sigma of each color across and down, for one glow, and its grid. The sigma comes from the area of the picture on the frame (`Glow::SIGMA`).
   - `place::GlowNoise` holds the Atmosphere noise at this frame. `Placed.frame` gives the frame of the clip.
-  - `Effect::moves_by_itself` is true for a Glow with Atmosphere and for a Film Grain without Freeze. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
+  - `Effect::moves_by_itself` is true for a Glow with Atmosphere, and for a Film Grain without Freeze or with Freeze keyframes. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
 - `place::Graining` holds what `fs_grain` needs for a Film Grain. `place::GrainTile` holds what makes its picture of noise.
 - `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.

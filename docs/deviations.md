@@ -1375,12 +1375,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The OpenEXR writer of vidcut writes this attribute for each level that it gets.
   - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.
 
-## X152. Film Grain Freeze has no keyframes
-
-- **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
-- **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md)).
-
 ## X153. Every clip pans as on a stereo track
 
 - **Resolve:**

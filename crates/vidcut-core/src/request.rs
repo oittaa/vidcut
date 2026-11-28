@@ -8160,7 +8160,8 @@ pub struct KindChange {
     /// Shows a Film Grain alone, with the picture's alpha.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grain_only: Option<bool>,
-    /// The grain of the clip's first frame on each frame.
+    /// The grain of the clip's first frame on each frame. With Freeze
+    /// keyframes, a change puts a keyframe of 0 or 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freeze: Option<bool>,
     /// The pattern of a Film Grain, from 0 to 1.
