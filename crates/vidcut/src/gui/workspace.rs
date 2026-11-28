@@ -162,7 +162,7 @@ pub struct Workspace {
     pub(super) gallery: super::gallery::Gallery,
 }
 
-const ALONE: [&str; 7] = [
+const ALONE: [&str; 8] = [
     "edit.compound",
     "edit.move",
     "edit.trim",
@@ -170,6 +170,7 @@ const ALONE: [&str; 7] = [
     "edit.slip",
     "edit.slide",
     "edit.delete",
+    "edit.split",
 ];
 
 fn alone(method: &str, params: &mut Value) {
@@ -2003,6 +2004,17 @@ impl Workspace {
                 "clip.set",
                 json!({ "clips": self.snap.selection.clips, "enabled": !enabled }),
             );
+        }
+        for (action, fade) in [
+            (Action::FadeInToPlayhead, "in"),
+            (Action::FadeOutToPlayhead, "out"),
+        ] {
+            if fired.pressed(action) && !self.snap.selection.clips.is_empty() {
+                self.send(
+                    "clip.fade_to_playhead",
+                    json!({ "clips": self.snap.selection.clips, "fade": fade }),
+                );
+            }
         }
         if fired.pressed(Action::VoiceIsolation) {
             let clips = self.snap.selection.clips.clone();

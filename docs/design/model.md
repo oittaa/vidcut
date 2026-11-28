@@ -63,6 +63,7 @@ classDiagram
   class ClipAudio {
     stream
     gain_db, muted, pan, equalizer, dialogue_leveler, compressor, noise_reduction, voice_isolation
+    fade_in, fade_out
   }
   class Keyframe {
     frame, value
@@ -201,6 +202,15 @@ Volume and Pan keyframes ([spec D81](../spec.md#12-decisions-on-gaps-and-contrad
 - With pan keyframes and `pan_on`, the pan is their curve (`ClipAudio::pan_at`), and `pan` is not heard.
 - `keyframes::reshape` makes each change. It keeps the order, one keyframe on a frame, and the ease of each keyframe.
 - `ops::keyframes` holds the requests. `ops::change_speed` moves the keyframes with `keyframes::retimed`.
+
+Clip fades ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)):
+
+- `ClipAudio::fade_in` and `ClipAudio::fade_out` hold a `SoundFade`: `frames`, `x_level` and `x_point`. A clip with no fade leaves them out.
+- The module `fades` holds the ranges (`X_LEVEL`, `X_POINT`), the Batch Fades shapes (`SHAPES`) and the curve (`SoundFade::along`).
+- `ClipAudio::fade_lengths` gives the lengths that play. The fade in comes first, and the fade out takes what is left of the clip.
+- `fades::fitted` refuses two fades that are longer than the clip together. `clip.set`, `ops::fades::to_playhead` and `ops::fades::batch` call it.
+- `ClipAudio::cut` clears the fade at each cut end. `split_at` and `cut_to` use it. `joined` refuses a fade at the meeting point.
+- `ops::fades::batch` puts the cross fades of Batch Fades with `transition::batch_cross_fade`. It returns `Batched`, with the ends that it kept (`Skipped`).
 
 Speeds ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
@@ -402,7 +412,7 @@ Ranges and resolution:
 
 - `origin` turns `MediaInfo.timecode` into frames of the open timeline with `StartTimecode::frames_at`. A file with no tag counts as 0.
   - `origin` and `shown` choose the reference clip.
-- `Grid` and `Spot` line up the files on the frame grid of the project ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+- `Grid` and `Spot` line up the files on the frame grid of the project ([spec §7.4](../spec.md#74-sync-bin-pp-708710)).
   - `Grid::place` gives the project frame of a timeline frame: the first project frame that is not before it.
     - Its time is the exact source time of the reference clip.
   - `Spot` holds the start of a file as a whole project frame, rounded down. With a group, it is the place of the file in the group.
@@ -655,7 +665,7 @@ Writing:
 
 ## Adjustment clips
 
-- `Clip::adjustment` marks an adjustment clip ([spec §8.24](../spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)): no media, no audio, no speed, no motion paths, on a video track.
+- `Clip::adjustment` marks an adjustment clip ([spec §8.24](../spec.md#824-adjustment-clips-pp-1145-1154-33753376)): no media, no audio, no speed, no motion paths, on a video track.
 - `Clip::ADJUSTMENT_CLIP` is its display name and OTIO generator kind (`otio::generators::adjustment_reference`). `Project::clip_name` returns it when `Clip::name` is absent.
 - `ops::titles::add_adjustment` shares `ops::titles::add_block` and `ops::block_clip` with titles and generators, backing `adjustment.add` and `edit.*` adjustment sources.
 - `ops::picture::has_picture` and `ops::picture::takes_effects` accept it, while `ops::speed` and `ops::motion::takes` refuse it.
@@ -705,7 +715,7 @@ Writing:
   - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus `Level.back` is a projective map. Without a lean, it is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 - The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
-- `ops::attributes` holds Paste Attributes and Remove Attributes ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+- `ops::attributes` holds Paste Attributes and Remove Attributes ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156)).
   - `paste` moves the keyframes of the copied picture to the clip with `Picture::scale_times`. Then it takes each chosen value with `Picture::take_channel`.
   - `Picture::take_axis` takes one axis of the zoom. It keeps the keyframes of the other axis.
     - It keeps only the keyframes that change an axis. When no axis changes, the zoom has no keyframes.
@@ -917,7 +927,7 @@ The metadata:
 | `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `pan_on`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` and `pan_keys` from the item's first source frame |
 | `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, with the motion paths of its composition, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
-| `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
+| `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames` and the fades (`effects::sound`), pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
 | `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
@@ -971,7 +981,7 @@ Import:
   - Place On Top of sound alone gives the `playhead` at the end of the new clips. `moves_playhead` lets `playhead_after_edit` seek there. Place On Top of a picture gives none, so the playhead stays.
   - `linked::sounds` gives the linked sound clips of a picture clip. The sound requests, the Inspector and the clip menu use it. Why: a picture clip has no sound of its own.
   - `follow::follow` moves a clip that is linked to a V1 clip by the change of the start of that clip. Thus a J/L cut keeps its offset.
-  - `linked::link` gives the clips one new link number. `linked::unlink` takes the link of each clip away.
+  - `linked::link` gives the clips one new link number. It writes `linked_at` on each clip: `start` less `source_in`. `linked::unlink` takes the link and `linked_at` of each clip away.
   - `linked::end_lone` ends each group with one clip left. The editor calls it after each request. Thus an edit that cuts one clip of a group leaves no group of one clip.
   - `linked::alone` takes the named clips out of their groups for one edit, then gives the links back.
     - The requests with `alone` use it (`linked::apart`). Thus each edit acts on the named clips only, and no edit function needs a second form.
@@ -979,11 +989,17 @@ Import:
     - Why: they must not follow Track 1 ([spec D21](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus a picture on Track 1 moves or slides apart from its sound.
     - A clip that goes back onto another clip goes to the next free track of its kind (`follow::settle`).
     - `edit.roll` and `edit.slide` also name the clips beside the clip (`linked::touching`). Thus their sound does not change either.
-  - `linked::offset` gives the sync offset of a clip. It compares the clip with the first linked clip of the same media and the other kind.
-    - The offset is the frames between the start of each clip, less the frames between their source starts. A clip with a speed change has none.
+  - `linked::offset` gives the sync offset of a clip. It compares the clip with a linked clip of the other kind.
+    - A sound clip compares with the first picture. A picture compares with the first sound clip that is out of sync with it.
+    - The offset is the frames between the start of each clip, less the frames between their source starts. With `linked_at`, the same difference at the time of the link is taken away. Why: the offset counts from the moment of the link.
+    - Without `linked_at`, only clips of the same media have an offset. A clip with a speed change has none.
+    - `conform::clip` changes the frame rate of a clip. It also writes `linked_at` at the new rate, and keeps the time that the clip moved since the link. Thus a clip in sync stays in sync.
     - `linked::offsets` gives the offset of each clip of the timeline in one pass. `clip_json` writes it as `sync`.
-  - `linked::resync` slips or moves the clip, or its other linked clips of the same media, by their offsets. Each part acts alone.
-    - `linked::others` gives the other clips only for a clip with an offset. Thus the four commands go with the offset.
+  - `linked::resync` slips or moves the clip, or the other clips of its group that are out of sync with it, by their offsets. Each part acts alone.
+    - `linked::others` gives the other clips only for a clip with an offset. Thus the four fixes go with the offset.
+    - `linked::fixes` tells which of the four fixes a clip takes. `linked::resync` refuses the others.
+  - `edit.split` with `alone` uses `linked::apart` too. `split_at` gives the part after the cut no link, because the clip has none during the edit.
+  - The OpenTimelineIO export writes `linked_at` in the vidcut metadata of each clip, and the import reads it back.
 - `clear_range` keeps the link groups of the clips that it cuts:
   - A clip that loses its head keeps its group.
   - The right piece of a middle cut can match a piece on another track: the same media, start and source start. It then takes the group of that piece (`piece_link`).
@@ -1061,6 +1077,7 @@ Kept data:
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
 | the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
+| the sound fades (`effects::sound_fade`) | `ClipAudio::fade_in` and `ClipAudio::fade_out`, taken out of the kept effect (`effects::drop_fades`) |
 | the clip pan (`effects::pan`, `effects::pan_on`, `effects::pan_keys`) | `pan`, `pan_on` and `ClipAudio::pan_keys`, taken out of carried effects (`effects::drop_pan`) |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |

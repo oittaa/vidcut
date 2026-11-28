@@ -204,6 +204,7 @@ pub struct ExportUi {
     pub(super) hide_clips: bool,
     pub(super) clip_label: vidcut_core::request::ClipLabel,
     pub(super) strip: Option<super::thumbnail_timeline::Strip>,
+    pub(super) strip_focus: bool,
     pub(super) queue: Option<super::export_page::QueueStep>,
     pub(super) renaming: Option<super::export_page::Renaming>,
     starting: Option<Starting>,

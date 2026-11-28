@@ -6,7 +6,7 @@ use serde_json::json;
 use vidcut_core::model::{Clip, Media, Project, RenderRange};
 use vidcut_core::ops::clip_filter;
 use vidcut_core::render::VideoPiece;
-use vidcut_core::request::ClipLabel;
+use vidcut_core::request::{ClipLabel, Page};
 use vidcut_core::time::format_timecode;
 
 use super::theme;
@@ -113,7 +113,10 @@ impl Workspace {
         let mut picked = None;
         let mut action: Option<(Mark, i64, i64)> = None;
         let mut cycle = false;
-        egui::ScrollArea::horizontal()
+        let grading = self.effects_page.page == Page::Color;
+        let takers = |from: &str| targets(list, selected, current, from);
+        let mut apply = None;
+        let shown = egui::ScrollArea::horizontal()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
@@ -176,7 +179,21 @@ impl Workspace {
                         if picture.clicked() {
                             picked = Some((i, ui.input(|input| input.modifiers)));
                         }
+                        if grading && picture.middle_clicked() && !takers(&t.clip).is_empty() {
+                            apply = Some(t.clip.clone());
+                        }
                         picture.context_menu(|ui| {
+                            if grading {
+                                let can = !takers(&t.clip).is_empty();
+                                if ui
+                                    .add_enabled(can, egui::Button::new("Apply Grade"))
+                                    .clicked()
+                                {
+                                    apply = Some(t.clip.clone());
+                                    ui.close();
+                                }
+                                ui.separator();
+                            }
                             if ui.button("Mark In").clicked() {
                                 action = Some((Mark::In, t.start, t.end));
                                 ui.close();
@@ -194,8 +211,19 @@ impl Workspace {
                     }
                 });
             });
+        let pressed = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()));
+        if let Some(spot) = pressed.flatten() {
+            self.export.strip_focus = shown.inner_rect.contains(spot);
+        }
         let pick = picked.and_then(|(i, mods)| pick(list, selected, current, at, i, mods));
+        let apply = apply.map(|from| {
+            let clips = takers(&from);
+            json!({ "from": from, "clips": clips })
+        });
         self.export.strip = Some(strip);
+        if let Some(params) = apply {
+            self.send("grade.apply", params);
+        }
         if cycle {
             self.export.clip_label = match label {
                 ClipLabel::Codec => ClipLabel::Name,
@@ -252,6 +280,25 @@ impl Workspace {
         ]);
         self.send("apply", json!({ "commands": commands }));
     }
+
+    pub(super) fn strip_grades(&self) -> Option<(String, Vec<String>)> {
+        if !self.export.strip_focus {
+            return None;
+        }
+        let list = &self.export.strip.as_ref()?.thumbs;
+        let current = top_at(list, self.snap.timeline.position)?;
+        let clip = list[current].clip.clone();
+        let selected = &self.snap.selection.thumbnails;
+        Some((clip, targets(list, selected, Some(current), "")))
+    }
+}
+
+fn targets(list: &[Thumb], selected: &[String], current: Option<usize>, from: &str) -> Vec<String> {
+    (list.iter().enumerate())
+        .filter(|(i, t)| current == Some(*i) || selected.contains(&t.clip))
+        .filter(|(_, t)| t.clip != from)
+        .map(|(_, t)| t.clip.clone())
+        .collect()
 }
 
 struct Pick {

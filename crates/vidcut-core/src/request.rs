@@ -11,13 +11,13 @@ use crate::model::{
     AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
     Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
     EbuLevel, EffectType, EffectValue, FillMethod, FindModel, FindValues, GeneratorKind, GlowAlpha,
-    GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
-    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel, PictureTool,
-    PictureTransition, PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing,
-    SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType,
-    TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind,
-    ZoomBox,
+    GlowFraming, GlowOutput, Grade, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop,
+    GradientType, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel,
+    MergeEdges, MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel,
+    PictureTool, PictureTransition, PivotType, Place, ReferenceTime, Stabilization, StabilizeMode,
+    Stabilizing, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
+    ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape,
+    WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1166,6 +1166,11 @@ pub enum Request {
         /// Only split these clips.
         #[serde(default)]
         clips: Vec<ClipRef>,
+        /// Split these clips alone, not the clips linked to them (Linked
+        /// Selection off). The part before the split stays in the link
+        /// group. The part after it has no link.
+        #[serde(default)]
+        alone: bool,
     },
     /// Join Match Edit Clips: clips that a split left join back into one.
     /// Two or more `clips` join where they meet. Otherwise the clips that
@@ -1542,9 +1547,14 @@ pub enum Request {
         by: TimeSpec,
     },
     /// Bring a clip and the clips linked to it back into sync. A clip is out
-    /// of sync when its media plays at another time than in a linked clip of
-    /// the same media and the other kind (picture or sound). Clips with a
-    /// speed change have no sync offset. One undo step.
+    /// of sync when it plays at another time against a linked clip of the
+    /// other kind (picture or sound) than when `clip.link` linked them.
+    /// Clips that `clip.link` did not link are out of sync only against
+    /// clips of the same media. A picture is out of sync when one of its
+    /// sound clips is. Clips with a speed change have no sync offset. A
+    /// picture with two or more sound clips takes only the `others` fixes.
+    /// A picture with one sound clip takes no fix that moves a clip later.
+    /// One undo step.
     #[serde(rename = "edit.resync")]
     EditResync { clip: ClipRef, how: Resync },
     /// Move clips' head or tail to `at` (Trim Start/End to Playhead).
@@ -1882,8 +1892,8 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, Noise Reduction, name,
-    /// Clip Color, Voice Isolation, Retime Process and Render Cache. The sound settings of a picture clip go to
+    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, Noise Reduction,
+    /// fades, name, Clip Color, Voice Isolation, Retime Process and Render Cache. The sound settings of a picture clip go to
     /// its linked sound clips.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1939,6 +1949,22 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         noise_reduction: Option<Option<NoiseReductionSet>>,
+        /// The fade in at the start of the sound: each field given replaces
+        /// its own, and null takes it off. The fade in and the fade out
+        /// together are not longer than the clip.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        fade_in: Option<Option<SoundFadeSet>>,
+        /// The fade out at the end of the sound, as `fade_in`.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        fade_out: Option<Option<SoundFadeSet>>,
         /// Where `gain_db` or `pan` goes as a keyframe on clips with volume or
         /// pan keyframes: the playhead by default.
         #[serde(default)]
@@ -2032,6 +2058,37 @@ pub enum Request {
     /// group with one clip left ends. One undo step.
     #[serde(rename = "clip.unlink")]
     ClipUnlink { clips: OneOrMany<ClipRef> },
+    /// Fade In to Playhead and Fade Out to Playhead: the fade in of each
+    /// sound clip that `at` (default: the playhead) is inside ends at `at`,
+    /// or its fade out starts there. A picture clip gives its linked sound
+    /// clips, and the other clips are left out. A fade keeps its curve, and
+    /// a new one is a straight line. One undo step.
+    #[serde(rename = "clip.fade_to_playhead")]
+    ClipFadeToPlayhead {
+        clips: OneOrMany<ClipRef>,
+        /// `in` or `out`.
+        fade: FadeEnd,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
+    /// Batch Fades: fades and cross fades on the sound of `clips`. A picture
+    /// clip gives its linked sound clips. An edit between two of the clips
+    /// gets the `cross_fade`, centered on it, where both sides have the
+    /// frames. Each other end of a clip gets the `fade_in` or `fade_out` that
+    /// fits in the clip. Each part left out does nothing. One undo step.
+    /// Returns the clips that got a fade (`faded`), the new transitions
+    /// (`cross_faded`), and the ends and edits left as they were (`skipped`),
+    /// with the reason.
+    #[serde(rename = "clip.batch_fades")]
+    ClipBatchFades {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        fade_in: Option<BatchFade>,
+        #[serde(default)]
+        fade_out: Option<BatchFade>,
+        #[serde(default)]
+        cross_fade: Option<BatchCrossFade>,
+    },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
     /// that their level reaches `target`. A picture clip gives its linked
     /// sound clips. Each clip is measured over the
@@ -3391,8 +3448,10 @@ pub enum Request {
     /// Copy the settings of a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade (Ctrl+C on the Color page): its
     /// values, its keyframes, its label and whether it is on. Returns them
-    /// as `settings`, ready for `grade.paste`. The GUI also keeps them on
-    /// its clipboard.
+    /// as `settings`, ready for `grade.paste`. Without `node`, copy the
+    /// whole clip grade of `clip`, with each node stack layer (Ctrl+C in
+    /// the Thumbnail timeline). Returns it as `grade`, ready for
+    /// `grade.apply`. The GUI also keeps them on its clipboard.
     #[serde(rename = "grade.copy")]
     GradeCopy {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3404,7 +3463,32 @@ pub enum Request {
         /// `node_stack_layers` count. Not with `timeline`. Left out: layer 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<usize>,
-        node: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+    },
+    /// Give clips the whole clip grade of another clip, with each node
+    /// stack layer, in place of their own (Apply Grade). Each keyframe
+    /// stays on its source frame. Give one of `from`, `prior` and `grade`.
+    /// With none of them: the GUI's copied grade (Ctrl+V in the Thumbnail
+    /// timeline).
+    #[serde(rename = "grade.apply")]
+    GradeApply {
+        /// The clip that gives its grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<ClipRef>,
+        /// 1 or 2: the clip at the playhead takes the grade of the clip one
+        /// or two places before it in the Thumbnail timeline (Apply Grade
+        /// From One Clip Prior, Apply Grade From Two Clips Prior). Not with
+        /// `clips`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prior: Option<u32>,
+        /// A whole clip grade, as `grade.copy` without `node` gives it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grade: Option<Grade>,
+        /// The clips that take the grade. Left out: the clip of the
+        /// Thumbnail timeline at the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
     },
     /// Give a corrector of the grade of clips, or with `timeline` of the
     /// timeline grade, copied settings in place of its own (Ctrl+V on the
@@ -3471,6 +3555,29 @@ pub enum Request {
     /// with no adjustment.
     #[serde(rename = "grade.shared.delete")]
     GradeSharedDelete { shared: u64 },
+    /// Ripple Node Changes to Selected Clips: give the changes of a
+    /// corrector of the grade of a clip to the corrector of the same number
+    /// in the grades of other clips. A change is a setting that differs
+    /// from `before`. A changed part that one of the two has at its usual
+    /// value goes whole, and so do changed keyframes. The label and whether
+    /// the node is on do not go. A clip with no corrector of that number, or
+    /// with a locked one, takes nothing. Returns the clips that took the
+    /// changes, as `clips`.
+    #[serde(rename = "grade.ripple")]
+    GradeRipple {
+        /// The clip whose corrector changed.
+        clip: ClipRef,
+        /// The node stack layer of the grades, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+        /// The settings of the corrector before the changes, as
+        /// `grade.copy` gives them.
+        before: CopiedNode,
+        /// The clips that take the changes.
+        clips: OneOrMany<ClipRef>,
+    },
     /// Place the nodes of the grade of a clip, or with `timeline` of the
     /// timeline grade, in an even grid. Each node goes in the column of its
     /// longest path from the source. A chain stays on one row, and the
@@ -4002,6 +4109,29 @@ pub enum Request {
         /// grade. Not with the `timeline` grade.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clips: Option<OneOrMany<ClipRef>>,
+        /// The grade that changes. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
+    },
+    /// Append Node Graph: add the nodes of a still after the output of
+    /// grades. They take the picture that the grade gave out, and give the
+    /// picture out. With the `clip` grade, the nodes of the same node stack
+    /// layer of the clip grade of the still go to clips. With the
+    /// `timeline` grade, the nodes of the timeline grade of the still go to
+    /// the timeline grade of the open timeline. A grade with keyframes is
+    /// refused.
+    #[serde(rename = "gallery.append")]
+    GalleryAppend {
+        /// The id of the still (`s1`).
+        still: String,
+        /// The clips that get the nodes. Left out: the topmost clip at the
+        /// playhead that takes a grade. Not with the `timeline` grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The node stack layer, from 1 to the project's `node_stack_layers`
+        /// count. Not with the `timeline` grade. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The grade that changes. Left out: `clip`.
         #[serde(default)]
         grade: GradeLevel,
@@ -6907,11 +7037,11 @@ pub enum Resync {
     Slip,
     /// Move into Place: move the clip, over what is there.
     Move,
-    /// Slip Others into Place: slip the content of each other clip of the
-    /// same media in its group.
+    /// Slip Others into Place: slip the content of each other clip of its
+    /// group that is out of sync with it, each by its own offset.
     SlipOthers,
-    /// Move Others into Place: move each other clip of the same media in its
-    /// group.
+    /// Move Others into Place: move each other clip of its group that is
+    /// out of sync with it, each by its own offset, over what is there.
     MoveOthers,
 }
 
@@ -8293,7 +8423,8 @@ pub struct KindChange {
     /// Shows a Film Grain alone, with the picture's alpha.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grain_only: Option<bool>,
-    /// The grain of the clip's first frame on each frame.
+    /// The grain of the clip's first frame on each frame. With Freeze
+    /// keyframes, a change puts a keyframe of 0 or 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freeze: Option<bool>,
     /// The pattern of a Film Grain, from 0 to 1.
@@ -8746,6 +8877,75 @@ pub struct NoiseReductionSet {
 /// 19000 Hz, both off. Band 2 is a `lo_shelf` at 117 Hz, bands 3 and 4 are
 /// `bell` filters at 239 and 1200 Hz, and band 5 is a `hi_shelf` at
 /// 6000 Hz.
+/// A fade of a clip's sound: each field given replaces its own. A new fade
+/// needs `frames`, and its curve starts as a straight line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SoundFadeSet {
+    /// The length in frames from the edge of the clip, more than 0.
+    #[serde(default)]
+    pub frames: Option<f64>,
+    /// X-Level, from -120 to -10. -60 at an X-Point of 50 is a straight
+    /// line.
+    #[serde(default)]
+    pub x_level: Option<f64>,
+    /// X-Point, in percent of the fade from its left end, from 1 to 99.
+    #[serde(default)]
+    pub x_point: Option<f64>,
+}
+
+/// Which end of a clip's sound fades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FadeEnd {
+    /// The fade in at the start.
+    In,
+    /// The fade out at the end.
+    Out,
+}
+
+/// The Fade In or Fade Out of Batch Fades.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchFade {
+    /// The length in frames, 1 or more.
+    pub frames: i64,
+    /// The curve: X-Level and X-Point as in `clip.set`. Left out, a
+    /// straight line.
+    #[serde(default)]
+    pub x_level: Option<f64>,
+    #[serde(default)]
+    pub x_point: Option<f64>,
+    /// Replace a fade that a clip has. Without it, that fade stays.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+/// The Crossfade of Batch Fades.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchCrossFade {
+    /// The length in frames, 1 or more, centered on the edit.
+    pub frames: i64,
+    /// `equal_power` keeps the power of the sound (a Cross Fade +3 dB).
+    /// `equal_gain` keeps its gain (a Cross Fade 0 dB).
+    #[serde(default)]
+    pub kind: CrossFadeKind,
+    /// Replace a transition that an edit has. Without it, that transition
+    /// stays.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+/// How a cross fade of Batch Fades keeps the level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CrossFadeKind {
+    #[default]
+    EqualPower,
+    EqualGain,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EqualizerSet {

@@ -25,3 +25,4 @@
 - Don't show until next copy in Paste Attributes.
 - Paste Attributes of a copied speed that has keyframes.
 - The Stabilization tool of the viewer, and the Stabilizer mode and the graph of the Tracker palette.
+- Resync Clip in the Edit Actions of the Cut page.

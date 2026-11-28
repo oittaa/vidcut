@@ -13,9 +13,9 @@ use vidcut_core::render_cache::Part;
 use vidcut_core::time::Rational;
 
 use super::geometry::{
-    Banded, Bands, Rows, Scale, TrackRect, band, chosen_on, clips_in, covered, curve_y,
-    handle_point, key_point, over, sound_band, speed_keyframes, speed_labels, speed_strip,
-    volume_y,
+    Banded, Bands, FADE_HANDLE, Rows, Scale, TrackRect, VOLUME_BAND, band, chosen_on, clips_in,
+    covered, curve_y, fade_handle, fade_point, fade_span, fade_y, handle_point, key_point, over,
+    sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
 };
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
@@ -30,6 +30,7 @@ pub struct Look {
     pub filmstrips: bool,
     pub waveforms: bool,
     pub target: bool,
+    pub fades: bool,
 }
 
 pub struct Assets<'a> {
@@ -437,8 +438,14 @@ fn sound(
     if (look.waveforms || sound_only) && !muted && !offline && audio.height() >= 8.0 {
         waveform(&ap, audio, scale, p, c, assets, fps);
     }
+    if look.fades {
+        fade_ramps(&ap, audio, scale, c);
+    }
     if line {
         volume_line(&ap, audio, scale, c, assets.keys);
+    }
+    if look.fades && !t.locked && audio.height() >= VOLUME_BAND {
+        fade_handles(&ap, audio, scale, c);
     }
     if muted && look.status {
         ap.text(
@@ -591,8 +598,11 @@ fn clip(
         && width > 30.0
         && let Some(d) = assets.sync.get(c.id.as_str())
     {
-        let galley =
-            painter.layout_no_wrap(format!("{d:+}"), FontId::proportional(10.0), Color32::WHITE);
+        let galley = painter.layout_no_wrap(
+            sync_text(*d, fps),
+            FontId::proportional(10.0),
+            Color32::WHITE,
+        );
         let badge =
             Rect::from_min_size(pos2(left + 2.0, top + 2.0), galley.size() + vec2(4.0, 1.0));
         painter.rect_filled(badge, CornerRadius::same(2), theme::colors().error);
@@ -768,6 +778,71 @@ fn volume_line(painter: &Painter, band: Rect, scale: &Scale, c: &Clip, chosen: &
             fill,
             Stroke::new(1.0, Color32::from_black_alpha(180)),
         ));
+    }
+}
+
+fn sync_text(d: i64, fps: Rational) -> String {
+    let base = fps.timecode_base().max(1);
+    let n = d.abs();
+    let sign = if d < 0 { '-' } else { '+' };
+    format!(
+        "{sign}{:02}:{:0w$}",
+        n / base,
+        n % base,
+        w = fps.frame_digits()
+    )
+}
+
+fn fade_ramps(painter: &Painter, band: Rect, scale: &Scale, c: &Clip) {
+    let Some(a) = c.audio.as_ref() else {
+        return;
+    };
+    for (falling, fade) in [(false, a.fade_in), (true, a.fade_out)] {
+        let Some(f) = fade else {
+            continue;
+        };
+        let (x0, x1) = fade_span(scale, c, falling);
+        if x1 - x0 < 1.0 {
+            continue;
+        }
+        let steps = ((x1 - x0) / 2.0).ceil().clamp(2.0, 400.0) as usize;
+        let curve: Vec<Pos2> = (0..=steps)
+            .map(|i| {
+                let u = i as f64 / steps as f64;
+                let x = (x0 + (x1 - x0) * u) as f32;
+                pos2(x, fade_y(band, f.along(u, falling)))
+            })
+            .collect();
+        let shade = Color32::from_black_alpha(110);
+        for w in curve.windows(2) {
+            let r = Rect::from_x_y_ranges(w[0].x..=w[1].x, band.top()..=w[0].y.min(w[1].y));
+            painter.rect_filled(r, CornerRadius::ZERO, shade);
+        }
+        let lowered: Vec<Pos2> = curve.iter().map(|p| *p + vec2(0.0, 1.0)).collect();
+        painter.add(egui::Shape::line(
+            lowered,
+            Stroke::new(1.0, Color32::from_black_alpha(140)),
+        ));
+        painter.add(egui::Shape::line(
+            curve,
+            Stroke::new(1.0, Color32::from_white_alpha(230)),
+        ));
+    }
+}
+
+fn fade_handles(painter: &Painter, band: Rect, scale: &Scale, c: &Clip) {
+    if band.width() < 4.0 * FADE_HANDLE {
+        return;
+    }
+    let edge = Stroke::new(1.0, Color32::from_black_alpha(180));
+    for falling in [false, true] {
+        let at = fade_handle(band, scale, c, falling);
+        let r = Rect::from_center_size(at, vec2(FADE_HANDLE * 1.5, FADE_HANDLE * 1.5));
+        painter.rect_filled(r, CornerRadius::same(1), Color32::WHITE);
+        painter.rect_stroke(r, CornerRadius::same(1), edge, StrokeKind::Outside);
+        if let Some(q) = fade_point(band, scale, c, falling) {
+            painter.circle(q, 3.0, theme::colors().accent, edge);
+        }
     }
 }
 

@@ -5,6 +5,7 @@ use eframe::egui::{self, ColorImage, Rect, RichText, Sense, TextureOptions, pos2
 use serde_json::json;
 use vidcut_av::thumbs::Image;
 use vidcut_core::lru::Lru;
+use vidcut_core::ops::grade::GradeOf;
 
 use super::theme;
 use super::workspace::{Workspace, dim};
@@ -77,6 +78,7 @@ impl Gallery {
 enum Act {
     Pick(String, bool),
     Apply(String),
+    Append(String),
     Delete(Vec<String>),
 }
 
@@ -144,6 +146,10 @@ impl Workspace {
                                 act = Some(Act::Apply(s.id.clone()));
                                 ui.close();
                             }
+                            if ui.button("Append Node Graph").clicked() {
+                                act = Some(Act::Append(s.id.clone()));
+                                ui.close();
+                            }
                             if ui.button("Delete Selected").clicked() {
                                 act = Some(Act::Delete(match chosen {
                                     true => selected.clone(),
@@ -173,9 +179,20 @@ impl Workspace {
                 let grade = self.effects_page.grading;
                 self.send("gallery.apply", json!({ "still": id, "grade": grade }));
             }
+            Some(Act::Append(id)) => self.append_still(&id),
             Some(Act::Delete(stills)) => self.send("gallery.remove", json!({ "stills": stills })),
             None => {}
         }
+    }
+
+    fn append_still(&self, id: &str) {
+        let grade = self.effects_page.grading;
+        let mut params = json!({ "still": id, "grade": grade });
+        if let Some((GradeOf::Clip(clip, layer), _, _)) = self.grade_shown() {
+            params["clips"] = json!([clip]);
+            params["layer"] = json!(layer);
+        }
+        self.send("gallery.append", params);
     }
 
     pub(super) fn grab_still(&self) {

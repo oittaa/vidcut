@@ -629,7 +629,7 @@ pub(super) fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> 
     Ok(())
 }
 
-pub(super) fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
+fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
     checked(&grade)?;
     let grade = (!grade.is_usual(p.frame_size())).then_some(grade);
     let (ti, ci) = locate(p, id)?;
@@ -1471,6 +1471,48 @@ fn grown(
     Ok(walked(g)[made as usize])
 }
 
+pub fn append_graph(p: &mut Project, of: &GradeOf, add: &Grade) -> Result<()> {
+    edited(p, of, |g| {
+        appended(g, add);
+        Ok(())
+    })
+}
+
+fn appended(g: &mut Grade, add: &Grade) {
+    if add.nodes.is_empty() {
+        return;
+    }
+    let before = g.clone();
+    let base = g.last();
+    let input = g.output;
+    let right = g.nodes.iter().map(|d| d.place[0] + 1.0).fold(0.0, f64::max);
+    let row = (g.output.and_then(|o| g.node(o.node))).map_or(0.0, |d| d.place[1]);
+    let left = (add.nodes.iter())
+        .map(|d| d.place[0])
+        .fold(f64::INFINITY, f64::min);
+    let top = (add.nodes.iter())
+        .map(|d| d.place[1])
+        .fold(f64::INFINITY, f64::min);
+    let moved = |v: Option<GradeLink>| match v {
+        Some(l) if l.node == 0 => input,
+        Some(l) => Some(GradeLink {
+            node: l.node + base,
+            ..l
+        }),
+        None => None,
+    };
+    for d in &add.nodes {
+        let mut d = d.clone();
+        d.inputs = d.inputs.iter().map(|v| moved(*v)).collect();
+        d.key_from = moved(d.key_from);
+        d.place = [d.place[0] - left + right, d.place[1] - top + row];
+        g.nodes.push(d);
+    }
+    g.output = moved(add.output);
+    stamped(&before, g);
+    walked(g);
+}
+
 fn renumbered(g: &mut Grade, gone: u32) {
     let after = |v: &mut Option<GradeLink>| {
         if let Some(l) = v
@@ -1633,6 +1675,22 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
             d.windows.clone_from(&copied.windows);
             Ok(())
         })?;
+    }
+    Ok(())
+}
+
+pub fn copy_whole(p: &Project, id: &str) -> Result<Grade> {
+    Ok(whole(p, id)?.unwrap_or_else(|| Grade::usual(p.frame_size())))
+}
+
+pub fn apply(p: &mut Project, grade: &Grade, to: &[String]) -> Result<()> {
+    checked(grade)?;
+    let frame = p.frame_size();
+    let mut fitted = grade.clone();
+    fitted.counted(p.settings.node_stack_layers.len(), frame);
+    for id in to {
+        whole(p, id)?;
+        put_whole(p, id, fitted.clone())?;
     }
     Ok(())
 }

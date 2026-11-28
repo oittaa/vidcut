@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
     Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
-    TrackKind,
+    TrackKind, USUAL_X_LEVEL, USUAL_X_POINT,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -305,6 +305,8 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub normalize: Option<super::normalize::NormalizeDialog>,
     pub normalize_last: Option<super::normalize::Choice>,
+    pub batch_fades: Option<super::batch_fades::BatchDialog>,
+    pub batch_last: Option<super::batch_fades::Settings>,
     pub equalizer: Option<super::equalizer::Draft>,
     pub track_naming: Option<(String, String)>,
     pub leveler: Option<super::leveler::GainDrag>,
@@ -381,6 +383,8 @@ impl Default for TimelineView {
             attributes: None,
             paste_last: None,
             normalize_last: None,
+            batch_fades: None,
+            batch_last: None,
             boring_dialog: None,
             dynamic: None,
             strip_drag: None,
@@ -416,6 +420,7 @@ impl TimelineView {
             snap_flipped: self.snap_flipped,
             fade_in_frames: self.fade_in_frames,
             normalize_last: self.normalize_last.take(),
+            batch_last: self.batch_last.take(),
             heard: self.heard,
             project,
             ..Self::default()
@@ -701,6 +706,7 @@ impl Workspace {
             filmstrips: o.filmstrips,
             waveforms: o.waveforms,
             target: false,
+            fades: self.effects_page.page == Page::Audio,
         }
     }
 
@@ -1048,6 +1054,7 @@ impl Workspace {
                     filmstrips: false,
                     waveforms: false,
                     durations: false,
+                    fades: false,
                     names: look.names && row.track == MAIN,
                     target: self.is_target(&row.track),
                     ..look
@@ -1248,8 +1255,12 @@ impl Workspace {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                     None
                 }
-                Gesture::Key { .. } | Gesture::KeyHandle { .. } => {
+                Gesture::Key { .. } | Gesture::KeyHandle { .. } | Gesture::FadeCurve { .. } => {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    None
+                }
+                Gesture::FadeLength { .. } => {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     None
                 }
                 _ => None,
@@ -1295,6 +1306,13 @@ impl Workspace {
                 }
                 if let Some(row) = rows.at(pos.y).filter(|r| geometry::is_subtitle(&r.track)) {
                     self.cue_hover(ui, &p, row, scale, pos);
+                    continue;
+                }
+                if let Some((_, on)) = self.fade_on(&p, rows, scale, pos, false) {
+                    ui.ctx().set_cursor_icon(match on {
+                        geometry::OnFade::Length(_) => egui::CursorIcon::ResizeHorizontal,
+                        geometry::OnFade::Curve(_) => egui::CursorIcon::Grab,
+                    });
                     continue;
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
@@ -1450,6 +1468,7 @@ impl Workspace {
         self.section_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.normalize_window(ui.ctx());
+        self.batch_fades_window(ui.ctx());
         self.compressor_window(ui.ctx());
         self.noise_window(ui.ctx());
         self.boring_window(ui.ctx());
@@ -2423,6 +2442,11 @@ impl Workspace {
                 after: x.after,
                 sound,
             }
+        } else if let Some((clip, on)) = self.fade_on(p, rows, &scale, press, upper) {
+            match on {
+                geometry::OnFade::Length(falling) => Gesture::FadeLength { clip, falling },
+                geometry::OnFade::Curve(falling) => Gesture::FadeCurve { clip, falling },
+            }
         } else if let Some((clip, band, on)) = rows.at(press.y).and_then(|r| {
             let t = p.track(&r.track)?;
             geometry::volume_target(t, &scale, &r.rect, press, &self.timeline.keys)
@@ -2570,6 +2594,22 @@ impl Workspace {
         }
     }
 
+    fn fade_on(
+        &self,
+        p: &Project,
+        rows: &Rows,
+        scale: &Scale,
+        pos: Pos2,
+        upper: bool,
+    ) -> Option<(String, geometry::OnFade)> {
+        if upper || !rows.audio_page {
+            return None;
+        }
+        let r = rows.at(pos.y)?;
+        let t = p.track(&r.track)?;
+        geometry::fade_target(t, scale, &r.rect, pos)
+    }
+
     fn edits_gesture(&mut self, p: &Project, what: &Hit) -> Option<Gesture> {
         let hit = hit_edit(p, what)?;
         let edits = self.timeline.selected_edits();
@@ -2710,7 +2750,9 @@ impl Workspace {
                     ("edit.transition", true) => self.send_asking("edit.transition", params),
                     _ => self.send_drag(&method, params),
                 }
-                if (d.preview.gains.is_some() || !d.preview.trims.is_empty())
+                if (d.preview.gains.is_some()
+                    || d.preview.fades.is_some()
+                    || !d.preview.trims.is_empty())
                     && let Some(q) = d.preview.moved(p)
                 {
                     self.trim_sent(q);
@@ -2954,7 +2996,32 @@ impl Workspace {
                 Some((TrackRef::of(&r.track)?, at))
             });
         if resp.double_clicked() || resp.triple_clicked() {
-            if on_ruler {
+            let fade = self
+                .fade_on(p, rows, &scale, pos, upper)
+                .filter(|_| !on_ruler);
+            if let Some((clip, on)) = fade {
+                let (falling, set) = match on {
+                    geometry::OnFade::Length(falling) => (falling, Value::Null),
+                    geometry::OnFade::Curve(falling) => (
+                        falling,
+                        json!({ "x_level": USUAL_X_LEVEL, "x_point": USUAL_X_POINT }),
+                    ),
+                };
+                let key = if falling { "fade_out" } else { "fade_in" };
+                let faded = p
+                    .clip(&clip)
+                    .and_then(|c| c.audio.as_ref())
+                    .is_some_and(|a| {
+                        if falling {
+                            a.fade_out.is_some()
+                        } else {
+                            a.fade_in.is_some()
+                        }
+                    });
+                if faded {
+                    self.send("clip.set", json!({ "clips": [clip], key: set }));
+                }
+            } else if on_ruler {
                 if let Some(k) = p
                     .markers
                     .iter()
@@ -3221,21 +3288,25 @@ impl Workspace {
         &self,
         p: &Project,
         clips: &[String],
-    ) -> Option<(&'static str, &'static str, Vec<String>)> {
+    ) -> Option<(bool, &'static str, Vec<String>)> {
         let ids = if self.timeline.options.linked_selection {
             ops::linked::with_ties(p, clips)
         } else {
             clips.to_vec()
         };
-        let links: HashSet<Option<u32>> = ids
-            .iter()
-            .map(|id| p.clip(id).and_then(|c| c.link))
-            .collect();
-        match links.into_iter().collect::<Vec<_>>().as_slice() {
-            [Some(_)] => Some(("Unlink Clips", "clip.unlink", ids)),
-            _ if ids.len() > 1 => Some(("Link Clips", "clip.link", ids)),
-            _ => None,
+        let chosen: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        if chosen.len() < 2 {
+            return None;
         }
+        let first = ids.first()?;
+        let tied = p.tied(first);
+        let whole =
+            tied.len() + 1 == chosen.len() && tied.iter().all(|o| chosen.contains(o.as_str()));
+        Some(if whole {
+            (true, "clip.unlink", ids)
+        } else {
+            (false, "clip.link", ids)
+        })
     }
 
     fn clip_menu(&mut self, ui: &mut egui::Ui, c: &vidcut_core::model::Clip) {
@@ -3342,37 +3413,28 @@ impl Workspace {
             json!({ "clips": clips, "lift": true }),
         );
         let linking = self.project().and_then(|p| self.link_action(p, &clips));
-        let resync = self.project().map(|p| {
-            (
-                ops::linked::offset(p, c).is_some(),
-                !ops::linked::others(p, &c.id).is_empty(),
-            )
-        });
-        if linking.is_some() || resync.is_some_and(|(own, others)| own || others) {
+        let fixes = self.project().and_then(|p| ops::linked::fixes(p, &c.id));
+        if linking.is_some() || fixes.is_some() {
             ui.separator();
         }
-        if let Some((label, method, ids)) = linking {
-            item(
-                ui,
-                &bindings.named(label, Action::LinkClips),
-                method,
-                json!({ "clips": ids }),
-            );
+        if let Some((mut linked, method, ids)) = linking {
+            let label = bindings.named("Link Clips", Action::LinkClips);
+            if ui.checkbox(&mut linked, label).clicked() {
+                self.send(method, json!({ "clips": ids }));
+                ui.close();
+            }
         }
-        if let Some((own, others)) = resync {
-            for (label, how, on) in [
-                ("Slip Into Place", "slip", own),
-                ("Move Into Place", "move", own),
-                ("Slip Others Into Place", "slip_others", others),
-                ("Move Others Into Place", "move_others", others),
-            ] {
-                if on {
-                    item(
-                        ui,
-                        label,
-                        "edit.resync",
-                        json!({ "clip": c.id, "how": how }),
-                    );
+        if let Some(on) = fixes {
+            let names = [
+                ("Slip Into Place", "slip"),
+                ("Move Into Place", "move"),
+                ("Slip Others Into Place", "slip_others"),
+                ("Move Others Into Place", "move_others"),
+            ];
+            for ((label, how), on) in names.into_iter().zip(on) {
+                if ui.add_enabled(on, egui::Button::new(label)).clicked() {
+                    self.send("edit.resync", json!({ "clip": c.id, "how": how }));
+                    ui.close();
                 }
             }
         }
@@ -3483,6 +3545,23 @@ impl Workspace {
                 }
                 if ui.button("Normalize Audio Levels…").clicked() {
                     self.open_normalize(sounding.clone());
+                    ui.close();
+                }
+                ui.separator();
+                for (label, action, fade) in [
+                    ("Fade In to Playhead", Action::FadeInToPlayhead, "in"),
+                    ("Fade Out to Playhead", Action::FadeOutToPlayhead, "out"),
+                ] {
+                    if ui.button(bindings.named(label, action)).clicked() {
+                        self.send(
+                            "clip.fade_to_playhead",
+                            json!({ "clips": sounding, "fade": fade }),
+                        );
+                        ui.close();
+                    }
+                }
+                if ui.button("Batch Fades…").clicked() {
+                    self.open_batch_fades(sounding.clone());
                     ui.close();
                 }
             });
@@ -4847,6 +4926,7 @@ mod tests {
             color: None,
             render_cache: vidcut_core::model::ClipCache::Auto,
             link: None,
+            linked_at: None,
         }
     }
 

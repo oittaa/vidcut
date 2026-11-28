@@ -67,9 +67,9 @@ pub fn remove(p: &mut Project, ids: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn refused(id: &str, which: &str) -> Error {
+fn refused(id: &str, which: &str, what: &str) -> Error {
     Error::invalid(format!(
-        "the {which} of {id} has keyframes: Apply Grade takes a grade with none"
+        "the {which} of {id} has keyframes: {what} takes a grade with none"
     ))
 }
 
@@ -79,18 +79,13 @@ pub fn apply(p: &mut Project, id: &str, level: GradeLevel, clips: &[String]) -> 
     match level {
         GradeLevel::Clip => {
             if still.grade.as_ref().is_some_and(keyed) {
-                return Err(refused(id, "clip grade"));
+                return Err(refused(id, "clip grade", "Apply Grade"));
             }
             if clips.is_empty() {
                 return Err(Error::usage("give the clips that get the grade"));
             }
-            let count = p.settings.node_stack_layers.len();
-            for clip in clips {
-                grade::whole(p, clip)?;
-                let mut g = (still.grade.clone()).unwrap_or_else(|| Grade::usual(size));
-                g.counted(count, size);
-                grade::put_whole(p, clip, g)?;
-            }
+            let g = (still.grade).unwrap_or_else(|| Grade::usual(size));
+            grade::apply(p, &g, clips)?;
         }
         GradeLevel::Timeline => {
             if !clips.is_empty() {
@@ -99,11 +94,37 @@ pub fn apply(p: &mut Project, id: &str, level: GradeLevel, clips: &[String]) -> 
                 ));
             }
             if still.timeline_grade.as_ref().is_some_and(keyed) {
-                return Err(refused(id, "timeline grade"));
+                return Err(refused(id, "timeline grade", "Apply Grade"));
             }
             let g = (still.timeline_grade).unwrap_or_else(|| Grade::usual(size));
             grade::store(p, &GradeOf::Timeline, &g)?;
         }
+    }
+    Ok(())
+}
+
+pub fn append(p: &mut Project, id: &str, to: &[GradeOf]) -> Result<()> {
+    let still = found(p, id)?.clone();
+    let size = p.frame_size();
+    if to.is_empty() {
+        return Err(Error::usage("give the clips that get the nodes"));
+    }
+    for of in to {
+        let (graph, which) = match of {
+            GradeOf::Clip(_, layer) => {
+                let g = still.grade.as_ref();
+                let g = g.map_or_else(|| Grade::usual(size), |g| g.layer(*layer, size));
+                (g, "clip grade")
+            }
+            GradeOf::Timeline => {
+                let g = (still.timeline_grade.clone()).unwrap_or_else(|| Grade::usual(size));
+                (g, "timeline grade")
+            }
+        };
+        if keyed(&graph) {
+            return Err(refused(id, which, "Append Node Graph"));
+        }
+        grade::append_graph(p, of, &graph)?;
     }
     Ok(())
 }
