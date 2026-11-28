@@ -648,7 +648,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The mode of the outgoing clip applies to the two moved pictures. The mode of the incoming clip has no effect during the transition.
   - Measured with a gray clip in Add mode over a picture that codes the position of each pixel, with and without motion blur.
 - **Resolve does not read back its own OTIO file of an adjustment clip** (measured in Resolve Studio 21.2).
-  - Its export has a `MissingReference.1` and an effect of `Type` 74 ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
+  - Its export has a `MissingReference.1` and an effect of `Type` 74 ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376)).
   - Its import makes an offline clip of that, with the Inspector title "Adjustment Clip".
   - It reads a `GeneratorReference.1` with `generator_kind` "Adjustment Clip" as an adjustment clip that works.
     - That clip takes no Open FX in Resolve. The form that Resolve writes imports offline, so this form is the better one.
@@ -702,7 +702,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
   - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
   - The renders use the typed value. A render with a typed Soft 20 at Width 10 matches Soft 20 within 2e-4.
-  - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+  - vidcut does not copy this fault. A typed Soft stays as typed ([spec §8.28](spec.md#828-qualifier-pp-32383256-3263-3436)).
 - **Two eases do not stay on the Center and the Offset of a title.**
   - The Center of the Background and the Offset of the Drop Shadow are `POINTF` values.
   - On them, Ease Out on the first key and Ease In on the last key do not stay set.
@@ -717,22 +717,22 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 - **The render queue of the Deliver page has no undo.**
   - On the Deliver page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add to Render Queue, the X of a job, a drag in the queue, Clear Rendered and Clear All are not undo steps.
-  - vidcut: each change of the render queue is an undo step, and Undo works on the Export page ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+  - vidcut: each change of the render queue is an undo step, and Undo works on the Export page ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 - **Paste Attributes puts each keyframe one frame early.**
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
-  - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+  - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156)).
 - **Smart Reframe pans across a shot change.**
   - Seven clips of one film have a shot change inside. The move of no clip jumps at the cut.
   - On four clips, the picture pans from the subject of one shot to that of the next, over 22 to 45 frames.
   - Thus the frames near the cut show the wrong part of each shot. On the other three clips, the move near the cut is small.
-  - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208)).
   - Seven more clips of three other files show the same. On two clips of the press conference, the picture pans across the cut over about 30 and 45 frames.
   - The owner rates the pan as a bug of Resolve.
 - **While jobs render, the pencils of the other jobs look active.**
   - On the Deliver page, the pencil of the job that renders is dim. The pencils of the other jobs stay white.
   - A click on a white pencil does nothing.
-  - vidcut greys all pencils while jobs render ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+  - vidcut greys all pencils while jobs render ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 - **Delete removes only one of the selected points of a curve window.**
   - The manual says that a Shift drag box selects points to delete them all at once (p. 3274).
   - With the two right points of a curve selected, Delete removed only the top right point. A second Delete removed nothing.
@@ -753,7 +753,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 - **A pick of a clip filter is not an undo step.**
   - After a pick of Ungraded Clips, Edit > Undo shows "Undo" with no name.
   - Ctrl+Z does not take back the pick. It changes nothing else that was seen.
-  - vidcut: a pick is an undo step, "Filter the clips", as each edit is ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+  - vidcut: a pick is an undo step, "Filter the clips", as each edit is ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 - **A filtered strip does not update after a script clears a clip color.**
   - Under Clip Color > Teal, the strip showed the one teal clip. `ClearClipColor` then cleared its color, and the clip stayed in the strip.
   - vidcut does not copy this fault. The strip follows each change of the project.
@@ -822,12 +822,12 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
 - **A Cross Dissolve from a gap into a zoomed adjustment clip jumps at its end** (measured in Resolve Studio 21.2).
   - With Zoom below 1 over a lower video clip, the outer area keeps the unzoomed picture until the last dissolve frame.
   - On the next frame, that outer area snaps from full brightness to black.
-  - vidcut blends smoothly across every frame ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
+  - vidcut blends smoothly across every frame ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376)).
 - **Individual clips name a clip at another frame rate by the start of its source.**
   - A 25 fps source with the start timecode 01:00:00:00 is in a 24 fps timeline.
   - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
   - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
-  - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+  - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 - **A title with only the family name Bahnschrift draws a narrow face of the font.**
   - Bahnschrift is a variable font. At weight 300, 350 and 400, the title draws Bahnschrift SemiLight SemiCondensed. At weight 200, it draws Bahnschrift Light SemiCondensed.
   - The Inspector does the same. The family Bahnschrift with the face Normal draws SemiLight SemiCondensed, the same in every pixel.
@@ -861,7 +861,7 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - With one video track, each clip with a frame in the In/Out range renders, whole.
   - With two video tracks, some ranges gave no file, with clips on V1 and V2 under the range. Other ranges gave the clip of one track only.
   - The runs on three such timelines show no rule for these cases.
-  - vidcut does not copy this fault. Individual clips renders each clip with a frame in the range, on each track ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+  - vidcut does not copy this fault. Individual clips renders each clip with a frame in the range, on each track ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 
 ## Resolve's key files
 

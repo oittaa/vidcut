@@ -225,7 +225,7 @@ Notes:
 
 ## Additional outputs
 
-[Spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
+[Spec §10.1](../spec.md#101-export-page-pp-41034132) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
 
 - `MoreOutput::path` gives the file: the name of `output` with the extension of its container, in the folder of `output` or in its `folder`.
 - `MoreOutput::settings` makes the `ExportSettings` of an additional output from those of output 1. It is the one place that decides them.
@@ -554,7 +554,7 @@ Voice Isolation:
 - GUI media exports are `background`.
 - Quick Export lists the presets marked `quick_export`. It sends one with `overwrite` and no range.
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
-- The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
+- The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132)) draws its panels in `export_page_ui`.
   - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
   - `Render::more` holds the additional outputs, and `Render::output_tab` the open tab. `more_tab` draws the rows of an additional output.
   - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
@@ -743,7 +743,7 @@ A compound clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions))
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
-A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):
+A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compound-clips-pp-10521054-1126)):
 
 - `render::expanded` keeps the compound clip on its track as a clip with no tracks (`hollow`). Thus `transitions::playing` still finds the transition, and the other side plays as usual.
 - `edges_on` gives the compound clip its edges. A dissolve gives its frames, and a dip to color the half of its side.
@@ -942,7 +942,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
   - A `Qualify` pass makes the key of a qualifier with `fs_key_qualify`, from the picture that comes into the node (`Qualifying`).
     - A node with only a qualifier, with its three parts on and the Qualifier row at its usual values, keeps its one `Qualify` pass. It applies the Key Output.
-    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436)).
   - A `Mask` pass makes the key of a Magic Mask with `fs_mask_key`, from the maps of the frame (`Masking`). A `KeyFold` always follows it ([analysis](analysis.md#subject-masks)).
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
@@ -992,7 +992,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
+- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129):
   - `editor::auto_color_looks` makes the `RenderPlan` of one frame and pairs it with the legacy flag (`false` with `tool`, else `ColorPrefs::use_legacy_auto_color`).
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
   - In neural mode, the corrector is at its usual values in that frame. In legacy mode, only its Lift and Gain reset.

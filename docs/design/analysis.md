@@ -192,7 +192,7 @@ flowchart TD
 
 ## Saliency
 
-- `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208)).
 - It reads the frames as `subjects::find` does. `subjects::looked` decodes, seeks and measures the scene scores and the `SEED` pictures for both.
   - The `Looker` trait is the part that is different. `Looking` finds boxes. `Seeing` makes saliency maps.
 - The model is UNISAL (`unisal`), with its weights for DHF1K.
@@ -265,7 +265,7 @@ flowchart TD
 
 ## Stabilization
 
-- `picture.stabilize` measures the motion of the camera, and the core decides the correction ([spec](../spec.md#827-stabilization-pp-295-737738-769-923924-12091210-35023503-measured-in-resolve-studio-212)).
+- `picture.stabilize` measures the motion of the camera, and the core decides the correction ([spec](../spec.md#827-stabilization-pp-295-737738-769-923924-12091210-35023503)).
 - `editor::stabilize_looks` gives the plan to measure: the own picture of the clip (`render::own_picture`).
   - That is the composition of the clip. It has one frame for each frame of the file from the In to the Out, at the rate of the file.
   - Why: the correction refers back to the source (spec, p. 295). Thus the crop, the transform and the speed of the clip do not change the measurement.
@@ -337,7 +337,7 @@ flowchart TD
 
 ## Smart Reframe
 
-- `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208)).
 - `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
   - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
     - It also gives the time of the source of each frame (`Pace::exact`).

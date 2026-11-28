@@ -887,7 +887,7 @@ The bar and the Jobs button:
 - `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media tab.
 - `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
-**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710)).
 
 - `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
 - `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time. `frame` counts the frames of the file.
@@ -898,7 +898,7 @@ The bar and the Jobs button:
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
-**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
+**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708)).
 
 - `SyncClips` holds the rows in the GUI, as `GroupRow` values. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
 - Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window. `SyncClips` keeps `files`, all files at open, so a file that a drag dropped comes back.
