@@ -748,9 +748,8 @@ impl Screen {
                 let (buffer, rest) =
                     held.ok_or_else(|| Error::Invalid("no RGB plane to hold".into()))?;
                 let mut held = super::held::Held::new(buffer, (&gpu.device, &gpu.queue), gpu.id);
-                if let Some((values, seen)) = rest {
-                    let done = (&gpu.device, submission);
-                    held = held.with_rest(super::held::Rest::new((values, size), seen, done));
+                if let Some(values) = rest {
+                    held = held.with_rest(super::held::Rest::new(values, size));
                 }
                 return super::held::picture(held, size, None, (deep, colors.1));
             }
@@ -765,31 +764,17 @@ fn cut_off(
     encoder: &mut wgpu::CommandEncoder,
     (drawn, params): (&wgpu::TextureView, &wgpu::Buffer),
     (w, h): (u32, u32),
-) -> Result<(wgpu::Buffer, wgpu::Buffer)> {
+) -> Result<wgpu::Buffer> {
     let pipeline =
         gpu.encoders().cut.as_ref().map_err(|e| {
             Error::Invalid(format!("the GPU can't keep the values outside 0..1: {e}"))
         })?;
-    let buffer = |size: u64, usage: wgpu::BufferUsages| {
-        gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vidcut values outside 0..1"),
-            size,
-            usage,
-            mapped_at_creation: false,
-        })
-    };
-    let values = buffer(
-        u64::from(w) * u64::from(h) * 12,
-        wgpu::BufferUsages::STORAGE,
-    );
-    let seen = buffer(
-        4,
-        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-    );
-    let read = buffer(
-        4,
-        wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-    );
+    let values = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut values outside 0..1"),
+        size: u64::from(w) * u64::from(h) * 12,
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
     let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("vidcut values outside 0..1"),
         layout: &pipeline.get_bind_group_layout(0),
@@ -806,10 +791,6 @@ fn cut_off(
                 binding: 16,
                 resource: values.as_entire_binding(),
             },
-            wgpu::BindGroupEntry {
-                binding: 17,
-                resource: seen.as_entire_binding(),
-            },
         ],
     });
     {
@@ -818,8 +799,7 @@ fn cut_off(
         pass.set_bind_group(0, &bind, &[]);
         pass.dispatch_workgroups(w.div_ceil(16), h.div_ceil(16), 1);
     }
-    encoder.copy_buffer_to_buffer(&seen, 0, &read, 0, 4);
-    Ok((values, read))
+    Ok(values)
 }
 
 fn handed(

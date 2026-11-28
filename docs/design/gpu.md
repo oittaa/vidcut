@@ -313,10 +313,7 @@ The AI models take 16-bit RGB, which holds only the values from 0 to 1. The valu
 
 - A draw into 16-bit RGB for a model also writes the part of each value outside 0..1 (`cut_off` in `picture.wgsl`).
   - This part is 32-bit float RGB at the size of the draw (`held::Rest`).
-  - The same pass sets a flag when a value is outside 0..1 by more than half a step of 16 bits.
-  - Why the half step: the conversion to RGB gives small errors near 0 and 1. These errors stay in the 16-bit picture.
-- `Rest::outside` reads the flag. Without the flag, the rest goes, and the picture takes the 16-bit path.
-  - Thus a picture inside 0..1 gives the same output as with no rest.
+  - Each picture of a model takes this path. A picture inside 0..1 has a rest of 0.
 - `held::with_rests` adds the rests to the picture that a model gives (`fold` in `rgb.wgsl`).
   - The result is 32-bit float RGB (`RGBF32LE`). The draw reads it as `Rgba32Float` (`Layout::Rgbf32`).
   - A bilinear filter enlarges the rest of a smaller picture.

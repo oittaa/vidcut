@@ -1563,9 +1563,7 @@ impl Source {
         let outs = match input {
             Fed::Rgb(rgb) => {
                 let outs = run.run.push(i, f.pts(), &rgb)?;
-                if let Some(rest) = crate::screen::held::rest(&rgb)
-                    && rest.outside()?
-                {
+                if let Some(rest) = crate::screen::held::rest(&rgb) {
                     run.rests.push((i, rest));
                 }
                 outs

@@ -1218,28 +1218,18 @@ fn whole_at(x: i32, y: i32) -> vec3<f32> {
 }
 
 @group(0) @binding(16) var<storage, read_write> cut_rest: array<f32>;
-@group(0) @binding(17) var<storage, read_write> cut_seen: atomic<u32>;
-var<workgroup> cut_here: atomic<u32>;
 
 @compute @workgroup_size(16, 16)
-fn cut_off(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+fn cut_off(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = textureDimensions(timeline);
-    if id.x < size.x && id.y < size.y {
-        let x = i32(id.x);
-        let y = i32(id.y);
-        let r = whole_at(x, y) - pixel_at(x, y);
-        let i = (id.y * size.x + id.x) * 3u;
-        cut_rest[i] = r.x;
-        cut_rest[i + 1u] = r.y;
-        cut_rest[i + 2u] = r.z;
-        if any(abs(r) > vec3<f32>(0.5 / 65535.0)) {
-            atomicOr(&cut_here, 1u);
-        }
+    if id.x >= size.x || id.y >= size.y {
+        return;
     }
-    workgroupBarrier();
-    if lane == 0u && atomicLoad(&cut_here) != 0u {
-        atomicOr(&cut_seen, 1u);
-    }
+    let r = whole_at(i32(id.x), i32(id.y)) - pixel_at(i32(id.x), i32(id.y));
+    let i = (id.y * size.x + id.x) * 3u;
+    cut_rest[i] = r.x;
+    cut_rest[i + 1u] = r.y;
+    cut_rest[i + 2u] = r.z;
 }
 
 fn output_ycc(c: vec3<f32>) -> vec3<f32> {

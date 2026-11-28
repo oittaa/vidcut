@@ -1,5 +1,5 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 
 use vidcut_core::model::Hdr;
 
@@ -18,66 +18,14 @@ pub(crate) struct Held {
 }
 
 #[derive(Clone)]
-pub(crate) struct Rest(Arc<CutOff>);
-
-struct CutOff {
+pub(crate) struct Rest {
     values: wgpu::Buffer,
     size: (u32, u32),
-    seen: wgpu::Buffer,
-    device: wgpu::Device,
-    done: wgpu::SubmissionIndex,
-    outside: Mutex<Option<bool>>,
 }
 
 impl Rest {
-    pub(crate) fn new(
-        (values, size): (wgpu::Buffer, (u32, u32)),
-        seen: wgpu::Buffer,
-        (device, done): (&wgpu::Device, wgpu::SubmissionIndex),
-    ) -> Self {
-        Self(Arc::new(CutOff {
-            values,
-            size,
-            seen,
-            device: device.clone(),
-            done,
-            outside: Mutex::new(None),
-        }))
-    }
-
-    pub(crate) fn outside(&self) -> Result<bool> {
-        let cut = &self.0;
-        let mut known = cut.outside.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(outside) = *known {
-            return Ok(outside);
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        cut.seen.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let failed = |e: &dyn std::fmt::Display| {
-            Error::Invalid(format!("the values outside 0..1 weren't counted: {e}"))
-        };
-        cut.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(cut.done.clone()),
-                timeout: None,
-            })
-            .map_err(|e| failed(&e))?;
-        rx.recv().map_err(|e| failed(&e))?.map_err(|e| failed(&e))?;
-        let outside = cut
-            .seen
-            .slice(..)
-            .get_mapped_range()
-            .map_err(|e| failed(&e))?
-            .iter()
-            .any(|b| *b != 0);
-        cut.seen.unmap();
-        if !outside {
-            cut.values.destroy();
-        }
-        *known = Some(outside);
-        Ok(outside)
+    pub(crate) fn new(values: wgpu::Buffer, size: (u32, u32)) -> Self {
+        Self { values, size }
     }
 }
 
@@ -263,16 +211,11 @@ pub(crate) fn whole(f: &frame::Video) -> Result<frame::Video> {
 }
 
 pub(crate) fn with_rests(f: &frame::Video, parts: &[(Option<Rest>, f32)]) -> Result<frame::Video> {
-    let mut outside = Vec::new();
-    for (rest, weight) in parts {
-        if let Some(r) = rest
-            && *weight != 0.0
-            && r.outside()?
-        {
-            outside.push((r, *weight));
-        }
-    }
-    if outside.is_empty() {
+    let parts: Vec<(&Rest, f32)> = parts
+        .iter()
+        .filter_map(|(r, w)| r.as_ref().map(|r| (r, *w)))
+        .collect();
+    if parts.is_empty() {
         return crate::export::video::frame_ref(f);
     }
     let held = held(f)?;
@@ -287,14 +230,14 @@ pub(crate) fn with_rests(f: &frame::Video, parts: &[(Option<Rest>, f32)]) -> Res
     let clock = std::time::Instant::now();
     let folded = gpu
         .held
-        .fold((&gpu.device, &gpu.queue), held.buffer(), size, &outside);
+        .fold((&gpu.device, &gpu.queue), held.buffer(), size, &parts);
     crate::debug!(
         "ai",
         "{}x{}: values outside 0..1 added in {:.2} ms, rests: {}",
         size.0,
         size.1,
         clock.elapsed().as_secs_f64() * 1e3,
-        outside.len()
+        parts.len()
     );
     let folded = Held::new(folded, (&gpu.device, &gpu.queue), gpu.id);
     let pixel = (ffmpeg::format::Pixel::RGBF32LE, RGB_FLOAT);
@@ -609,7 +552,7 @@ impl Pipes {
             mapped_at_creation: false,
         });
         let (first, second) = (parts[0], parts.get(1).copied().unwrap_or((parts[0].0, 0.0)));
-        let ((fw, fh), (sw, sh)) = (first.0.0.size, second.0.0.size);
+        let ((fw, fh), (sw, sh)) = (first.0.size, second.0.size);
         let count = parts.len().min(2) as u32;
         let words = [w, h, count, 0, fw, fh, 0, 0, sw, sh, 0, 0];
         let weights = [first.1, second.1, 0.0, 0.0];
@@ -635,11 +578,11 @@ impl Pipes {
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: first.0.0.values.as_entire_binding(),
+                    resource: first.0.values.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
-                    resource: second.0.0.values.as_entire_binding(),
+                    resource: second.0.values.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 9,
