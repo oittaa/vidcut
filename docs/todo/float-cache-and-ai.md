@@ -1,5 +1,3 @@
-# Float pictures in the render cache and the AI models
+# Values outside 0 to 1
 
-- Values below 0 and above 1 in the render cache.
-- Values below 0 and above 1 through the AI upscalers and the scaler of macOS.
-- Values below 0 and above 1 through the AI frames of Retime Process and Smooth Cut.
+- Values below 0 and above 1 in the render cache, the AI upscalers, the macOS scaler and the AI frames.

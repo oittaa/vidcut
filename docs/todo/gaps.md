@@ -1,27 +1,16 @@
 # Resolve behavior that vidcut does not have
 
-- Date Imported clusters by day.
-- Zoom of the waveform in the Source Clip scroll area.
-- Audio Assistant, Voice Convert, Set Color, Add Marker and Add Transition to All Edits in Timeline Actions.
-- The switch that turns off a group of the Inspector: Dynamic Zoom, Composite, Speed and the audio groups.
+- Media Pool: Date Imported clusters, and the waveform zoom of the Source Clip.
+- Timeline: the Timeline Actions items Audio Assistant, Voice Convert, Set Color, Add Marker and Add Transition to All Edits.
+- Timeline: the filters for flags, node colors, keywords, people, stereo clips, groups, HDR grades, Magic Mask and more.
+- Viewer: KeyKode, and the Stabilization tool.
+- Inspector: the switch that turns off a group, Deinterlace Quality for each clip, and keyframes of an Edge Wipe.
+- Color page: the keyframe tracks inside a corrector track, and the Stabilizer of the Tracker palette.
+- Thumbnail timeline: a frame picked by a drag, Update All Thumbnails, and the versions.
+- Scopes: Colorize, Extents, the sliders, and the Additional Gamut.
+- Audio: the Solo icon of a track header, copy of the clip Equalizer, and Reset of the Dialogue Leveler.
+- Subtitles: CEA-608 and EAS708 captions, MXF files, and subtitle presets.
+- Export page: Estimated File Size, the Data burn-in of an additional output, render presets, and the render queue items.
+- Paste Attributes: Don't show until next copy, and a speed with keyframes.
 - Most of the System and User preferences.
-- Deinterlace Quality for each clip: Normal, High and DaVinci Neural Engine.
-- CEA-608 and EAS708 captions, and MXF files.
-- Export and import of a subtitle preset as a `.preset` file.
-- KeyKode in the timecode menu of the viewer.
-- The Solo icon of a track header.
-- The Additional Gamut of the CIE Chromaticity scope.
-- Colorize, Extents and the sliders of each scope.
-- Copy and paste of the Equalizer settings of a clip.
-- Keyframes on the Angle and the Border of an Edge Wipe.
-- Reset of the Dialogue Leveler section.
-- The keyframe tracks inside a corrector track.
-- On the Export page: Estimated File Size, the Data burn-in of an additional output, and render preset import and export.
-- The timeline filters for flags, node colors, keywords, people, stereo clips and groups.
-- The timeline filters for HDR grades, Magic Mask, noise reduction, Input Sizing, bins, mattes and Smart Filters.
-- In the Thumbnail timeline: a frame picked by a drag, Update All Thumbnails, and the versions.
-- Codec names with the profile and the level, like "H.264 High L4.0".
-- In the render queue: Show All Projects, Review Before Upload, Reveal in Media Storage and Refresh.
-- Don't show until next copy in Paste Attributes.
-- Paste Attributes of a copied speed that has keyframes.
-- The Stabilization tool of the viewer, and the Stabilizer mode and the graph of the Tracker palette.
+- Codec names with the profile and the level.

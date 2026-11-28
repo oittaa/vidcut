@@ -1,9 +1,5 @@
 # Frame interpolation
 
-- AI Slow exports with less GPU memory.
-- Frame interpolation on macOS without copies through memory.
-- A first frame of each size on macOS without a wait of some seconds.
-- Tensor cores for the convolution kernel.
-- Fast frames in the viewer with AI Slow.
-- Made frames for a clip that plays backward.
-- AI upscaling of made frames.
+- AI Slow with less GPU memory, with tensor cores, and at full speed in the viewer.
+- Frame interpolation on macOS without copies through memory and without waits.
+- Made frames for a clip that plays backward, and AI upscaling of made frames.

@@ -1966,7 +1966,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A drag of a side handle does not change the link.
     - One `titles.set` follows on release. Thus each drag is one undo step.
     - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title.
-    - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md)).
+    - The pixels of a stretched title in Resolve are not measured.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
@@ -2321,7 +2321,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On a rotated clip, the Position point turns with the picture. The cells keep the directions of the frame.
     - A crop does not change the size or the place of the cells.
     - On a compound clip, the effect gives the same picture as on a plain clip with the same values.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - A Dynamic Zoom box does not change the size or the place of the cells.
     - The Zoom of each compound clip around the picture multiplies the size on the frame.
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
@@ -2432,11 +2432,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
     - Measured in Resolve Studio 21.2 with float renders on the spots and the color bars pictures, at 1280×720.
     - At Zoom 0.5, the renders and vidcut agree within 0.002. At Zoom 2, they agree away from the left edge of the frame.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - Source Recovery works on the sum of the glows.
     - Invert Effect on a picture with alpha takes the negative of `c`, as the mask does.
     - Color Filter values go from 0 to 1000000. No limit is measured.
-  - Cases measured in Resolve Studio 21.2 with float renders. They are not a rule yet ([todo](todo/effects-library.md)):
+  - Cases measured in Resolve Studio 21.2 with float renders. They are not a rule yet:
     - The spots picture at Zoom 2, with and without Secondary Glow, and the color bars picture at Zoom 2 with Secondary Glow.
       - The renders are brighter than vidcut only near the left edge of the frame. There they add up to 0.032.
       - At the right, top and bottom edges, the renders and vidcut agree within 0.002.
@@ -2513,7 +2513,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A picture with fewer pixels than the frame shows the full-size export, scaled down. The viewer, `frame render --width` and a smaller export draw such pictures.
     - Each of its pixels is the mean of the pixels of the frame that it covers. vidcut puts that mean and Softness into the spectrum of the noise.
     - At 960 and 640 pixels wide, Grain Size 0 to 1 with Softness 0 and 0.2984 agree with the scaled export within 2%.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
   - Measured in Resolve Studio 21.2 with float renders of Grain Only, on 1920×1080 and 1280×720:
@@ -2554,7 +2554,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Vignette in vidcut:**
   - A source that fits with a half pixel takes the next whole pixel as its size. Only 607.5 and 608 were tried.
   - The GUI shows only the values that work in the Operating Mode.
-  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - vidcut's own choices, not measured:
     - Beyond the cells, a pixel takes the value of the nearest cell.
     - With an odd width or height, B0 is the cell one pixel to the left of or above the middle.
     - Hue gives the fixed hue at each gray between 0 and 1. A gray of 0 or less, or of 1 or more, takes the hue of red.
@@ -5114,7 +5114,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The mask of a node is the union of its subjects (p. 3296).
   - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
   - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
-  - No measurement of version 2 checks these three rules yet ([todo](todo/subject-masks.md)).
+  - No measurement of version 2 checks these three rules yet.
 - vidcut:
   - The Magic Mask is a part of a corrector of the grade of a clip ([design](design/analysis.md#subject-masks)).
   - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask, Quality or one click. `grade.mask.clear` deletes one click or all of them.
@@ -5403,10 +5403,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Reset and Close are at the bottom of the window.
   - vidcut uses the measured processor with the typed values. The ranges are those of the window, and the defaults are the shown values.
   - vidcut: Mix goes in a straight line from the compressed sound at 0 to the input at 100, as the manual says.
-    - Two renders of one setting do not override the manual. More cases are to measure ([todo](todo/audio-page.md#track-dynamics)).
-  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/audio-page.md#track-dynamics)):
+    - Two renders of one setting do not override the manual.
+  - Where a case is not measured, vidcut uses the nearest measured rule:
     - Other sample rates also run the detector once in each 3 samples.
-  - vidcut has no presets and no Sidechain ([todo](todo/audio-page.md#track-dynamics)).
+  - vidcut has no presets and no Sidechain ([todo](todo/audio-page.md)).
   - vidcut: the Dynamics of a track work on the mix of its clips, after their ducking and with their fades.
   - vidcut: the Dynamics of a track that holds a compound clip also work on the sound of the compound clip.
   - vidcut: the fader of a track comes after its Dynamics and its equalizer. The meter of a track shows the sound after its fader.
@@ -5484,7 +5484,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut uses the measured filters and the measured rule from a Q to its step (`track::stepped`):
     - A request or a typed value keeps the Q of its step, (n − 10) / 15, at most 10.3.
     - Step 21 shows 0.7 ([gotchas](gotchas.md#resolves-edits)).
-  - Where a case is not measured, vidcut uses the nearest measured rule ([todo](todo/audio-page.md#track-equalizer)):
+  - Where a case is not measured, vidcut uses the nearest measured rule:
     - The Low Pass of Fire at the slopes 6 and 18 adds a filter of the first order, as its High Pass does.
     - Other sample rates use the same rules.
   - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.

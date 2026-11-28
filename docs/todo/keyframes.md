@@ -1,24 +1,9 @@
 # Keyframes
 
-- Display Time Ruler in Seconds and Display Time Ruler in Frames.
-- Show Curve Tooltips.
-- Display All Video Parameters and Display Selected Parameters.
-- A height divider in the keyframe tray.
-- A track with the clip name, and a group track for each section and each effect, in the keyframe tray.
-- A curve view and a Parameters menu in the keyframe tray.
-- The clip under the playhead in the keyframe tray, when no clip is selected.
-- The keyframes of all the selected clips, in a group for each clip.
-- Display Speed Keyframes in Timeline Options.
-- Hand Mode in the header of the graph.
+- The full keyframe tray: tracks for each effect, a curve view, a Parameters menu, and the clips of a selection.
+- The menu items of the Keyframes tab: time ruler units, curve tooltips and parameter filters.
+- Step In, Step Out, Loop, Ping Pong, and smooth points on the motion path.
+- The Shape Box, track lock, handles, Hand Mode and a Shift-click range select.
 - Position X and Y, and Zoom X and Y, keyed apart.
-- Smooth points on the motion path, with Bezier handles and an acceleration handle.
-- Step In and Step Out keyframes.
-- Loop and Ping Pong of the selected keyframes.
-- The Shape Box around keyframes.
-- Lock on a keyframe track.
-- Show Handles and Flat Handle.
-- Shift-click in the graph selects the keyframes between two clicks.
-- One group button for Volume and Pan.
-- Keyframes on Film Grain Freeze.
+- Display Speed Keyframes, one group button for Volume and Pan, and Film Grain Freeze keyframes.
 - Dynamic Zoom keys at times other than the ends of the clip.
-- The shadow and the background of a title between keys: not checked against Resolve.
