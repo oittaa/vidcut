@@ -958,7 +958,7 @@ Import:
   - `linked::with_sound` puts the sound of each placed picture on the audio track of the same number, and each next stream on the next audio track. It writes over what is there, and links the clips.
   - `linked::sounds` gives the linked sound clips of a picture clip. The sound requests, the Inspector and the clip menu use it. Why: a picture clip has no sound of its own.
   - `follow::follow` moves a clip that is linked to a V1 clip by the change of the start of that clip. Thus a J/L cut keeps its offset.
-  - `linked::link` gives the clips one new link number. `linked::unlink` takes the link of each clip away.
+  - `linked::link` gives the clips one new link number. It writes `linked_at` on each clip: `start` less `source_in`. `linked::unlink` takes the link and `linked_at` of each clip away.
   - `linked::end_lone` ends each group with one clip left. The editor calls it after each request. Thus an edit that cuts one clip of a group leaves no group of one clip.
   - `linked::alone` takes the named clips out of their groups for one edit, then gives the links back.
     - The requests with `alone` use it (`linked::apart`). Thus each edit acts on the named clips only, and no edit function needs a second form.
@@ -966,11 +966,16 @@ Import:
     - Why: they must not follow Track 1 ([spec D21](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus a picture on Track 1 moves or slides apart from its sound.
     - A clip that goes back onto another clip goes to the next free track of its kind (`follow::settle`).
     - `edit.roll` and `edit.slide` also name the clips beside the clip (`linked::touching`). Thus their sound does not change either.
-  - `linked::offset` gives the sync offset of a clip. It compares the clip with the first linked clip of the same media and the other kind.
-    - The offset is the frames between the start of each clip, less the frames between their source starts. A clip with a speed change has none.
+  - `linked::offset` gives the sync offset of a clip. It compares the clip with a linked clip of the other kind.
+    - A sound clip compares with the first picture. A picture compares with the first sound clip that is out of sync with it.
+    - The offset is the frames between the start of each clip, less the frames between their source starts. With `linked_at`, the same difference at the time of the link is taken away. Why: the offset counts from the moment of the link.
+    - Without `linked_at`, only clips of the same media have an offset. A clip with a speed change has none.
     - `linked::offsets` gives the offset of each clip of the timeline in one pass. `clip_json` writes it as `sync`.
-  - `linked::resync` slips or moves the clip, or its other linked clips of the same media, by their offsets. Each part acts alone.
-    - `linked::others` gives the other clips only for a clip with an offset. Thus the four commands go with the offset.
+  - `linked::resync` slips or moves the clip, or the other clips of its group that are out of sync with it, by their offsets. Each part acts alone.
+    - `linked::others` gives the other clips only for a clip with an offset. Thus the four fixes go with the offset.
+    - `linked::fixes` tells which of the four fixes a clip takes. `linked::resync` refuses the others.
+  - `edit.split` with `alone` uses `linked::apart` too. `split_at` gives the part after the cut no link, because the clip has none during the edit.
+  - The OpenTimelineIO export writes `linked_at` in the vidcut metadata of each clip, and the import reads it back.
 - `clear_range` keeps the link groups of the clips that it cuts:
   - A clip that loses its head keeps its group.
   - The right piece of a middle cut can match a piece on another track: the same media, start and source start. It then takes the group of that piece (`piece_link`).

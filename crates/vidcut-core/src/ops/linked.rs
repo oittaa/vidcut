@@ -310,6 +310,7 @@ pub fn end_lone(p: &mut Project) {
         for c in &mut t.clips {
             if lone(c) {
                 c.link = None;
+                c.linked_at = None;
             }
         }
     }
@@ -328,7 +329,9 @@ pub fn link(p: &mut Project, ids: &[String]) -> Result<()> {
     let l = p.free_link();
     for id in &ids {
         let (ti, ci) = locate(p, id)?;
-        p.tracks[ti].clips[ci].link = Some(l);
+        let c = &mut p.tracks[ti].clips[ci];
+        c.link = Some(l);
+        c.linked_at = Some(c.start - c.source_in);
     }
     end_lone(p);
     Ok(())
@@ -338,7 +341,9 @@ pub fn unlink(p: &mut Project, ids: &[String]) -> Result<()> {
     let mut any = false;
     for id in ids {
         let (ti, ci) = locate(p, id)?;
-        any |= p.tracks[ti].clips[ci].link.take().is_some();
+        let c = &mut p.tracks[ti].clips[ci];
+        c.linked_at = None;
+        any |= c.link.take().is_some();
     }
     if !any {
         return Err(Error::invalid("These clips have no link"));
@@ -422,8 +427,15 @@ fn same_source(a: &Clip, b: &Clip) -> bool {
 }
 
 fn lag(c: &Clip, of: &Clip) -> Option<i64> {
-    (c.speed.is_none() && of.speed.is_none())
-        .then(|| (c.start - c.source_in) - (of.start - of.source_in))
+    if c.speed.is_some() || of.speed.is_some() {
+        return None;
+    }
+    let at = |x: &Clip| x.start - x.source_in;
+    match (c.linked_at, of.linked_at) {
+        (Some(a), Some(b)) => Some((at(c) - a) - (at(of) - b)),
+        (None, None) if same_source(c, of) => Some(at(c) - at(of)),
+        _ => None,
+    }
 }
 
 fn in_order(p: &Project) -> impl Iterator<Item = &Clip> {
@@ -434,9 +446,14 @@ fn in_order(p: &Project) -> impl Iterator<Item = &Clip> {
 }
 
 fn partner<'a>(group: impl IntoIterator<Item = &'a Clip>, c: &Clip) -> Option<&'a Clip> {
-    group
+    let mut kin = group
         .into_iter()
-        .find(|o| o.video != c.video && o.tied_with(c) && same_source(o, c))
+        .filter(|o| o.video != c.video && o.tied_with(c) && lag(c, o).is_some());
+    if c.video {
+        kin.find(|o| lag(c, o) != Some(0))
+    } else {
+        kin.next()
+    }
 }
 
 pub fn offset(p: &Project, c: &Clip) -> Option<i64> {
@@ -469,10 +486,30 @@ pub fn others(p: &Project, id: &str) -> Vec<(String, i64)> {
         .into_iter()
         .filter_map(|o| {
             let x = p.clip(&o)?;
-            let d = lag(x, c).filter(|&d| d != 0 && same_source(x, c))?;
+            let d = lag(x, c).filter(|&d| d != 0)?;
             Some((o, d))
         })
         .collect()
+}
+
+pub fn fixes(p: &Project, id: &str) -> Option<[bool; 4]> {
+    let c = p.clip(id)?;
+    let d = offset(p, c)?;
+    if !c.video {
+        return Some([true; 4]);
+    }
+    let sounds = p
+        .tied(id)
+        .iter()
+        .filter_map(|o| p.clip(o))
+        .filter(|o| !o.video)
+        .count();
+    let others = !others(p, id).is_empty();
+    Some(if sounds > 1 {
+        [false, false, others, others]
+    } else {
+        [true, d > 0, others, others && d < 0]
+    })
 }
 
 fn into_place(p: &mut Project, id: &str, d: i64, slip: bool) -> Result<()> {
@@ -493,6 +530,15 @@ pub fn resync(p: &mut Project, id: &str, how: crate::request::Resync) -> Result<
     let (ti, ci) = locate(p, id)?;
     let d = offset(p, &p.tracks[ti].clips[ci])
         .ok_or_else(|| Error::invalid(format!("{id} is in sync")))?;
+    let n = match how {
+        Resync::Slip => 0,
+        Resync::Move => 1,
+        Resync::SlipOthers => 2,
+        Resync::MoveOthers => 3,
+    };
+    if !fixes(p, id).is_some_and(|on| on[n]) {
+        return Err(Error::invalid(format!("{id} does not take this fix")));
+    }
     let slip = matches!(how, Resync::Slip | Resync::SlipOthers);
     match how {
         Resync::Slip | Resync::Move => into_place(p, id, d, slip),

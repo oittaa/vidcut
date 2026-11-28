@@ -159,7 +159,7 @@ pub struct Workspace {
     pub(super) gallery: super::gallery::Gallery,
 }
 
-const ALONE: [&str; 7] = [
+const ALONE: [&str; 8] = [
     "edit.compound",
     "edit.move",
     "edit.trim",
@@ -167,6 +167,7 @@ const ALONE: [&str; 7] = [
     "edit.slip",
     "edit.slide",
     "edit.delete",
+    "edit.split",
 ];
 
 fn alone(method: &str, params: &mut Value) {

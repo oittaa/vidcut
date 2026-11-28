@@ -4181,14 +4181,16 @@ fn mutate(
             })?;
             clip_ids(&ids)
         }
-        Request::EditSplit { at, clips } => {
+        Request::EditSplit { at, clips, alone } => {
             let points = at
                 .to_vec()
                 .iter()
                 .map(|t| resolve(p, t, playhead))
                 .collect::<Result<Vec<_>>>()?;
             let selected = resolve_clips(p, clips, playhead)?;
-            json!({ "created": ops::split(p, &points, &selected)? })
+            let created =
+                ops::linked::apart(p, *alone, &selected, |p| ops::split(p, &points, &selected))?;
+            json!({ "created": created })
         }
         Request::EditJoin { at, clips } => {
             let at = match at {
@@ -7607,7 +7609,9 @@ fn place_imported(
                     .link
                     .filter(|_| c.compound.is_some() || c.has_no_media())
                     .map(|l| links.of(l)),
+                linked_at: None,
             };
+            clip.linked_at = clip.link.and(c.linked_at);
             if !clip.takes_speed() {
                 clip.speed = None;
             }
@@ -7763,6 +7767,7 @@ fn place_imported(
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
             link: c.link.map(|l| links.of(l)),
+            linked_at: c.link.and(c.linked_at),
         });
         placed.insert(track_of(&c.track));
     }

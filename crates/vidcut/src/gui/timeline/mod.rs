@@ -3085,21 +3085,25 @@ impl Workspace {
         &self,
         p: &Project,
         clips: &[String],
-    ) -> Option<(&'static str, &'static str, Vec<String>)> {
+    ) -> Option<(bool, &'static str, Vec<String>)> {
         let ids = if self.timeline.options.linked_selection {
             ops::linked::with_ties(p, clips)
         } else {
             clips.to_vec()
         };
-        let links: HashSet<Option<u32>> = ids
-            .iter()
-            .map(|id| p.clip(id).and_then(|c| c.link))
-            .collect();
-        match links.into_iter().collect::<Vec<_>>().as_slice() {
-            [Some(_)] => Some(("Unlink Clips", "clip.unlink", ids)),
-            _ if ids.len() > 1 => Some(("Link Clips", "clip.link", ids)),
-            _ => None,
+        let chosen: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        if chosen.len() < 2 {
+            return None;
         }
+        let first = ids.first()?;
+        let tied = p.tied(first);
+        let whole =
+            tied.len() + 1 == chosen.len() && tied.iter().all(|o| chosen.contains(o.as_str()));
+        Some(if whole {
+            (true, "clip.unlink", ids)
+        } else {
+            (false, "clip.link", ids)
+        })
     }
 
     fn clip_menu(&mut self, ui: &mut egui::Ui, c: &vidcut_core::model::Clip) {
@@ -3206,37 +3210,28 @@ impl Workspace {
             json!({ "clips": clips, "lift": true }),
         );
         let linking = self.project().and_then(|p| self.link_action(p, &clips));
-        let resync = self.project().map(|p| {
-            (
-                ops::linked::offset(p, c).is_some(),
-                !ops::linked::others(p, &c.id).is_empty(),
-            )
-        });
-        if linking.is_some() || resync.is_some_and(|(own, others)| own || others) {
+        let fixes = self.project().and_then(|p| ops::linked::fixes(p, &c.id));
+        if linking.is_some() || fixes.is_some() {
             ui.separator();
         }
-        if let Some((label, method, ids)) = linking {
-            item(
-                ui,
-                &bindings.named(label, Action::LinkClips),
-                method,
-                json!({ "clips": ids }),
-            );
+        if let Some((mut linked, method, ids)) = linking {
+            let label = bindings.named("Link Clips", Action::LinkClips);
+            if ui.checkbox(&mut linked, label).clicked() {
+                self.send(method, json!({ "clips": ids }));
+                ui.close();
+            }
         }
-        if let Some((own, others)) = resync {
-            for (label, how, on) in [
-                ("Slip Into Place", "slip", own),
-                ("Move Into Place", "move", own),
-                ("Slip Others Into Place", "slip_others", others),
-                ("Move Others Into Place", "move_others", others),
-            ] {
-                if on {
-                    item(
-                        ui,
-                        label,
-                        "edit.resync",
-                        json!({ "clip": c.id, "how": how }),
-                    );
+        if let Some(on) = fixes {
+            let names = [
+                ("Slip Into Place", "slip"),
+                ("Move Into Place", "move"),
+                ("Slip Others Into Place", "slip_others"),
+                ("Move Others Into Place", "move_others"),
+            ];
+            for ((label, how), on) in names.into_iter().zip(on) {
+                if ui.add_enabled(on, egui::Button::new(label)).clicked() {
+                    self.send("edit.resync", json!({ "clip": c.id, "how": how }));
+                    ui.close();
                 }
             }
         }
@@ -4711,6 +4706,7 @@ mod tests {
             color: None,
             render_cache: vidcut_core::model::ClipCache::Auto,
             link: None,
+            linked_at: None,
         }
     }
 

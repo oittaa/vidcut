@@ -391,9 +391,11 @@ The bar and the Jobs button:
   - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
   - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
 - An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
-- `Assets::sync` holds `linked::offsets` for each frame that is drawn. A clip that is out of sync shows its offset in a red badge before its name.
-- The clip menu gives Link Clips or Unlink Clips (`link_action`). With Linked Selection on, it takes the linked clips of the selection too.
-  - It gives the four commands of the offset when the clip has an offset.
+- `Assets::sync` holds `linked::offsets` for each frame that is drawn. A clip that is out of sync shows its offset in a red badge before its name, as a sign and seconds:frames (`sync_text`).
+- The clip menu gives Link Clips (`link_action`) for two or more clips. With Linked Selection on, it takes the linked clips of the selection too.
+  - On one whole group, the item has a check mark and sends `clip.unlink`. Else it sends `clip.link`.
+  - It gives the four fixes when the clip has an offset. `linked::fixes` turns off the fixes that the clip does not take.
+- With Linked Selection off, `edit.split` is in `ALONE` too. Thus the blade and Split cut the selected clip alone.
 - `Options::linked_selection` is the Linked Selection switch.
   - On, the timeline draws the linked clips of each selected clip as selected (`linked::with_ties`). The selection itself holds the clicked clip.
   - Off, `Rows::layout` makes no `Bands`, and a video row has no band. Thus each sound clip shows on its audio row.

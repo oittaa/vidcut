@@ -589,8 +589,11 @@ fn clip(
         && width > 30.0
         && let Some(d) = assets.sync.get(c.id.as_str())
     {
-        let galley =
-            painter.layout_no_wrap(format!("{d:+}"), FontId::proportional(10.0), Color32::WHITE);
+        let galley = painter.layout_no_wrap(
+            sync_text(*d, fps),
+            FontId::proportional(10.0),
+            Color32::WHITE,
+        );
         let badge =
             Rect::from_min_size(pos2(left + 2.0, top + 2.0), galley.size() + vec2(4.0, 1.0));
         painter.rect_filled(badge, CornerRadius::same(2), theme::colors().error);
@@ -767,6 +770,18 @@ fn volume_line(painter: &Painter, band: Rect, scale: &Scale, c: &Clip, chosen: &
             Stroke::new(1.0, Color32::from_black_alpha(180)),
         ));
     }
+}
+
+fn sync_text(d: i64, fps: Rational) -> String {
+    let base = fps.timecode_base().max(1);
+    let n = d.abs();
+    let sign = if d < 0 { '-' } else { '+' };
+    format!(
+        "{sign}{:02}:{:0w$}",
+        n / base,
+        n % base,
+        w = fps.frame_digits()
+    )
 }
 
 fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {
