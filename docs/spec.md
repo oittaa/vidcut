@@ -1204,6 +1204,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Shift+V selects one clip under the playhead (pp. 889, 900, 942).
     - It takes the lowest track that has a clip there.
     - The manual ties this key to the Source Track Selector of the Edit page. vidcut has no such control.
+  - Ctrl+Left and Ctrl+Right select the previous or the next clip. Ctrl+Up and Ctrl+Down select a clip on another track (pp. 825, 900).
+    - vidcut: these keys start from the clip that was selected last. After the key, only the new clip is selected (not measured).
+    - vidcut: Ctrl+Left and Ctrl+Right stay on the track of that clip. A gap does not count as a clip (not measured).
+    - vidcut: Ctrl+Up and Ctrl+Down go to the nearest track above or below that has a clip and is not locked (not measured).
+    - vidcut: the tracks are in the order of the screen, the highest video track first, then V1, A1 and the next audio tracks (not measured).
+    - vidcut: on that track, the key selects the clip nearest the start of the selected clip (not measured).
+    - vidcut: with no clip in that direction, the selection does not change (not measured).
+    - vidcut: with no clip selected, the key selects the clip that Shift+V selects (not measured).
 - **Edit points:**
   - The pointer at the center of an edit selects both sides (a roll).
   - The pointer just left or right of the edit selects one side (a resize).
@@ -6277,6 +6285,7 @@ The Audio page follows the Fairlight page of the manual.
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |
+| Ctrl+Left / Ctrl+Right / Ctrl+Up / Ctrl+Down | Select the previous / next clip, or a clip above / below (§8.1) |
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |
@@ -7758,7 +7767,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A clip at Zoom 0.5 in a compound clip at Zoom 2 is softer than a clip at Zoom 1. One picture and two pictures inside give the same softness.
       - An effect on a clip inside works before the crop of the compound clip. Thus the cut edge stays hard.
     - The pictures of the compound clip in the frame set how they mix. This rule is for each frame.
-    - **One picture in the frame:** it acts as if it were on the timeline ([X164](deviations.md#x164-a-mode-inside-a-compound-clip-always-mixes-with-the-tracks-below)).
+    - **One picture in the frame:** it acts as if it were on the timeline ([gotchas](gotchas.md#resolves-renders)).
       - Its composite mode mixes with the tracks below the compound clip.
       - Its opacity and the opacity of the compound clip multiply.
       - A composite mode on the compound clip replaces its mode.

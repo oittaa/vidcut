@@ -794,6 +794,11 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The ramp of Inside and Outside fits best at (x − 0.5, y − 0.5).
   - Thus the edge and the ramp are half a pixel apart in x, and one pixel apart in y.
   - vidcut reads both at (x, y + 0.5) (`CURVE_SAMPLE`, `window_curve`).
+- **A mode inside a compound clip can mix with black.**
+  - A compound clip holds one picture with a composite mode. The compound clip has its default values, and the picture has an opacity of 100%.
+  - Then Resolve mixes the mode with black, not with the tracks below. Multiply gives a black frame. Screen, Add and Difference give the picture with no change.
+  - A small change brings back the rule of the spec. Examples are a pan of 1 pixel, or an opacity of 99% on the compound clip.
+  - vidcut does not copy this fault. The mode of one picture always mixes with the tracks below ([spec §12](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Step 21 of a track equalizer Q shows 0.8.**
   - The Equalizer window of a track shows the step n of a Q as (n − 10) / 15, with one decimal.
   - Step 21 is 0.733, but the window shows 0.8. Earth, Ice and Fire show the same.

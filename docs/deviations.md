@@ -1476,23 +1476,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
 
-## X164. A mode inside a compound clip always mixes with the tracks below
-
-- **Resolve:** (measured in Resolve Studio 21.2.0)
-  - One picture in a compound clip mixes its composite mode with the tracks below ([spec](spec.md#12-decisions-on-gaps-and-contradictions)).
-  - In one case the mode mixes with black. The compound clip has its usual values, and the picture has an opacity of 100%.
-  - In that case Multiply gives a black frame. Screen, Add and Difference give the picture with no change.
-  - Each of these changes brings back the rule of the spec:
-    - An opacity of 99% on the compound clip.
-    - A pan of 1 pixel, a zoom of 0.99, a crop of 1 pixel or a rotation of 0.1°.
-    - An opacity of 50% on the picture inside.
-  - A title alone does not act in this way. Its mode mixes with the tracks below.
-  - A Vignette on the compound clip also brings back the rule. A Sharpen alone does not.
-- **vidcut:**
-  - The mode of one picture always mixes with the tracks below.
-- **Why:**
-  - A move of 1 pixel must not change a black frame to the correct picture. This behavior of Resolve is a fault.
-
 ## X167. vidcut finds the faces and the text of a clip
 
 - **Resolve:**
