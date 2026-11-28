@@ -5208,6 +5208,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A keyframe outside the target clip stays when another keyframe of the node is in the clip.
   - When no keyframe of a node lands in the clip, the node gets no keyframes. It takes the values of its last keyframe before the first frame.
   - Align Keyframes to Current Frame: the grabbed frame goes on the playhead. Each keyframe keeps its distance from the grabbed frame.
+  - With one still of two nodes with keyframes, Align Keyframes to Current Frame gave no change. The rule of this case is not known ([todo](todo/color-gallery.md)).
 - **Preserve Number Of Nodes** (N):
   - The number of nodes of the clip becomes the larger of two numbers. One is the number of nodes of the still.
   - The other is the smaller of N and the number of nodes of the clip.
@@ -5243,6 +5244,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Left out, the mode is the project's `apply_keys`. `project.set` with `apply_keys` sets it, and Apply Grades Using in the menu of the Gallery area does too.
     - A new project has No Keyframes (not measured).
     - With `current_frame`, the grabbed frame goes on `at`, or on the playhead. Each target must be at that frame. With no `clips`, the target is the clip there.
+    - `current_frame` applies each still, also a still like the one that gave no change ([todo](todo/color-gallery.md)).
     - The rule for a node with no keyframe in the clip also holds for Start Frames and Align Keyframes to Current Frame (not measured).
     - Source timecode compares in frames of the open timeline. A clip with no start timecode starts at 0.
   - `project.set` with `preserve_nodes` sets Preserve Number Of Nodes, from 0 to 10. Preserve Number Of Nodes in the menu of the Gallery area does too.
