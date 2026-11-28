@@ -60,7 +60,7 @@ impl Frame {
             }
             SubtitleView {
                 style: t.style.clone(),
-                cues,
+                cues: cues.to_vec(),
             }
         }));
         player.follow(t, 0.0);

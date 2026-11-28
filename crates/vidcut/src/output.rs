@@ -1887,10 +1887,11 @@ fn state_line(v: &Value) -> String {
 
 fn clip_line(c: &Value) -> String {
     let s = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-    let audio = match &c["audio"] {
-        Value::Null => "no audio".to_string(),
-        a if a["head"] != 0 || a["tail"] != 0 => format!("audio {:+}/{:+}", a["head"], a["tail"]),
-        _ => "audio".to_string(),
+    let audio = match (&c["audio"], c["link"].as_u64()) {
+        (Value::Null, None) => "no audio".to_string(),
+        (Value::Null, Some(l)) => format!("link {l}"),
+        (_, None) => "audio".to_string(),
+        (_, Some(l)) => format!("audio, link {l}"),
     };
     let speed = match c["speed"].as_f64() {
         Some(0.0) => ", freeze".to_string(),

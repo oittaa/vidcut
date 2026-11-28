@@ -120,7 +120,12 @@ pub fn measure(
             newer: None,
         },
     };
-    let reader = Reader { plan, size, gpu };
+    let reader = Reader {
+        plan,
+        size,
+        gpu,
+        pixel: crate::ffmpeg::format::Pixel::RGB24,
+    };
     let (lo, hi) = (look.frames.0.max(0), look.frames.1.min(plan.frames));
     if hi <= lo {
         return Err(Error::Invalid("the clip has no frame to stabilize".into()));

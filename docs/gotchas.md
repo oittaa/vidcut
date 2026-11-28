@@ -395,7 +395,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
     - 2: fit.
     - 3: fill.
     - 4: stretch.
-  - Crop maps a source pixel to a frame pixel. Only square pixels were measured.
+  - Crop maps a source pixel to a frame pixel. On pixels that are not square, the value is the crop / (the fit factor × the source width) ([spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
   - A clip at 0 has no Retime and Scaling. The file does not hold the setting of the timeline.
   - Pan is in picture widths to the right, and Tilt in picture heights up.
   - The zoom is across and down the picture.
@@ -744,6 +744,13 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - In the edit of a Text title, Esc kept the change and moved the caret to the start of the text. The edit stayed open.
   - Only a click outside the title ended the edit. Thus no key ends it.
   - vidcut does not copy this fault. Esc keeps the change and ends the edit, as in most editors ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **A pick of a clip filter is not an undo step.**
+  - After a pick of Ungraded Clips, Edit > Undo shows "Undo" with no name.
+  - Ctrl+Z does not take back the pick. It changes nothing else that was seen.
+  - vidcut: a pick is an undo step, "Filter the clips", as each edit is ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+- **A filtered strip does not update after a script clears a clip color.**
+  - Under Clip Color > Teal, the strip showed the one teal clip. `ClearClipColor` then cleared its color, and the clip stayed in the strip.
+  - vidcut does not copy this fault. The strip follows each change of the project.
 
 ## Resolve's scopes
 
@@ -829,6 +836,26 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - The letters are those of Arial Black: the stem of the H is 0.305 of its height, as in `ariblk.ttf`. In Arial, it is 0.132.
   - The family of `ariblk.ttf` in its typographic names is Arial, with the face Black.
   - vidcut does not copy this fault. It draws Arial for the family Arial ([spec §8.14](spec.md#814-titles-pp-762764-11761178)).
+- **Stretch makes a file with pixels that are not square too wide.**
+  - Stretch scales the stored pixels to the frame. Then the pixel aspect ratio makes the picture wider again.
+  - Thus the picture is W × PAR wide, and it goes out of the frame at the left and the right.
+  - This is measured on files with pixels of 4:3, 2:1 and 10:9:
+    - The 4:3 file is 1706.67 px wide in 1280 x 720 and in 1280 x 960. This is 1280 × 4/3.
+    - The marks of the 2:1 file are 2 times as far apart across as at Fit, in 1280 x 720 and in 1280 x 960.
+    - The 10:9 file is 1422.4 px wide in 1280 x 960. Its left edge is at the place that 1280 × 10/9 gives, and its right edge is 0.2 px farther out.
+  - vidcut does not copy this fault. Stretch fills the frame on each axis (`place::mapped`, [spec](spec.md#input-scaling-pp-292293)).
+- **The crop of a file with a rotation cuts other sides of the picture.**
+  - The files have a rotation of 90, 180 or 270 in the `tkhd` matrix. The timeline shows them upright.
+  - One 1280 x 720 file was measured at each angle.
+  - At 90, Crop Left cuts the right side, and Crop Right cuts the left side. Crop Top and Crop Bottom cut their own sides.
+  - At 270, Crop Top cuts the bottom, and Crop Bottom cuts the top. Crop Left and Crop Right cut their own sides.
+  - At 180, each crop cuts the opposite side.
+  - vidcut does not copy this fault. Each crop cuts the side that it names, on the upright picture ([spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
+- **Individual clips with two video tracks skips clips in the range.**
+  - With one video track, each clip with a frame in the In/Out range renders, whole.
+  - With two video tracks, some ranges gave no file, with clips on V1 and V2 under the range. Other ranges gave the clip of one track only.
+  - The runs on three such timelines show no rule for these cases.
+  - vidcut does not copy this fault. Individual clips renders each clip with a frame in the range, on each track ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 
 ## Resolve's key files
 

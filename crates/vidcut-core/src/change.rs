@@ -48,6 +48,24 @@ pub struct Items {
     changed: BTreeMap<String, Change>,
 }
 
+impl Items {
+    pub(crate) fn map_items(
+        &mut self,
+        mut on_val: impl FnMut(&mut Value),
+        mut on_change: impl FnMut(&mut Change),
+    ) {
+        for (_, v) in &mut self.removed {
+            on_val(v);
+        }
+        for (_, v) in &mut self.added {
+            on_val(v);
+        }
+        for c in self.changed.values_mut() {
+            on_change(c);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     first: String,

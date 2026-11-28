@@ -85,8 +85,7 @@ mod tests {
             auto_format: false,
             ..Settings::default()
         });
-        std::fs::write(&path, serde_json::to_string(&project).unwrap()).unwrap();
-        Store::open_in(&path, &dir.join("state")).unwrap()
+        Store::create(&path, &project).unwrap()
     }
 
     fn run(store: &Store, method: &str, params: serde_json::Value) {

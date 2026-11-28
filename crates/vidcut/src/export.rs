@@ -543,7 +543,7 @@ fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitl
                     word_styles: c.words.iter().map(|w| w.style.clone()).collect(),
                     color: p.speakers.color_of(c),
                     style: c.style.clone(),
-                    picture: keyed.picture,
+                    picture: keyed.picture.as_deref().cloned(),
                 }
             })
             .collect(),
@@ -1089,10 +1089,7 @@ pub fn prepare(
             return Err(Error::invalid("no clips in the export range"));
         }
     } else {
-        let heard = |c: &&Clip| {
-            let (x, y) = c.audio_range().unwrap_or((c.start, c.end()));
-            c.start.min(x) < b && c.end().max(y) > a
-        };
+        let heard = |c: &&Clip| c.start < b && c.end() > a;
         offline = p.offline_in(p.tracks.iter().flat_map(|t| &t.clips).filter(heard));
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,

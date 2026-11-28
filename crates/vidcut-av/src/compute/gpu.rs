@@ -154,9 +154,40 @@ impl Gpu {
     pub(crate) fn start(what: &'static str, shared: u32) -> std::result::Result<Self, String> {
         let on = crate::screen::offscreen().map_err(|e| format!("no GPU for {what}: {e}"))?;
         let (device, queue) = on.gpu.handles();
-        let limits = device.limits();
         let listed = crate::gpus::of(on.adapter.vendor, on.adapter.device);
         let name = on.adapter.name.clone();
+        Self::made((device, queue), (on.gpu.id(), listed, name), what, shared)
+    }
+
+    pub(crate) fn start_soft(what: &'static str, shared: u32) -> std::result::Result<Self, String> {
+        let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: true,
+            ..Default::default()
+        }))
+        .map_err(|e| format!("no CPU device for {what}: {e}"))?;
+        let name = adapter.get_info().name;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some(what),
+            required_limits: adapter.limits(),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            ..Default::default()
+        }))
+        .map_err(|e| format!("no CPU device for {what}: {e}"))?;
+        Self::made((&device, &queue), (0, None, name), what, shared)
+    }
+
+    fn made(
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        (id, listed, name): (u64, Option<crate::gpus::Gpu>, String),
+        what: &'static str,
+        shared: u32,
+    ) -> std::result::Result<Self, String> {
+        let limits = device.limits();
         if limits.max_compute_workgroup_storage_size < shared
             || limits.max_compute_invocations_per_workgroup < 256
             || limits.max_storage_buffers_per_shader_stage < 8
@@ -167,7 +198,7 @@ impl Gpu {
         Ok(Self {
             device: device.clone(),
             queue: queue.clone(),
-            id: on.gpu.id(),
+            id,
             listed,
             name,
             what,

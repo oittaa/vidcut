@@ -13,13 +13,12 @@ fn store(dir: &Path) -> Store {
         auto_format: false,
         ..Settings::default()
     });
-    std::fs::write(&path, serde_json::to_string(&project).unwrap()).unwrap();
-    Store::open_in(&path, &dir.join("state")).unwrap()
+    Store::create(&path, &project).unwrap()
 }
 
 fn run(store: &Store, method: &str, params: Value) -> Value {
     let e = Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
-    let (r, _) = store
+    let r = store
         .transact(|ed| ed.apply(e, &FakeEnv::default(), None))
         .unwrap_or_else(|e| panic!("{method}: {e}"));
     r.result
@@ -94,7 +93,7 @@ fn a_named_step_keeps_its_name_in_a_later_run() {
     let s = store(dir.path());
     bins(&s, &["a", "b"]);
     run(&s, "history.mark", json!({ "step": 1, "name": "Before b" }));
-    let again = Store::open_in(s.path(), &dir.path().join("state")).unwrap();
+    let again = Store::open(s.path()).unwrap();
     let m = &history(&again)["marks"][0];
     assert_eq!(
         (m["step"].clone(), m["id"].clone(), m["name"].clone()),
@@ -122,7 +121,7 @@ fn reverting_a_step_undoes_it_alone() {
     f.ok(json!({ "method": "history.revert", "params": { "step": 4 } }));
     assert_eq!(
         (f.v1(), f.editor.project().markers.len()),
-        (vec![row("c1", 0, 50, 0), row("c2", 50, 50, 100)], 1)
+        (vec![row("c1", 0, 50, 0), row("c3", 50, 50, 100)], 1)
     );
 }
 
@@ -145,7 +144,7 @@ fn since_a_step_says_what_changed() {
     f.append("m1", 100, 150);
     f.ok(json!({ "method": "edit.delete", "params": { "clips": "c1" } }));
     let r = f.ok(json!({ "method": "history.get", "params": { "since": 3 } }));
-    assert_eq!(r.result["since"]["text"], "1 clip deleted, 1 moved");
+    assert_eq!(r.result["since"]["text"], "2 clips deleted, 2 moved");
 }
 
 #[test]
@@ -157,7 +156,7 @@ fn reverting_a_move_keeps_a_clip_added_after_it() {
     f.append("m1", 0, 50);
     f.ok(json!({ "method": "history.revert", "params": { "step": 4 } }));
     let ids: Vec<String> = f.v1().into_iter().map(|r| r.0).collect();
-    assert_eq!(ids, ["c1", "c2", "c3"]);
+    assert_eq!(ids, ["c1", "c3", "c5"]);
 }
 
 #[test]
@@ -179,9 +178,9 @@ fn a_revert_that_no_longer_fits_names_the_step_in_its_way() {
     f.append("m1", 0, 50);
     f.append("m1", 50, 100);
     f.append("m1", 100, 150);
-    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c3", "lift": true } }));
+    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c5", "lift": true } }));
     f.ok(json!({ "method": "edit.delete", "params": { "clips": "c1", "lift": true } }));
-    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c2", "lift": true } }));
+    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c3", "lift": true } }));
     let e = f.err(json!({ "method": "history.revert", "params": { "step": 5 } }));
     assert_eq!(
         e.message,

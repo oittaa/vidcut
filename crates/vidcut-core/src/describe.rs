@@ -503,7 +503,8 @@ pub fn describe_at(
         | "grade.window.paste"
         | "grade.mask.click"
         | "grade.mask.set"
-        | "grade.mask.clear" => format!(
+        | "grade.mask.clear"
+        | "grade.mask.track" => format!(
             "{} {}",
             match method {
                 "grade.keys.add" if d.flag("edl") => "Add EDL marks to",
@@ -529,6 +530,7 @@ pub fn describe_at(
                 "grade.mask.clear" if d.params.get("click").is_some() =>
                     "Delete a Magic Mask click of",
                 "grade.mask.clear" => "Clear the Magic Mask of",
+                "grade.mask.track" => "Track the Magic Mask of",
                 _ => "Link the nodes of",
             },
             match d.flag("timeline") {
@@ -1089,6 +1091,7 @@ impl Words<'_> {
                 ids => format!("Split {} at {at}", self.names_of(ids)),
             };
         };
+        let mut groups = std::collections::HashSet::new();
         let cut: Vec<(String, &str)> = p
             .tracks
             .iter()
@@ -1096,6 +1099,7 @@ impl Words<'_> {
             .flat_map(|t| t.clips.iter().map(move |c| (c, t.id.as_str())))
             .filter(|(c, _)| only.is_empty() || only.contains(&c.id))
             .filter(|(c, _)| frames.iter().any(|&f| c.start < f && f < c.end()))
+            .filter(|(c, _)| c.link.is_none_or(|l| groups.insert(l)))
             .map(|(c, t)| (c.id.clone(), t))
             .collect();
         match cut.as_slice() {

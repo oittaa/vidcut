@@ -249,7 +249,9 @@ Each step has requests for the CLI, IPC and MCP. Each edit is one undo step, als
 
 ### Stills and Apply Grade
 
-The Gallery panel, Grab Still, Delete Selected, the selection of stills and Apply Grade of a still with no keyframes are built. These items are still to do:
+The Gallery panel, Grab Still, Delete Selected, a click and a Ctrl-click on stills, and Apply Grade of a still with no keyframes are built.
+
+These items wait for measured cases. Each gives its reason:
 
 - The ID of a still, as measured: the track and the place of the clip at the grab, then the place of the still.
   - Local versions did not change the ID in the measured cases. Thus vidcut needs no versions for it ([versions.md](versions.md)).
@@ -261,12 +263,16 @@ The Gallery panel, Grab Still, Delete Selected, the selection of stills and Appl
   - No Keyframes gives the grade at the frame of the still, as p. 3340 says. gotchas.md records what Resolve does.
   - It removes the line of the keyframes of a still from [gaps.md](gaps.md).
 - Apply Active Layer gives only the shown node stack layer.
-- A drag of a still into the viewer applies its grade to the clip at the playhead only, as measured.
+  - Why it waits: Resolve did this for one still on one clip, once with each layer shown. The Rules run adds clips and timelines.
+- A drag of a still into the viewer applies its grade.
+  - Why it waits: in one case, with two clips selected, only the clip at the playhead changed. The Rules run adds cases.
+- A Shift-click on a still selects a range of stills (p. 3334).
+  - Why it waits: what the range holds is not measured. The Rules run measures it, as for the Thumbnail timeline.
 - A click on a clip under a clip of a higher track makes it the current clip. Resolve did this in three cases.
   - The Rules run tests what playback and the arrow keys then do.
   - The Rules run also tests if the red tint of the clip at the playhead changes the targets of Apply Grade.
 - Export of stills writes the picture formats of Resolve ([Import and export](#import-and-export)).
-- Runs: the stills run and the Gallery menus run.
+- Runs: the Labels run and the Rules run.
 
 ### Albums and Memories
 
@@ -385,6 +391,7 @@ These cases use at least three timelines that differ in size, frame rate, media 
   - Undo: three clips, the group modes, the group items, a ripple, a memory load, the albums, Grab Still and Delete Selected.
   - Groups: a timeline grade, PRE stills in other modes, Collapse with two layers and two groups.
   - Memories and layers: a save from each layer, a load into another layer, the Timeline mode and a full memory.
+  - Stills: Apply Active Layer, a drag into the viewer and a Shift-click, each on three timelines.
 - **Wipes run** ([window], 15 min): the wipe styles, the drag, Invert Wipe and the picture of the still side.
 - **Timelines album run** ([window], 15 min): the Timelines album, Copy Active Layer and Display Node Graph.
 - **Shared nodes run** ([window], 15 min): the Shared node items and what a change of a Shared node does.

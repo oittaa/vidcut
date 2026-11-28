@@ -47,6 +47,6 @@ pub fn admits(p: &Project, c: &Clip, f: &ClipFilter) -> bool {
         ClipFilter::Marked { color } => marked(color.as_deref()),
         ClipFilter::Effects => picture.is_some_and(|x| !x.effects.is_empty()),
         ClipFilter::OtherRate => media.is_some_and(|m| m.rate(p.fps()) != p.fps()),
-        ClipFilter::Sizing => picture.is_some_and(sizing),
+        ClipFilter::Sizing => picture.is_some_and(|p| sizing(p)),
     }
 }

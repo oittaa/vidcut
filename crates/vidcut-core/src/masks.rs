@@ -9,6 +9,44 @@ pub const CELLS: usize = SIDE * SIDE;
 pub const MAPS_BYTES: usize = 256 << 20;
 pub const MOST_CLICKS: usize = 64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rules {
+    pub joins: bool,
+    pub clicked_stays: bool,
+    pub clicks_drop_tracked: bool,
+}
+
+pub const RULES: Rules = Rules {
+    joins: true,
+    clicked_stays: true,
+    clicks_drop_tracked: true,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Size {
+    Tiny,
+    BasePlus,
+    Large,
+}
+
+impl Size {
+    pub fn of(quality: crate::model::MaskQuality, large: bool) -> Self {
+        match (quality, large) {
+            (crate::model::MaskQuality::Faster, _) => Self::Tiny,
+            (crate::model::MaskQuality::Better, false) => Self::BasePlus,
+            (crate::model::MaskQuality::Better, true) => Self::Large,
+        }
+    }
+
+    pub fn model(self) -> &'static crate::catalog::Model {
+        match self {
+            Self::Tiny => &crate::catalog::SAM21_TINY,
+            Self::BasePlus => &crate::catalog::SAM21_BASE_PLUS,
+            Self::Large => &crate::catalog::SAM21_LARGE,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
     pub at: [f64; 2],

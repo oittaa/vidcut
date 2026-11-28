@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::shared::{Shared, SharedVec};
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames, rescale};
 
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
@@ -20,15 +21,15 @@ pub struct Project {
     pub rev: u64,
     pub edited: Option<u64>,
     pub settings: Settings,
-    pub media: Vec<Media>,
-    pub tracks: Vec<Track>,
-    pub compounds: Vec<Compound>,
+    pub media: SharedVec<Media>,
+    pub tracks: SharedVec<Track>,
+    pub compounds: SharedVec<Compound>,
     pub compound_path: Vec<OpenCompound>,
     pub marks: Marks,
     pub tape_marks: TapeMarks,
     pub markers: Vec<Marker>,
-    pub subtitles: Vec<SubtitleTrack>,
-    pub timelines: Vec<Timeline>,
+    pub subtitles: SharedVec<SubtitleTrack>,
+    pub timelines: SharedVec<Timeline>,
     pub recent: Vec<String>,
     pub next_id: NextIds,
     pub bins: Vec<String>,
@@ -166,15 +167,15 @@ impl From<ProjectFile> for Project {
             rev: f.rev,
             edited: f.edited,
             settings: f.settings,
-            media: f.media,
-            tracks: Vec::new(),
-            compounds: f.compounds,
+            media: f.media.into(),
+            tracks: SharedVec::new(),
+            compounds: f.compounds.into(),
             compound_path: f.compound_path,
             marks: Marks::default(),
             tape_marks: f.tape_marks,
             markers: Vec::new(),
-            subtitles: Vec::new(),
-            timelines: f.timelines,
+            subtitles: SharedVec::new(),
+            timelines: f.timelines.into(),
             recent: f.recent,
             next_id: f.next_id,
             bins: f.bins,
@@ -216,7 +217,7 @@ pub struct Timeline {
     #[serde(default)]
     pub clip_filter: ClipFilter,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
-    pub tracks: Vec<Track>,
+    pub tracks: SharedVec<Track>,
     /// Timeline In/Out marks.
     #[serde(default)]
     pub marks: Marks,
@@ -224,7 +225,7 @@ pub struct Timeline {
     pub markers: Vec<Marker>,
     /// Subtitle tracks `S1…`, from the one nearest the video up.
     #[serde(default)]
-    pub subtitles: Vec<SubtitleTrack>,
+    pub subtitles: SharedVec<SubtitleTrack>,
 }
 
 /// What the Export page renders of a timeline.
@@ -1837,9 +1838,9 @@ pub struct AudioInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackKind {
-    /// Combined video+audio clips (`V1`, `V2`, …).
+    /// Picture clips (`V1`, `V2`, …).
     Video,
-    /// Audio-only clips (`A1`, `A2`, …).
+    /// Sound clips (`A1`, `A2`, …).
     Audio,
 }
 
@@ -1850,31 +1851,34 @@ pub struct Track {
     pub id: String,
     pub kind: TrackKind,
     /// Sorted by `start`, never overlapping.
-    pub clips: Vec<Clip>,
+    pub clips: SharedVec<Clip>,
     pub locked: bool,
-    /// Audio of this track is silent.
+    /// The sound of this audio track is silent. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub muted: bool,
-    /// While any track is soloed, only soloed tracks are heard (the mixer).
+    /// While any audio track is soloed, only soloed tracks are heard (the
+    /// mixer). Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
-    /// The mixer fader, in dB, from -100 to 10. -100 stands for the fader's
-    /// bottom, minus infinity: the track is silent.
+    /// The mixer fader of an audio track, in dB, from -100 to 10. -100
+    /// stands for the fader's bottom, minus infinity: the track is silent.
+    /// Left out at 0.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
-    /// Voice Isolation on the track's clips that have none of their own.
-    /// Left out, it is off.
+    /// Voice Isolation on the clips of an audio track that have none of
+    /// their own. Left out, it is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_isolation: Option<VoiceIsolation>,
-    /// Ducking: the track dips where its sources are active (decision
-    /// D76).
+    /// Ducking: an audio track dips where its sources are active (decision
+    /// D76). Left out when the track has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<Duck>,
-    /// The equalizer of the track, after its Dynamics and before its fader.
-    /// Left out when the track has none, as a new track: then it is off,
-    /// with the usual bands.
+    /// The equalizer of an audio track, after its Dynamics and before its
+    /// fader. Left out when the track has none, as a new track: then it is
+    /// off, with the usual bands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<TrackEqualizer>,
-    /// The Dynamics of the track, after its ducking and before its
+    /// The Dynamics of an audio track, after its ducking and before its
     /// equalizer. Left out when the track has none, as a new track: then
     /// they are on, with each module off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1884,7 +1888,8 @@ pub struct Track {
     /// A name shown in the track header and the mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Transitions on its edit points, carried from another editor.
+    /// Transitions on its edit points, carried from another editor: picture
+    /// transitions on a video track, sound transitions on an audio track.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<Transition>,
     /// Off, the render cache's User mode renders none of its speed
@@ -1906,7 +1911,7 @@ pub struct Duck {
     /// It dips the track. Off keeps the settings.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub on: bool,
-    /// The tracks whose sound dips it (`V1`, `A2`), never its own. A source
+    /// The audio tracks whose sound dips it (`A2`), never its own. A source
     /// counts only where it is heard: not muted, and soloed while any
     /// track is.
     #[serde(default)]
@@ -1968,9 +1973,6 @@ pub enum DuckDetect {
 pub struct Transition {
     /// `t<N>`, never reused.
     pub id: String,
-    /// Between the clips' sounds (an audio edit), not their pictures.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub sound: bool,
     /// The clip before the cut; none for a gap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -2356,7 +2358,7 @@ pub struct Clip {
     pub media: String,
     /// First timeline frame.
     pub start: i64,
-    /// Length in frames (of the video; the audio may differ by J/L offsets).
+    /// Length in frames.
     pub duration: i64,
     /// Source position of the clip's first frame, in project frames from the
     /// media's first video frame.
@@ -2366,9 +2368,12 @@ pub struct Clip {
     /// on a frame of media at another frame rate has one. Left out at 0.
     #[serde(default, skip_serializing_if = "is_zero_f64")]
     pub phase: f64,
-    /// Whether the clip shows video (false for audio-only clips).
+    /// Whether the clip shows video: true on a video track, false on an
+    /// audio track.
     pub video: bool,
-    /// The clip's audio, if it carries any.
+    /// The sound of a clip on an audio track. A clip on a video track has
+    /// none: its sound is a linked clip on an audio track. Left out on a
+    /// clip with no sound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<ClipAudio>,
     /// Disabled clips are kept but not shown (the D key).
@@ -2398,7 +2403,7 @@ pub struct Clip {
     /// Where its picture goes over the frame: moved, zoomed, turned,
     /// flipped and cropped. Left out, it fills the frame as it always has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Picture>,
+    pub picture: Option<Shared<Picture>>,
     /// The id of a compound clip definition in [`Project::compounds`].
     /// It is a block with no media and no audio of its own. On an audio
     /// track it stands for the sound of what it holds (`video` false).
@@ -2420,9 +2425,9 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// Its link group. The clips of a group with the same start, length,
-    /// source start and speed act as one clip in an edit: the picture and
-    /// the sound of a compound clip, or the parts of a clip with no media.
+    /// Its link group: the clips with the same number act as one clip in
+    /// an edit, as the picture and the sound of one clip. Each clip of a
+    /// group moves and trims by the same frames, so a J or L cut stays.
     /// Left out when the clip has no link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<u32>,
@@ -5028,10 +5033,32 @@ pub struct MagicMask {
     /// off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
+    /// Quality: the model that makes the maps. Left out for `faster`.
+    #[serde(default, skip_serializing_if = "MaskQuality::is_usual")]
+    pub quality: MaskQuality,
     /// One map for each subject on each frame that has clicks of it that
-    /// are on. Left out when there is none.
+    /// are on, and on each frame that a track of it reached. Left out when
+    /// there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub maps: Vec<MaskMap>,
+}
+
+/// The Quality of a Magic Mask.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskQuality {
+    /// A looser mask, made quickly by SAM 2.1 tiny.
+    #[default]
+    Faster,
+    /// More detail, made by SAM 2.1 base+. With the preference
+    /// `color.magic_mask_large` on, SAM 2.1 large makes it.
+    Better,
+}
+
+impl MaskQuality {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A click of the Magic Mask.
@@ -5066,6 +5093,10 @@ pub struct MaskMap {
     pub subject: u32,
     /// The name of the map in the mask store of the cache folder.
     pub name: String,
+    /// The frame of the clicks that a track carried to this frame. Left
+    /// out for a map of the clicks on its own frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<i64>,
 }
 
 /// How the key input of a corrector takes the key that comes in. The key
@@ -5885,6 +5916,67 @@ pub struct Tracker {
     /// from 0 to 1 over this many frames, from 0 to 1000000. Usual: 25.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade_frames: Option<f64>,
+    /// How a track takes the picture of a `point` pattern again. Usual:
+    /// `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_mode: Option<AdaptiveMode>,
+    /// The most that the picture of a `point` pattern can change on a frame
+    /// for `best_match` to take it again, from 0 to 1. At 0 it takes no
+    /// change, and at 1 it takes each. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_tolerance: Option<f64>,
+}
+
+/// How a track takes the picture of a `point` pattern again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveMode {
+    /// On each frame, it looks for the picture of the box on the first
+    /// frame of the track.
+    #[default]
+    None,
+    /// It takes the picture where it found the pattern on each frame, and
+    /// looks for that on the next frame. This follows slow changes, and it
+    /// can drift.
+    EveryFrame,
+    /// As `every_frame`, but it keeps the last picture when the new one
+    /// differs from the first by more than `match_tolerance`.
+    BestMatch,
+}
+
+/// The way a track follows a pattern.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternKind {
+    /// A neural network (VitTrack) on the CPU follows the box. The box
+    /// grows and shrinks with the thing. Its file (715 kB) downloads at its
+    /// first use.
+    #[default]
+    Model,
+    /// On each frame, the track looks for the pixels of the box in the
+    /// search area around its last place, in one channel. The box keeps its
+    /// size.
+    Point,
+}
+
+/// The channel of the picture in which a `point` pattern is looked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternChannel {
+    /// The channel in which the box has the most contrast on the first
+    /// frame of the track.
+    #[default]
+    Auto,
+    /// The red channel.
+    Red,
+    /// The green channel.
+    Green,
+    /// The blue channel.
+    Blue,
+    /// 0.2126 red, 0.7152 green and 0.0722 blue.
+    Luminance,
+    /// The alpha channel.
+    Alpha,
 }
 
 /// What a `tracker` does with its pictures.
@@ -5982,6 +6074,22 @@ pub struct Pattern {
     /// picture, up. Each from -10 to 10. Usual: `[0, 0]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
+    /// How a track follows it. Usual: `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<PatternKind>,
+    /// The width of the area around the box in which a track of a `point`
+    /// pattern looks on the next frame, as a fraction of the width of the
+    /// picture, from 0.001 to 1. Usual: 0.125.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_width: Option<f64>,
+    /// The height of that area, as a fraction of the height of the
+    /// picture, from 0.001 to 1. Usual: 0.125.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_height: Option<f64>,
+    /// The channel in which a track of a `point` pattern looks. Usual:
+    /// `auto`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<PatternChannel>,
 }
 
 /// The pattern of a tracker that the center of a node follows.
@@ -8860,8 +8968,8 @@ pub struct Compound {
     pub frames: i64,
     /// The tracks inside it (video and audio, frames from 0 at `fps`).
     /// Empty while checked out as the active open sheet, or while offline.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tracks: Vec<Track>,
+    #[serde(default, skip_serializing_if = "SharedVec::is_empty")]
+    pub tracks: SharedVec<Track>,
     #[serde(default, skip_serializing_if = "Marks::is_empty")]
     pub marks: Marks,
     /// Timeline markers inside the compound clip. Left out when empty.
@@ -9048,11 +9156,6 @@ pub struct TrackClip {
 pub struct ClipAudio {
     /// Index into the media's audio streams.
     pub stream: u32,
-    /// Audio starts this many frames after the clip start (negative: before,
-    /// i.e. a J cut).
-    pub head: i64,
-    /// Audio ends this many frames after the clip end (positive: an L cut).
-    pub tail: i64,
     /// The volume in dB, from -100 to 30, while the clip has no volume
     /// keyframes.
     pub gain_db: f64,
@@ -9324,12 +9427,29 @@ impl VoiceIsolation {
     }
 }
 
+impl ClipAudio {
+    pub fn of(stream: u32) -> Self {
+        Self {
+            stream,
+            gain_db: 0.0,
+            gain_keys: Vec::new(),
+            muted: false,
+            pan: 0.0,
+            pan_on: true,
+            pan_keys: Vec::new(),
+            equalizer: None,
+            dialogue_leveler: None,
+            compressor: None,
+            noise_reduction: None,
+            effects: None,
+            voice_isolation: None,
+        }
+    }
+}
+
 impl Clip {
     pub fn tied_with(&self, o: &Clip) -> bool {
-        self.link.is_some()
-            && self.link == o.link
-            && (self.start, self.duration, self.source_in) == (o.start, o.duration, o.source_in)
-            && self.pace() == o.pace()
+        self.link.is_some() && self.link == o.link
     }
 
     pub const ADJUSTMENT_CLIP: &str = "Adjustment Clip";
@@ -9374,12 +9494,6 @@ impl Clip {
 
     pub fn end(&self) -> i64 {
         self.start + self.duration
-    }
-
-    pub fn audio_range(&self) -> Option<(i64, i64)> {
-        self.audio
-            .as_ref()
-            .map(|a| (self.start + a.head, self.end() + a.tail))
     }
 
     pub fn pace(&self) -> crate::render::Pace {
@@ -9436,7 +9550,8 @@ impl Clip {
     }
 
     pub fn sound_span(&self) -> Option<(f64, f64)> {
-        let (a, b) = self.audio_range()?;
+        self.audio.as_ref()?;
+        let (a, b) = (self.start, self.end());
         if self.constant_speed().is_some() {
             if self.speed_at(self.start) == 0.0 {
                 return None;
@@ -10065,7 +10180,7 @@ pub struct SubtitleTrack {
     #[serde(default, skip_serializing_if = "SubtitleStyle::is_empty")]
     pub style: SubtitleStyle,
     /// Sorted by `start`; cues may overlap.
-    pub cues: Vec<Cue>,
+    pub cues: SharedVec<Cue>,
 }
 
 /// One word of a cue. `at` is left out when the word has no start frame.
@@ -10140,7 +10255,7 @@ pub struct Cue {
     /// before or after the cue. The whole value is left out when nothing is
     /// changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Picture>,
+    pub picture: Option<Shared<Picture>>,
 }
 
 /// Where a cue shows on the picture.
@@ -10219,7 +10334,7 @@ impl SubtitleTrack {
             destination: true,
             locked: false,
             style: SubtitleStyle::default(),
-            cues: Vec::new(),
+            cues: SharedVec::new(),
         }
     }
 
@@ -10259,15 +10374,15 @@ impl Project {
             rev: 0,
             edited: None,
             settings,
-            media: Vec::new(),
+            media: SharedVec::new(),
             tracks: Self::fresh_tracks(),
-            compounds: Vec::new(),
+            compounds: SharedVec::new(),
             compound_path: Vec::new(),
             marks: Marks::default(),
             tape_marks: TapeMarks::default(),
             markers: Vec::new(),
-            subtitles: Vec::new(),
-            timelines: Vec::new(),
+            subtitles: SharedVec::new(),
+            timelines: SharedVec::new(),
             recent: Vec::new(),
             next_id: NextIds {
                 media: 1,
@@ -10287,8 +10402,8 @@ impl Project {
         }
     }
 
-    pub fn fresh_tracks() -> Vec<Track> {
-        vec![Track::new("V1", TrackKind::Video)]
+    pub fn fresh_tracks() -> SharedVec<Track> {
+        vec![Track::new("V1", TrackKind::Video)].into()
     }
 
     pub fn sheet(&self) -> Sheet<'_> {
@@ -10466,7 +10581,7 @@ impl Project {
                 take(&mut k.tracks),
                 take(&mut k.marks),
                 take(&mut k.markers),
-                Vec::new(),
+                SharedVec::new(),
             ))
         } else {
             self.timeline_mut().map(|t| {
@@ -10483,7 +10598,7 @@ impl Project {
                 Self::fresh_tracks(),
                 Marks::default(),
                 Vec::new(),
-                Vec::new(),
+                SharedVec::new(),
             )
         });
     }
@@ -10492,7 +10607,7 @@ impl Project {
         debug_assert!(self.timelines.is_empty());
         self.recent.insert(0, t.id.clone());
         self.timelines.push(Timeline {
-            tracks: Vec::new(),
+            tracks: SharedVec::new(),
             ..t
         });
     }
@@ -10510,17 +10625,17 @@ impl Project {
         }
     }
 
-    pub fn take_timelines(&mut self) -> Vec<Timeline> {
+    pub fn take_timelines(&mut self) -> SharedVec<Timeline> {
         self.check_in();
         std::mem::take(&mut self.timelines)
     }
 
-    pub fn put_timelines(&mut self, timelines: Vec<Timeline>) {
+    pub fn put_timelines(&mut self, timelines: SharedVec<Timeline>) {
         self.timelines = timelines;
         self.check_out();
     }
 
-    pub fn take_sheets(&mut self) -> (Vec<Timeline>, Vec<Compound>) {
+    pub fn take_sheets(&mut self) -> (SharedVec<Timeline>, SharedVec<Compound>) {
         self.check_in();
         (
             std::mem::take(&mut self.timelines),
@@ -10528,7 +10643,7 @@ impl Project {
         )
     }
 
-    pub fn put_sheets(&mut self, timelines: Vec<Timeline>, compounds: Vec<Compound>) {
+    pub fn put_sheets(&mut self, timelines: SharedVec<Timeline>, compounds: SharedVec<Compound>) {
         self.timelines = timelines;
         self.compounds = compounds;
         self.check_out();
@@ -10570,7 +10685,7 @@ impl Project {
             tracks: Self::fresh_tracks(),
             marks: Marks::default(),
             markers: Vec::new(),
-            subtitles: Vec::new(),
+            subtitles: SharedVec::new(),
         }
     }
 
@@ -10870,22 +10985,7 @@ impl Project {
     }
 
     pub fn end(&self) -> i64 {
-        let clips = self
-            .tracks
-            .iter()
-            .flat_map(|t| t.clips.iter())
-            .map(|c| c.audio_range().map_or(c.end(), |(_, e)| e.max(c.end())));
-        let fades = self.tracks.iter().flat_map(|t| {
-            t.transitions
-                .iter()
-                .filter(|x| x.to.is_none())
-                .filter_map(|x| {
-                    let c = t.clips.iter().find(|c| Some(&c.id) == x.from.as_ref())?;
-                    let edge = if x.sound { c.audio_range()?.1 } else { c.end() };
-                    Some(edge + x.after)
-                })
-        });
-        clips.chain(fades).max().unwrap_or(0)
+        crate::ops::compound::end_of(&self.tracks)
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
@@ -11141,7 +11241,7 @@ impl Track {
         Self {
             id: id.into(),
             kind,
-            clips: Vec::new(),
+            clips: SharedVec::new(),
             locked: false,
             muted: false,
             solo: false,
@@ -11162,7 +11262,7 @@ impl Track {
     }
 
     pub fn has_sound(&self) -> bool {
-        self.kind == TrackKind::Audio || self.clips.iter().any(|c| c.audio.is_some())
+        self.kind == TrackKind::Audio
     }
 
     pub fn in_mix(&self, any_solo: bool) -> bool {

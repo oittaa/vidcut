@@ -520,7 +520,15 @@ impl Workspace {
             return true;
         };
         let had = bindings.keys(capture.action).contains(&combo);
-        if let Some(other) = owner.filter(|o| *o != capture.action && !had) {
+        let action = capture.action;
+        let shared = || {
+            let mut others = bindings.owners(panel, combo).into_iter();
+            others.find(|o| *o != action)
+        };
+        if let Some(other) = owner
+            .or_else(shared)
+            .filter(|o| *o != capture.action && !had)
+        {
             capture.taken = Some(format!("{} is used by {}", combo.shown(), other.title()));
             return true;
         }

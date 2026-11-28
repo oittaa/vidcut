@@ -7,7 +7,7 @@ use super::{EDITOR, VIDCUT, gap, rt, schema};
 use crate::model::{
     Clip, Course, EdgeWipe, Handle, Keyframe, MAX_ANGLE, MAX_BORDER, Media, Motion, MotionEase,
     PictureTransition, Project, PushPreset, SlidePreset, SmoothMode, SmoothProcess, Track,
-    Transition, WHITE,
+    TrackKind, Transition, WHITE,
 };
 use crate::render::Curve;
 
@@ -33,19 +33,19 @@ pub fn dissolves(t: &Transition) -> bool {
 }
 
 pub fn wipe_of(t: &Transition) -> Option<EdgeWipe> {
-    (!t.sound).then(|| wipe_in(&t.otio)).flatten()
+    wipe_in(&t.otio)
 }
 
 pub fn dip_of(t: &Transition) -> Option<[u8; 3]> {
-    (!t.sound).then(|| dip_in(&t.otio)).flatten()
+    dip_in(&t.otio)
 }
 
 pub fn moving_of(t: &Transition) -> Option<PictureTransition> {
-    (!t.sound).then(|| moving_in(&t.otio)).flatten()
+    moving_in(&t.otio)
 }
 
 pub fn smooth_of(t: &Transition) -> Option<PictureTransition> {
-    (!t.sound).then(|| smooth_in(&t.otio)).flatten()
+    smooth_in(&t.otio)
 }
 
 pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
@@ -58,7 +58,7 @@ pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     if let Some(kind) = moving_of(t).or_else(|| smooth_of(t)) {
         return Some(kind);
     }
-    (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve)
+    dissolves(t).then_some(PictureTransition::Dissolve)
 }
 
 pub fn mixes(t: &Transition) -> bool {
@@ -529,7 +529,7 @@ fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
 }
 
 pub fn course_played(t: &Transition, frames: i64) -> Option<(PictureTransition, Vec<Keyframe>)> {
-    let (kind, values) = (!t.sound).then(|| curved_values(&t.otio)).flatten()?;
+    let (kind, values) = curved_values(&t.otio)?;
     let course = kind.course()?;
     let keys = match (course.ease, curve_in(values)) {
         (MotionEase::None, _) => eased(MotionEase::None, frames),
@@ -644,7 +644,6 @@ pub struct Playing<'a> {
 pub fn playing<'a>(
     p: &'a Project,
     track: &'a Track,
-    sound: bool,
     plays: impl Fn(&Transition) -> bool,
 ) -> Vec<Playing<'a>> {
     let cuts = Cuts::of(p, track);
@@ -653,22 +652,17 @@ pub fn playing<'a>(
             .and_then(|id| cuts.clips.get(id.as_str()).copied())
     };
     let mut found: Vec<Playing<'a>> = Vec::new();
-    for t in track
-        .transitions
-        .iter()
-        .filter(|t| t.sound == sound && plays(t))
-    {
+    for t in track.transitions.iter().filter(|t| plays(t)) {
         let Some(cut) = cuts.place(p, t) else {
             continue;
         };
         let (a, b) = (cut - t.before, cut + t.after);
         let (before, after) = (find(&t.from), find(&t.to));
-        let covers = |c: Option<&Clip>, x: i64, y: i64| {
-            c.is_none_or(|c| span(c, sound).is_some_and(|(s, e)| s <= x && e >= y))
-        };
+        let covers =
+            |c: Option<&Clip>, x: i64, y: i64| c.is_none_or(|c| c.start <= x && c.end() >= y);
         let others_clear = track.clips.iter().all(|c| {
             let side = |o: Option<&Clip>| o.is_some_and(|o| std::ptr::eq(o, c));
-            side(before) || side(after) || span(c, sound).is_none_or(|(s, e)| e <= a || s >= b)
+            side(before) || side(after) || c.end() <= a || c.start >= b
         });
         if b > a && covers(before, a, cut) && covers(after, cut, b) && others_clear {
             found.push(Playing {
@@ -690,14 +684,15 @@ pub fn playing<'a>(
 }
 
 pub fn cross_fades<'a>(p: &'a Project, track: &'a Track) -> Vec<Playing<'a>> {
-    if !track.transitions.iter().any(|t| t.sound) {
+    if track.kind != TrackKind::Audio || track.transitions.is_empty() {
         return Vec::new();
     }
-    playing(p, track, true, |t| cross_fade(t).is_some())
+    playing(p, track, |t| cross_fade(t).is_some())
 }
 
 pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
-    let (a, b) = c.audio_range()?;
+    c.audio.as_ref()?;
+    let (a, b) = (c.start, c.end());
     let side = |into: bool| {
         fades.iter().find(|f| {
             let s = if into { f.after } else { f.before };
@@ -724,19 +719,10 @@ pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
     })
 }
 
-fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
-    if sound {
-        c.audio_range()
-            .or_else(|| (c.is_sound_block() || c.compound.is_some()).then(|| (c.start, c.end())))
-    } else {
-        c.video.then(|| (c.start, c.end()))
-    }
-}
-
 pub struct Cuts<'a> {
     clips: HashMap<&'a str, &'a Clip>,
-    starts: HashSet<(bool, i64)>,
-    ends: HashSet<(bool, i64)>,
+    starts: HashSet<i64>,
+    ends: HashSet<i64>,
     pool: HashMap<&'a str, &'a Media>,
 }
 
@@ -750,12 +736,8 @@ impl<'a> Cuts<'a> {
         };
         for c in &track.clips {
             cuts.clips.entry(c.id.as_str()).or_insert(c);
-            for sound in [false, true] {
-                if let Some((a, b)) = span(c, sound) {
-                    cuts.starts.insert((sound, a));
-                    cuts.ends.insert((sound, b));
-                }
-            }
+            cuts.starts.insert(c.start);
+            cuts.ends.insert(c.end());
         }
         cuts
     }
@@ -781,20 +763,16 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
     };
     let (from, to) = (clip(&t.from)?, clip(&t.to)?);
     let cut = match (from, to) {
-        (Some(f), Some(g)) => {
-            let at = span(f, t.sound)?.1;
-            (span(g, t.sound)?.0 == at).then_some(at)?
-        }
-        (Some(f), None) => span(f, t.sound)?.1,
-        (None, Some(g)) => span(g, t.sound)?.0,
+        (Some(f), Some(g)) => (g.start == f.end()).then_some(f.end())?,
+        (Some(f), None) => f.end(),
+        (None, Some(g)) => g.start,
         (None, None) => return None,
     };
     let meets = |end: bool| {
-        let at = (t.sound, cut);
         if end {
-            cuts.ends.contains(&at)
+            cuts.ends.contains(&cut)
         } else {
-            cuts.starts.contains(&at)
+            cuts.starts.contains(&cut)
         }
     };
     if (from.is_none() && meets(true)) || (to.is_none() && meets(false)) {
@@ -855,8 +833,8 @@ fn written(t: &Transition, rate: f64) -> Value {
 
 pub(super) struct Edits<'a> {
     cuts: Cuts<'a>,
-    into: HashMap<(bool, &'a str), &'a Transition>,
-    out_of: HashMap<(bool, &'a str), &'a Transition>,
+    into: HashMap<&'a str, &'a Transition>,
+    out_of: HashMap<&'a str, &'a Transition>,
 }
 
 impl<'a> Edits<'a> {
@@ -869,10 +847,10 @@ impl<'a> Edits<'a> {
         for t in &track.transitions {
             match (&t.from, &t.to) {
                 (_, Some(to)) => {
-                    edits.into.entry((t.sound, to.as_str())).or_insert(t);
+                    edits.into.entry(to.as_str()).or_insert(t);
                 }
                 (Some(from), None) => {
-                    edits.out_of.entry((t.sound, from.as_str())).or_insert(t);
+                    edits.out_of.entry(from.as_str()).or_insert(t);
                 }
                 (None, None) => {}
             }
@@ -885,12 +863,11 @@ pub(super) fn head(
     p: &Project,
     edits: &Edits,
     c: &Clip,
-    sound: bool,
     s: i64,
     items: &[Value],
     rate: f64,
 ) -> Option<Value> {
-    let t = *edits.into.get(&(sound, c.id.as_str()))?;
+    let t = *edits.into.get(c.id.as_str())?;
     if edits.cuts.place(p, t)? != s {
         return None;
     }
@@ -903,15 +880,8 @@ pub(super) fn head(
     follows.then(|| written(t, rate))
 }
 
-pub(super) fn tail(
-    p: &Project,
-    edits: &Edits,
-    c: &Clip,
-    sound: bool,
-    e: i64,
-    rate: f64,
-) -> Option<Value> {
-    let t = *edits.out_of.get(&(sound, c.id.as_str()))?;
+pub(super) fn tail(p: &Project, edits: &Edits, c: &Clip, e: i64, rate: f64) -> Option<Value> {
+    let t = *edits.out_of.get(c.id.as_str())?;
     (edits.cuts.place(p, t)? == e).then(|| written(t, rate))
 }
 
@@ -947,7 +917,6 @@ mod tests {
         let mut p = f.editor.project().clone();
         p.track_mut("V1").unwrap().transitions.push(Transition {
             id: "t1".into(),
-            sound: false,
             from: Some("c1".into()),
             to: Some("c2".into()),
             before: 0,

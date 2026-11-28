@@ -1,5 +1,6 @@
 use crate::composition::Corner;
 use crate::effect_keys::Keyed;
+use crate::keyframes::PictureValue;
 use crate::model::{
     ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
@@ -20,6 +21,8 @@ type Weighed = (Places, f64);
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_REACH: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
+const LEAN_OUTSET: f64 = 0.5;
+const LEAST_LEAN: f64 = 0.0005;
 const SAME_MAP: f64 = 1e-9;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,6 +31,7 @@ pub struct Level {
     pub sized: Option<[f64; 8]>,
     pub shown: [f64; 4],
     pub edge: [f64; 4],
+    pub outset: f64,
     pub soft: Soft,
     pub opacity: f64,
 }
@@ -435,7 +439,7 @@ pub struct GlowSpread {
 impl GlowSpread {
     const GRID: u32 = 8;
     const MOST_GRID: u32 = 1 << 16;
-    const WIDE: f64 = 600.0;
+    const WIDE: f64 = 596.25;
 
     fn grid(spreads: &[f64; 3]) -> u32 {
         let most = spreads.iter().copied().fold(0.0, f64::max);
@@ -468,14 +472,14 @@ pub struct GlowNoise {
 }
 
 impl GlowNoise {
-    const CELL: f64 = 340.0 / (0.6 * 1440.0);
+    const CELL: f64 = 340.0 / (0.6 * 1080.0);
     const EVOLUTION: f64 = 1.8;
     const SEETHE: f64 = 0.0208;
     const SEETHE_POWER: f64 = 1.9;
     const DEPTHS: f64 = 4096.0;
 
-    fn of(g: &Glow, area: f64, frame: i64) -> Self {
-        let cell = Self::CELL * g.noise_scale() * area;
+    fn of(g: &Glow, height: f64, frame: i64) -> Self {
+        let cell = Self::CELL * g.noise_scale() * height;
         let moved = frame.max(0) as f64 * Self::SEETHE * g.noise_seethe().powf(Self::SEETHE_POWER);
         Self {
             strength: g.noise_strength(),
@@ -533,7 +537,7 @@ impl Glowing {
             second_color: g.second_color(),
             gamma: g.curve(),
             saturation: g.colorful(),
-            noise: g.atmosphere.then(|| GlowNoise::of(g, area, on.frame)),
+            noise: g.atmosphere.then(|| GlowNoise::of(g, on.size[1], on.frame)),
             seen_only: g.frames() == GlowFraming::OnlyAsSeen,
             mode: g.over(),
             opacity: g.shown(),
@@ -910,6 +914,10 @@ impl Working {
             use_alpha: false,
             masks: Masks::default(),
         })
+    }
+
+    pub fn at_frame_size(&self) -> bool {
+        matches!(self.work, Work::Sharpen(_))
     }
 
     fn of_blur(b: &Blur, blend: f64, w: f64) -> Option<Self> {
@@ -1716,21 +1724,31 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let [cx, cy, cw, ch] = extent.within(fitted);
     let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
+    let (gw, gh) = extent.grid;
+    let aspect = (cw * fw * gh) / (ch * fh * gw);
+    let aspect = match aspect.is_finite() && aspect > 0.0 {
+        true => aspect,
+        false => 1.0,
+    };
+    let plain = p.turn().to_radians().sin_cos();
+    let ((sin, cos), [across, down]) = turn_of(plain, aspect);
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
     let [ax, ay] = p.pivot();
-    let (sin, cos) = p.turn().to_radians().sin_cos();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
     let [qx, qy] = anchored(p, frame, fitted);
     let (dx, dy) = (zx * (ax - 0.5) * fw, zy * (ay - 0.5) * fh);
-    let (ox, oy) = (qx - cos * dx - sin * dy, qy + sin * dx - cos * dy);
+    let (ox, oy) = (
+        qx - plain.1 * dx - aspect * plain.0 * dy,
+        qy + plain.0 * dx / aspect - plain.1 * dy,
+    );
+    let (zx, zy) = (zx * across, zy * down);
     let (k, [u0, v0]) = placed
         .zoomed()
         .map_or((1.0, Picture::MIDDLE), |b| (b.size, flipped(p, b.center)));
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
-    let (gw, gh) = extent.grid;
     let crop = [
         cx + whole_pixels(c0.left, gw) * cw,
         cy + whole_pixels(c0.top, gh) * ch,
@@ -1762,13 +1780,18 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
         0.0,
         0.0,
     ];
-    let back = leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw());
+    let (pitch, yaw) = (felt(p.pitch()), felt(p.yaw()));
+    let back = leaned(affine, [u0, v0], [k * sx, k * sy], pitch, yaw);
     let steadied = placed.steadied();
     Level {
         back: steadied.map_or(back, |s| chain(&back, &s)),
         sized: steadied.map(|_| back),
         shown: crop,
         edge,
+        outset: match pitch == 0.0 && yaw == 0.0 {
+            true => 0.0,
+            false => LEAN_OUTSET,
+        },
         soft,
         opacity: match gone {
             true => 0.0,
@@ -1777,6 +1800,19 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
                 p.opaque() * dissolve.map_or(1.0, |r| r.level(0))
             }
         },
+    }
+}
+
+fn turn_of((sin, cos): (f64, f64), p: f64) -> ((f64, f64), [f64; 2]) {
+    let (x, y) = (cos, sin / p);
+    let across = x.hypot(y);
+    ((y / across, x / across), [across, cos.hypot(p * sin)])
+}
+
+fn felt(lean: f64) -> f64 {
+    match lean.abs() < LEAST_LEAN {
+        true => 0.0,
+        false => lean,
     }
 }
 
@@ -1841,7 +1877,12 @@ pub fn frame_back((w, h): (f64, f64)) -> [f64; 8] {
     [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]
 }
 
-fn reached(m: &[f64; 8], [x, y]: [f64; 2], [u0, v0, u1, v1]: [f64; 4]) -> Option<([f64; 2], f64)> {
+fn reached(
+    m: &[f64; 8],
+    [x, y]: [f64; 2],
+    [u0, v0, u1, v1]: [f64; 4],
+    outset: f64,
+) -> Option<([f64; 2], f64)> {
     let [a, b, e, c, d, f, g, h] = *m;
     let w = g * x + h * y + 1.0;
     if !w.is_finite() || w.abs() < 1e-12 {
@@ -1857,7 +1898,7 @@ fn reached(m: &[f64; 8], [x, y]: [f64; 2], [u0, v0, u1, v1]: [f64; 4]) -> Option
     );
     let cover = [(u - u0) / du, (u1 - u) / du, (v - v0) / dv, (v1 - v) / dv]
         .into_iter()
-        .map(|e| (e + 0.5).clamp(0.0, 1.0))
+        .map(|e| (e + 0.5 + outset).clamp(0.0, 1.0))
         .product();
     Some(([u, v], cover))
 }
@@ -1927,6 +1968,7 @@ impl Level {
             sized: None,
             shown: [0.0, 0.0, 1.0, 1.0],
             edge: [0.0, 0.0, 1.0, 1.0],
+            outset: 0.0,
             soft: Soft::default(),
             opacity: 1.0,
         }
@@ -1985,8 +2027,14 @@ impl Placing {
         effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(own.area(), c));
-        if u0 < u1 && v0 < v1 && own.soft == Soft::default() && no_bars(quad, frame) {
+        let at = p.source as f64;
+        let plain = p.picture.crop_at(at).is_none()
+            && p.picture.channel_at(PictureValue::CropSoftness, at)[0] >= 0.0
+            && p.picture.channel_at(PictureValue::Pitch, at)[0] == 0.0
+            && p.picture.channel_at(PictureValue::Yaw, at)[0] == 0.0;
+        if plain && u0 < u1 && v0 < v1 && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
+            own.soft = Soft::default();
         }
         let composed = p
             .picture
@@ -2007,8 +2055,8 @@ impl Placing {
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {
         let l = &self.level;
-        let (uv, source) = reached(&l.back, [x, y], [0.0, 0.0, 1.0, 1.0])?;
-        let (at, area) = reached(l.area(), [x, y], l.edge)?;
+        let (uv, source) = reached(&l.back, [x, y], [0.0, 0.0, 1.0, 1.0], l.outset)?;
+        let (at, area) = reached(l.area(), [x, y], l.edge, l.outset)?;
         let inside = if l.sized.is_some() { source } else { 1.0 };
         let cover = l.soft.alpha(at) * l.opacity * area * inside;
         (cover > 0.0).then_some((uv, cover))
@@ -2309,6 +2357,17 @@ pub fn upright_fit(
     }
 }
 
+pub fn crop_unit([fw, fh]: [f64; 2], sar: (i32, i32), rotation: u16) -> [f64; 2] {
+    let across = match sar.0 > 0 && sar.1 > 0 {
+        true => f64::from(sar.0) / f64::from(sar.1),
+        false => 1.0,
+    };
+    match rotation % 180 == 90 {
+        true => [fw, fh / across],
+        false => [fw / across, fh],
+    }
+}
+
 pub fn upright_pixels((w, h): (u32, u32), rotation: u16) -> (f64, f64) {
     let (w, h) = (f64::from(w), f64::from(h));
     if rotation % 180 == 90 { (h, w) } else { (w, h) }
@@ -2329,18 +2388,29 @@ pub fn rounded_place(
     ]
 }
 
+fn shown_size((w, h): (u32, u32), sar: (i32, i32), rotation: u16) -> (f64, f64) {
+    let across = match sar.0 > 0 && sar.1 > 0 {
+        true => f64::from(sar.0) / f64::from(sar.1),
+        false => 1.0,
+    };
+    let (dw, dh) = (f64::from(w) * across, f64::from(h));
+    match rotation % 180 == 90 {
+        true => (dh, dw),
+        false => (dw, dh),
+    }
+}
+
 pub fn fitted(
-    (w, h): (u32, u32),
+    size: (u32, u32),
     sar: (i32, i32),
     rotation: u16,
     (out_w, out_h): (u32, u32),
 ) -> [f64; 4] {
-    let square = sar.0 == sar.1 || sar.0 <= 0 || sar.1 <= 0;
-    if !square || rotation != 0 || w == 0 || h == 0 {
-        return rounded_place((w, h), sar, rotation, (out_w, out_h));
-    }
-    let (pw, ph) = (f64::from(w), f64::from(h));
+    let (pw, ph) = shown_size(size, sar, rotation);
     let (fw, fh) = (f64::from(out_w), f64::from(out_h));
+    if pw <= 0.0 || ph <= 0.0 {
+        return [0.0, 0.0, fw, fh];
+    }
     let (sw, sh) = if pw * fh >= ph * fw {
         (fw, fw * ph / pw)
     } else {
@@ -2357,16 +2427,7 @@ pub fn mapped(
     (out_w, out_h): (u32, u32),
 ) -> [f64; 4] {
     let fit = fitted((w, h), sar, rotation, (out_w, out_h));
-    let across = match sar.0 > 0 && sar.1 > 0 {
-        true => f64::from(sar.0) / f64::from(sar.1),
-        false => 1.0,
-    };
-    let (dw, dh) = (f64::from(w) * across, f64::from(h));
-    let (sw, sh) = if rotation % 180 == 90 {
-        (dh, dw)
-    } else {
-        (dw, dh)
-    };
+    let (sw, sh) = shown_size((w, h), sar, rotation);
     let (fw, fh) = (f64::from(out_w), f64::from(out_h));
     if sw <= 0.0 || sh <= 0.0 {
         return fit;
@@ -2547,6 +2608,79 @@ mod tests {
             adjustment: false,
         };
         assert_eq!(detail(&[placed]), 0.4);
+    }
+
+    fn turned_level(picture: Picture) -> Level {
+        let placed = Placed {
+            clip: "c1".into(),
+            picture: Picture {
+                rotation: Some(0.016),
+                ..picture
+            },
+            mapped: None,
+            run: None,
+            source: 0,
+            frame: 0,
+            start: 0,
+            ready: true,
+            ramp: None,
+            crossing: false,
+            moving: None,
+            clock: Default::default(),
+            adjustment: false,
+        };
+        Placing::whole(&[placed], (1280.0, 720.0)).level
+    }
+
+    #[test]
+    fn a_turn_under_the_limit_shows_no_bar() {
+        let level = turned_level(Picture::default());
+        assert_eq!(level.edge, [-1.0, -1.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn a_crop_that_cuts_no_pixel_stops_the_limit() {
+        let mut picture = Picture::default();
+        picture.crop.right = 0.5 / 1280.0;
+        assert_eq!(turned_level(picture).edge, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn softness_above_zero_keeps_the_limit() {
+        let level = turned_level(Picture {
+            crop_softness: Some(2.0),
+            ..Picture::default()
+        });
+        assert_eq!(
+            (level.edge, level.soft),
+            ([-1.0, -1.0, 2.0, 2.0], Soft::default())
+        );
+    }
+
+    #[test]
+    fn softness_below_zero_stops_the_limit() {
+        let level = turned_level(Picture {
+            crop_softness: Some(-0.5),
+            ..Picture::default()
+        });
+        assert_eq!(level.edge, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn the_crop_unit_of_pixels_of_9_to_8_has_no_aspect_ratio() {
+        assert_eq!(crop_unit([1012.5, 720.0], (9, 8), 0), [900.0, 720.0]);
+    }
+
+    #[test]
+    fn pixels_of_9_to_8_fit_the_display_size_with_no_rounding() {
+        let place = fitted((1000, 800), (9, 8), 0, (1280, 720));
+        assert_eq!(place, [133.75, 0.0, 1012.5, 720.0]);
+    }
+
+    #[test]
+    fn a_file_turned_90_fits_its_upright_size_with_no_rounding() {
+        let place = fitted((1280, 720), (1, 1), 90, (1920, 1080));
+        assert_eq!(place, [656.25, 0.0, 607.5, 1080.0]);
     }
 
     #[test]

@@ -129,6 +129,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.mask.click", &["clip"]),
     ("grade.mask.set", &["clip"]),
     ("grade.mask.clear", &["clip"]),
+    ("grade.mask.track", &["clip"]),
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
@@ -483,7 +484,7 @@ const EXAMPLES: &[(&str, &str)] = &[
         "track.set",
         "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true\n  vidcut track set A1 --voice-isolation 75\n  \
          vidcut track set A2 --duck '{}' --download\n  \
-         vidcut track set A2 --duck '{\"sources\":[\"V1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
+         vidcut track set A2 --duck '{\"sources\":[\"A1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
          vidcut track set A2 --duck '{\"on\":false}'\n  \
          vidcut track set A2 --duck null\n  \
          vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \
@@ -579,6 +580,9 @@ const EXAMPLES: &[(&str, &str)] = &[
            vidcut comp set c3 Blur1 --pass-through true
            vidcut comp set c3 Blur1 --size 8 --frame 60
            vidcut comp set c3 Tracker1 --add-pattern
+           vidcut comp set c3 Tracker1 --add-point
+           vidcut comp set c3 Tracker1 --pattern 2 --search-width 0.2 --pattern-channel green
+           vidcut comp set c3 Tracker1 --adaptive-mode best_match --match-tolerance 0.3
            vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --pattern-offset 0,0.05
            vidcut comp set c3 Tracker1 --operation match_move --merge fg_only --reference-time end
            vidcut comp set c3 Ellipse1 --connect '{\"tracker\":\"Tracker1\",\"pattern\":1,\"size\":true}'",

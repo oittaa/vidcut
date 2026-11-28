@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -5,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::key_file;
 use crate::looks::checked_name;
-use crate::shortcuts::{Bindings, Custom};
+use crate::shortcuts::{Action, Bindings, Combo, Custom};
 
 pub const OWN: &str = "vidcut";
 
@@ -48,10 +49,26 @@ pub struct Listing {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SetFile {
+struct SetFile<K> {
     #[serde(skip_serializing_if = "Option::is_none")]
     base: Option<String>,
-    keys: Custom,
+    keys: BTreeMap<Action, Vec<K>>,
+}
+
+struct Written(Option<Combo>);
+
+impl<'de> Deserialize<'de> for Written {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        let meta = text
+            .split('+')
+            .any(|part| part.eq_ignore_ascii_case("meta"));
+        match text.parse::<Combo>() {
+            Ok(combo) => Ok(Self(Some(combo))),
+            Err(_) if meta && !cfg!(target_os = "macos") => Ok(Self(None)),
+            Err(e) => Err(serde::de::Error::custom(e)),
+        }
+    }
 }
 
 pub fn dir() -> PathBuf {
@@ -70,14 +87,19 @@ fn preset(name: &str) -> Option<&'static str> {
 }
 
 pub fn parse(text: &str) -> std::result::Result<(String, Custom), String> {
-    let file: SetFile = toml::from_str(text).map_err(|e| e.message().to_string())?;
-    Bindings::of(&file.keys).map_err(|e| e.message)?;
+    let file: SetFile<Written> = toml::from_str(text).map_err(|e| e.message().to_string())?;
+    let keys: Custom = file
+        .keys
+        .into_iter()
+        .map(|(action, keys)| (action, keys.into_iter().filter_map(|k| k.0).collect()))
+        .collect();
+    Bindings::of(&keys).map_err(|e| e.message)?;
     let base = match file.base {
         None => OWN,
         Some(base) => preset(&base)
             .ok_or_else(|| format!("{base} is not the name of another editor's key set"))?,
     };
-    Ok((base.to_string(), file.keys))
+    Ok((base.to_string(), keys))
 }
 
 pub fn text(base: &str, keys: &Custom) -> Result<String> {

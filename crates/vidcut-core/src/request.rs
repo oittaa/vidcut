@@ -8,15 +8,16 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter, Border,
-    BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel,
-    EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
-    GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
+    AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
+    Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
+    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
+    GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
-    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PictureTool, PictureTransition,
-    PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing, SubPixel, Subject,
-    SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
-    TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind, ZoomBox,
+    MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel, PictureTool,
+    PictureTransition, PivotType, Place, ReferenceTime, Stabilization, StabilizeMode, Stabilizing,
+    SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType,
+    TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape, WindowKind,
+    ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -721,7 +722,8 @@ pub enum Request {
     #[serde(rename = "probe")]
     Probe { path: PathBuf },
 
-    /// Tracks with their clips and gaps (frames plus timecodes).
+    /// Tracks with their clips and gaps (frames plus timecodes). A clip of a
+    /// link group gives its `link` number.
     #[serde(rename = "timeline.get")]
     TimelineGet {
         #[serde(default)]
@@ -747,7 +749,7 @@ pub enum Request {
 
     /// Silent stretches (as Ripple Delete Silence finds them) in `media`
     /// (source frames), in `clips` (timeline frames), or in every clip with
-    /// sound.
+    /// sound. A picture clip gives the stretches of its linked sound clips.
     #[serde(rename = "analyze.silence")]
     AnalyzeSilence {
         #[serde(default)]
@@ -833,7 +835,8 @@ pub enum Request {
     /// The words said, each with its frames, for `edit.ripple_delete_words`.
     /// With `media` or `clips`, from their media's transcripts
     /// (`media.transcribe`), heard nothing new: the media's source frames,
-    /// or each clip's timeline frames. Otherwise the mix of the tracks heard
+    /// or each clip's timeline frames. A picture clip gives the words of its
+    /// linked sound clips. Otherwise the mix of the tracks heard
     /// (`tracks`) over `range` is heard now, as `subtitles.transcribe` hears
     /// it, without adding cues. Only a model that times words: Parakeet
     /// Ultra does. Whisper large-v3 times phrases and Qwen3-ASR gives no
@@ -1336,7 +1339,7 @@ pub enum Request {
     /// their tracks. It makes a compound clip of what is
     /// between them. It goes on the lowest picture track and the lowest
     /// sound track with clips in the range, and the clips outside the range
-    /// stay. A J or L cut that reaches a mark is undone. A clip in the range on a
+    /// stay. A clip in the range on a
     /// locked track refuses it. A cue on a locked subtitle track stays whole.
     /// `range` defaults to the timeline's marks,
     /// which stay. With one mark, the range runs from the start of the
@@ -1377,7 +1380,7 @@ pub enum Request {
     MediaCompoundRemove { compound: String },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
     /// their times, trimmed to the part it shows. Inner track n goes on the
-    /// track of the compound clip plus n. Where a clip is in the way, a new
+    /// track of the compound clip's part of its kind plus n. Where a clip is in the way, a new
     /// track goes in, and that clip and the tracks above it move up. One made
     /// here brings its clips back whole. One from another editor (deviation
     /// X9) brings them from its file: a picture block its pictures, and a
@@ -1707,7 +1710,8 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). Only an audio track takes the
+    /// sound settings. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1738,8 +1742,8 @@ pub enum Request {
         /// Ducking: the track dips by its Duck Amount where any of its
         /// sources is active, by speech or by sound level. Each field given
         /// replaces its own; null takes it off with its settings. `{}`
-        /// turns it on with the usual values, under every other track with
-        /// sound. Sources not measured yet are measured first.
+        /// turns it on with the usual values, under every other audio
+        /// track. Sources not measured yet are measured first.
         #[serde(
             default,
             deserialize_with = "given",
@@ -1820,7 +1824,8 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, Noise Reduction, name,
-    /// Clip Color, Voice Isolation, Retime Process and Render Cache.
+    /// Clip Color, Voice Isolation, Retime Process and Render Cache. The sound settings of a picture clip go to
+    /// its linked sound clips.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1921,18 +1926,21 @@ pub enum Request {
         download: bool,
     },
     /// Paste Attributes (Alt+V): give `clips` the chosen `attributes` of a
-    /// copied clip. `copied` is a clip as `edit.copy` returns it, and `from`
-    /// is a clip of the timeline. Default: the first clip of the GUI's
-    /// clipboard. Each attribute takes the place of the clip's own, with its
-    /// keyframes. A clip takes only what it can have: a clip with no sound
-    /// takes no volume, and a clip with no source takes no speed.
+    /// copied clip. `copied` is the clips as `edit.copy` returns them, and
+    /// `from` is a clip of the timeline. Default: the GUI's clipboard. The
+    /// first clip and the clips linked to it give the attributes: the sound
+    /// attributes come from the one with sound. Each attribute takes the
+    /// place of the clip's own, with its keyframes. The sound attributes go
+    /// to the linked sound clips of a picture clip. A clip takes only what it
+    /// can have: a clip with no sound takes no volume, and a clip with no
+    /// source takes no speed.
     #[serde(rename = "clip.paste_attributes")]
     ClipPasteAttributes {
         clips: OneOrMany<ClipRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<ClipRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        copied: Option<Box<crate::model::TrackClip>>,
+        copied: Option<Vec<crate::model::TrackClip>>,
         attributes: Vec<ClipAttribute>,
         /// Where the keyframes go in each clip. Default: `maintain`.
         #[serde(default)]
@@ -1944,7 +1952,8 @@ pub enum Request {
         ripple: bool,
     },
     /// Remove Attributes: give the chosen `attributes` of `clips` their
-    /// usual values, with no keyframes.
+    /// usual values, with no keyframes. The sound attributes of a picture
+    /// clip are those of its linked sound clips.
     #[serde(rename = "clip.remove_attributes")]
     ClipRemoveAttributes {
         clips: OneOrMany<ClipRef>,
@@ -1956,7 +1965,8 @@ pub enum Request {
         ripple: bool,
     },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
-    /// that their level reaches `target`. Each clip is measured over the
+    /// that their level reaches `target`. A picture clip gives its linked
+    /// sound clips. Each clip is measured over the
     /// sound it plays, as the export mixes it, without its volume and its
     /// volume keyframes, mute, Voice Isolation and transitions, and without
     /// its track's mixer. The volume of a clip with volume keyframes is its
@@ -2008,7 +2018,8 @@ pub enum Request {
     /// clip. A speed keyframe goes only inside the clip, after its first
     /// frame. Without a `value`, it takes the value the clip has there. A
     /// keyframe already on that frame takes the value and the ease. With
-    /// its first keyframe, a clip's volume follows its keyframes. On a
+    /// its first keyframe, a clip's volume follows its keyframes. The volume
+    /// and pan of a picture clip are those of its linked sound clips. On a
     /// title, position, zoom and rotation are those of its text, and a
     /// scroll's text takes only position. The
     /// handles of its position keys bend its path. The other values of a
@@ -3666,15 +3677,16 @@ pub enum Request {
         /// it. One more than the last subject starts a new subject.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<u32>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256. Without it, a missing
         /// model is an error that tells its size.
         #[serde(default)]
         download: bool,
     },
     /// Change the Magic Mask of a corrector of the grade of a clip: Invert
-    /// Mask, or one click. The masks of the changed click's subject come
-    /// again from its clicks.
+    /// Mask, Quality, or one click. The masks of the changed click's subject
+    /// come again from its clicks. A change of Quality makes the masks of
+    /// all the clicks again with the other model.
     #[serde(rename = "grade.mask.set")]
     GradeMaskSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3689,6 +3701,10 @@ pub enum Request {
         /// Invert Mask: the mask is where the subjects are not.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         invert: Option<bool>,
+        /// Quality: `faster` gives a looser mask quickly, `better` more
+        /// detail.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quality: Option<crate::model::MaskQuality>,
         /// The number of the click that changes, from 1, in the order of the
         /// clicks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3702,7 +3718,7 @@ pub enum Request {
         /// With `click`: a negative or a positive click.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         negative: Option<bool>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -3725,7 +3741,43 @@ pub enum Request {
         /// clicks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         click: Option<usize>,
-        /// Download the Magic Mask model (156 MB) when it is not on this
+        /// Download the model of the Quality when it is not on this
+        /// computer, checked against its SHA-256.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Magic Mask: carry the subjects of the clicks on a frame through the
+    /// frames before and after it. The model remembers each subject on the
+    /// frames that it has seen, and finds it again on the next frame. Each
+    /// frame that the track reaches gets a map of each subject. A frame
+    /// with clicks of a subject keeps the map of its clicks. A track again
+    /// from the same frame replaces the maps of the last one. A change of
+    /// the clicks on that frame removes them. Returns the `subjects`, the
+    /// first and the last frame of the track (`first`, `last`), and the
+    /// count of the new `maps`.
+    #[serde(rename = "grade.mask.track")]
+    GradeMaskTrack {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frame of the clicks that the track starts from. Left out:
+        /// the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The ways the track goes from that frame. Usual: `both`.
+        #[serde(default)]
+        way: TrackWay,
+        /// The most frames that the track goes in each `way`, from 1.
+        /// Without it, the track goes to the start or the end of the clip.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<u32>,
+        /// Download the model of the Quality when it is not on this
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
@@ -4135,10 +4187,12 @@ pub enum Request {
     /// (`c3`, or `V2@15s`). The track looks at the picture that comes into
     /// the tracker, on each frame of the file of the clip. It starts with
     /// the box of the pattern on `frame`, and goes from there in its `way`
-    /// to the In or the Out, or for its `length`. It follows the place and
-    /// the size of the thing in the box. A shot change or a thing that goes
-    /// out of sight does not stop it. `jobs.cancel` stops it, and the frames
-    /// that it tracked stay.
+    /// to the In or the Out, or for its `length`. A `model` pattern
+    /// follows the place and the size of the thing in the box. A `point`
+    /// pattern follows the place of the pixels of the box, in the search
+    /// area of the pattern, with the `adaptive_mode` of the tracker. A shot
+    /// change or a thing that goes out of sight does not stop it.
+    /// `jobs.cancel` stops it, and the frames that it tracked stay.
     ///
     /// The pattern then follows its path: before the first sample of the
     /// path and after its last, it stays where that sample puts it. When
@@ -4148,7 +4202,7 @@ pub enum Request {
     /// Returns the `node`, the `pattern`, its `name`, the `count` of the
     /// samples of its path and their frames of the file `first` and `last`.
     /// It also gives the
-    /// `score` (how sure the model is, from 0 to 1, the mean of the
+    /// `score` (how sure the track is, from 0 to 1, the mean of the
     /// frames), and where the track ended `backward` and `forward`: `clip`
     /// (the In or the Out), `length` (after its `length`), `stopped`
     /// (`jobs.cancel`) or `off`.
@@ -4170,9 +4224,10 @@ pub enum Request {
         /// `way`, from 1. Without it, the track goes to the In or the Out.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<u32>,
-        /// Download the tracking model (715 kB) when it is not on this
-        /// computer, checked against its SHA-256. Without it, a missing
-        /// model is an error that tells its size.
+        /// Download the tracking model (715 kB) when a `model` pattern
+        /// needs it and it is not on this computer, checked against its
+        /// SHA-256. Without it, a missing model is an error that tells its
+        /// size. A `point` pattern needs no model.
         #[serde(default)]
         download: bool,
     },
@@ -4461,8 +4516,8 @@ pub enum Request {
         /// The action, as `keys.list` names it.
         action: crate::shortcuts::Action,
         /// Its keys, like `Ctrl+Shift+Z`, `F5` or `+`. Cmd and Option are
-        /// other names for Ctrl and Alt. On macOS, Control is the Control
-        /// key. With no keys, the action has no key.
+        /// other names for Ctrl and Alt. On macOS, Control and Meta are the
+        /// Control key. With no keys, the action has no key.
         #[serde(default)]
         #[schemars(with = "Vec<String>")]
         keys: Vec<crate::shortcuts::Combo>,
@@ -6596,8 +6651,8 @@ pub enum TrimSide {
     /// Both: a roll.
     #[default]
     Both,
-    /// Its audio edit: where a clip's sound ends or starts, the J/L handle
-    /// (decision D20).
+    /// Its audio edit: the edge of a linked sound clip on an audio track,
+    /// the J/L handle (decision D20).
     Audio,
 }
 
@@ -7018,17 +7073,16 @@ pub struct SourceParams {
     #[serde(default)]
     pub audio_only: bool,
     /// The target track. Default: V1, or A1 for audio-only clips. The next new
-    /// track (`V3` when there are two) is made. On an audio track only the
+    /// track (`V3` when there are two) is made. The sound of a picture on `Vn`
+    /// goes on `An`, linked, and each next sound stream on the next audio
+    /// track. On an audio track only the
     /// audio is used. A generator or adjustment clip goes only on a video track.
     #[serde(default)]
     pub track: Option<String>,
     /// With Decompose Compound Clips On Edit on: the timeline track for a
     /// track inside the compound clip, as `{"V2": "V4", "A1": null}`. `null`
     /// leaves that track out. A track that is not named goes on the edit's
-    /// track plus its number minus 1. The sound of a picture track moves with
-    /// it, also with `audio_only`. `null` on a picture track leaves out only
-    /// its picture: its sound goes on the first audio track from its own that
-    /// no other track inside takes.
+    /// track of its kind plus its number minus 1.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inner_tracks: BTreeMap<String, Option<String>>,
     /// A part of the Multi Source viewer: the frames left empty before the
@@ -7543,10 +7597,23 @@ pub struct NodeChange {
     /// pattern, `[x, y]` as fractions of the picture, up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_offset: Option<[f64; 2]>,
-    /// On, a tracker gets a new pattern at the end of its list, with the
-    /// first free name.
+    /// The width of the search area of a `point` pattern, from 0.001 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_width: Option<f64>,
+    /// The height of the search area of a `point` pattern, from 0.001 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_height: Option<f64>,
+    /// The channel in which a track of a `point` pattern looks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_channel: Option<PatternChannel>,
+    /// On, a tracker gets a new `model` pattern at the end of its list,
+    /// with the first free name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub add_pattern: bool,
+    /// On, a tracker gets a new `point` pattern at the end of its list,
+    /// with the first free name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub add_point: bool,
     /// On, the pattern goes from the tracker. A node that follows it then
     /// has its own center again. A later pattern keeps its nodes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -7595,6 +7662,14 @@ pub struct NodeChange {
     /// goes from 0 to 1, from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade_frames: Option<f64>,
+    /// How a track of a tracker takes the picture of a `point` pattern
+    /// again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_mode: Option<AdaptiveMode>,
+    /// The most that the picture of a `point` pattern can change on a frame
+    /// for `best_match` to take it again, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_tolerance: Option<f64>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern
@@ -8126,8 +8201,8 @@ impl DynamicZoomSet {
 }
 
 /// A change to a track's ducking: each field given replaces its own, and
-/// the rest stay as they are. A new one is on, under every other track
-/// with sound, at the usual values: Duck Amount 2.7 dB, Lookahead 15 ms,
+/// the rest stay as they are. A new one is on, under every other audio
+/// track, at the usual values: Duck Amount 2.7 dB, Lookahead 15 ms,
 /// Rise Time 10 ms, Hold 150 ms, Recovery Time 750 ms, by speech, and from
 /// -42 dBFS by level.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -8136,7 +8211,7 @@ pub struct DuckSet {
     /// On or off. Off keeps the settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
-    /// The tracks whose sound dips it (`V1`, `A2`), never its own.
+    /// The audio tracks whose sound dips it (`A2`), never its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<String>>,
     /// The Duck Amount: how far it dips, in dB, from 0 to 18.

@@ -75,7 +75,7 @@ With `--json`, stdout gets the response, without the empty fields:
 | `result` | the result of the method, untyped JSON ([Result fields](#result-fields)) |
 | `via` | `headless` or `gui:<pid>` |
 | `dry_run` | `true` for a dry run |
-| `warnings` | problems that did not make the request fail, for example an unsaved undo history |
+| `warnings` | problems that did not make the request fail, for example an edit that a GUI could not save |
 
 With `--json`, an error is `{"error": {"code": "NOT_FOUND", "message": "…"}}`. The exit code tells which error it is:
 

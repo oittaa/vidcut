@@ -463,7 +463,7 @@ impl Clip {
     }
 
     pub fn sounds_at(&self, t: i64) -> bool {
-        self.audio_range().is_some_and(|(a, b)| a <= t && t < b)
+        self.audio.is_some() && self.start <= t && t < self.end()
     }
 }
 

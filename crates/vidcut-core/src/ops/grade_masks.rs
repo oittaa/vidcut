@@ -97,14 +97,31 @@ pub fn checked(mask: &MagicMask) -> Result<()> {
                 m.name
             )));
         }
-        if !counts.contains_key(&(m.frame, m.subject)) || !seen.insert((m.frame, m.subject)) {
+        if m.from == Some(m.frame) {
             return Err(Error::invalid(format!(
-                "the Magic Mask has one map of subject {} on frame {} at most, and only with a click there",
+                "a Magic Mask map on frame {} is not tracked from its own frame",
+                m.frame
+            )));
+        }
+        let source = m.from.unwrap_or(m.frame);
+        if !counts.contains_key(&(source, m.subject)) || !seen.insert((m.frame, m.subject)) {
+            return Err(Error::invalid(format!(
+                "the Magic Mask has one map of subject {} on frame {} at most, from a click of it on frame {source}",
                 m.subject, m.frame
             )));
         }
     }
     Ok(())
+}
+
+pub fn clicked_subjects(mask: &MagicMask, frame: i64) -> Vec<u32> {
+    let mut found: Vec<u32> = (mask.clicks.iter())
+        .filter(|c| c.on && c.frame == frame)
+        .map(|c| c.subject)
+        .collect();
+    found.sort_unstable();
+    found.dedup();
+    found
 }
 
 pub fn points(mask: &MagicMask, frame: i64, subject: u32) -> Vec<Point> {
@@ -154,8 +171,9 @@ pub fn clicked(
         }
         Some(s) => s,
         None => match (subject_at(mask, frame, at), negative) {
-            (Some(s), _) => s,
-            (None, false) => fresh,
+            (Some(s), true) => s,
+            (Some(s), false) if masks::RULES.joins => s,
+            (_, false) => fresh,
             (None, true) => last_subject(mask, frame).ok_or_else(|| {
                 Error::invalid("a negative click needs a subject on its frame: click on one first")
             })?,

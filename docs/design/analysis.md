@@ -28,7 +28,7 @@ flowchart TD
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
 | `analyze.ducking` | `Env::audio_levels` of the sources of the ducking; with `detect: speech`, also `Env::voice_activity` | `duck::graph`: `Heard::peak` and `Dip::gain_db` at each point |
-| `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`), without its volume keyframes | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
+| `clip.normalize` | `Env::loudness` of each sound clip alone (`render::sound_alone`), without its volume keyframes. A picture clip gives its linked sound clips (`linked::sounds`) | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 | `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
 | `motion.track` | `Env::tracked`: the box of one thing on each picture of the track, with a score | `motion::followed`; the edit then calls `ops::motion::tracked` |
@@ -39,6 +39,7 @@ flowchart TD
 ## Speech
 
 - Ripple Delete Silence with `detect: speech` cuts what is not speech.
+- A picture clip in `edit.ripple_delete_silence` and `analyze.silence` gives its linked sound clips (`linked::sounds`). `ops::remove_parts` cuts each clip of the link group.
 - `transcribe::voice_activity` mixes one audio stream into one channel at 16 kHz through `AudioMix`, as transcription listens (`listen`). It feeds the mix to Silero VAD on the CPU.
 - `VoiceActivity` keeps the speech probability of each frame of the VAD.
 - `analysis::non_speech` finds the speech in the frames that the clip covers, by the rule of Silero that transcribe.cpp ports:
@@ -172,7 +173,11 @@ flowchart TD
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.
     - Thus a mask of 1.2 times the box of a path covers the face on each frame where the model found it.
-  - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
+  - Then each path holds its first box for `EDGE_SECS` before that box, and its last box for `EDGE_SECS` after that box (`widened`).
+    - Why: the model finds a face only when most of it shows. A face that comes into the picture or goes out of it shows for some frames with no box.
+    - A held box stops at a shot change and at the ends of the clip.
+    - Why a still box: on the test clips, it covers more of the face than a box that keeps moving.
+  - `FoundPath` gives the gaps of a path from its boxes before these two steps, and the mean of their scores. The held frames are no gaps.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
@@ -195,7 +200,7 @@ flowchart TD
   - The masks on the effect mask of the Tracker are not in it. Why: they do not change the track ([spec](../spec.md#the-tracker)).
   - The plan has one frame for each frame of the file, at the rate of the file.
   - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
-- `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
+- `tracking::track` in vidcut-av measures. A `model` pattern uses the VitTrack model on the CPU:
   - `Reader` reads the frames of the plan as one stream, at a working size.
   - `working` chooses that size: the search area of the model then has about its own size, within `SIDES`.
   - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
@@ -206,6 +211,18 @@ flowchart TD
     - Why: a track holds only one part in memory, however long the shot is.
   - `Shown` reports the progress of both ways.
   - `Follow` holds the first frame, the frames of the track, the box and the ways.
+- A `point` pattern has a `Pointed` in `Follow::point`: its search area, its channel, the Adaptive Mode and the Match Tolerance of the Tracker.
+  - `tracking::track` then follows it with `point::Point` on the CPU, and needs no model. `walked` goes through the frames for both kinds.
+  - `Reader` reads RGBA frames (`point::Rgba`). The long side is at most `LONGEST` pixels (`point::working`).
+  - `Point::start` cuts the pattern from the first frame (`Patch`). With `auto`, `picked` takes the channel with the most variance in the box.
+  - `Point::step` looks for the pattern at each place of the search area around the last place (`search`). The score is the normalized cross-correlation.
+    - Why: the score does not change with the brightness and the contrast of the pattern.
+    - A pattern of `COARSE` pixels or more is looked for at half size first, then near that place at full size. Why: the search is then about 16 times as fast.
+    - A parabola through the scores next to the best place gives the place between pixels.
+    - A place where the picture has almost no variance scores 0 (`FLAT`). Why: the correlation divides by that variance, and rounding then gives false high scores.
+    - When no place scores above 0, the pattern keeps its last place.
+  - `Point::adapt` takes the pattern again for `every_frame`, and for `best_match` when it differs from the first pattern by at most the Match Tolerance (`Patch::like`).
+  - The box keeps its size. The cache key has `point::NAME` and the values of the `Pointed`.
 - The result is a `Tracked`: its first frame and one box for each frame.
   - A cancelled track gives the boxes that it found, with `whole` off.
   - `AvEnv::track` keeps a whole track in the disk cache. The key has `tracking::name`, the digest of the plan and the `Follow`.
@@ -296,7 +313,7 @@ flowchart TD
 
 The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297)) has three parts:
 
-- The project keeps the clicks, Invert Mask and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
+- The project keeps the clicks, Invert Mask, Quality and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
 - `vidcut_core::masks` keeps the maps. Each map holds the logits of one subject on one frame.
 - The key stage scales each map to the frame on the GPU, and cuts it at 0.
 
@@ -304,12 +321,31 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 
 - `ops::grade_masks` changes the clicks. `clicked` chooses the subject of a new click with `subject_at`, which reads the maps of its frame.
 - `editor::mask_maps` makes the needs of the subjects that the request changed (`MaskNeed`).
+  - A change of Quality changes all the subjects of all the frames with clicks.
+  - `masks::Size::of` gives the model from Quality and the preference `ColorPrefs::magic_mask_large`. Each need holds it.
   - `mask_plan` gives the picture that comes into the corrector: the plan of `solo_plan`, with the input of the node as the output of the grade.
   - The plan leaves out the Magic Mask of the node itself. Thus a click does not change the picture that the next click reads.
   - The name of a map is a digest of the model, the plan and the clicks of its subject (`masks::name`).
   - A need lists only the names that the store does not have.
 - `editor::mask_made` runs `Env::subject_masks` for each need and puts the maps into the store.
 - In a GUI, `Live::measuring` makes the maps first (`editor::mask_looks`). The edit then finds them in the store.
+
+**A track.** `grade.mask.track` goes through `editor::mask_track`:
+
+- The subjects are those with clicks that are on, on the frame of `at` (`grade_masks::clicked_subjects`).
+- `mask_track_plan` gives the picture that comes into the corrector on all the frames of the track.
+  - It is the plan of `solo_plan` over a range of frames. The grade keeps its keyframes, and the renderer resolves them on each frame.
+- Each frame of the clip that the track reaches gets a `MaskMap` with `from`, the frame of the clicks.
+  - A retimed clip can show one frame of the clip on more than one frame of the timeline. The first of them that the track reaches gives the map.
+- The name of a tracked map is a digest of the model, the plan and the clicks of its subject. It also holds its own frame and the frame of the clicks.
+- `TrackNeed` lists the names with their frames in the plan. `editor::mask_tracked` runs `Env::subject_tracks` when the store lacks a name.
+  - `Env::subject_tracks` gives the maps of each frame as it makes them. `mask_tracked` puts them into the store at once.
+- In a GUI, `Live::measuring` tracks first, as a job with progress and a cancel (`editor::mask_track_looks`). The edit then finds the maps in the store.
+- `masks::RULES` holds the rules that the runs measure later. Until then they are vidcut's choice:
+  - `joins`: a positive click on the mask of a subject goes to that subject.
+  - `clicked_stays`: a frame with clicks of a subject keeps the map of its clicks.
+  - `clicks_drop_tracked`: a change of the clicks on a frame removes the maps tracked from them (`mask_maps`).
+- The edge of the mask is `MASK_CUT` in the key shader.
 
 **The model.** `AvEnv::subject_masks` renders the frame of the plan in float with `floats_sized`. Then `mask::find` in vidcut-av runs SAM 2.1:
 
@@ -318,12 +354,34 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - The input is the picture clamped to 0..1, scaled to the square with the bicubic filter of `bicubic::taps`, and normalized.
   - Meta's video code rounds the scaled picture to 8 bits. vidcut keeps it in float ([AGENTS.md](../../AGENTS.md), rule 1).
 - One encode serves all the subjects of the frame. Each subject gets one decode with its clicks.
-- The choice of the output is the choice of SAM 2.1 (`chosen`):
-  - With one click, the output with the best predicted overlap.
+- The choice of the output is the choice of SAM 2.1 (`pick`):
+  - With one click, or none on a tracked frame, the output with the best predicted overlap.
   - With more clicks, the first output when it is stable, else the best one.
   - With a negative object score, no mask.
-- `mask::NET` keeps the loaded model for the next frame.
-- The model needs a GPU. It runs on the GPU also with `gpu.acceleration` off, as the AI upscalers do. With no GPU, the request fails.
+- `mask::NET` keeps the loaded model for the next frame. A need of another `mask::Size` loads that model in its place.
+- With `gpu.acceleration` on, the model runs on the GPU. With it off, `Gpu::start_soft` gets the software adapter of wgpu.
+  - The same kernels then run on the CPU: WARP on Windows, lavapipe on Linux.
+  - macOS has no software adapter. There the request fails with `gpu.acceleration` off.
+
+**The track engine.** `AvEnv::subject_tracks` gives a `mask::Run` to `mask::track`:
+
+- `mask::Pictures` renders the frames of the plan in float (`VideoFrames`).
+- Each way starts a new `mask::Track` from the frame of the clicks. The way forward comes first.
+  - The way back reads parts of at most `PART_BYTES` forward. Then it gives the frames of each part to the model in reverse.
+- `Track::start` encodes the frame of the clicks. `Net::first` decodes each subject with its clicks and remembers the result.
+- `Track::next` encodes the next frame. For each subject, `Net::next` recalls the memory, decodes with no clicks, and remembers the result.
+- Each subject has its own memory, a `Bank`. One encode of a frame serves all the subjects.
+  - The memory holds the frame of the clicks and the last six frames, each as features of 64 × 64 × 64.
+  - It also holds the object pointers of the last 16 frames: one token of the decoder of each frame.
+- `Net::recall` is the memory attention of SAM 2.1: four layers, with rotary positions (`kernels::rope`) on the features.
+  - The features of the frame attend to themselves, then to all the memories and the object pointers.
+- `Net::remember` encodes the mask of the frame with the features of the frame into a memory (`kernels::memory_mask`).
+  - The mask of the frame of the clicks is cut at 0. A tracked mask goes through a sigmoid.
+  - With a negative object score, the memory gets an empty mask and the no-object pointer.
+- Attention with many keys is two matrix multiplies and a softmax (`kernels::attend_gemm`).
+  - The memory attention and the global blocks of the image encoder use it.
+  - Why: the attention of one query in one thread is too slow for nearly 29,000 keys.
+- `tracking::Shown` reports the frames done. A cancel stops the track between two frames.
 
 **The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
 
@@ -331,6 +389,11 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - The disk cache limit can remove a map. Before an export, `editor::mask_remakes` lists the maps that the store does not have. The export makes them again.
   - It makes one plan for each frame, with all the missing subjects of that frame.
   - It skips a clip that is off, a frame outside the clip and a node with no input. Such a map does not show.
+  - For tracked maps, `track_remake` makes one `TrackNeed` for each frame of clicks that has a missing map in the clip.
+    - Its frames go from the first to the last map of that track, with the frame of the clicks. These are the frames of the first track.
+    - Why: the model takes fewer object pointers on a track of fewer than 16 frames. A shorter track gives other maps.
+    - A trim can take some of these frames out of the clip. Thus the plan reads a copy of the clip that covers them (`widened`, `Clip::walk`).
+    - The track runs again from the frame of the clicks, because each tracked map needs the memory of the frames before it.
   - It also reads each compound clip that the export plays, opened alone in a copy of the project (`ops::compound::open_alone`).
 - A split gives each part all the clicks and maps. A frame outside a part gets no new map (`mask_maps`).
 - `grade_masks::checked` lets a map name be only a digest. Thus a name from a project file stays in the `masks` folder.
@@ -338,14 +401,21 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 **The key.** `Grade::at` keeps only the maps of its frame. `key_steps` adds `KeySource::Mask` after the windows and the qualifier.
 
 - `Pass::Mask` names the maps of the frame (`Masking`). `mask_into` in the screen puts them into one storage buffer.
-- `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above 0.
+- `fs_mask_key` maps each pixel to the frame, samples each map bilinear and gives 1 where a map is above `MASK_CUT`.
 - A `Pass::KeyFold` then applies Invert Mask and folds the mask into the key of the corrector.
 
 **Checks.** The scripts and results are in the sam2 folder of the test data.
 
-- On the same input, the masks of vidcut and Meta's network overlap 0.9999 on average, and 0.9993 at worst.
-- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click. The model is SAM 2.1 tiny.
-- Two or more clicks, negative clicks, base+ and large are not checked yet ([todo](../todo/subject-masks.md#measurements)).
+- On the same input, the masks of vidcut and Meta's network overlap 0.9999 or more on average, with each of the three models.
+  - The worst overlaps are 0.9993 (tiny), 0.9976 (base+) and 0.9997 (large).
+- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click.
+- A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 or more on average, with each model.
+  - The cases are 12 frames of blackswan, and two objects on 12 frames of bike-packing. The logits differ by 0.06 at most.
+  - Meta's predictor keeps its memories in bfloat16. vidcut keeps them in 32-bit float.
+- Two positive clicks, a negative click and a click at the edge of the frame give the masks of Meta's network: overlap 0.9999 or more.
+- One frame each of five clips from 720 × 480 to 3840 × 2160 gives the masks of Meta's network: overlap 1.0000.
+- On the software adapter, the masks match the GPU within 8e-5.
+- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run ([todo](../todo/subject-masks.md#measurements)).
 
 ## In a GUI
 
@@ -372,7 +442,7 @@ How it hears:
   - `clip_speech` reads the transcript of the file of each heard clip, as `media.transcribe` keeps it.
   - It transcribes a transcript that is missing, or that another model or language made (`Asked::made`).
 - `hear: transcript`: it takes the transcript that each file has, whatever made it. It transcribes only a file with no transcript.
-- For `media` and `transcript`, it places the words through the sound of each clip, J and L cuts too (`analysis::words_between`).
+- For `media` and `transcript`, it places the words through each sound clip (`analysis::words_between`).
   - Where two tracks have the same word at the same time, the word of the first track stays (`first_heard`).
   - The cues get one `Speech`, in the times of the range. The words of Re-time come in the same way.
 

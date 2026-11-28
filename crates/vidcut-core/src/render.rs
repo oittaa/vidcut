@@ -15,6 +15,7 @@ use crate::model::{
     SmoothMode, TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
+use crate::shared::{Shared, SharedVec};
 use crate::time::Rational;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2361,7 +2362,7 @@ fn crosses_inside(p: &Project, c: &Clip, t: i64) -> bool {
         .flat_map(|k| p.compound_tracks(k))
         .filter(|n| n.kind == TrackKind::Video && !n.transitions.is_empty())
         .any(|n| {
-            transitions::playing(p, n, false, transitions::mixes)
+            transitions::playing(p, n, transitions::mixes)
                 .iter()
                 .any(|d| {
                     let side =
@@ -2450,7 +2451,7 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
     if !t.clips.iter().any(|c| plays_inside(p, c)) {
         return edges;
     }
-    for d in transitions::playing(p, t, false, joins_compound) {
+    for d in transitions::playing(p, t, joins_compound) {
         for (side, falling) in [(d.before, true), (d.after, false)] {
             let Some(c) = side.filter(|c| plays_inside(p, c)) else {
                 continue;
@@ -2594,10 +2595,11 @@ fn slated(clips: &mut [Clip], gone: &HashSet<&str>) {
                 .map(|p| Picture {
                     composite_mode: p.composite_mode,
                     opacity: p.opacity,
-                    opacity_keys: p.opacity_keys,
+                    opacity_keys: p.opacity_keys.clone(),
                     ..Picture::default()
                 })
-                .filter(|p| !p.is_usual());
+                .filter(|p| !p.is_usual())
+                .map(Into::into);
         }
     }
 }
@@ -2643,7 +2645,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             drop_frame,
             start_tc,
             frames,
-            tracks: Vec::new(),
+            tracks: SharedVec::new(),
             marks: Default::default(),
             markers: Vec::new(),
             kept_otio: None,
@@ -2674,8 +2676,9 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             let edges = edges_on(&out, t);
             let (mut host, mut host_within) = (t.clone(), Vec::new());
             host.clips.clear();
-            host.transitions
-                .retain(|x| x.sound || joins_compound(x) || !touches_compound(&out, t, x));
+            host.transitions.retain(|x| {
+                t.kind == TrackKind::Audio || joins_compound(x) || !touches_compound(&out, t, x)
+            });
             let mut inner = Vec::new();
             for (c, nest) in t.clips.iter().zip(&w.nests) {
                 if !plays_inside(&out, c) {
@@ -2688,7 +2691,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 }
                 host.clips.push(hollow(&out, c, &hollows));
                 opened += 1;
-                let own = c.picture.clone().unwrap_or_default();
+                let own = c.picture.as_deref().cloned().unwrap_or_default();
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
                 let smooth = edges.iter().any(|e| e.smooth);
                 let crossed = !edges.is_empty();
@@ -2797,7 +2800,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 placed.push(chains);
             }
         }
-        out.tracks = tracks;
+        out.tracks = tracks.into();
         within = placed;
     }
     Some((out, within))
@@ -2993,10 +2996,10 @@ fn flat_pieces(
     let mut clip = whole.clone();
     clip.audio = None;
     let mut track = t.clone();
-    track.clips = vec![clip];
+    track.clips = vec![clip].into();
     track.transitions.clear();
     let mut alone = p.clone();
-    alone.tracks = vec![track];
+    alone.tracks = vec![track].into();
     let (plan, _) = plan_lanes(&alone, frames.0, frames.1)?;
     Ok(plan.video.into())
 }
@@ -3021,7 +3024,7 @@ fn placed_of(
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
-    let own = Placed::at(c, own.unwrap_or_default(), run, x);
+    let own = Placed::at(c, own.map(Shared::into_inner).unwrap_or_default(), run, x);
     std::iter::once(own)
         .chain(crossed.iter().cloned())
         .chain(outer)
@@ -3054,7 +3057,7 @@ fn paced_keys(y: &mut Clip, c: &Clip, k0: i64, first_key: i64) {
     let moving: Vec<&PaceStep> = steps.iter().filter(|s| s.rate != 0.0).collect();
     let (Some(first), Some(last)) = (moving.first(), moving.last()) else {
         let held = first_key as f64;
-        y.picture = y.picture.take().map(|p| p.sampled(held));
+        y.picture = y.picture.take().map(|p| p.sampled(held).into());
         y.title = y.title.take().map(|t| t.sampled(held));
         return;
     };
@@ -3141,10 +3144,6 @@ fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
         let own = y.speed.take();
         y.speed = paced(c, own.as_ref(), k0);
         paced_keys(&mut y, c, k0, first_key);
-        if let Some(a) = y.audio.as_mut() {
-            a.head = 0;
-            a.tail = 0;
-        }
         let run = if speed == 0.0 {
             Run {
                 at: walked,
@@ -3170,15 +3169,6 @@ fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
     y.walk(s - x.start);
     y.start = c.start + s - first;
     y.duration = e - s;
-    if let Some(a) = y.audio.as_mut() {
-        if s > x.start || e < x.end() {
-            a.head = 0;
-            a.tail = 0;
-        } else {
-            a.head = a.head.max(first - x.start);
-            a.tail = a.tail.min(last - x.end());
-        }
-    }
     let run = Run {
         at: s - x.start - y.start,
         of: x.duration,
@@ -3453,7 +3443,7 @@ fn planned_video(
         .map(|(i, t)| VideoLane {
             track: t,
             inner: within.and_then(|w| w.get(i)),
-            played: transitions::playing(p, t, false, transitions::mixes),
+            played: transitions::playing(p, t, transitions::mixes),
         })
         .collect();
     let plan = VideoPlan { p, pool: p.pool() };
@@ -3558,7 +3548,7 @@ impl VideoPlan<'_> {
     fn fills(&self, c: &Clip) -> bool {
         let (pool, s) = (&self.pool, &self.p.flat_settings());
         let media = pool.get(c.media.as_str());
-        c.picture.as_ref().is_none_or(Picture::is_usual)
+        c.picture.as_deref().is_none_or(Picture::is_usual)
             && media.is_none_or(|m| self.mapped(c, m).is_none())
             && (c.draws() || media.is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
     }
@@ -3962,7 +3952,7 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
         let root = chain.last().map_or(track, |&i| &p.tracks[i]);
         let window = held.map_or(EVERY_FRAME, |i| i.shown);
         let around = held.map_or(&[][..], |i| i.fades.as_slice());
-        let fades = transitions::playing(p, track, true, |t| transitions::cross_fade(t).is_some());
+        let fades = transitions::playing(p, track, |t| transitions::cross_fade(t).is_some());
         let fade_of = |c: &Clip, into: bool| {
             fades.iter().find(|f| {
                 let side = if into { f.after } else { f.before };
@@ -3972,9 +3962,10 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
         let mut two: [(Vec<AudioPiece>, i64); 2] = [(Vec::new(), a), (Vec::new(), a)];
         let mut on = 0;
         for c in &track.clips {
-            let Some((ra, rb)) = c.audio_range() else {
+            if c.audio.is_none() {
                 continue;
-            };
+            }
+            let (ra, rb) = (c.start, c.end());
             let (into, out_of) = (fade_of(c, true), fade_of(c, false));
             if into.is_some_and(|f| f.before.is_some()) {
                 on = 1 - on;
@@ -4293,15 +4284,15 @@ fn alone(p: &Project, clip: &str, input: Option<&str>) -> Result<RenderPlan> {
             x.picture = x
                 .picture
                 .take()
-                .and_then(|p| p.composition)
+                .and_then(|p| p.into_inner().composition)
                 .map(|mut composition| {
                     if let Some(input) = &input {
                         composition.cut_at(input);
                     }
-                    Picture {
+                    Shared::new(Picture {
                         composition: Some(composition),
                         ..Picture::default()
-                    }
+                    })
                 });
         }
     }
@@ -4321,16 +4312,11 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         .clip(clip)
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
+    let parts: Vec<String> = std::iter::once(c.id.clone()).chain(p.tied(&c.id)).collect();
     let mut alone = p.clone();
     for t in &mut alone.tracks {
-        t.clips.retain(|x| x.id == c.id);
+        t.clips.retain(|x| parts.contains(&x.id));
         t.transitions.clear();
-        for x in &mut t.clips {
-            if let Some(a) = x.audio.as_mut() {
-                a.head = 0;
-                a.tail = 0;
-            }
-        }
     }
     let mut plan = flatten(&alone, c.start, c.end())?;
     plan.colors = timeline_colors(p);
@@ -4386,14 +4372,20 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         .clip(clip)
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
-    let a = c
-        .audio
-        .as_ref()
-        .ok_or_else(|| Error::invalid(format!("{clip} has no sound")))?;
-    let (from, to) = ((c.start + a.head).max(0), c.end() + a.tail);
+    let parts: Vec<&Clip> = std::iter::once(c.id.clone())
+        .chain(p.tied(&c.id))
+        .filter_map(|id| p.clip(&id))
+        .filter(|x| x.audio.is_some())
+        .collect();
+    if parts.is_empty() {
+        return Err(Error::invalid(format!("{clip} has no sound")));
+    }
+    let from = parts.iter().map(|x| x.start).min().unwrap_or(0).max(0);
+    let to = parts.iter().map(|x| x.end()).max().unwrap_or(0);
+    let ids: Vec<String> = parts.iter().map(|x| x.id.clone()).collect();
     let mut alone = p.clone();
     for t in &mut alone.tracks {
-        t.clips.retain(|x| x.id == c.id);
+        t.clips.retain(|x| ids.contains(&x.id));
         t.transitions.clear();
         t.muted = false;
         t.solo = false;
@@ -4428,10 +4420,10 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
 
 pub fn graded_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
     frame_alone(p, clip, at, |picture| {
-        Some(Picture {
-            grade: Some(picture?.grade?),
+        Some(Shared::new(Picture {
+            grade: Some(picture?.into_inner().grade?),
             ..Picture::default()
-        })
+        }))
     })
 }
 
@@ -4439,7 +4431,7 @@ fn frame_alone(
     p: &Project,
     clip: &str,
     at: i64,
-    kept: fn(Option<Picture>) -> Option<Picture>,
+    kept: fn(Option<Shared<Picture>>) -> Option<Shared<Picture>>,
 ) -> Result<VideoPiece> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
@@ -4870,7 +4862,6 @@ mod tests {
             .transitions
             .push(crate::model::Transition {
                 id: "t1".into(),
-                sound: false,
                 from: from.map(Into::into),
                 to: to.map(Into::into),
                 before,
@@ -4889,12 +4880,11 @@ mod tests {
         after: i64,
     ) -> Project {
         let mut p = f.editor.project().clone();
-        p.track_mut("V1")
+        p.track_mut("A1")
             .unwrap()
             .transitions
             .push(crate::model::Transition {
                 id: "t1".into(),
-                sound: true,
                 from: from.map(Into::into),
                 to: to.map(Into::into),
                 before,
@@ -4943,7 +4933,7 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
-        let p = cross_fade(&f, Some("c1"), Some("c2"), 5, 5);
+        let p = cross_fade(&f, Some("c2"), Some("c4"), 5, 5);
         let plan = flatten(&p, 0, 100).unwrap();
         assert_eq!(
             heard(&plan),
@@ -4968,7 +4958,7 @@ mod tests {
         f.append("m1", 0, 50);
         f.append("m1", 50, 100);
         req(&mut f, "edit.delete", json!({"clips": "c1", "lift": true}));
-        let p = cross_fade(&f, None, Some("c2"), 0, 10);
+        let p = cross_fade(&f, None, Some("c4"), 0, 10);
         let plan = flatten(&p, 0, 100).unwrap();
         assert_eq!(
             heard(&plan),
@@ -4985,8 +4975,8 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
-        let p = cross_fade(&f, Some("c1"), Some("c2"), 2, 2);
-        let t = p.track("V1").unwrap();
+        let p = cross_fade(&f, Some("c2"), Some("c4"), 2, 2);
+        let t = p.track("A1").unwrap();
         let fades = transitions::cross_fades(&p, t);
         assert_eq!(transitions::heard_at(&fades, &t.clips[1], 49), Some(0.5));
     }
@@ -5377,7 +5367,7 @@ mod tests {
         f.append("m1", 0, 50);
         f.append("m1", 50, 100);
         req(&mut f, "edit.delete", json!({"clips": "c1", "lift": true}));
-        let p = dissolve(&f, None, Some("c2"), 5, 5);
+        let p = dissolve(&f, None, Some("c3"), 5, 5);
         let plan = flatten(&p, 0, 100).unwrap();
         assert_eq!(
             shown(&plan),
@@ -5390,7 +5380,7 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m1", 50, 100);
-        req(&mut f, "edit.delete", json!({"clips": "c2", "lift": true}));
+        req(&mut f, "edit.delete", json!({"clips": "c3", "lift": true}));
         let p = dissolve(&f, Some("c1"), None, 0, 10);
         let plan = flatten(&p, 0, 60).unwrap();
         assert_eq!(
@@ -5404,7 +5394,7 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
-        let p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
+        let p = dissolve(&f, Some("c1"), Some("c3"), 5, 5);
         let plan = flatten(&p, 0, 100).unwrap();
         assert_eq!(
             shown(&plan),
@@ -5421,7 +5411,7 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
-        let p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
+        let p = dissolve(&f, Some("c1"), Some("c3"), 5, 5);
         let plan = flatten(&p, 48, 52).unwrap();
         assert_eq!(
             shown(&plan),
@@ -5458,8 +5448,8 @@ mod tests {
         f.append("m1", 0, 100);
         f.append("m3", 0, 50);
         f.append("m1", 100, 150);
-        req(&mut f, "edit.delete", json!({"clips": "c2", "lift": true}));
-        req(&mut f, "clip.set", json!({"clips": "c3", "enabled": false}));
+        req(&mut f, "edit.delete", json!({"clips": "c3", "lift": true}));
+        req(&mut f, "clip.set", json!({"clips": "c4", "enabled": false}));
         let plan = flatten(f.editor.project(), 0, 200).unwrap();
         let kinds: Vec<(String, i64)> = plan
             .video
@@ -5518,7 +5508,7 @@ mod tests {
             "edit.audio_roll",
             json!({"clip": "c1", "edge": "tail", "by": 5}),
         );
-        let plan = flatten_clip(f.editor.project(), "c2").unwrap();
+        let plan = flatten_clip(f.editor.project(), "c3").unwrap();
         assert_eq!(plan.range, (100, 150));
         assert!(matches!(
             plan.video[0],
@@ -5531,10 +5521,10 @@ mod tests {
             }
         ));
         assert!(matches!(
-            plan.audio[0][0],
+            plan.audio[0][1],
             AudioPiece::Source {
-                source_sample: 19_200,
-                samples: 96_000,
+                source_sample: 28_800,
+                samples: 86_400,
                 ..
             }
         ));

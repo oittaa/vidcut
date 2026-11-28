@@ -80,12 +80,14 @@ impl AvEnv {
         download: bool,
     ) -> Result<(MeasureKey, Arc<Tracked>)> {
         let dir = paths::models_dir();
-        vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
+        if follow.point.is_none() {
+            vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
+        }
         let area = follow.area.map(|v| (v * 1e5).round() as i64);
         let picture = serde_json::to_vec(plan).unwrap_or_default();
         let key = format!(
             "{}-{}-{}-{}-{}-{}-{}-{}-{}-{}{}",
-            vidcut_av::tracking::name(),
+            vidcut_av::tracking::name(follow.point.as_ref()),
             vidcut_core::fingerprint::digest(&picture),
             follow.at,
             follow.frames.0,
@@ -578,6 +580,7 @@ impl Env for AvEnv {
     fn subject_masks(
         &self,
         plan: &RenderPlan,
+        size: vidcut_core::masks::Size,
         subjects: &[Vec<vidcut_core::masks::Point>],
         download: bool,
     ) -> Result<Vec<Arc<[f32]>>> {
@@ -587,7 +590,7 @@ impl Env for AvEnv {
             ));
         }
         let dir = paths::models_dir();
-        let size = vidcut_av::mask::Size::Tiny;
+        let size = mask_size(size);
         vidcut_av::mask::get_ready(&dir, size, download).map_err(av_error)?;
         let piece = plan
             .video
@@ -614,9 +617,58 @@ impl Env for AvEnv {
                     .collect()
             })
             .collect();
+        let model = (size, crate::preferences::gpu_acceleration());
         let found =
-            vidcut_av::mask::find(&dir, size, (w, h, &pixels), &clicks).map_err(av_error)?;
+            vidcut_av::mask::find(&dir, model, (w, h, &pixels), &clicks).map_err(av_error)?;
         Ok(found.into_iter().map(|f| f.logits.into()).collect())
+    }
+
+    fn subject_tracks(
+        &self,
+        need: &vidcut_core::editor::TrackNeed,
+        each: &mut dyn FnMut(i64, Vec<Arc<[f32]>>) -> Result<()>,
+    ) -> Result<()> {
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the picture changed while the Magic Mask tracked it; track again",
+            ));
+        }
+        let dir = paths::models_dir();
+        let size = mask_size(need.size);
+        vidcut_av::mask::get_ready(&dir, size, need.download).map_err(av_error)?;
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let run = vidcut_av::mask::Run {
+            plan: &need.plan,
+            source: &need.source,
+            at: need.at,
+            backward: need.backward,
+            forward: need.forward,
+            decoder: decoder.as_ref(),
+        };
+        let subjects: Vec<Vec<vidcut_av::mask::Click>> = (need.subjects.iter())
+            .map(|points| {
+                (points.iter())
+                    .map(|p| vidcut_av::mask::Click {
+                        at: p.at,
+                        positive: !p.negative,
+                    })
+                    .collect()
+            })
+            .collect();
+        let model = (size, crate::preferences::gpu_acceleration());
+        let mut failed = None;
+        let tracked = vidcut_av::mask::track(&dir, model, &run, &subjects, |f, found| {
+            let maps = found.into_iter().map(|v| v.logits.into()).collect();
+            each(f, maps).map_err(|e| {
+                let text = e.to_string();
+                failed = Some(e);
+                vidcut_av::Error::Invalid(text)
+            })
+        });
+        match (tracked, failed) {
+            (_, Some(e)) => Err(e),
+            (r, None) => r.map_err(av_error),
+        }
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
@@ -886,6 +938,14 @@ impl Env for AvEnv {
         } else {
             vidcut_core::editor::read_timeline_file(path)
         }
+    }
+}
+
+fn mask_size(size: vidcut_core::masks::Size) -> vidcut_av::mask::Size {
+    match size {
+        vidcut_core::masks::Size::Tiny => vidcut_av::mask::Size::Tiny,
+        vidcut_core::masks::Size::BasePlus => vidcut_av::mask::Size::BasePlus,
+        vidcut_core::masks::Size::Large => vidcut_av::mask::Size::Large,
     }
 }
 

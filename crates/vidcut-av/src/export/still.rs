@@ -60,6 +60,10 @@ pub fn floats_sized(
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(u32, u32, Vec<[f32; 3]>)> {
     let frame = float_frame(piece, fps, size, colors, decoder)?;
+    Ok(floats_of(&frame))
+}
+
+pub(crate) fn floats_of(frame: &crate::ffmpeg::frame::Video) -> (u32, u32, Vec<[f32; 3]>) {
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let value = |plane: usize, x: usize, y: usize| {
         let at = y * frame.stride(plane) + 4 * x;
@@ -72,7 +76,7 @@ pub fn floats_sized(
             out.push([value(2, x, y), value(0, x, y), value(1, x, y)]);
         }
     }
-    Ok((frame.width(), frame.height(), out))
+    (frame.width(), frame.height(), out)
 }
 
 pub fn rgba(
