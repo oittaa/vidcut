@@ -2472,9 +2472,15 @@ impl VideoFrames {
 
     fn whole_of(&self, placed: &[Vec<Placed>]) -> Option<(u32, u32)> {
         let (w, h, _) = self.maker.out();
+        let most = self.drawer.as_ref()?.on.gpu.device.limits();
+        let most = most.max_texture_dimension_2d;
         self.frame_size.filter(|&(fw, fh)| {
             let sized = (f64::from(fw), f64::from(fh));
-            (w < fw || h < fh) && !self.colors && vidcut_core::place::whole_frame(placed, sized)
+            let fits = fw <= most && fh <= most;
+            (w < fw || h < fh)
+                && fits
+                && !self.colors
+                && vidcut_core::place::whole_frame(placed, sized)
         })
     }
 

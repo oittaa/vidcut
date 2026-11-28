@@ -869,6 +869,7 @@ The draw:
   - A second `Screen` draws the layers, the compound clips, the adjustment clips and the timeline grade at the frame size (`Screen::draw_whole`).
   - `Blurred::scaled` then scales that picture onto the canvas once. The subtitles and the output LUT come after it.
   - Why the whole frame: the Sharpen of an adjustment clip or a compound clip works on the layers below it or inside it.
+  - A frame with a side larger than the largest texture of the GPU keeps the canvas size. The second `Screen` never draws a whole frame itself.
   - An export keeps that second `Screen` until it ends. The viewer frees it at the next frame with no such Sharpen.
   - In such a frame, `VideoFrames` makes its pictures at the frame size (`VideoFrames::made_size`). These are the titles, the generators and the retimed, upscaled and Smooth Cut frames.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).

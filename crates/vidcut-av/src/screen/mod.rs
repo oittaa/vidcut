@@ -1983,7 +1983,10 @@ impl Screen {
             .iter()
             .any(|(p, _)| matches!(p.sampling(), Sampling::Colors { .. }));
         let sized = (f64::from(in_frame.0), f64::from(in_frame.1));
-        if (size.0 < in_frame.0 || size.1 < in_frame.1)
+        if !self.part
+            && (size.0 < in_frame.0 || size.1 < in_frame.1)
+            && in_frame.0 <= max
+            && in_frame.1 <= max
             && !colored
             && vidcut_core::place::whole_frame(placed, sized)
         {
