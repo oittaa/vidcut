@@ -586,8 +586,9 @@ fn line_of(t: texture_2d<f32>, x: i32, y: i32) -> vec3<f32> {
     return textureLoad(t, vec2<i32>(x, clamp(y, 0, h - 1)), 0).rgb;
 }
 
-fn both(x: i32, y: i32) -> vec3<f32> {
-    return line_of(before, x, y) + line_of(middle, x, y);
+fn both(x: i32, y: i32, second: bool) -> vec3<f32> {
+    let pair = select(line_of(before, x, y), line_of(after, x, y), second);
+    return pair + line_of(middle, x, y);
 }
 
 @fragment
@@ -620,8 +621,8 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
     var diff = max(max(t0 * 0.5, t1), t2);
     let edge = y < 4 || y + 5 > h;
     if !edge || !(y < 2 || y + 3 > h) {
-        let b = both(x, y - 2) * 0.5 - c;
-        let f = both(x, y + 2) * 0.5 - e;
+        let b = both(x, y - 2, second) * 0.5 - c;
+        let f = both(x, y + 2, second) * 0.5 - e;
         let hi = max(max(d - e, d - c), min(b, f));
         let lo = min(min(d - e, d - c), max(b, f));
         diff = max(max(diff, lo), -hi);
@@ -629,8 +630,8 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
     var made = (c + e) * 0.5;
     if !edge {
         let far = line_of(middle, x, y - 3) + line_of(middle, x, y + 3);
-        let high = HIGH.x * (p0 + n0) - HIGH.y * (both(x, y - 2) + both(x, y + 2))
-            + HIGH.z * (both(x, y - 4) + both(x, y + 4));
+        let high = HIGH.x * (p0 + n0) - HIGH.y * (both(x, y - 2, second) + both(x, y + 2, second))
+            + HIGH.z * (both(x, y - 4, second) + both(x, y + 4, second));
         let moving = high * 0.25 + LOW.x * (c + e) - LOW.y * far;
         let still = ALONE.x * (c + e) - ALONE.y * far;
         made = select(still, moving, abs(c - e) > t0);
