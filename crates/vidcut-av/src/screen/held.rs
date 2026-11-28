@@ -290,11 +290,11 @@ pub(crate) fn with_rests(f: &frame::Video, parts: &[(Option<Rest>, f32)]) -> Res
         .fold((&gpu.device, &gpu.queue), held.buffer(), size, &outside);
     crate::debug!(
         "ai",
-        "{}x{}: {} pictures of values outside 0..1 added in {:.2} ms",
+        "{}x{}: values outside 0..1 added in {:.2} ms, rests: {}",
         size.0,
         size.1,
-        outside.len(),
-        clock.elapsed().as_secs_f64() * 1e3
+        clock.elapsed().as_secs_f64() * 1e3,
+        outside.len()
     );
     let folded = Held::new(folded, (&gpu.device, &gpu.queue), gpu.id);
     let pixel = (ffmpeg::format::Pixel::RGBF32LE, RGB_FLOAT);

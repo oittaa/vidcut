@@ -320,6 +320,7 @@ The AI models take 16-bit RGB, which holds only the values from 0 to 1. The valu
 - `held::with_rests` adds the rests to the picture that a model gives (`fold` in `rgb.wgsl`).
   - The result is 32-bit float RGB (`RGBF32LE`). The draw reads it as `Rgba32Float` (`Layout::Rgbf32`).
   - A bilinear filter enlarges the rest of a smaller picture.
+  - Why bilinear: the kernel of the export (`RESIZE`) rings at the edge of a highlight. On a test pattern, the bilinear rest came nearer to the frame at full size.
   - The picture of an upscaler gets the rest of its own frame (`Session::take`).
   - A frame of Retime Process or of a Smooth Cut gets the rests of its two frames, mixed by the weight of the frame (`made_between`).
   - At a shot change, the nearer frame keeps its rest (`held::whole`).
