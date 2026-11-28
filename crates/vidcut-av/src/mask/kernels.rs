@@ -1,15 +1,23 @@
 use crate::compute::Gpu;
-use crate::compute::ops::{Act, Conv, HEADER, Ops, Res, View, tensor};
+use crate::compute::ops::{Act, Conv, HEADER, Ops, Res, SHARED, View, tensor};
 
 const KEYS: u32 = 16;
+
+fn attend_layout(d: u32, bq: u32) -> (u32, u32, u32) {
+    let (ko, vo) = (bq * 9, bq * 5);
+    (ko, vo, (ko + KEYS * 9).max(vo + KEYS * (d / 4)))
+}
+
+pub(super) fn attend_fits(d: u32) -> bool {
+    let (_, _, size) = attend_layout(d, 64);
+    d.is_multiple_of(4) && size * 16 + 64 * 4 * 4 <= SHARED
+}
 
 fn attend_source(d: u32, bq: u32) -> String {
     let g = d / 4;
     let parts = g.div_ceil(4);
     let threads = 4 * bq;
-    let ko = bq * 9;
-    let vo = bq * 5;
-    let mx = (ko + KEYS * 9).max(vo + KEYS * g);
+    let (ko, vo, mx) = attend_layout(d, bq);
     let mut decl = String::new();
     let mut rescale = String::new();
     let mut store = String::new();
@@ -42,8 +50,10 @@ fn attend_source(d: u32, bq: u32) -> String {
     let mut mix = String::new();
     for c in 0..KEYS / 4 {
         mix.push_str(&format!("        let w{c} = sh[r * 5u + {c}u];\n"));
-        for (e, comp) in (0..).zip(["x", "y", "z", "w"]) {
-            let kk = 4 * c + e;
+    }
+    for (e, comp) in (0..).zip(["x", "y", "z", "w"]) {
+        for c in 0..KEYS / 4 {
+            let kk = 4 * e + c;
             for j in 0..parts {
                 mix.push_str(&format!(
                     "        a{j} = fma(vec4<f32>(w{c}.{comp}), sh[VO + {kk}u * G + part + {o}u], a{j});\n",
@@ -61,13 +71,13 @@ const T: u32 = {threads}u;
 const BK: u32 = {KEYS}u;
 const KO: u32 = {ko}u;
 const VO: u32 = {vo}u;
-const MX: u32 = {mx}u;
 @group(0) @binding(1) var<storage, read> qs: array<f32>;
 @group(0) @binding(2) var<storage, read> ks: array<f32>;
 @group(0) @binding(3) var<storage, read> vs: array<f32>;
 @group(0) @binding(4) var<storage, read_write> os: array<f32>;
 
-var<workgroup> sh: array<vec4<f32>, {size}>;
+var<workgroup> sh: array<vec4<f32>, {mx}>;
+var<workgroup> red: array<f32, {threads}>;
 
 @compute @workgroup_size({threads})
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {{
@@ -93,23 +103,25 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
         var s2 = 0.0;
         var s3 = 0.0;
         for (var c = 0u; c < D; c += 32u) {{
-            for (var e = li; e < BQ * 32u; e += T) {{
-                let row = e / 32u;
-                let dd = e % 32u;
-                var x = 0.0;
-                if (q0 + row < lq && c + dd < D) {{
-                    x = qs[qb + (q0 + row) * u(8u) + c + dd] * scale;
+            for (var e = li; e < BQ * 8u; e += T) {{
+                let row = e / 8u;
+                let at = c + (e % 8u) * 4u;
+                var x = vec4<f32>(0.0);
+                if (q0 + row < lq && at < D) {{
+                    let i = qb + (q0 + row) * u(8u) + at;
+                    x = vec4<f32>(qs[i], qs[i + 1u], qs[i + 2u], qs[i + 3u]) * scale;
                 }}
-                sh[row * 9u + dd / 4u][dd % 4u] = x;
+                sh[row * 9u + e % 8u] = x;
             }}
-            for (var e = li; e < BK * 32u; e += T) {{
-                let row = e / 32u;
-                let dd = e % 32u;
-                var x = 0.0;
-                if (k0 + row < lk && c + dd < D) {{
-                    x = ks[kb + (k0 + row) * u(12u) + c + dd];
+            for (var e = li; e < BK * 8u; e += T) {{
+                let row = e / 8u;
+                let at = c + (e % 8u) * 4u;
+                var x = vec4<f32>(0.0);
+                if (k0 + row < lk && at < D) {{
+                    let i = kb + (k0 + row) * u(12u) + at;
+                    x = vec4<f32>(ks[i], ks[i + 1u], ks[i + 2u], ks[i + 3u]);
                 }}
-                sh[KO + row * 9u + dd / 4u][dd % 4u] = x;
+                sh[KO + row * 9u + e % 8u] = x;
             }}
             workgroupBarrier();
 {scores}            workgroupBarrier();
@@ -122,10 +134,10 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
         s1 = select(-3.0e38, s1, v1);
         s2 = select(-3.0e38, s2, v2);
         s3 = select(-3.0e38, s3, v3);
-        sh[MX + r][part] = max(max(s0, s1), max(s2, s3));
+        red[li] = max(max(s0, s1), max(s2, s3));
         workgroupBarrier();
-        let mv = sh[MX + r];
-        let mn = max(m, max(max(mv.x, mv.y), max(mv.z, mv.w)));
+        let mv = max(max(red[r * 4u], red[r * 4u + 1u]), max(red[r * 4u + 2u], red[r * 4u + 3u]));
+        let mn = max(m, mv);
         let corr = exp(m - mn);
         let p0 = select(0.0, exp(s0 - mn), v0);
         let p1 = select(0.0, exp(s1 - mn), v1);
@@ -133,33 +145,28 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
         let p3 = select(0.0, exp(s3 - mn), v3);
         l = l * corr + p0 + p1 + p2 + p3;
 {rescale}        m = mn;
-        sh[r * 5u][part] = p0;
-        sh[r * 5u + 1u][part] = p1;
-        sh[r * 5u + 2u][part] = p2;
-        sh[r * 5u + 3u][part] = p3;
-        for (var e = li; e < BK * D; e += T) {{
-            let row = e / D;
-            let d = e % D;
-            var x = 0.0;
+        sh[r * 5u + part] = vec4<f32>(p0, p1, p2, p3);
+        for (var e = li; e < BK * G; e += T) {{
+            let row = e / G;
+            var x = vec4<f32>(0.0);
             if (k0 + row < lk) {{
-                x = vs[vb + (k0 + row) * u(16u) + d];
+                let i = vb + (k0 + row) * u(16u) + (e % G) * 4u;
+                x = vec4<f32>(vs[i], vs[i + 1u], vs[i + 2u], vs[i + 3u]);
             }}
-            sh[VO + row * G + d / 4u][d % 4u] = x;
+            sh[VO + e] = x;
         }}
         workgroupBarrier();
 {mix}        workgroupBarrier();
     }}
-    sh[MX + r][part] = l;
+    red[li] = l;
     workgroupBarrier();
-    let lv = sh[MX + r];
-    let inv = 1.0 / (lv.x + lv.y + lv.z + lv.w);
+    let inv = 1.0 / (red[r * 4u] + red[r * 4u + 1u] + red[r * 4u + 2u] + red[r * 4u + 3u]);
     let row = q0 + r;
     if (row < lq) {{
         let ob = u(18u) + b * u(19u) + row * u(20u) + u(21u) + h * D;
 {store}    }}
 }}
 "#,
-        size = mx + bq,
     )
 }
 

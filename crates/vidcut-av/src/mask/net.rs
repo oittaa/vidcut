@@ -658,6 +658,15 @@ impl Net {
                     "{title}: the GPU's buffers are too small"
                 )));
             }
+            if let Some(p) = plans
+                .iter()
+                .find(|p| !kernels::attend_fits(p.dout / p.heads))
+            {
+                return Err(Error::Invalid(format!(
+                    "{title}: heads of {} channels are not supported",
+                    p.dout / p.heads
+                )));
+            }
             let ends: Vec<u32> = plans
                 .iter()
                 .filter(|p| p.end.is_some())

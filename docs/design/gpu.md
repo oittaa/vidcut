@@ -332,6 +332,9 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
   - Four threads share each query. Each thread scores 4 keys of a block of 16 and adds up a quarter of the channels of the values.
   - The keys and the values of each block go through workgroup memory.
   - The softmax is online: the four threads of a query keep its running maximum and its running sum.
+  - Each thread writes only whole `vec4<f32>` elements of workgroup memory. The four threads of a query exchange numbers through an array of `f32`.
+  - Why: WGSL lets a write of one component of a vector change the whole vector. Then two threads that write one vector can lose a write.
+  - `Net::load` checks that the heads of the image encoder fit the kernel (`kernels::attend_fits`): a multiple of 4 channels, within `ops::SHARED`.
 - `Gpu::start_soft` gets the software adapter of wgpu. The kernels then run on the CPU.
 
 ## Deinterlacing and HDR
