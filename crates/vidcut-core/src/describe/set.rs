@@ -766,6 +766,7 @@ impl Words<'_> {
                     "equalizer": t.equalizer,
                     "pan": t.pan,
                     "pan_on": t.pan_on,
+                    "format": t.format,
                 })),
                 (None, Some(t)) => Some(json!({
                     "locked": t.locked,
@@ -796,6 +797,7 @@ impl Words<'_> {
         s.put("equalizer", "Equalizer", &raw, |t| t["equalizer"].clone());
         s.put("pan", "Pan", &number, |t| t["pan"].clone());
         s.put("pan_on", "Pan On", &raw, |t| t["pan_on"].clone());
+        s.put("format", "Track Type", &raw, |t| t["format"].clone());
         s.put("shown", "Show", &raw, |t| t["shown"].clone());
         s.put("destination", "Destination", &raw, |t| {
             t["destination"].clone()
@@ -869,6 +871,17 @@ impl Words<'_> {
         s.put("retime", "Retime Process", &retime, |c| json!(c.retime));
         s.put("render_cache", "Render Cache", &word, |c| {
             json!(c.render_cache)
+        });
+        let project = self.project;
+        s.put("channel", "Audio Channel", &number, |c| {
+            let m = project.and_then(|p| p.media(&c.media));
+            match (m, &c.audio) {
+                (Some(m), Some(a)) => match m.info.heard(a).as_slice() {
+                    [ch] => json!(m.info.embedded(a.stream, *ch)),
+                    _ => Value::Null,
+                },
+                _ => Value::Null,
+            }
         });
         s.f.text()
     }

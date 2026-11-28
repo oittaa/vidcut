@@ -195,6 +195,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
         "track.list" => {
             for t in r.result.as_array().into_iter().flatten() {
                 let mut flags = Vec::new();
+                if let Some(f) = t["format"].as_str().filter(|f| *f != "stereo") {
+                    flags.push(f.to_string());
+                }
                 for key in ["locked", "muted", "solo"] {
                     if t[key] == true {
                         flags.push(key.to_string());

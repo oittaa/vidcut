@@ -461,7 +461,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("media.set", "vidcut media set m1 m2 --color teal"),
     (
         "clip.set",
-        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation-on false\n  vidcut clip set c4 --pan -50\n  vidcut clip set c4 --equalizer '{\"bands\":[{\"band\":2,\"gain\":-6}]}'\n  vidcut clip set c4 --dialogue-leveler '{\"lift_soft\":true}'",
+        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation-on false\n  vidcut clip set c4 --pan -50\n  vidcut clip set c4 --equalizer '{\"bands\":[{\"band\":2,\"gain\":-6}]}'\n  vidcut clip set c4 --dialogue-leveler '{\"lift_soft\":true}'\n  vidcut clip set c4 --channel 2",
     ),
     (
         "keyframes.add",
@@ -525,7 +525,8 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \
          vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'\n  \
          vidcut track set A1 --pan -50\n  \
-         vidcut track set A1 --pan-on false",
+         vidcut track set A1 --pan-on false\n  \
+         vidcut track set A1 --format 5.1",
     ),
     (
         "titles.add",

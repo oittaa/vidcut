@@ -327,6 +327,13 @@ pub fn violations(p: &Project) -> Vec<String> {
                                 c.id, a.stream, m.id
                             ));
                         }
+                        let held = u32::from(m.info.stream_channels(a.stream));
+                        if let Some(ch) = a.channels.iter().find(|&&ch| ch >= held) {
+                            v.push(format!(
+                                "{}: no channel {ch} in audio stream {} of {}",
+                                c.id, a.stream, m.id
+                            ));
+                        }
                         let (s, e) = c.sound_span().unwrap_or((0.0, 1.0));
                         if s < -1e-6 || e > frames as f64 + 1e-6 {
                             v.push(format!(

@@ -1769,9 +1769,9 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
-    /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer, pan). Only an audio track takes the
-    /// sound settings. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// Track header toggles (lock, mute, video on or off, render cache), the track type and the mixer
+    /// (solo, volume in dB, Voice Isolation, ducking, Dynamics, equalizer, pan). Only an audio track
+    /// takes the sound settings and a type. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1847,6 +1847,11 @@ pub enum Request {
         /// at 0.
         #[serde(default)]
         pan_on: Option<bool>,
+        /// Change Track Type: the channels of an audio track. Its clips keep
+        /// their channels. The track plays the first ones of each clip, as
+        /// many as it has.
+        #[serde(default)]
+        format: Option<crate::model::TrackFormat>,
         /// Download what this computer doesn't have yet: Voice Isolation's
         /// model, or the speech detector of ducking by speech, each checked
         /// against its SHA-256. Without it, a missing file is an error that
@@ -2010,6 +2015,12 @@ pub enum Request {
         /// AI Upscale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
+        /// Audio Channel: the channel of the file, counted from 1 over all
+        /// its audio streams, that a sound clip of one channel plays. It also
+        /// sets each sound clip of one channel of the same file that is
+        /// linked with it.
+        #[serde(default)]
+        channel: Option<u32>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice

@@ -2,8 +2,9 @@ use std::path::Path;
 
 use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
-use crate::export::audio::{Resampler, discard_others};
+use crate::export::audio::{Resampler, discard_others, frame_channels};
 use crate::ffmpeg::{codec, frame, media};
+use vidcut_core::render::Heard;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Waveform {
@@ -12,6 +13,7 @@ pub struct Waveform {
     pub peaks: Vec<(i8, i8)>,
     pub channels: u16,
     pub channel_peaks: Vec<(i8, i8)>,
+    pub sources: Vec<Waveform>,
 }
 
 impl Waveform {
@@ -59,8 +61,31 @@ impl Waveform {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(20 + (self.peaks.len() + self.channel_peaks.len()) * 2);
-        out.extend_from_slice(b"VCW2");
+        let mut out = b"VCW3".to_vec();
+        for w in std::iter::once(self).chain(&self.sources) {
+            let own = w.own_bytes();
+            out.extend_from_slice(&(own.len() as u32).to_le_bytes());
+            out.extend_from_slice(&own);
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let mut b = b.strip_prefix(b"VCW3")?;
+        let mut all = Vec::new();
+        while !b.is_empty() {
+            let len = u32::from_le_bytes(b.get(..4)?.try_into().ok()?) as usize;
+            all.push(Self::from_own(b.get(4..4 + len)?)?);
+            b = &b[4 + len..];
+        }
+        let mut all = all.into_iter();
+        let mut w = all.next()?;
+        w.sources = all.collect();
+        Some(w)
+    }
+
+    fn own_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(16 + (self.peaks.len() + self.channel_peaks.len()) * 2);
         out.extend_from_slice(&self.per_second.to_le_bytes());
         out.extend_from_slice(&self.channels.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
@@ -72,8 +97,7 @@ impl Waveform {
         out
     }
 
-    pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        let b = b.strip_prefix(b"VCW2")?;
+    fn from_own(b: &[u8]) -> Option<Self> {
         if b.len() < 16 || !(b.len() - 16).is_multiple_of(2) {
             return None;
         }
@@ -96,12 +120,31 @@ impl Waveform {
             peaks: peaks.to_vec(),
             channels,
             channel_peaks: channel_peaks.to_vec(),
+            sources: Vec::new(),
         })
     }
 }
 
 pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Result<Waveform> {
-    let want = channels.max(1);
+    build(path, ordinal, per_second, Some(channels.max(1)))
+}
+
+pub fn sources(path: &Path, streams: usize, per_second: u32) -> Vec<Waveform> {
+    let silent = Waveform {
+        per_second,
+        start: 0.0,
+        peaks: Vec::new(),
+        channels: 1,
+        channel_peaks: Vec::new(),
+        sources: Vec::new(),
+    };
+    (0..streams as u32)
+        .map(|k| build(path, k, per_second, None).unwrap_or_else(|_| silent.clone()))
+        .collect()
+}
+
+fn build(path: &Path, ordinal: u32, per_second: u32, want: Option<u16>) -> Result<Waveform> {
+    let mut held: Option<u16> = want;
     crate::init();
     let mut input = crate::decode::open_file(path)?;
     let stream = input
@@ -138,9 +181,13 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
             acc.rate = f.rate();
         }
         if ch_resampler.as_ref().is_none_or(|r| !r.matches(f)) {
-            ch_resampler = Some(Resampler::new(f, f.rate(), want)?);
+            let n = *held.get_or_insert_with(|| frame_channels(f));
+            ch_resampler = Some(match want {
+                Some(_) => Resampler::new(f, f.rate(), n)?,
+                None => Resampler::heard(f, f.rate(), n, &Heard::every(n))?,
+            });
             if ch_acc.is_none() {
-                ch_acc = Some(ChannelAccum::new(per_second, usize::from(want)));
+                ch_acc = Some(ChannelAccum::new(per_second, usize::from(n)));
             }
             ch_acc.as_mut().expect("set").rate = f.rate();
         }
@@ -174,7 +221,7 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
         &mut frame::Audio::empty(),
         handle,
     )?;
-    let channels = want;
+    let channels = held.unwrap_or(1);
     let peaks = acc.finish();
     let mut channel_peaks = ch_acc.map(|c| c.finish()).unwrap_or_default();
     let need = peaks.len() * usize::from(channels);
@@ -185,6 +232,7 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
         peaks,
         channels,
         channel_peaks,
+        sources: Vec::new(),
     })
 }
 

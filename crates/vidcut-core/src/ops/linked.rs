@@ -1,10 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    Source, clear_range, ensure_track, locate, main_index, place, split_at, tracks, unlocked,
+    Source, clear_range, ensure_sound_track, locate, main_index, place, split_at, tracks, unlocked,
 };
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, Track, TrackKind};
+use crate::model::{
+    Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, SoundTrack, Track, TrackFormat,
+    TrackKind,
+};
 
 #[derive(Debug, Default)]
 pub(super) struct Parts {
@@ -228,10 +231,10 @@ pub(super) fn put_free(p: &mut Project, track: &str, c: Clip) {
     }
 }
 
-fn sound_of(c: &Clip, stream: Option<u32>) -> Clip {
+fn sound_of(c: &Clip, track: Option<&SoundTrack>) -> Clip {
     Clip {
         video: false,
-        audio: stream.map(ClipAudio::of),
+        audio: track.map(ClipAudio::of_track),
         picture: None,
         effects: None,
         retime: ClipRetime::Project,
@@ -240,21 +243,26 @@ fn sound_of(c: &Clip, stream: Option<u32>) -> Clip {
     }
 }
 
-fn sound_parts(p: &Project, c: &Clip, src: &Source) -> Vec<Clip> {
+fn sound_parts(p: &Project, c: &Clip, src: &Source) -> Vec<(Clip, TrackFormat)> {
     if src.video_only {
         return Vec::new();
     }
     if c.compound.is_some() {
         let heard = c.video && p.clip_compound(c).is_some_and(Compound::has_sound);
-        return heard.then(|| sound_of(c, None)).into_iter().collect();
+        return heard
+            .then(|| (sound_of(c, None), TrackFormat::Stereo))
+            .into_iter()
+            .collect();
     }
     let Some(m) = p.media(&c.media) else {
         return Vec::new();
     };
-    let own = c.audio.as_ref().map(|a| a.stream);
-    (0..m.info.audio.len() as u32)
-        .filter(|&k| Some(k) != own)
-        .map(|k| sound_of(c, Some(k)))
+    let own = c.audio.as_ref().map(|a| (a.stream, &a.channels));
+    m.info
+        .sound_tracks()
+        .iter()
+        .filter(|t| Some((t.stream, &t.channels)) != own)
+        .map(|t| (sound_of(c, Some(t)), t.format))
         .collect()
 }
 
@@ -298,7 +306,8 @@ fn place_sounds(
         let n = p.tracks[ti].number();
         if p.tracks[ti].kind == TrackKind::Video && !p.tracks[ti].clips[ci].video {
             let c = p.tracks[ti].clips.remove(ci);
-            ti = ensure_track(p, &format!("A{n}"))?;
+            let format = super::sound_format(p, &c);
+            ti = ensure_sound_track(p, &format!("A{n}"), format)?;
             unlocked(p, ti)?;
             clear_range(p, ti, c.start, c.end());
             place(p, ti, c);
@@ -315,8 +324,8 @@ fn place_sounds(
         };
         let link = c.link.unwrap_or_else(|| p.free_link());
         p.tracks[ti].clips[ci].link = Some(link);
-        for (k, mut s) in parts.into_iter().enumerate() {
-            let ai = ensure_track(p, &format!("A{}", first + k))?;
+        for (k, (mut s, format)) in parts.into_iter().enumerate() {
+            let ai = ensure_sound_track(p, &format!("A{}", first + k), format)?;
             unlocked(p, ai)?;
             s.id = p.alloc_clip_id();
             s.link = Some(link);

@@ -52,6 +52,7 @@ classDiagram
     locked, muted, solo, volume_db
     video_enabled, voice_isolation, duck
     equalizer, pan, pan_on, render_cache
+    format
   }
   class Clip {
     id, name, color
@@ -61,7 +62,7 @@ classDiagram
     link
   }
   class ClipAudio {
-    stream
+    stream, channels
     gain_db, muted, pan, equalizer, dialogue_leveler, compressor, noise_reduction, voice_isolation
     fade_in, fade_out
   }
@@ -158,6 +159,12 @@ classDiagram
 - A clip on a video track carries its picture only. A clip on an audio track carries its sound in its `ClipAudio`. `validate` refuses sound on a video track.
 - A picture clip and its sound clips have one link group (`Clip::link`). A J/L cut is a sound clip that starts or ends apart from its picture.
 - Only an audio track has sound settings. `ops::tracks::set_track` refuses them on a video track.
+- An audio track has a `TrackFormat`: its channels and their order. It plays the first channels of each clip, as many as it has (spec §6).
+- `ClipAudio::channels` holds the channels of the stream that the clip holds. Empty means all of them.
+  - `MediaInfo::sound_tracks` gives the sound tracks of a file. An edit puts one sound clip for each of them (`linked::with_sound`).
+  - `ops::ensure_sound_track` gives a new audio track the type of its sound track. A new A1 is Stereo.
+  - Why: a new timeline has only V1, and the first sound makes A1. A new timeline in Resolve starts with a Stereo A1 (spec §6).
+  - `MediaInfo::embedded` and `MediaInfo::of_embedded` count the channels of a file from 1, over all its streams (Audio Channel).
 - `tape_marks` holds the In and Out of the source tape.
 - `MediaInfo` keeps what the probe found: streams, duration, start timecode.
 
@@ -924,16 +931,18 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `pan_on`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` and `pan_keys` from the item's first source frame |
+| `vidcut` on clips, for the sound | `stream`, `channels`, `gain_db`, `muted`, `pan`, `pan_on`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` and `pan_keys` from the item's first source frame |
 | `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, with the motion paths of its composition, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames` and the fades (`effects::sound`), pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Dynamic Zoom, and Retime and Scaling with the `scale` of `ClipScaling` (`otio::picture`), in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |
 | `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content |
-| `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
+| `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type`, the title of the `TrackFormat` |
 | `Resolve_OTIO` on markers | `Note` |
 
 - Other editors read the `Resolve_OTIO` metadata.
+- `Channels` names each channel of a sound clip by the sound track of the file and the channel in it (`MediaInfo::sound_track_of`).
+  - An import reads the `vidcut` `stream` and `channels` first. Else it reads `Channels` back (`MediaInfo::of_sound_track`).
 - An import extracts `ClipRetime` on non-block video clips (`picture::take_retime` into `ImportedClip`), and reads placed effects as `Picture` (`picture::take`) by the shape of the probed source.
   - This occurs when the clip has no `vidcut` picture, and the parameters and keys fit the model.
   - A Resolve effect is an OTIO `Effect.1` with the `effect_name` `Resolve Effect`. Its `Resolve_OTIO` metadata holds `Effect Name`, `Name`, `Type`, `Enabled`, `Display Type` and `Parameters`.

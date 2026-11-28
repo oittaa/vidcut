@@ -31,6 +31,7 @@ pub struct Look {
     pub waveforms: bool,
     pub target: bool,
     pub fades: bool,
+    pub lanes: bool,
 }
 
 pub struct Assets<'a> {
@@ -436,7 +437,11 @@ fn sound(
     let ap = painter.with_clip_rect(tr.rect.intersect(audio.expand(1.0)));
     ap.rect_filled(parted(audio), corners, color);
     if (look.waveforms || sound_only) && !muted && !offline && audio.height() >= 8.0 {
-        waveform(&ap, audio, scale, p, c, assets, fps);
+        let held = held_channels(c, media);
+        match look.lanes {
+            true => lanes(&ap, audio, scale, (p, t, c), assets, fps, &held),
+            false => waveform(&ap, audio, scale, (p, c), assets, fps, &held),
+        }
     }
     if look.fades {
         fade_ramps(&ap, audio, scale, c);
@@ -969,14 +974,54 @@ fn filmstrip(painter: &Painter, rect: Rect, scale: &Scale, p: &Project, c: &Clip
     }
 }
 
+fn held_channels(c: &Clip, media: Option<&Media>) -> Vec<u32> {
+    match (c.audio.as_ref(), media) {
+        (Some(a), Some(m)) => m.info.heard(a),
+        _ => Vec::new(),
+    }
+}
+
+fn lanes(
+    painter: &Painter,
+    rect: Rect,
+    scale: &Scale,
+    (p, t, c): (&Project, &Track, &Clip),
+    assets: &Assets,
+    fps: Rational,
+    held: &[u32],
+) {
+    let n = t.format.channels().max(1);
+    let h = rect.height() / n as f32;
+    for k in 0..n {
+        let lane = Rect::from_x_y_ranges(
+            rect.x_range(),
+            rect.top() + h * k as f32..=rect.top() + h * (k + 1) as f32,
+        );
+        if k > 0 {
+            painter.hline(
+                rect.x_range(),
+                lane.top(),
+                Stroke::new(1.0, theme::LANE_LINE),
+            );
+        }
+        let one = match held {
+            [only] => Some(*only),
+            _ => held.get(k).copied(),
+        };
+        if let Some(ch) = one.filter(|_| h >= 4.0) {
+            waveform(painter, lane, scale, (p, c), assets, fps, &[ch]);
+        }
+    }
+}
+
 fn waveform(
     painter: &Painter,
     rect: Rect,
     scale: &Scale,
-    p: &Project,
-    c: &Clip,
+    (p, c): (&Project, &Clip),
     assets: &Assets,
     fps: Rational,
+    held: &[u32],
 ) {
     let Some(w) = assets.waveforms.get(&c.media) else {
         return;
@@ -984,6 +1029,10 @@ fn waveform(
     if c.is_frozen() {
         return;
     }
+    let stream = c.audio.as_ref().map_or(0, |a| a.stream) as usize;
+    let Some(w) = w.sources.get(stream) else {
+        return;
+    };
     let source = |at: f64| c.sound_at(at);
     let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
     let f = fps.as_f64();
@@ -993,7 +1042,9 @@ fn waveform(
         if c.speed_at(scale.frame(x).floor() as i64) == 0.0 {
             return None;
         }
-        w.range(origin + t0 / f, origin + t1 / f)
+        held.iter()
+            .filter_map(|&ch| w.channel_range(ch as usize, origin + t0 / f, origin + t1 / f))
+            .reduce(|(a, b), (lo, hi)| (a.min(lo), b.max(hi)))
     });
 }
 

@@ -49,7 +49,7 @@ pub use transition::{
 use crate::error::{Error, Result};
 use crate::model::{
     AlphaMode, Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project,
-    Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
+    Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackFormat, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use crate::request::KeyTiming;
@@ -354,6 +354,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             media.id
         )));
     }
+    let sound = (audio && !video).then(|| first_sound(media));
     let id = p.alloc_clip_id();
     Ok(Clip {
         id,
@@ -363,7 +364,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         source_in: a,
         phase: src.phase,
         video,
-        audio: (audio && !video).then(|| ClipAudio::of(0)),
+        audio: sound,
         enabled: true,
         name: None,
         effects: None,
@@ -379,6 +380,13 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         link: None,
         linked_at: None,
     })
+}
+
+fn first_sound(m: &Media) -> ClipAudio {
+    m.info
+        .sound_tracks()
+        .first()
+        .map_or_else(|| ClipAudio::of(0), ClipAudio::of_track)
 }
 
 fn compound_clip(p: &mut Project, src: &Source, cid: &str) -> Result<Clip> {
@@ -409,6 +417,7 @@ fn compound_clip(p: &mut Project, src: &Source, cid: &str) -> Result<Clip> {
 }
 
 fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
+    let had = p.tracks_of(TrackKind::Audio).len();
     let picture = clips.iter().any(|c| c.video);
     let ti = match &src.track {
         Some(id) => tracks::resolve(p, id)?,
@@ -450,8 +459,12 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
             }
             clip.video = false;
             if clip.compound.is_none() {
-                clip.audio = Some(ClipAudio::of(0));
+                clip.audio = p.media(&clip.media).map(first_sound);
             }
+        }
+        if let Some(c) = clips.first() {
+            let format = sound_format(p, c);
+            type_new(p, ti, had, format);
         }
     }
     unlocked(p, ti)?;
@@ -527,6 +540,34 @@ fn only(ids: Vec<String>) -> String {
 pub const VIDEO_TRACKS: u32 = 99;
 pub const AUDIO_TRACKS: u32 = 999;
 
+pub fn ensure_sound_track(p: &mut Project, id: &str, format: TrackFormat) -> Result<usize> {
+    let had = p.tracks_of(TrackKind::Audio).len();
+    let ti = ensure_track(p, id)?;
+    type_new(p, ti, had, format);
+    Ok(ti)
+}
+
+fn type_new(p: &mut Project, ti: usize, had: usize, format: TrackFormat) {
+    if p.tracks[ti].kind == TrackKind::Audio && p.tracks[ti].number() > had.max(1) {
+        p.tracks[ti].format = format;
+    }
+}
+
+fn new_sound_track(p: &mut Project, c: &Clip) -> usize {
+    let had = p.tracks_of(TrackKind::Audio).len();
+    let ti = tracks::nth(p, TrackKind::Audio, had);
+    let format = sound_format(p, c);
+    type_new(p, ti, had, format);
+    ti
+}
+
+pub(crate) fn sound_format(p: &Project, c: &Clip) -> TrackFormat {
+    match (c.audio.as_ref(), p.media(&c.media)) {
+        (Some(a), Some(m)) => TrackFormat::of_stream(m.info.heard(a).len() as u16),
+        _ => TrackFormat::Stereo,
+    }
+}
+
 pub fn ensure_track(p: &mut Project, id: &str) -> Result<usize> {
     let (kind, most) = match id.chars().next() {
         Some('V') => (TrackKind::Video, VIDEO_TRACKS),
@@ -567,7 +608,10 @@ fn above_main_row(p: &mut Project) -> usize {
 pub fn append_block(p: &mut Project, srcs: &[Source], lead: i64) -> Result<Vec<String>> {
     let mut clips = make_clips(p, srcs)?;
     let (ti, end) = if srcs[0].track.is_none() && !clips.iter().any(|c| c.video) {
+        let had = p.tracks_of(TrackKind::Audio).len();
         let ti = above_main_row(p);
+        let format = sound_format(p, &clips[0]);
+        type_new(p, ti, had, format);
         unlocked(p, ti)?;
         (ti, p.end())
     } else {
@@ -839,8 +883,7 @@ pub fn place_on_top_block(
     let ti = if clips.iter().any(|c| c.video) {
         track_above(p, start, end)
     } else {
-        let audio = p.tracks_of(TrackKind::Audio).len();
-        tracks::nth(p, TrackKind::Audio, audio)
+        new_sound_track(p, &clips[0])
     };
     unlocked(p, ti)?;
     let start = if is_main(p, ti) && p.settings.ripple_on {
@@ -2231,6 +2274,57 @@ pub struct ClipProps {
     pub voice_isolation_on: Option<bool>,
     pub retime: Option<crate::model::ClipRetime>,
     pub render_cache: Option<crate::model::ClipCache>,
+    pub channel: Option<u32>,
+}
+
+fn one_channel(p: &Project, c: &Clip) -> bool {
+    match (c.audio.as_ref(), p.media(&c.media)) {
+        (Some(a), Some(m)) => m.info.heard(a).len() == 1,
+        _ => false,
+    }
+}
+
+fn set_channel(p: &mut Project, ids: &[String], n: u32) -> Result<()> {
+    let mut targets = Vec::new();
+    for id in ids {
+        let c = p
+            .clip(id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        if !one_channel(p, c) {
+            return Err(Error::invalid(format!(
+                "{id} is not a sound clip of one channel"
+            )));
+        }
+        let info = &p.media(&c.media).expect("one channel has media").info;
+        let (stream, ch) = info.of_embedded(n).ok_or_else(|| {
+            Error::invalid(format!(
+                "{} has no channel {n} (1..{})",
+                c.media,
+                info.embedded_count()
+            ))
+        })?;
+        let channels = match info.stream_channels(stream) {
+            0 | 1 => Vec::new(),
+            _ => vec![ch],
+        };
+        targets.push((id.clone(), stream, channels.clone()));
+        for o in p.tied(id) {
+            if let Some(oc) = p.clip(&o)
+                && oc.media == c.media
+                && one_channel(p, oc)
+            {
+                targets.push((o, stream, channels.clone()));
+            }
+        }
+    }
+    for (id, stream, channels) in targets {
+        let (ti, ci) = locate(p, &id)?;
+        if let Some(a) = p.tracks[ti].clips[ci].audio.as_mut() {
+            a.stream = stream;
+            a.channels = channels;
+        }
+    }
+    Ok(())
 }
 
 pub const ISOLATION: std::ops::RangeInclusive<f64> = 0.0..=100.0;
@@ -2292,6 +2386,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     }
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
+    }
+    if let Some(n) = props.channel {
+        set_channel(p, ids, n)?;
     }
     let sound = props.muted.is_some()
         || props.gain_db.is_some()
@@ -3393,6 +3490,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
             }
             if c.audio.as_ref().is_some_and(|a| {
                 a.stream as usize >= media.info.audio.len()
+                    || a.channels
+                        .iter()
+                        .any(|&ch| ch >= u32::from(media.info.stream_channels(a.stream)))
                     || !crate::validate::GAIN.contains(&a.gain_db)
                     || crate::keyframes::problem(&a.gain_keys).is_some()
                     || !crate::validate::PAN.contains(&a.pan)
