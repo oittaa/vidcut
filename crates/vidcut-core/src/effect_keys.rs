@@ -16,6 +16,7 @@ type Slot<'a> = Option<(&'a mut f64, Range)>;
 type Point<'a> = Option<(&'a mut [f64; 2], Range)>;
 
 const BLEND: Range = (0.0, 1.0);
+const SWITCH: Range = (0.0, 1.0);
 const FINITE: Range = (f64::MIN, f64::MAX);
 
 fn gaussian_slot(b: &mut GaussianBlur, value: EffectValue) -> Slot<'_> {
@@ -225,6 +226,17 @@ fn sharpen_slot(s: &mut Sharpen, value: EffectValue) -> Slot<'_> {
     })
 }
 
+fn switch(kind: &mut EffectKind, value: EffectValue) -> Option<&mut bool> {
+    match (kind, value) {
+        (EffectKind::FilmGrain(g), EffectValue::Freeze) => Some(&mut g.freeze),
+        _ => None,
+    }
+}
+
+fn switch_read(on: bool) -> ([f64; 2], Range) {
+    ([if on { 1.0 } else { 0.0 }, 0.0], SWITCH)
+}
+
 fn slot(kind: &mut EffectKind, value: EffectValue) -> Slot<'_> {
     match kind {
         EffectKind::GaussianBlur(b) => gaussian_slot(b, value),
@@ -250,7 +262,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 145] = [
+    pub const ALL: [EffectValue; 146] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -294,6 +306,7 @@ impl EffectValue {
         EffectValue::AtmosphereSeethe,
         EffectValue::Recovery,
         EffectValue::Opacity,
+        EffectValue::Freeze,
         EffectValue::Texture,
         EffectValue::GrainSize,
         EffectValue::GrainAspect,
@@ -403,6 +416,10 @@ impl EffectValue {
             .ok()
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default()
+    }
+
+    pub fn switch(self) -> bool {
+        self == EffectValue::Freeze
     }
 
     pub fn pair(self) -> bool {
@@ -578,6 +595,12 @@ pub trait Keyed: Clone {
         keys_previewed(self, baseline, edited, frame)
     }
 
+    fn freeze_key(&self, at: i64) -> Option<i64> {
+        (self.keys_of(EffectValue::Freeze).iter().rev())
+            .find(|k| k.frame <= at)
+            .map(|k| k.frame)
+    }
+
     fn has_key_at(&self, frame: i64) -> bool {
         self.key_list()
             .iter()
@@ -691,6 +714,10 @@ impl Keyed for Effect {
     }
 
     fn write(&mut self, value: EffectValue, to: f64) {
+        if let Some(on) = switch(&mut self.kind, value) {
+            *on = to >= 0.5;
+            return;
+        }
         let place = match value {
             EffectValue::Blend => Some((self.blend.get_or_insert(to), BLEND)),
             v if v.pair() => point_slot(&mut self.kind, v).map(|(p, range)| (&mut p[0], range)),
@@ -711,6 +738,9 @@ impl Keyed for Effect {
 
 fn kind_read(kind: &EffectKind, value: EffectValue) -> Option<([f64; 2], Range)> {
     let mut kind = kind.clone();
+    if let Some(on) = switch(&mut kind, value) {
+        return Some(switch_read(*on));
+    }
     if value.pair() {
         return point_slot(&mut kind, value).map(|(p, range)| (*p, range));
     }
@@ -720,7 +750,7 @@ fn kind_read(kind: &EffectKind, value: EffectValue) -> Option<([f64; 2], Range)>
 fn kind_takes(kind: &mut EffectKind, value: EffectValue) -> bool {
     match value.pair() {
         true => point_slot(kind, value).is_some(),
-        false => slot(kind, value).is_some(),
+        false => switch(kind, value).is_some() || slot(kind, value).is_some(),
     }
 }
 
@@ -1008,6 +1038,11 @@ impl Keyed for Node {
             return self.tool.works().then_some(([self.mixed(), 0.0], BLEND));
         }
         let mut tool = self.tool.clone();
+        if let Tool::Effect(kind) = &mut tool
+            && let Some(on) = switch(kind, value)
+        {
+            return Some(switch_read(*on));
+        }
         match value.pair() {
             true => node_point(&mut tool, value).map(|(p, range)| (*p, range)),
             false => node_slot(&mut tool, value).map(|(n, range)| ([*n, 0.0], range)),
@@ -1023,6 +1058,12 @@ impl Keyed for Node {
     }
 
     fn write(&mut self, value: EffectValue, to: f64) {
+        if let Tool::Effect(kind) = &mut self.tool
+            && let Some(on) = switch(kind, value)
+        {
+            *on = to >= 0.5;
+            return;
+        }
         let place = match value {
             EffectValue::Blend if self.tool.works() => Some((self.blend.get_or_insert(to), BLEND)),
             v if v.pair() => node_point(&mut self.tool, v).map(|(p, range)| (&mut p[0], range)),

@@ -497,6 +497,9 @@ pub(super) fn keys_checked<T: Keyed>(
                 "{name} keyframes out of order or on one frame"
             )));
         }
+        if entry.value.switch() && entry.keys.iter().any(|k| !(0.0..=1.0).contains(&k.value)) {
+            return Err(Error::invalid(format!("{name} keyframes are from 0 to 1")));
+        }
         let ys = match entry.value.pair() {
             true => entry.keys.len(),
             false => 0,
