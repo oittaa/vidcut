@@ -590,6 +590,8 @@ The bar and the Jobs button:
   - The Qualifier badge comes from the HSL values of the node and of each keyframe (`Qualifier::hsl_usual`).
   - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
   - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
+  - A copy of a shared node has the Shared Node badge (`GradeNode::shared`). In a clip grade, `node_menu` gets the shared nodes of the project (`Project::shared_nodes`).
+  - The menu of a corrector then has Save as Shared Node, or Convert to Corrector and the Delete Shared Node submenu (`shared_menu`). The Add Node submenu lists the shared nodes at its bottom (`shared_name`).
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
   - The same menu sets `color.show_thumbnails` and `color.disable_thumbnail_refresh`. `Snapshot::show_thumbnails` and `Snapshot::disable_thumbnail_refresh` hold them.
   - With thumbnails on, the page asks the viewer for them each frame (`Workspace::shots_want`, `ShotsWanted`). The height follows the zoom of the editor and the pixels per point.

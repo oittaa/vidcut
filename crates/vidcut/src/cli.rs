@@ -118,6 +118,10 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.input.remove", &["node", "clip"]),
     ("grade.copy", &["node", "clip"]),
     ("grade.paste", &["node", "clips"]),
+    ("grade.share", &["node", "clip"]),
+    ("grade.unshare", &["node", "clip"]),
+    ("grade.shared.add", &["shared", "node", "clip"]),
+    ("grade.shared.delete", &["shared"]),
     ("grade.apply", &["from", "clips"]),
     ("grade.ripple", &["node", "clip", "clips"]),
     ("grade.append_node", &["node", "clip", "clips"]),
@@ -286,6 +290,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "grade.mask",
         "The Magic Mask of a corrector: the clicks that pick its subjects",
+    ),
+    (
+        "grade.shared",
+        "Shared nodes: correctors with copies in clip grades",
     ),
     ("grade.window", "Windows of the correctors of a grade"),
     (
