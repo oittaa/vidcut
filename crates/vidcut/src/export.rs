@@ -928,7 +928,11 @@ fn more_outputs(
     Ok(out)
 }
 
-fn chosen_clips(p: &Project, params: &ExportParams, range: (i64, i64)) -> Result<Option<Vec<String>>> {
+fn chosen_clips(
+    p: &Project,
+    params: &ExportParams,
+    range: (i64, i64),
+) -> Result<Option<Vec<String>>> {
     let some = params.clip_filter.is_some() || !params.clips.is_empty();
     if some && !params.per_clip {
         return Err(Error::usage("clips and clip_filter need per_clip"));
@@ -940,9 +944,13 @@ fn chosen_clips(p: &Project, params: &ExportParams, range: (i64, i64)) -> Result
         return vidcut_core::ops::clip_filter::met(p, f, range).map(Some);
     }
     for id in &params.clips {
-        let c = p.clip(id).ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        let c = p
+            .clip(id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
         if c.start >= range.1 || c.end() <= range.0 {
-            return Err(Error::invalid(format!("clip {id} has no frame in the range")));
+            return Err(Error::invalid(format!(
+                "clip {id} has no frame in the range"
+            )));
         }
     }
     Ok((!params.clips.is_empty()).then(|| params.clips.clone()))

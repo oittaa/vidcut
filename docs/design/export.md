@@ -46,6 +46,8 @@ flowchart TD
   - `clip_path` makes the path of each clip file from the File tab fields of `ExportParams`. `kept_levels` gives the folders of `source_levels`. `Track::number` gives the track in the folder of `separate_folders`.
   - The frame count is the source timecode of the clip's first frame: `Media::timecode_at` plus the source frame (`render::per_frame` and `render::shown_frame`). An image sequence numbers its frames from it.
   - `check_clip_names` refuses these fields without `per_clip`, and a `subfolder` that leaves the output folder.
+  - `chosen_clips` gives the clips of `clips` or of `clip_filter`. Only these clips render. Each needs `per_clip`.
+  - `ops::clip_filter::met` gives the clips of the strip that meet a filter and have a frame in the range.
   - `prepare` also refuses the combinations of rows whose names are not measured. Why: the order of the parts is then not known.
   - `render::flatten` works in stages. `planned_video` makes the pictures and `planned_audio` makes the sound.
   - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts. It gives the layers of that track and what they hide (`Drawn`).
@@ -562,6 +564,8 @@ Voice Isolation:
   - Before Add or Update Job, `start_render` checks the paths with `written_twice`. Two equal paths show the prompt `ask_duplicate_paths`, and nothing is sent.
   - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
+  - `filtered` sends `in..out` too. Its pick sets the marks at the span of the clips that meet the filter (`ops::clip_filter::span`).
+  - A mark that is set while the range is `filtered` changes the range to `in_out` (`ops::set_marks`). A filter of `all` does the same.
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
   - On the page, `Workspace::mark` and `Workspace::clear_marks` call `export_mark` and `export_clear_marks`. Thus the keys and the Mark In, Mark Out and Clear buttons of the viewer follow the rules of the page.
   - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
@@ -577,11 +581,19 @@ Voice Isolation:
   - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips that meet it, from 1, as measured.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
   - Graded and Ungraded use `Grade::is_active`, as the render does. Why: a node or a value that changes nothing does not grade a clip, as measured.
+  - `ops::clip_filter::strip` gives the clips of the strip in their order. On the Export page, the strip uses the filter only with Individual Clips.
+  - With a filter, `render_range_menu` has In/Out Range and All Filtered Clips. A pick of All Filtered Clips also sets Individual Clips.
+  - With Individual Clips, `Render::params` sends the filter as `clip_filter`.
+  - `filter_prompts` opens the two prompts of the filter (`FilterPrompt`).
+    - Unable to Apply Filter opens when a filter is on and Single Clip is set. Apply Filter sets Individual Clips.
+    - Cancel keeps Single Clip. The prompt then stays closed for that timeline and filter until the page opens again.
+    - Cannot Render Single Clip opens at a click on Single Clip while a filter is on. Clear Filter sets Single Clip. The timeline keeps its filter.
 
 The render queue:
 
 - `Project.queue` holds the jobs (`RenderJob`) in the project file. Thus a job and its status stay after a quit.
 - `render.add` keeps the open timeline and the export params of the job (`ops::render::add`). It fixes the range in frames. Why: a later change of the marks does not change a job.
+  - With `per_clip`, it also changes `clip_filter` into the `clips` that meet it. Why: a later change of a clip does not change a job.
 - `render.update` gives a job new export params in the same way (`ops::render::update`). `Live` and the headless session check its files as they check those of `render.add`.
 - The pencil of a job loads its params into the render settings (`Render::load_job`), the reverse of `Render::params`. `Workspace::edit_job` opens its timeline and sets its range in one `apply`.
 - Before it adds a job, `queue::existing` checks the job as `render.add` does, and finds the files that are there. `Live` and the headless session refuse them without `overwrite`. A dry run returns them, and the page asks its prompt from them.

@@ -616,7 +616,6 @@ impl Workspace {
             (FilterPrompt::Apply, true) => d.per_clip = true,
             (FilterPrompt::Apply, false) => self.export.filter_asked = key,
             (FilterPrompt::SingleClip, true) => {
-                self.send("timeline.set", json!({ "clip_filter": ClipFilter::All }));
                 self.export.filter_asked = key;
                 d.per_clip = false;
             }

@@ -7324,7 +7324,7 @@ pub struct TimelineSet {
     /// What the Export page renders of it: `entire`, `in_out` or
     /// `filtered`. `entire` also clears its In and Out marks. `filtered`
     /// needs a clip filter, and sets the marks at the span of its clips.
-    /// A clip filter of `all` makes `filtered` into `in_out`.
+    /// A clip filter of `all` or a new mark makes `filtered` into `in_out`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::model::RenderRange>,
     /// The clips that its Thumbnail timeline shows, e.g.
