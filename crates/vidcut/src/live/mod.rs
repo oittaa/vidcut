@@ -165,6 +165,7 @@ pub struct TimelineState {
     pub fixed_playhead: bool,
     pub snap: bool,
     pub trim_to_audio: bool,
+    pub linked_selection: bool,
     pub safe_edit: bool,
     pub names: bool,
     pub durations: bool,

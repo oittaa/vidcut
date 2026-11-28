@@ -191,6 +191,7 @@ pub struct Preview {
     pub marker: Option<(String, i64)>,
     pub gains: Option<Gains>,
     pub trims: Vec<Trim>,
+    pub alone: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -205,7 +206,7 @@ pub struct Gains {
 impl Preview {
     pub fn moved(&self, p: &Project) -> Option<Project> {
         if !self.trims.is_empty() {
-            return applied(p, &self.trims).ok();
+            return applied(p, &self.trims, self.alone).ok();
         }
         if self.marks.is_none() && self.marker.is_none() && self.gains.is_none() {
             return None;
@@ -243,6 +244,7 @@ pub struct Ctx<'a> {
     pub rows: &'a Rows,
     pub snap: Option<&'a Snap>,
     pub safe_edit: bool,
+    pub alone: bool,
     pub selected: &'a [String],
 }
 
@@ -1376,13 +1378,14 @@ fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
 }
 
 fn edits_preview(ctx: &Ctx, target: i64, edits: &[EditSel], lead: EditSel) -> Preview {
-    let Ok(plan) = Plan::new(ctx.project, edits, lead) else {
+    let Ok(plan) = Plan::new(ctx.project, edits, lead, ctx.alone) else {
         return Preview::default();
     };
     let (target, snapped) = ctx.snapped(target);
     let want = target - lead.at;
     let fits = |by: i64| {
-        by.abs() <= want.abs() && applied(ctx.project, &plan.shared(ctx.project, by)).is_ok()
+        by.abs() <= want.abs()
+            && applied(ctx.project, &plan.shared(ctx.project, by), ctx.alone).is_ok()
     };
     let by = match want {
         0 => 0,
@@ -1399,6 +1402,7 @@ fn edits_preview(ctx: &Ctx, target: i64, edits: &[EditSel], lead: EditSel) -> Pr
         delta: Some((by, None)),
         row: Some(lead.track.id()),
         trims,
+        alone: ctx.alone,
         ..Preview::default()
     }
 }
@@ -1406,7 +1410,10 @@ fn edits_preview(ctx: &Ctx, target: i64, edits: &[EditSel], lead: EditSel) -> Pr
 fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview {
     let moved = (f64::from(pos.x - press.x) / ctx.scale.ppf).round() as i64;
     let mut by = -moved;
-    let clips = vidcut_core::ops::linked::leads(ctx.project, clips);
+    let clips = match ctx.alone {
+        true => clips.to_vec(),
+        false => vidcut_core::ops::linked::leads(ctx.project, clips),
+    };
     for id in &clips {
         if let Some(c) = ctx.clip(id) {
             let have = ctx.source_range(c);
@@ -1755,6 +1762,7 @@ mod tests {
                 rows: &self.rows,
                 snap: self.snapping.then_some(&self.snap),
                 safe_edit: self.safe_edit,
+                alone: false,
                 selected: &[],
             }
         }

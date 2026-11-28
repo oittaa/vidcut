@@ -220,6 +220,7 @@ pub struct Options {
     pub fixed_playhead: bool,
     pub snapping: bool,
     pub trim_to_audio: bool,
+    pub linked_selection: bool,
     pub safe_edit: bool,
     pub names: bool,
     pub durations: bool,
@@ -241,6 +242,7 @@ impl Default for Options {
             fixed_playhead: true,
             snapping: true,
             trim_to_audio: false,
+            linked_selection: true,
             safe_edit: false,
             names: true,
             durations: true,
@@ -887,6 +889,7 @@ impl Workspace {
             0.0,
             None,
             0.0,
+            self.timeline.options.linked_selection,
         );
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
         let [v1_h, video_h, audio_h] = LOWER_ROWS;
@@ -906,6 +909,7 @@ impl Workspace {
             NEW_TRACK_STRIP,
             self.timeline.enlarged.as_deref(),
             self.timeline.rows_lift,
+            self.timeline.options.linked_selection,
         );
         self.timeline.rows_lift = self.timeline.rows_lift.min(lower.overflow(NEW_TRACK_STRIP));
         let rows_clip =
@@ -954,6 +958,7 @@ impl Workspace {
         let title_thumbs = self.title_thumbs.prepare(ui.ctx(), drawn).clone();
         let chosen_keys = self.timeline.keys.clone();
         let audio_trim = self.audio_trim(drawn);
+        let sync = ops::linked::offsets(drawn);
         let assets = Assets {
             waveforms: &waveforms,
             tiles: tiles.as_ref(),
@@ -963,6 +968,7 @@ impl Workspace {
             titles: &title_thumbs,
             keys: &chosen_keys,
             audio_trim: &audio_trim,
+            sync: &sync,
         };
         let overview = Assets {
             audio_trim: &[],
@@ -970,13 +976,11 @@ impl Workspace {
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
-        let selected: HashSet<&str> = self
-            .snap
-            .selection
-            .clips
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let chosen = match self.timeline.options.linked_selection {
+            true => ops::linked::with_ties(drawn, &self.snap.selection.clips),
+            false => self.snap.selection.clips.clone(),
+        };
+        let selected: HashSet<&str> = chosen.iter().map(String::as_str).collect();
         let picked_cues: HashSet<&str> = self
             .snap
             .selection
@@ -1735,11 +1739,16 @@ impl Workspace {
             self.send("project.set", json!({ "ripple_on": ripple }));
         }
         let snap = self.snap.bindings.named("Snap", Action::Snapping);
+        let linked = self
+            .snap
+            .bindings
+            .named("Linked Selection", Action::LinkedSelection);
         let o = &mut self.timeline.options;
         let before = *o;
         ui.checkbox(&mut o.snapping, snap);
         ui.checkbox(&mut o.fixed_playhead, "Fixed Playhead");
         ui.checkbox(&mut o.trim_to_audio, "Trim to Audio");
+        ui.checkbox(&mut o.linked_selection, linked);
         ui.checkbox(&mut o.safe_edit, "Trim with Safe Edit");
         ui.separator();
         ui.checkbox(&mut o.names, "Display Clip Names");
@@ -2148,8 +2157,10 @@ impl Workspace {
             )];
             let heard = if t.has_sound() {
                 vec![t.id.clone()]
-            } else {
+            } else if self.timeline.options.linked_selection {
                 geometry::heard_on(p, t)
+            } else {
+                Vec::new()
             };
             if !heard.is_empty() {
                 let muted = heard.iter().all(|id| p.track(id).is_some_and(|a| a.muted));
@@ -2229,6 +2240,7 @@ impl Workspace {
             rows: if upper { &layout.upper } else { &layout.lower },
             snap: snap.filter(|_| self.snapping()),
             safe_edit: self.timeline.options.safe_edit,
+            alone: !self.timeline.options.linked_selection,
             selected,
         }
     }
@@ -2432,7 +2444,9 @@ impl Workspace {
             self.timeline.set_edit(None);
             return None;
         };
-        let clips = edits::Plan::new(p, &edits, lead).map_or_else(|_| Vec::new(), |x| x.clips(p));
+        let alone = !self.timeline.options.linked_selection;
+        let plan = edits::Plan::new(p, &edits, lead, alone);
+        let clips = plan.map_or_else(|_| Vec::new(), |x| x.clips(p));
         Some(Gesture::Edits { edits, lead, clips })
     }
 
@@ -3067,6 +3081,27 @@ impl Workspace {
         self.send("selection.set", params);
     }
 
+    fn link_action(
+        &self,
+        p: &Project,
+        clips: &[String],
+    ) -> Option<(&'static str, &'static str, Vec<String>)> {
+        let ids = if self.timeline.options.linked_selection {
+            ops::linked::with_ties(p, clips)
+        } else {
+            clips.to_vec()
+        };
+        let links: HashSet<Option<u32>> = ids
+            .iter()
+            .map(|id| p.clip(id).and_then(|c| c.link))
+            .collect();
+        match links.into_iter().collect::<Vec<_>>().as_slice() {
+            [Some(_)] => Some(("Unlink Clips", "clip.unlink", ids)),
+            _ if ids.len() > 1 => Some(("Link Clips", "clip.link", ids)),
+            _ => None,
+        }
+    }
+
     fn clip_menu(&mut self, ui: &mut egui::Ui, c: &vidcut_core::model::Clip) {
         let clips = if self.snap.selection.clips.contains(&c.id) {
             self.snap.selection.clips.clone()
@@ -3170,6 +3205,41 @@ impl Workspace {
             "edit.delete",
             json!({ "clips": clips, "lift": true }),
         );
+        let linking = self.project().and_then(|p| self.link_action(p, &clips));
+        let resync = self.project().map(|p| {
+            (
+                ops::linked::offset(p, c).is_some(),
+                !ops::linked::others(p, &c.id).is_empty(),
+            )
+        });
+        if linking.is_some() || resync.is_some_and(|(own, others)| own || others) {
+            ui.separator();
+        }
+        if let Some((label, method, ids)) = linking {
+            item(
+                ui,
+                &bindings.named(label, Action::LinkClips),
+                method,
+                json!({ "clips": ids }),
+            );
+        }
+        if let Some((own, others)) = resync {
+            for (label, how, on) in [
+                ("Slip Into Place", "slip", own),
+                ("Move Into Place", "move", own),
+                ("Slip Others Into Place", "slip_others", others),
+                ("Move Others Into Place", "move_others", others),
+            ] {
+                if on {
+                    item(
+                        ui,
+                        label,
+                        "edit.resync",
+                        json!({ "clip": c.id, "how": how }),
+                    );
+                }
+            }
+        }
         if c.compound.is_some() {
             ui.separator();
             item(
@@ -3677,6 +3747,15 @@ impl Workspace {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
         }
+        if fired.pressed(Action::LinkedSelection) && self.timeline.drag.is_none() {
+            self.timeline.options.linked_selection = !self.timeline.options.linked_selection;
+            self.timeline.options.save();
+        }
+        if fired.pressed(Action::LinkClips)
+            && let Some((_, method, ids)) = self.link_action(&p, &self.snap.selection.clips)
+        {
+            self.send(method, json!({ "clips": ids }));
+        }
         if fired.pressed(Action::NearestCut) {
             let at = ops::nearest_edit(&p, self.snap.timeline.position);
             self.timeline.set_edit(Some(EditSel {
@@ -3764,14 +3843,15 @@ impl Workspace {
         let (Some(&lead), Some(p)) = (all.last(), self.shown_project()) else {
             return;
         };
-        let Ok(plan) = edits::Plan::new(&p, all, lead) else {
+        let alone = !self.timeline.options.linked_selection;
+        let Ok(plan) = edits::Plan::new(&p, all, lead, alone) else {
             return;
         };
         let trims = plan.each(by);
         let Some(r) = edits::request(&trims) else {
             return;
         };
-        let tried = edits::applied(&p, &trims);
+        let tried = edits::applied(&p, &trims, alone);
         self.send(
             r["method"].as_str().unwrap_or_default(),
             r["params"].clone(),
@@ -4448,6 +4528,7 @@ impl Workspace {
         o.fixed_playhead = set.fixed_playhead.unwrap_or(o.fixed_playhead);
         o.snapping = set.snap.unwrap_or(o.snapping);
         o.trim_to_audio = set.trim_to_audio.unwrap_or(o.trim_to_audio);
+        o.linked_selection = set.linked_selection.unwrap_or(o.linked_selection);
         o.safe_edit = set.safe_edit.unwrap_or(o.safe_edit);
         o.names = set.names.unwrap_or(o.names);
         o.durations = set.durations.unwrap_or(o.durations);
@@ -4471,6 +4552,7 @@ impl Workspace {
             fixed_playhead: o.fixed_playhead,
             snap: o.snapping,
             trim_to_audio: o.trim_to_audio,
+            linked_selection: o.linked_selection,
             safe_edit: o.safe_edit,
             names: o.names,
             durations: o.durations,

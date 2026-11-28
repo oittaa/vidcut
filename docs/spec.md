@@ -880,7 +880,21 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - An edit of one clip of a group acts on each clip of the group (p. 3875): move, trim, roll, slip, slide, split, join, delete, speed and paste.
   - Each clip of a group moves and trims by the same amount. Thus a J/L cut stays (§8.7).
   - The Cut page shows a picture clip and its linked sound as one item. The sound is the band along the bottom of the item (§5; pp. 646–647).
-  - The Cut page has no link/unlink.
+  - **Link** (pp. 916, 3875): the selected clips become one link group. Any number of picture and sound clips can be in one group.
+  - **Unlink** (p. 916): each selected clip leaves its group. Link and Unlink are in the clip menu, and on Ctrl+Alt+L.
+    - vidcut: a group with one clip left ends. The clip menu shows Link Clips or Unlink Clips, as the selection is.
+  - **Linked Selection** (pp. 913–914): a switch on the timeline toolbar, and Ctrl+Shift+L. It is on at first.
+    - On, a click on a clip also selects its linked clips, and an edit acts on them all.
+    - Off, a clip is selected and edited alone. The clips stay in their group.
+    - vidcut: the switch is in the timeline options. Off, the picture and the sound of an item show apart, each on its own track, as on the Edit page.
+    - vidcut: each edit request that acts on clips by id takes `alone`, the same switch for one request.
+    - vidcut: the selection holds the clicked clip. With the switch on, the timeline draws its linked clips as selected too.
+    - vidcut: off, the linked clips of an edited clip stay where they are. They do not follow Track 1 (D21).
+  - **Out of sync** (p. 915): a clip that moves or slips apart from its linked clips shows a red indicator at the left of its name bar. The indicator gives the offset.
+    - The menu of the indicator has Slip into place, Move into place, Slip others into place and Move others into place.
+    - Slip into place slips the content of the clip. Move into place moves the clip. The two others do this to the other clips of the group.
+    - vidcut: the indicator gives the offset in frames. The clip menu of a clip with an offset has the four commands. A clip with a speed change shows no offset.
+  - **Resync Clip** (p. 646, Edit Actions on the Cut page) brings a clip that slipped sync back. What it changes is not measured yet: batch 1 saw no change in one case.
 
 ## 7. Edit functions (pp. 696–701)
 

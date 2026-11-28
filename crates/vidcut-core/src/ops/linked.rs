@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::{
     Source, clear_range, ensure_track, locate, main_index, place, split_at, tracks, unlocked,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::{Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, TrackKind};
 
 #[derive(Debug, Default)]
@@ -293,4 +293,214 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
         }
     }
     Ok(out)
+}
+
+pub fn end_lone(p: &mut Project) {
+    let mut held: HashMap<u32, usize> = HashMap::new();
+    for l in p
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter_map(|c| c.link)
+    {
+        *held.entry(l).or_default() += 1;
+    }
+    let lone = |c: &Clip| c.link.is_some_and(|l| held[&l] == 1);
+    for t in p.tracks.iter_mut().filter(|t| t.clips.iter().any(lone)) {
+        for c in &mut t.clips {
+            if lone(c) {
+                c.link = None;
+            }
+        }
+    }
+}
+
+pub fn link(p: &mut Project, ids: &[String]) -> Result<()> {
+    let ids: Vec<String> = ids.iter().fold(Vec::new(), |mut all, id| {
+        if !all.contains(id) {
+            all.push(id.clone());
+        }
+        all
+    });
+    if ids.len() < 2 {
+        return Err(Error::usage("Link needs two clips or more"));
+    }
+    let l = p.free_link();
+    for id in &ids {
+        let (ti, ci) = locate(p, id)?;
+        p.tracks[ti].clips[ci].link = Some(l);
+    }
+    end_lone(p);
+    Ok(())
+}
+
+pub fn unlink(p: &mut Project, ids: &[String]) -> Result<()> {
+    let mut any = false;
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        any |= p.tracks[ti].clips[ci].link.take().is_some();
+    }
+    if !any {
+        return Err(Error::invalid("These clips have no link"));
+    }
+    end_lone(p);
+    Ok(())
+}
+
+pub fn alone<T>(
+    p: &mut Project,
+    ids: &[String],
+    edit: impl FnOnce(&mut Project) -> Result<T>,
+) -> Result<T> {
+    let mut kept = Vec::new();
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        if let Some(l) = p.tracks[ti].clips[ci].link.take() {
+            kept.push((id.clone(), l));
+        }
+    }
+    let links: HashSet<u32> = kept.iter().map(|&(_, l)| l).collect();
+    let main = main_index(p);
+    let mut aside = Vec::new();
+    let partner = |c: &Clip| c.link.is_some_and(|l| links.contains(&l));
+    for (ti, t) in p.tracks.iter_mut().enumerate() {
+        if ti == main || !t.clips.iter().any(partner) {
+            continue;
+        }
+        let (out, stay): (Vec<Clip>, Vec<Clip>) =
+            std::mem::take(&mut t.clips).into_iter().partition(partner);
+        t.clips = stay.into();
+        aside.extend(out.into_iter().map(|c| (t.id.clone(), t.kind, c)));
+    }
+    let out = edit(p);
+    let mut back = HashSet::new();
+    for (track, kind, c) in aside {
+        let ti = p
+            .track_index(&track)
+            .unwrap_or_else(|| tracks::nth(p, kind, 0));
+        back.insert(c.id.clone());
+        place(p, ti, c);
+    }
+    super::follow::settle(p, &back);
+    for (id, l) in &kept {
+        if let Some((ti, ci)) = p.find_clip(id) {
+            p.tracks[ti].clips[ci].link = Some(*l);
+        }
+    }
+    end_lone(p);
+    out
+}
+
+pub fn apart<T>(
+    p: &mut Project,
+    on: bool,
+    ids: &[String],
+    edit: impl FnOnce(&mut Project) -> Result<T>,
+) -> Result<T> {
+    if on { alone(p, ids, edit) } else { edit(p) }
+}
+
+pub fn touching(p: &Project, id: &str) -> Vec<String> {
+    let mut ids = vec![id.to_string()];
+    if let Some((ti, ci)) = p.find_clip(id) {
+        let c = &p.tracks[ti].clips[ci];
+        let beside = |x: &&Clip| x.id != c.id && (x.end() == c.start || x.start == c.end());
+        ids.extend(
+            p.tracks[ti]
+                .clips
+                .iter()
+                .filter(beside)
+                .map(|x| x.id.clone()),
+        );
+    }
+    ids
+}
+
+fn same_source(a: &Clip, b: &Clip) -> bool {
+    let heard = |c: &Clip| !c.media.is_empty() || c.compound.is_some();
+    heard(a) && a.media == b.media && a.compound == b.compound
+}
+
+fn lag(c: &Clip, of: &Clip) -> Option<i64> {
+    (c.speed.is_none() && of.speed.is_none())
+        .then(|| (c.start - c.source_in) - (of.start - of.source_in))
+}
+
+fn in_order(p: &Project) -> impl Iterator<Item = &Clip> {
+    p.tracks_of(TrackKind::Video)
+        .into_iter()
+        .chain(p.tracks_of(TrackKind::Audio))
+        .flat_map(|i| &p.tracks[i].clips)
+}
+
+fn partner<'a>(group: impl IntoIterator<Item = &'a Clip>, c: &Clip) -> Option<&'a Clip> {
+    group
+        .into_iter()
+        .find(|o| o.video != c.video && o.tied_with(c) && same_source(o, c))
+}
+
+pub fn offset(p: &Project, c: &Clip) -> Option<i64> {
+    lag(c, partner(in_order(p), c)?).filter(|&d| d != 0)
+}
+
+pub fn offsets(p: &Project) -> HashMap<String, i64> {
+    let mut groups: HashMap<u32, Vec<&Clip>> = HashMap::new();
+    for c in in_order(p) {
+        if let Some(l) = c.link {
+            groups.entry(l).or_default().push(c);
+        }
+    }
+    groups
+        .values()
+        .flat_map(|g| {
+            g.iter().filter_map(|c| {
+                let d = lag(c, partner(g.iter().copied(), c)?).filter(|&d| d != 0)?;
+                Some((c.id.clone(), d))
+            })
+        })
+        .collect()
+}
+
+pub fn others(p: &Project, id: &str) -> Vec<(String, i64)> {
+    let Some(c) = p.clip(id).filter(|c| offset(p, c).is_some()) else {
+        return Vec::new();
+    };
+    p.tied(id)
+        .into_iter()
+        .filter_map(|o| {
+            let x = p.clip(&o)?;
+            let d = lag(x, c).filter(|&d| d != 0 && same_source(x, c))?;
+            Some((o, d))
+        })
+        .collect()
+}
+
+fn into_place(p: &mut Project, id: &str, d: i64, slip: bool) -> Result<()> {
+    let one = [id.to_string()];
+    alone(p, &one, |p| {
+        if slip {
+            super::slip(p, id, d)
+        } else {
+            let (ti, ci) = locate(p, id)?;
+            let to = p.tracks[ti].clips[ci].start - d;
+            super::move_clips(p, &one, to, super::MoveMode::Overwrite, None)
+        }
+    })
+}
+
+pub fn resync(p: &mut Project, id: &str, how: crate::request::Resync) -> Result<()> {
+    use crate::request::Resync;
+    let (ti, ci) = locate(p, id)?;
+    let d = offset(p, &p.tracks[ti].clips[ci])
+        .ok_or_else(|| Error::invalid(format!("{id} is in sync")))?;
+    let slip = matches!(how, Resync::Slip | Resync::SlipOthers);
+    match how {
+        Resync::Slip | Resync::Move => into_place(p, id, d, slip),
+        Resync::SlipOthers | Resync::MoveOthers => {
+            for (o, d) in others(p, id) {
+                into_place(p, &o, d, slip)?;
+            }
+            Ok(())
+        }
+    }
 }

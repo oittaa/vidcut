@@ -883,6 +883,7 @@ impl Editor {
             )?,
             _ => mutate(&mut working, &request, env, playhead, dry_run)?,
         };
+        ops::linked::end_lone(&mut working);
         need_timeline(&mut working)?;
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
@@ -4291,9 +4292,9 @@ fn mutate(
             let track = track.as_deref().unwrap_or(ops::MAIN);
             json!({ "removed": ops::to_cut(p, track, at, *picture, *sound, *all)? })
         }
-        Request::EditDelete { clips, lift } => {
+        Request::EditDelete { clips, lift, alone } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            ops::delete(p, &ids, *lift)?;
+            ops::linked::apart(p, *alone, &ids, |p| ops::delete(p, &ids, *lift))?;
             Value::Null
         }
         Request::EditDeleteRange { range, lift } => {
@@ -4311,10 +4312,13 @@ fn mutate(
             to,
             mode,
             track,
+            alone,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let to = resolve(p, to, playhead)?;
-            ops::move_clips(p, &ids, to, *mode, track.as_deref())?;
+            ops::linked::apart(p, *alone, &ids, |p| {
+                ops::move_clips(p, &ids, to, *mode, track.as_deref())
+            })?;
             Value::Null
         }
         Request::EditReplace { clip, onto } => {
@@ -4329,6 +4333,7 @@ fn mutate(
             by,
             to,
             ripple,
+            alone,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let c = p.clip(&id).expect("resolved").clone();
@@ -4341,25 +4346,36 @@ fn mutate(
                 (None, Some(to)) => ctx(p, playhead).resolve_from(to, edge_at)? - edge_at,
                 _ => return Err(Error::usage("edit.trim needs exactly one of `by` and `to`")),
             };
-            ops::trim(p, &id, *edge, delta, *ripple)?;
+            let one = [id.clone()];
+            ops::linked::apart(p, *alone, &one, |p| {
+                ops::trim(p, &id, *edge, delta, *ripple)
+            })?;
             Value::Null
         }
-        Request::EditRoll { clip, edge, by } => {
+        Request::EditRoll {
+            clip,
+            edge,
+            by,
+            alone,
+        } => {
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
-            ops::roll(p, &id, *edge, delta)?;
+            let near = ops::linked::touching(p, &id);
+            ops::linked::apart(p, *alone, &near, |p| ops::roll(p, &id, *edge, delta))?;
             Value::Null
         }
-        Request::EditSlip { clip, by } => {
+        Request::EditSlip { clip, by, alone } => {
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
-            ops::slip(p, &id, delta)?;
+            let one = [id.clone()];
+            ops::linked::apart(p, *alone, &one, |p| ops::slip(p, &id, delta))?;
             Value::Null
         }
-        Request::EditSlide { clip, by } => {
+        Request::EditSlide { clip, by, alone } => {
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
-            ops::slide(p, &id, delta)?;
+            let near = ops::linked::touching(p, &id);
+            ops::linked::apart(p, *alone, &near, |p| ops::slide(p, &id, delta))?;
             Value::Null
         }
         Request::EditRippleDeleteSilence {
@@ -4457,6 +4473,21 @@ fn mutate(
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
             ops::audio_roll(p, &id, *edge, delta)?;
+            Value::Null
+        }
+        Request::EditResync { clip, how } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::linked::resync(p, &id, *how)?;
+            Value::Null
+        }
+        Request::ClipLink { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::linked::link(p, &ids)?;
+            Value::Null
+        }
+        Request::ClipUnlink { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::linked::unlink(p, &ids)?;
             Value::Null
         }
         Request::EditTrimToPlayhead {
@@ -6445,19 +6476,22 @@ fn mutate(
             name,
             bin,
             start_tc,
+            alone,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let start_tc = match start_tc {
                 Some(tc) => p.flat_settings().start_frames(tc)?,
                 None => 0,
             };
-            let nested = ops::compound::nest(
-                p,
-                &ids,
-                name.as_deref(),
-                bin.as_deref().unwrap_or(""),
-                start_tc,
-            )?;
+            let nested = ops::linked::apart(p, *alone, &ids, |p| {
+                ops::compound::nest(
+                    p,
+                    &ids,
+                    name.as_deref(),
+                    bin.as_deref().unwrap_or(""),
+                    start_tc,
+                )
+            })?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
         Request::EditCompoundRange {
@@ -12145,6 +12179,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     });
     if let Some(link) = c.link {
         v["link"] = json!(link);
+    }
+    if let Some(sync) = ops::linked::offset(p, c) {
+        v["sync"] = json!(sync);
     }
     if let Some(color) = c.shown_color(media) {
         v["color"] = json!(color);

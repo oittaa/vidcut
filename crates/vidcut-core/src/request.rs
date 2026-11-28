@@ -1264,6 +1264,10 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         lift: bool,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Delete a range on every unlocked track; ripples unless `lift`.
     #[serde(rename = "edit.delete_range")]
@@ -1287,6 +1291,10 @@ pub enum Request {
         mode: MoveMode,
         #[serde(default)]
         track: Option<String>,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Move a clip onto another, replacing it (rippling the difference).
     #[serde(rename = "edit.replace")]
@@ -1303,6 +1311,10 @@ pub enum Request {
         /// Override Ripple On for this trim.
         #[serde(default)]
         ripple: Option<bool>,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Roll the edit at a clip's edge. With a gap at that edge, only the
     /// picture edge moves and the sound stays. It stops one frame short of
@@ -1312,10 +1324,21 @@ pub enum Request {
         clip: ClipRef,
         edge: Edge,
         by: TimeSpec,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Slip a clip's content.
     #[serde(rename = "edit.slip")]
-    EditSlip { clip: ClipRef, by: TimeSpec },
+    EditSlip {
+        clip: ClipRef,
+        by: TimeSpec,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
+    },
     /// New Compound Clip: the clips become one compound clip from the start
     /// of the first to the end of the last, their sound and any gaps
     /// included. Its picture stays on the lowest of their video tracks; a
@@ -1333,6 +1356,10 @@ pub enum Request {
         /// Starting timecode of the compound clip. Default: `00:00:00:00`.
         #[serde(default)]
         start_tc: Option<TimeSpec>,
+        /// Take these clips alone, not the clips linked to them (Linked
+        /// Selection off).
+        #[serde(default)]
+        alone: bool,
     },
     /// Convert In and Out to Compound Clip: cuts the clips and the subtitle
     /// cues of every track at the In mark and the Out mark. The cues stay on
@@ -1395,7 +1422,14 @@ pub enum Request {
     /// slide stops one frame short of a clip that does not touch it, and at
     /// the timeline's start.
     #[serde(rename = "edit.slide")]
-    EditSlide { clip: ClipRef, by: TimeSpec },
+    EditSlide {
+        clip: ClipRef,
+        by: TimeSpec,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
+    },
     /// Ripple Delete Silence: cut the silent parts out of `clips` and close the
     /// gaps, as one undo step. `dry_run` reports the parts without cutting (the
     /// red stripes, `removed`). `parts` cuts a list of them instead, edited
@@ -1497,6 +1531,12 @@ pub enum Request {
         edge: Edge,
         by: TimeSpec,
     },
+    /// Bring a clip and the clips linked to it back into sync. A clip is out
+    /// of sync when its media plays at another time than in a linked clip of
+    /// the same media and the other kind (picture or sound). Clips with a
+    /// speed change have no sync offset. One undo step.
+    #[serde(rename = "edit.resync")]
+    EditResync { clip: ClipRef, how: Resync },
     /// Move clips' head or tail to `at` (Trim Start/End to Playhead).
     #[serde(rename = "edit.trim_to_playhead")]
     EditTrimToPlayhead {
@@ -1973,6 +2013,15 @@ pub enum Request {
         #[serde(default)]
         ripple: bool,
     },
+    /// Link clips: they become one link group and act as one clip in an
+    /// edit. A clip leaves the group that it was in. A group with one clip
+    /// left ends. One undo step.
+    #[serde(rename = "clip.link")]
+    ClipLink { clips: OneOrMany<ClipRef> },
+    /// Unlink clips: each leaves its link group and then acts alone. A
+    /// group with one clip left ends. One undo step.
+    #[serde(rename = "clip.unlink")]
+    ClipUnlink { clips: OneOrMany<ClipRef> },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
     /// that their level reaches `target`. A picture clip gives its linked
     /// sound clips. Each clip is measured over the
@@ -6752,6 +6801,22 @@ pub fn viewer_frame_after(frame: ViewerFrame, key: ViewerFrameKey) -> ViewerFram
     }
 }
 
+/// How `edit.resync` brings clips back into sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Resync {
+    /// Slip into Place: slip the content of the clip, and keep its place.
+    Slip,
+    /// Move into Place: move the clip, over what is there.
+    Move,
+    /// Slip Others into Place: slip the content of each other clip of the
+    /// same media in its group.
+    SlipOthers,
+    /// Move Others into Place: move each other clip of the same media in its
+    /// group.
+    MoveOthers,
+}
+
 /// What a trim of an edit moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -6785,6 +6850,11 @@ pub struct TimelineOptions {
     /// the track.
     #[serde(default)]
     pub trim_to_audio: Option<bool>,
+    /// Linked Selection: a click selects a clip and the clips linked to it,
+    /// and an edit acts on them all. Off, the linked parts show apart, and
+    /// each acts alone.
+    #[serde(default)]
+    pub linked_selection: Option<bool>,
     /// Trim with Safe Edit: a trim stops at the neighboring clip.
     #[serde(default)]
     pub safe_edit: Option<bool>,
