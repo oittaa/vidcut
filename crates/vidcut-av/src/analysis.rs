@@ -4,12 +4,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex32;
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch};
+use vidcut_core::loudness::Meter;
 use vidcut_core::render::RenderPlan;
 
 use crate::decode::{Decoder, decode_stream};
 use crate::error::{Context, Error, Result};
-use crate::export::audio::{AudioMix, Resampler, channel_layout, discard_others};
-use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
+use crate::export::audio::{AudioMix, Resampler, discard_others, loudness_weights};
+use crate::ffmpeg::{self, codec, format, frame, media, software::scaling};
 
 pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioLevels> {
     crate::cancel::stop()?;
@@ -483,103 +484,18 @@ pub fn mix_loudness(
     let mut mix = AudioMix::new(&plan.audio, rate, channels, declick_ms)
         .ducked(&plan.ducking)
         .bused(&plan.buses);
-    let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
-    let layout = channel_layout(channels).bits();
-    let args =
-        format!("sample_rate={rate}:sample_fmt=flt:channel_layout=0x{layout:x}:time_base=1/{rate}");
-    graph
-        .add(
-            &filter::find("abuffer").ok_or_else(|| Error::Invalid("no abuffer filter".into()))?,
-            "in",
-            &args,
-        )
-        .ctx(|| "creating the audio source".into())?;
-    graph
-        .add(
-            &filter::find("abuffersink")
-                .ok_or_else(|| Error::Invalid("no abuffersink filter".into()))?,
-            "out",
-            "",
-        )
-        .ctx(|| "creating the audio sink".into())?;
-    let spec = "ebur128=peak=true:metadata=1";
-    crate::parts::parse_filters(&mut graph, spec)?;
-    graph
-        .validate()
-        .ctx(|| format!("configuring filter {spec}"))?;
-    let mut result = Loudness {
-        integrated: f64::NEG_INFINITY,
-        range: 0.0,
-        true_peak: f64::NEG_INFINITY,
-        sample_peak: f64::NEG_INFINITY,
-    };
-    let drain = |graph: &mut filter::Graph, result: &mut Loudness| {
-        let mut out = frame::Audio::empty();
-        while graph
-            .get("out")
-            .expect("sink")
-            .sink()
-            .frame(&mut out)
-            .is_ok()
-        {
-            let meta = out.metadata();
-            let value = |k: &str| meta.get(k).and_then(|v| v.parse::<f64>().ok());
-            if let Some(i) = value("lavfi.r128.I") {
-                result.integrated = i;
-            }
-            if let Some(lra) = value("lavfi.r128.LRA") {
-                result.range = lra;
-            }
-            if let Some(peak) = value("lavfi.r128.true_peak") {
-                result.true_peak = 20.0 * peak.max(1e-12).log10();
-            }
-        }
-    };
+    let mut meter = Meter::new(rate, loudness_weights(channels));
     let ch = usize::from(channels);
     let mut done = 0i64;
-    let mut peak = 0f32;
     while done < total {
         if stopped(cancel) {
             return Err(Error::Invalid(crate::export::CANCELLED.into()));
         }
         let n = (total - done).min(4096) as usize;
         let samples = mix.read(n)?;
-        peak = samples
-            .iter()
-            .take(n * ch)
-            .fold(peak, |m, s| m.max(s.abs()));
-        let mut f = frame::Audio::new(
-            format::Sample::F32(format::sample::Type::Packed),
-            n,
-            channel_layout(channels),
-        );
-        f.set_rate(rate);
-        f.set_pts(Some(done));
-        let data = f.data_mut(0);
-        for (i, s) in samples.iter().take(n * ch).enumerate() {
-            data[i * 4..i * 4 + 4].copy_from_slice(&s.to_le_bytes());
-        }
-        graph
-            .get("in")
-            .expect("source")
-            .source()
-            .add(&f)
-            .ctx(|| "measuring loudness".into())?;
-        drain(&mut graph, &mut result);
+        meter.push(&samples[..(n * ch).min(samples.len())]);
         done += n as i64;
     }
-    graph
-        .get("in")
-        .expect("source")
-        .source()
-        .flush()
-        .ctx(|| "measuring loudness".into())?;
-    drain(&mut graph, &mut result);
-    if result.integrated <= -70.0 {
-        result.integrated = f64::NEG_INFINITY;
-    }
-    if peak > 0.0 {
-        result.sample_peak = 20.0 * f64::from(peak).log10();
-    }
-    Ok(result)
+    meter.finish();
+    Ok(meter.loudness())
 }

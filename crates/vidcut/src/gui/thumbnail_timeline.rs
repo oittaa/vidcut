@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Rect, RichText, Sense, pos2, vec2};
 use serde_json::json;
-use vidcut_core::model::{Clip, Media, Project, RenderRange, TrackKind};
+use vidcut_core::model::{Clip, Media, Project, RenderRange};
 use vidcut_core::ops::clip_filter;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::request::ClipLabel;
@@ -21,6 +21,7 @@ const COMPOUND: &str = "Compound Clip";
 
 pub(super) struct Strip {
     project: Arc<Project>,
+    filtered: bool,
     thumbs: Vec<Thumb>,
 }
 
@@ -48,17 +49,11 @@ fn look(p: &Project, settings: &[u8], c: &Clip, m: Option<&Media>) -> String {
     vidcut_core::fingerprint::short_digest(&bytes)
 }
 
-fn thumbs(p: &Project) -> Vec<Thumb> {
-    let mut clips: Vec<_> = (p.tracks.iter())
-        .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
-        .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
-        .filter(|(_, c)| !c.is_generator())
-        .collect();
-    clips.sort_by_key(|(t, c)| (c.start, c.end(), t.number()));
+fn thumbs(p: &Project, filtered: bool) -> Vec<Thumb> {
+    let filter = (p.timeline().map(|t| &t.clip_filter)).filter(|f| filtered && !f.is_all());
+    let clips = clip_filter::strip(p, filter);
     let source_rate = p.settings.fps;
     let settings = serde_json::to_vec(&p.settings).unwrap_or_default();
-    let filter = p.timeline().map(|t| &t.clip_filter);
-    clips.retain(|(_, c)| filter.is_none_or(|f| clip_filter::admits(p, c, f)));
     (clips.into_iter().enumerate())
         .map(|(i, (t, c))| {
             let media = p.media(&c.media);
@@ -99,10 +94,13 @@ impl Workspace {
         let Some(project) = self.project_shared() else {
             return;
         };
+        let export = self.effects_page.page == vidcut_core::request::Page::Export;
+        let filtered = !export || self.export.render.as_ref().is_some_and(|d| d.per_clip);
         let strip = match self.export.strip.take() {
-            Some(s) if Arc::ptr_eq(&s.project, &project) => s,
+            Some(s) if Arc::ptr_eq(&s.project, &project) && s.filtered == filtered => s,
             _ => Strip {
-                thumbs: thumbs(&project),
+                thumbs: thumbs(&project, filtered),
+                filtered,
                 project,
             },
         };
@@ -244,7 +242,7 @@ impl Workspace {
 
     fn render_clip(&self, a: i64, b: i64) {
         let marks = json!({ "in": a, "out": b });
-        if !self.render_whole() {
+        if self.render_mode() == RenderRange::InOut {
             self.send("marks.set", marks);
             return;
         }

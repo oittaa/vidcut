@@ -807,9 +807,10 @@ pub enum Request {
         #[serde(default = "black_min")]
         min: TimeSpec,
     },
-    /// Loudness of the timeline's mix (EBU R128): integrated LUFS, range,
-    /// true peak (dBTP) and sample peak (dBFS), over `range` (default: In–Out
-    /// if set, else everything).
+    /// Loudness of the timeline's mix (ITU-R BS.1770-4, EBU R128), as the
+    /// loudness meter measures it: integrated LUFS, range (LU), the highest
+    /// momentary and short-term loudness (LUFS), true peak (dBTP) and sample
+    /// peak (dBFS), over `range` (default: In–Out if set, else everything).
     #[serde(rename = "analyze.loudness")]
     AnalyzeLoudness {
         #[serde(default)]
@@ -1750,7 +1751,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer). Only an audio track takes the
+    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer, pan). Only an audio track takes the
     /// sound settings. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
@@ -1810,6 +1811,15 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         equalizer: Option<Option<TrackEqualizerSet>>,
+        /// The pan, after the equalizer and before the fader, from -100
+        /// (all the way left) to 100 (all the way right). The pan of each
+        /// clip adds to it, and the sum stops at the ends.
+        #[serde(default)]
+        pan: Option<f64>,
+        /// The switch of the pan. Off keeps the pan, and the sound plays as
+        /// at 0.
+        #[serde(default)]
+        pan_on: Option<bool>,
         /// Download what this computer doesn't have yet: Voice Isolation's
         /// model, or the speech detector of ducking by speech, each checked
         /// against its SHA-256. Without it, a missing file is an error that
@@ -5156,6 +5166,32 @@ pub enum Request {
     /// timeline's mix (muted, left out by solo, or empty) is an error.
     #[serde(rename = "mixer.preview")]
     MixerPreview { track: String, volume_db: f64 },
+    /// The loudness meter of the mix (ITU-R BS.1770-4, as
+    /// `analyze.loudness`): what the timeline plays, before the monitoring
+    /// mute. Loudness is in LUFS, and null where there is no level (-70
+    /// LUFS or less). `momentary` (400 ms) and `short` (3 s) end at the
+    /// sound heard last, and `channels` has the momentary loudness of each
+    /// channel, without LFE. `true_peak` (dBTP) is the highest since the
+    /// reset. `momentary_max`, `short_max`, `range` (LU) and `integrated`
+    /// gather only while `running`. `target` and `scale` come from the
+    /// project; LU is a value less `target`. `absolute`: the meter shows
+    /// LUFS, not LU.
+    #[serde(rename = "loudness.get")]
+    LoudnessGet {},
+    /// Start (`running: true`) or pause (`running: false`) what the
+    /// loudness meter gathers, and show it in LUFS (`absolute: true`) or in
+    /// LU from the target. Not saved. Answers what `loudness.get` does.
+    #[serde(rename = "loudness.set")]
+    LoudnessSet {
+        #[serde(default)]
+        running: Option<bool>,
+        #[serde(default)]
+        absolute: Option<bool>,
+    },
+    /// Clear the loudness meter and stop what it gathers until
+    /// `loudness.set` starts it. Answers what `loudness.get` does.
+    #[serde(rename = "loudness.reset")]
+    LoudnessReset {},
     /// The Media tab: the bin shown, the sort order and how it shows
     /// its items. Source Tape strings together that bin's media, and its
     /// bins', in that order.
@@ -5282,12 +5318,13 @@ pub enum Request {
     /// buttons, `title_text` (the text of the selected title, or of the
     /// topmost title at the playhead, to edit in place in the viewer),
     /// `select_tool` (a tool to add on the effects page), `equalizer` (the
-    /// Equalizer window of `track`), or `dynamics` (the Dynamics window of
+    /// Equalizer window of `track`), `dynamics` (the Dynamics window of
+    /// `track`), or `pan` (the Pan window of
     /// `track`). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
-        /// The track of the `equalizer` or `dynamics` window.
+        /// The track of the `equalizer`, `dynamics` or `pan` window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<String>,
     },
@@ -5895,6 +5932,15 @@ pub struct ExportParams {
     /// One file per clip (in the range) instead of one file.
     #[serde(default)]
     pub per_clip: bool,
+    /// With `per_clip`, only these clips, by id. Each has a frame in the
+    /// range. Left out: each clip in the range.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<String>,
+    /// With `per_clip`, only the clips of the video tracks that meet this
+    /// filter, as the Thumbnail timeline shows them. A job keeps the clips
+    /// that meet it at `render.add`, as `clips`. Not with `clips`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_filter: Option<crate::model::ClipFilter>,
     /// Leave the video out.
     #[serde(default)]
     pub audio_only: bool,
@@ -7084,6 +7130,9 @@ pub enum GuiPanel {
     /// The Dynamics window of a track with sound: the switch, the Make Up
     /// gain and the Expander or Gate, Compressor and Limiter modules.
     Dynamics,
+    /// The Pan window of a track with sound: the switch and Left/Right of
+    /// its pan.
+    Pan,
 }
 
 /// Media tab sort orders.
@@ -7359,8 +7408,10 @@ pub struct TimelineSet {
     /// that uses the project's settings gets its own first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own: Option<TimelineFormat>,
-    /// What the Export page renders of it: `entire` or `in_out`. `entire`
-    /// also clears its In and Out marks.
+    /// What the Export page renders of it: `entire`, `in_out` or
+    /// `filtered`. `entire` also clears its In and Out marks. `filtered`
+    /// needs a clip filter, and sets the marks at the span of its clips.
+    /// A clip filter of `all` or a new mark makes `filtered` into `in_out`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::model::RenderRange>,
     /// The clips that its Thumbnail timeline shows, e.g.
@@ -7499,6 +7550,14 @@ pub struct ProjectSet {
     /// until a longer list gives them back. Usual: `["L1"]`.
     #[serde(default)]
     pub node_stack_layers: Option<Vec<String>>,
+    /// The Target Loudness Level in LUFS, from -30 to 0: the loudness that
+    /// the loudness meter shows as 0 LU. Usual: -23.
+    #[serde(default)]
+    pub target_loudness: Option<f64>,
+    /// The scale of the loudness meter: `ebu9` (the usual: 18 LU under the
+    /// target to 9 LU over it) or `ebu18` (36 LU under to 18 LU over).
+    #[serde(default)]
+    pub loudness_scale: Option<crate::model::LoudnessScale>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -9035,6 +9094,9 @@ impl Request {
                 | Self::PlayerBounds { .. }
                 | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
+                | Self::LoudnessGet {}
+                | Self::LoudnessSet { .. }
+                | Self::LoudnessReset {}
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}
                 | Self::SelectionSet { .. }

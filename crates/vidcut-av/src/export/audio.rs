@@ -24,6 +24,30 @@ pub(crate) fn sample_format(n: i32) -> Option<ffi::AVSampleFormat> {
     Some(unsafe { std::mem::transmute::<i32, ffi::AVSampleFormat>(n) })
 }
 
+pub fn loudness_weights(channels: u16) -> Vec<f64> {
+    use vidcut_core::loudness::SURROUND;
+    let count = usize::from(channels.max(1));
+    let mask = channel_layout(channels).bits();
+    let lfe = ffi::AV_CH_LOW_FREQUENCY | ffi::AV_CH_LOW_FREQUENCY_2;
+    let side = ffi::AV_CH_SIDE_LEFT | ffi::AV_CH_SIDE_RIGHT;
+    let back = ffi::AV_CH_BACK_LEFT | ffi::AV_CH_BACK_RIGHT;
+    let surround = if mask & side != 0 { side } else { side | back };
+    let weights: Vec<f64> = (0..64)
+        .map(|b| 1u64 << b)
+        .filter(|bit| mask & bit != 0)
+        .map(|bit| match bit {
+            _ if bit & lfe != 0 => 0.0,
+            _ if bit & surround != 0 => SURROUND,
+            _ => 1.0,
+        })
+        .collect();
+    if weights.len() == count {
+        weights
+    } else {
+        vec![1.0; count]
+    }
+}
+
 pub(crate) fn channel_layout(channels: u16) -> ffmpeg::ChannelLayout {
     let standard = ffmpeg::ChannelLayout::default(i32::from(channels));
     if !standard.is_empty() {
@@ -615,6 +639,7 @@ struct Lane {
     scratch: Vec<f32>,
     trim: f32,
     bused: bool,
+    track_pan: f64,
     isolator: Option<Isolator>,
     filter: Option<Filter<Equalizer>>,
     leveler: Option<Leveler>,
@@ -639,6 +664,7 @@ impl Lane {
             scratch: Vec::new(),
             trim: 1.0,
             bused: false,
+            track_pan: 0.0,
             isolator: None,
             filter: None,
             leveler: None,
@@ -891,8 +917,9 @@ impl Lane {
                     10f32.powf(*gain_db as f32 / 20.0) * trim
                 };
                 const PAN_STEP: usize = 64;
-                let flat_sides =
-                    (ch >= 2 && pan_keyed.is_none()).then(|| vidcut_core::render::pan_gains(*pan));
+                let track_pan = self.track_pan;
+                let flat_sides = (ch >= 2 && pan_keyed.is_none())
+                    .then(|| vidcut_core::render::clip_pan_gains(*pan, track_pan));
                 let mut block_sides = flat_sides;
                 let fade = self.declick.min(len / 2).max(1);
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
@@ -928,8 +955,10 @@ impl Lane {
                         && let Some(k) = pan_keyed
                         && i.is_multiple_of(PAN_STEP)
                     {
-                        block_sides =
-                            Some(vidcut_core::render::pan_gains(k.pan_at(k.at + p as f64)));
+                        block_sides = Some(vidcut_core::render::clip_pan_gains(
+                            k.pan_at(k.at + p as f64),
+                            track_pan,
+                        ));
                     }
                     for c in 0..ch {
                         let side = match (block_sides, c) {
@@ -1055,6 +1084,8 @@ struct Mixed {
     top: usize,
     dynamics: Option<(TrackDynamics, Dynamics)>,
     filter: Option<Filter<TrackEqualizer>>,
+    pan: f64,
+    channels: usize,
     gain: f32,
     sum: Vec<f32>,
 }
@@ -1072,6 +1103,8 @@ impl Mixed {
                 .equalizer
                 .as_ref()
                 .map(|e| Filter::new(e, rate, channels)),
+            pan: bus.pan,
+            channels: usize::from(channels),
             gain: decibels(bus.gain_db),
             sum: Vec::new(),
         }
@@ -1099,6 +1132,13 @@ impl Mixed {
         }
         if let Some(filter) = self.filter.as_mut() {
             filter.run(&mut self.sum);
+        }
+        if self.channels >= 2 && self.pan != 0.0 {
+            let (left, right) = vidcut_core::render::pan_gains(self.pan);
+            for frame in self.sum.chunks_exact_mut(self.channels) {
+                frame[0] *= left;
+                frame[1] *= right;
+            }
         }
         let gain = self.gain * trim;
         if gain != 1.0 {
@@ -1153,6 +1193,7 @@ impl AudioMix {
                 Some(i) => {
                     let mut kept = old.swap_remove(i);
                     kept.gain = decibels(b.gain_db);
+                    kept.pan = b.pan;
                     kept
                 }
                 None => Mixed::of(b, self.rate, self.channels),
@@ -1174,6 +1215,7 @@ impl AudioMix {
         }
         for (lane, bus) in self.lanes.iter_mut().zip(&self.bus_of) {
             lane.bused = bus.is_some();
+            lane.track_pan = bus.map_or(0.0, |b| self.buses[b].pan);
         }
     }
 

@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Project, Settings, TimelineSettings, TrackKind};
+use crate::model::{Marks, Project, RenderRange, Settings, TimelineSettings, TrackKind};
 use crate::request::{TimelineFormat, TimelineNew, TimelineSet};
 
 pub const RECENT_SHOWN: usize = 10;
@@ -275,6 +275,15 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
     if let Some(f) = &s.clip_filter {
         super::clip_filter::check(f)?;
     }
+    let span = match s.render {
+        Some(RenderRange::Filtered) => {
+            let filter = s.clip_filter.as_ref().unwrap_or(&t.clip_filter);
+            let mut q = super::render::top(p);
+            q.open_timeline(&id)?;
+            Some(super::clip_filter::span(&q, filter)?)
+        }
+        _ => None,
+    };
     let start = match &s.start_tc {
         Some(tc) => settings_with(p, after).start_frames(tc)?,
         None if rate_changes => {
@@ -288,11 +297,20 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
     if let Some(r) = s.render {
         t.render = r;
         if r.is_entire() {
-            t.marks = crate::model::Marks::default();
+            t.marks = Marks::default();
         }
+    }
+    if let Some((a, b)) = span {
+        t.marks = Marks {
+            mark_in: Some(a),
+            mark_out: Some(b),
+        };
     }
     if let Some(f) = &s.clip_filter {
         t.clip_filter = f.clone();
+    }
+    if t.clip_filter.is_all() && t.render == RenderRange::Filtered {
+        t.render = RenderRange::InOut;
     }
     if let Some(r) = super::conform::Rates::new(before.fps, after.fps) {
         t.markers

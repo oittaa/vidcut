@@ -51,7 +51,7 @@ classDiagram
     kind: Video or Audio
     locked, muted, solo, volume_db
     video_enabled, voice_isolation, duck
-    equalizer, render_cache
+    equalizer, pan, pan_on, render_cache
   }
   class Clip {
     id, name, color
@@ -845,6 +845,13 @@ Writing:
 - A Q goes to a whole step, and the band keeps the Q of that step (`equalizer::track::stepped`). `patched` and the Equalizer window both use it.
 - `equalizer::track::problem` is the check that `validate::violations` and the import of an OTIO file share.
 - An OTIO file carries the `TrackEqualizer` in the `vidcut` metadata of its track.
+- [export](export.md#sound) tells how it plays.
+
+## Track pan
+
+- An audio track has a `pan` and a switch, `pan_on`, as a clip has. `Track::heard_pan` gives 0 when the switch is off.
+- `track.set` checks the pan with `keyframes::checked_pan`, as `clip.set` does.
+- An OTIO file carries `pan` and `pan_on` in the `vidcut` metadata of its track. An import drops a pan outside the range.
 - [export](export.md#sound) tells how it plays.
 
 ## Track Dynamics

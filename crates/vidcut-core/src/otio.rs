@@ -1109,6 +1109,12 @@ fn export_with(
         if let Some(e) = &t.equalizer {
             meta["equalizer"] = json!(e);
         }
+        if t.pan != 0.0 {
+            meta["pan"] = json!(t.pan);
+        }
+        if !t.pan_on {
+            meta["pan_on"] = json!(false);
+        }
         if !t.render_cache {
             meta["render_cache"] = json!(false);
         }
@@ -1715,6 +1721,8 @@ pub struct ImportedTrack {
     pub duck: Option<crate::model::Duck>,
     pub dynamics: Option<crate::model::TrackDynamics>,
     pub equalizer: Option<crate::model::TrackEqualizer>,
+    pub pan: f64,
+    pub pan_on: bool,
     pub video_enabled: bool,
     pub render_cache: bool,
     pub name: Option<String>,
@@ -1750,6 +1758,11 @@ impl ImportedTrack {
             equalizer: serde_json::from_value(meta["equalizer"].clone())
                 .ok()
                 .filter(|e| audio && crate::equalizer::track::problem(e).is_none()),
+            pan: meta["pan"]
+                .as_f64()
+                .filter(|v| audio && crate::validate::PAN.contains(v))
+                .unwrap_or(0.0),
+            pan_on: !audio || meta["pan_on"].as_bool().unwrap_or(true),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             render_cache: meta["render_cache"].as_bool().unwrap_or(true),
             name: match meta.get("name") {
@@ -2789,6 +2802,10 @@ pub fn unheard_track_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<
     track_kept(p, span, "The track equalizer", |t| {
         t.equalizer.as_ref().is_some_and(|e| e.heard())
     })
+}
+
+pub fn unheard_track_pan(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    track_kept(p, span, "The track pan", |t| t.heard_pan() != 0.0)
 }
 
 fn kept_in_metadata(

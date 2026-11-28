@@ -238,6 +238,10 @@ pub enum RenderRange {
     /// From the In to the Out of the timeline. Without an In, from its
     /// start. Without an Out, to its end.
     InOut,
+    /// The clips that meet its clip filter. The pick sets the In at the
+    /// first frame of the first of them, and the Out at the last frame of
+    /// the last. Only with a clip filter.
+    Filtered,
 }
 
 impl RenderRange {
@@ -253,9 +257,10 @@ pub enum ClipFilter {
     /// Every clip.
     #[default]
     All,
-    /// The clips with a grade that is not the usual grade.
+    /// The clips with a grade that changes their picture, or a grade with
+    /// keyframes.
     Graded,
-    /// The clips with the usual grade.
+    /// The clips with no such grade.
     Ungraded,
     /// The clips with a composition that has more nodes than its MediaIn
     /// and its MediaOut.
@@ -574,6 +579,16 @@ pub struct Settings {
         skip_serializing_if = "Settings::has_one_layer"
     )]
     pub node_stack_layers: Vec<String>,
+    /// The Target Loudness Level in LUFS: the 0 LU of the loudness meter.
+    /// Left out at -23.
+    #[serde(
+        default = "Settings::usual_target_loudness",
+        skip_serializing_if = "Settings::has_usual_target_loudness"
+    )]
+    pub target_loudness: f64,
+    /// The scale of the loudness meter. Left out at `ebu9`.
+    #[serde(default, skip_serializing_if = "LoudnessScale::is_usual")]
+    pub loudness_scale: LoudnessScale,
 }
 
 impl Default for Settings {
@@ -601,6 +616,39 @@ impl Default for Settings {
             scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
             node_stack_layers: Self::one_layer(),
+            target_loudness: crate::loudness::TARGET,
+            loudness_scale: LoudnessScale::Ebu9,
+        }
+    }
+}
+
+/// The scale of the loudness meter, around the Target Loudness Level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoudnessScale {
+    /// EBU +9: from 18 LU under the target to 9 LU over it.
+    #[default]
+    Ebu9,
+    /// EBU +18: from 36 LU under the target to 18 LU over it.
+    Ebu18,
+}
+
+impl LoudnessScale {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::Ebu9
+    }
+
+    pub fn span(self) -> (f64, f64) {
+        match self {
+            Self::Ebu9 => (-18.0, 9.0),
+            Self::Ebu18 => (-36.0, 18.0),
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Ebu9 => "EBU +9",
+            Self::Ebu18 => "EBU +18",
         }
     }
 }
@@ -670,6 +718,14 @@ impl Format {
 }
 
 impl Settings {
+    pub fn usual_target_loudness() -> f64 {
+        crate::loudness::TARGET
+    }
+
+    pub fn has_usual_target_loudness(target: &f64) -> bool {
+        *target == crate::loudness::TARGET
+    }
+
     pub fn one_layer() -> Vec<String> {
         vec![Self::layer_name(1)]
     }
@@ -1883,6 +1939,15 @@ pub struct Track {
     /// they are on, with each module off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamics: Option<TrackDynamics>,
+    /// The pan of an audio track, after its equalizer and before its
+    /// fader, from -100 (all the way left) to 100 (all the way right). The
+    /// pan of each clip adds to it. Left out at 0, the middle.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pan: f64,
+    /// The switch of the pan of an audio track. Off keeps the pan, and the
+    /// sound plays as at 0. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub pan_on: bool,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -11297,11 +11362,17 @@ impl Track {
             duck: None,
             dynamics: None,
             equalizer: None,
+            pan: 0.0,
+            pan_on: true,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),
             render_cache: true,
         }
+    }
+
+    pub fn heard_pan(&self) -> f64 {
+        if self.pan_on { self.pan } else { 0.0 }
     }
 
     pub fn number(&self) -> usize {

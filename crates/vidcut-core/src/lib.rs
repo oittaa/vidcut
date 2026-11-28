@@ -27,6 +27,7 @@ pub mod key_sets;
 pub mod keyframes;
 pub mod leveler;
 pub mod looks;
+pub mod loudness;
 pub mod lru;
 pub mod luts;
 pub mod masks;
