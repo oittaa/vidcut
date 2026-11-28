@@ -234,7 +234,7 @@ Notes:
   - The audio of output 1 goes in when the container takes that codec (`Container::takes_audio`). Else the file has no audio.
   - The `quality` of output 1 goes in. The encoder of the additional output applies it.
   - With a `bitrate` on output 1, the quality and the bitrate are not set. Thus the codec gives its default quality.
-  - Why: the measurements show the audio and the quality of output 1 in each output. An output 1 with a bitrate is not measured.
+  - Why: the measurements show the audio and the quality of output 1 in each output. They show no bit rate of output 1 in another output.
 - `written_twice` finds two outputs with the same path. It compares the paths part by part, in lowercase. Why: Windows and macOS do not see the case of a name, and Windows takes both / and \ between folders.
   - `refuse_written_twice` refuses them in `render.add` and `render.update` (`queue::existing`), and in `export.start` (`session::export_media`).
   - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.

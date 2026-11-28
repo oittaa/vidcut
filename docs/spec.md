@@ -5855,9 +5855,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: All Filtered Clips sets the In and the Out at the span of the filtered clips. The job renders each filtered clip, whole, to a file of its own.
   - Measured: after a pick of All Filtered Clips, the Render button shows "Entire Timeline". This was seen 3 times.
   - Measured: with a filter on and Single clip set, the Deliver page opens the prompt "Unable to Apply Filter". Apply Filter sets Individual clips.
+  - Measured: its text is "Clip filters can't be applied to single clips. Do you want to apply your clip filter and switch to individual clips?"
+  - Measured: Cancel keeps Single clip, and the strip of the Deliver page shows all clips. Apply Filter shows only the filtered clips there.
   - Measured: with a filter on, a click on Single clip opens "Cannot Render Single Clip", with Cancel and Clear Filter. Cancel keeps Individual clips and the filter.
+  - Measured: its text is "To render selection as a single clip, please clear your clip filter."
+  - Measured: Clear Filter sets Single clip, and the strip of the Deliver page shows all clips. The Color page keeps its filter, also after Cancel of the other prompt.
+  - Measured: when a filter leaves no clip, the Deliver page shows no strip. Add to Render Queue is greyed, and Estimated File Size shows 0.00 MB.
   - Measured: Unrendered Clips looks at each timeline clip. An Individual clips render marks the clips that it renders. A Single clip render marks no clip.
-  - Measured: in two runs, Individual clips with In/Out rendered only the clips wholly inside the range.
+  - Measured: a grade change makes a rendered clip unrendered. A trim, a move and the removal of the job do not.
+  - Measured: a job that was stopped after all its files were complete marks its clips.
+  - Measured: Selected Clips shows the clips selected in the strip at the pick. A later selection on the Edit page does not change it.
+  - Measured: in one run, a Ctrl+click in the strip did not add a clip to the selection.
+  - Measured: Modified Clips counted a Lift change. A trim on the Edit page and a Zoom set by a script did not count.
+  - Measured: Common Media Pool Source shows the clips of the media of the current clip. A move of the playhead on the ruler does not change the current clip.
+  - Measured: Tracked counts a window track, the Stabilizer of the Tracker palette and Stabilize of the Inspector. A Tracker node of a composition does not count.
+  - Measured: a pick of a filter is not an undo step ([gotchas](gotchas.md#resolves-edits)).
+  - Measured: with one video track, Individual clips renders each clip with a frame in the In/Out range. Each file holds the whole clip.
+  - Measured: with two video tracks, some ranges gave no file, or the clip of one track only. The runs show no rule ([gotchas](gotchas.md#resolves-renders)).
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5920,6 +5934,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: each output has the audio of output 1, with its codec and its bit rate. A QuickTime output also has the AAC of an MP4 output 1.
   - Measured: each output has the Quality of output 1, and its own encoder applies it. In the run, Auto used NVIDIA (High profile), and output 1 used Native (Main profile).
   - Measured: with Best, output 1 had 118 kb/s and the others 332 kb/s each. With Least, output 1 had 104 kb/s and the others 88 kb/s each.
+  - Measured: with a bit rate on output 1, the other outputs do not take it. An additional output has no rate setting.
   - Measured: two outputs with the same path stop Add. The prompt is "Duplicate Render Paths", with one button, OK. No job is added.
   - Measured: its text is "Please enter unique sub-folder names for each additional output in the render settings".
   - Measured: the queue has one job, and one render writes all outputs. The row of the job shows the path and the details of output 1.
@@ -5988,7 +6003,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Type shows for each format with fixed profiles: ProRes, DNxHR, TIFF and OpenEXR. Only ProRes is measured.
   - With additional outputs, the Format menu of tab 1 has only the formats that hold video. The Preset menu greys the presets with no video.
   - An additional output gets the audio of output 1 when its format takes that codec, else no audio.
-  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, its codec gives its default quality. That case is not measured.
+  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, it gets no bit rate, as measured.
+  - Its codec then gives its default quality. The quality that Resolve gives it then is not measured.
   - An additional output gets the subtitle streams of output 1. Burned-in subtitles are in the picture of each output.
   - `render.add`, `render.update` and `export.start` refuse two outputs with the same path. `export.plan` gives the note `written_twice`.
   - The text of the prompt has no "Please", because GUI text has 12 words at most.
@@ -6026,7 +6042,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A graded clip has a grade that is not the usual grade. A clip with a composition has a node other than MediaIn and MediaOut.
   - Marked Clips looks at the markers of the media in the part that the clip shows. Edit Sizing looks at the transform and the crop.
   - The other filters are greyed. Those of features that vidcut does not have are in [gaps](todo/gaps.md).
-  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source wait for measurements ([todo](todo/clip-filter.md)).
+  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source are greyed ([todo](todo/clip-filter.md)).
+  - Individual clips renders each clip with a frame in the range, on each track. Each file holds the whole clip.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
