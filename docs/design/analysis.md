@@ -352,6 +352,8 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - `mask::Pictures` renders the frames of the plan in float (`VideoFrames`).
 - Each way starts a new `mask::Track` from the frame of the clicks. The way forward comes first.
   - The way back reads parts of at most `PART_BYTES` forward. Then it gives the frames of each part to the model in reverse.
+  - A `vidcut-mask-read` thread reads the picture of the next frame while the model works on this frame (`mask::follow`).
+  - On the way back, that thread reads one frame of the part before at each frame (`mask::Back`). Thus about one part is in memory.
 - `Track::start` encodes the frame of the clicks. `Net::first` decodes each subject with its clicks and remembers the result.
 - `Track::next` encodes the next frame. For each subject, `Net::next` recalls the memory, decodes with no clicks, and remembers the result.
 - Each subject has its own memory, a `Bank`. One encode of a frame serves all the subjects.

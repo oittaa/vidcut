@@ -293,29 +293,109 @@ pub fn track(
     };
     if run.forward && run.at + 1 < frames {
         let (mut track, _) = Track::start(dir, model, picture(&first), subjects, count)?;
-        let mut pictures = Pictures::read(run.plan, (run.at + 1, frames), run.decoder)?;
-        for f in run.at + 1..frames {
-            let p = pictures.next_picture()?.ok_or_else(|| ended(f))?;
-            each(f, track.next(picture(&p))?)?;
-        }
+        let pictures = Pictures::read(run.plan, (run.at + 1, frames), run.decoder)?;
+        let mut source = Source::Ahead(pictures);
+        follow(&mut track, run.at + 1..frames, &mut source, &mut each)?;
     }
     if run.backward && run.at > 0 {
         let (mut track, _) = Track::start(dir, model, picture(&first), subjects, count)?;
         let per = (first.0 as usize * first.1 as usize * 12).max(1);
         let most = (PART_BYTES / per).max(1) as i64;
-        let mut end = run.at;
-        while end > 0 {
-            let start = (end - most).max(0);
-            let mut pictures = Pictures::read(run.plan, (start, end), run.decoder)?;
-            let mut part = Vec::new();
-            for f in start..end {
-                part.push(pictures.next_picture()?.ok_or_else(|| ended(f))?);
-            }
-            for (f, p) in (start..end).rev().zip(part.iter().rev()) {
-                each(f, track.next(picture(p))?)?;
-            }
-            end = start;
+        let mut source = Source::Back(Back {
+            run,
+            most,
+            end: run.at,
+            part: Vec::new(),
+            below: None,
+            read: Vec::new(),
+        });
+        follow(&mut track, (0..run.at).rev(), &mut source, &mut each)?;
+    }
+    Ok(())
+}
+
+enum Source<'a> {
+    Ahead(Pictures),
+    Back(Back<'a>),
+}
+
+impl Source<'_> {
+    fn next(&mut self) -> Result<Option<Picture>> {
+        match self {
+            Self::Ahead(pictures) => pictures.next_picture(),
+            Self::Back(back) => back.next(),
         }
+    }
+}
+
+struct Back<'a> {
+    run: &'a Run<'a>,
+    most: i64,
+    end: i64,
+    part: Vec<Picture>,
+    below: Option<(Pictures, i64, i64)>,
+    read: Vec<Picture>,
+}
+
+impl Back<'_> {
+    fn next(&mut self) -> Result<Option<Picture>> {
+        if self.part.is_empty() {
+            while self.step()? {}
+            self.part = std::mem::take(&mut self.read);
+            self.below = None;
+        }
+        let p = self.part.pop();
+        self.step()?;
+        Ok(p)
+    }
+
+    fn step(&mut self) -> Result<bool> {
+        if self.below.is_none() && self.end > 0 {
+            let start = (self.end - self.most).max(0);
+            let pictures = Pictures::read(self.run.plan, (start, self.end), self.run.decoder)?;
+            self.below = Some((pictures, start, self.end));
+            self.end = start;
+        }
+        let Some((pictures, from, to)) = &mut self.below else {
+            return Ok(false);
+        };
+        let f = *from + self.read.len() as i64;
+        if f >= *to {
+            return Ok(false);
+        }
+        self.read
+            .push(pictures.next_picture()?.ok_or_else(|| ended(f))?);
+        Ok(true)
+    }
+}
+
+fn follow(
+    track: &mut Track,
+    frames: impl Iterator<Item = i64>,
+    source: &mut Source,
+    each: &mut impl FnMut(i64, Vec<Found>) -> Result<()>,
+) -> Result<()> {
+    let job = crate::first::yields();
+    let mut next = source.next()?;
+    for f in frames {
+        let p = next.take().ok_or_else(|| ended(f))?;
+        let (found, read) = std::thread::scope(|scope| -> Result<_> {
+            let reading = std::thread::Builder::new()
+                .name("vidcut-mask-read".into())
+                .spawn_scoped(scope, || {
+                    if job {
+                        crate::first::as_job();
+                    }
+                    source.next()
+                })?;
+            let found = track.next(picture(&p));
+            let read = reading
+                .join()
+                .unwrap_or_else(|e| std::panic::resume_unwind(e));
+            Ok((found, read))
+        })?;
+        each(f, found?)?;
+        next = read?;
     }
     Ok(())
 }
