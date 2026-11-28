@@ -1002,6 +1002,7 @@ Keys:
 From an event to an action (`crates/vidcut/src/gui/shortcuts.rs`):
 
 - `owner` gives the action of one event. `Fired` holds the actions of the events of one frame, and `Workspace::keys` reads it.
+- For Ctrl+Left, Ctrl+Right, Ctrl+Up and Ctrl+Down, `ops::beside::clip_beside` finds the clip. `Workspace::keys` sends it in a `selection.set`.
 - The modifiers must be equal to the modifiers of the `Combo`.
 - A modifier that a sign needs on the layout does not count. Why: Shift+0 makes the equals sign on a Nordic layout, and the binding is that sign.
 - The two brackets, the comma, the period, the backslash, the semicolon and the quote also match by the place of the key. Why: on a Nordic layout these places make other signs, and the keys stay at the same place.

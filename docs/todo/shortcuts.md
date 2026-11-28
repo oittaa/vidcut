@@ -1,5 +1,4 @@
 # Shortcuts
 
-- Ctrl+arrow keys that move the clip selection.
 - Copy, Cut, Paste and Delete keys of their own in the keyframe views.
 - For a key with two actions, vidcut can run another action than Resolve.
