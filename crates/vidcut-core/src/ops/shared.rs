@@ -93,7 +93,7 @@ pub fn remove(p: &mut Project, number: u64) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn took(p: &mut Project, was: &Grade, now: &Grade) {
+pub(super) fn took(p: &mut Project, was: &Grade, now: &mut Grade) {
     let had = |n: u64| was.every_node().any(|d| d.shared == Some(n));
     let changes: Vec<(usize, GradeNode)> = (now.every_node())
         .filter_map(|d| {
@@ -103,8 +103,19 @@ pub(super) fn took(p: &mut Project, was: &Grade, now: &Grade) {
             (p.shared_nodes[i].node != part).then_some((i, part))
         })
         .collect();
+    if changes.is_empty() {
+        return;
+    }
     for (i, part) in changes {
         p.shared_nodes[i].node = part;
+    }
+    synced(p);
+    let registry = &p.shared_nodes;
+    for d in now.every_node_mut() {
+        let shared = d.shared.and_then(|n| registry.iter().find(|s| s.number == n));
+        if let Some(s) = shared.filter(|s| s.node != d.shared_part()) {
+            d.take_shared(&s.node);
+        }
     }
 }
 

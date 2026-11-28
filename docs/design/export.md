@@ -928,6 +928,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - A shared node (`SharedNode`) is in `Project::shared_nodes`. Each copy holds its number in `GradeNode::shared`. `ops::shared` has the requests.
   - `GradeNode::shared_part` gives the settings that each copy shares. `GradeNode::take_shared` gives them to a copy, and keeps its links, its place and its Magic Mask.
   - `ops::grade::edited` gives the grade before and after each change to `ops::shared::took`. A changed copy changes `SharedNode::node`.
+  - `took` then gives the new settings to the other copies at once, with `synced`. Why: a later change in the same `apply` can be on another copy, and that copy must not hold the old settings.
   - Why: a change finds its copy by its settings, not by its number. The numbers change when a node is added or removed.
   - After each request, `ops::shared::synced` gives the settings of the shared node to each copy that differs, in each timeline and compound clip. It unlinks a copy of no shared node.
   - Why: a copied clip, grade or still brings its copies. The copies then follow the shared node.

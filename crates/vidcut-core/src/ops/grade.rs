@@ -688,7 +688,7 @@ pub(super) fn edited(
     let before = g.clone();
     edit(&mut g)?;
     marked(&mut g);
-    super::shared::took(p, &before, &g);
+    super::shared::took(p, &before, &mut g);
     store(p, of, &g)
 }
 
