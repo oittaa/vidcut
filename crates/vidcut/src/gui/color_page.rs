@@ -1813,7 +1813,7 @@ impl Workspace {
         };
         let p = self.project()?;
         let c = p.clip(id)?;
-        let mut picture = c.picture.clone().unwrap_or_default();
+        let mut picture = c.picture.as_deref().cloned().unwrap_or_default();
         checked(&h.grade).ok()?;
         let frame = p.frame_size();
         let was = picture.grade.take().unwrap_or_else(|| Grade::usual(frame));

@@ -87,6 +87,10 @@ pub struct ColorPrefs {
     /// Color controls (`A` button, Color > Auto Color and scripts without
     /// `tool`). Default off.
     pub use_legacy_auto_color: bool,
+    /// The Magic Mask makes Better with SAM 2.1 large (898 MB), in place
+    /// of base+ (324 MB). It acts on the maps made after the change.
+    /// Default off.
+    pub magic_mask_large: bool,
 }
 
 impl Default for ColorPrefs {
@@ -98,6 +102,7 @@ impl Default for ColorPrefs {
             show_thumbnails: true,
             disable_thumbnail_refresh: false,
             use_legacy_auto_color: false,
+            magic_mask_large: false,
         }
     }
 }
@@ -135,6 +140,8 @@ pub struct ColorPrefsPatch {
     pub disable_thumbnail_refresh: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_legacy_auto_color: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magic_mask_large: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1420,6 +1427,7 @@ impl Preferences {
             c.disable_thumbnail_refresh =
                 (x.disable_thumbnail_refresh).unwrap_or(c.disable_thumbnail_refresh);
             c.use_legacy_auto_color = (x.use_legacy_auto_color).unwrap_or(c.use_legacy_auto_color);
+            c.magic_mask_large = (x.magic_mask_large).unwrap_or(c.magic_mask_large);
         }
         if let Some(folders) = patch.luts.as_ref().and_then(|l| l.folders.as_ref()) {
             p.luts.folders = folders.clone();

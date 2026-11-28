@@ -1,7 +1,7 @@
 # Project model
 
-- A project is one `Project` value in vidcut-core: settings, its media, bins and timelines. A timeline holds tracks of clips, subtitle tracks of cues, marks and markers.
-- It is saved as one `.vidcut` JSON file. Only the editor changes it ([requests](requests.md)).
+- A project is one `Project` value in vidcut-core: settings, its media, bins and timelines. Large collections use `Shared` and `SharedVec` for copy-on-write sharing. A timeline holds tracks of clips, subtitle tracks of cues, marks and markers.
+- It is saved as one `.vidcut` SQLite file. Only the editor changes it ([requests](requests.md)).
 - This page tells about the types, time, ids, the file, OpenTimelineIO and the preferences.
 
 ```mermaid
@@ -458,15 +458,28 @@ Ranges and resolution:
 
 ## The `.vidcut` file
 
-- `Store` reads and writes the `Project` as pretty JSON (serde).
+- `Store` reads and writes `Project` as one SQLite database file, with `synchronous = FULL`. Why: edits come at the speed of a person, and each save must stay after a power loss.
+- On local drives, `Store` uses WAL mode. On a network drive (`dirs::on_network`), it uses the rollback `DELETE` journal mode, because WAL needs shared memory on one host.
+  - On Linux, `dirs::on_network` also counts FUSE (sshfs, gvfs, rclone, virtiofs), 9p, Ceph and AFS. WAL is not safe on them, because they do not share memory between hosts.
+- After each save, `Store` copies the WAL into the main file (`settle`, a `PASSIVE` checkpoint). Thus a copy, a backup or a sync of the `.vidcut` file alone has the saved edits.
+  - A `PASSIVE` checkpoint does not wait. It leaves in the WAL the changes that a reader in another process still needs. The next checkpoint copies them.
+- Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.
+  - `MetaRow`, `TimelineRow`, `CompoundRow`, `TrackRow` and `SubtitleTrackRow` borrow their fields from the model. `Store::save` compares them to find a dirty row.
+  - Each row takes all the fields of its model struct by name, with no rest pattern. Thus a new field does not compile until the store writes it.
+- `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
+  - `gc_blobs` removes the blobs that no clip row names. A compaction and `Store::close` run it. A save writes a blob again when a clip needs it.
+- `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
+  - When only `rev` and `edited` change, it updates those two columns of `meta`, and does not write its `data` again.
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
   - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut`, `color_viewer_lut` and `scopes_lut` of the settings.
+  - `history_base` and `history_events` store those project-folder paths relative too, so undo and external diffs stay valid after moving the folder.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
-- A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
-- `Store::transact`, `Store::compact` and `OpenProject::apply` hold the lock file of the project (`Store::lock`). `Store::create` and `Store::replace` write a new file without the lock.
-- A load runs `validate::violations`, and refuses an inconsistent file.
-- The undo history is kept apart, in the state dir ([requests](requests.md#undo-history)).
+- `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
+- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::close` removes unreferenced `blobs` and empties the WAL (a `TRUNCATE` checkpoint).
+- A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
+  - `open_conn` verifies the header before it sets the journal mode. Thus it does not change a file that it refuses.
+- The undo history lives in the same `.vidcut` file ([requests](requests.md#undo-history)).
 
 Temporary files:
 
@@ -1083,7 +1096,6 @@ Reset:
   - presets, themes, looks and the LUT folder of vidcut (unless `saved`)
   - the downloaded models and kept paid replies (with `keep_downloads`)
   - the folders of playback files set as absolute paths (`PlaybackFiles`)
-  - the undo history of the project that its own GUI has open (`Store::history_path`)
 - It compares the paths after it resolves links (`dirs::canonical`). It does not follow a link to reach a kept path. When it removes a link, the folder that the link names stays.
 - It refuses while another GUI runs (the registry). Why: that GUI keeps view settings and folders in memory, and writes them back.
 - A folder that the reset cannot read fails the reset. The folder does not pass for empty.

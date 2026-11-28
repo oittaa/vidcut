@@ -145,7 +145,7 @@ impl Subtitles {
                     color: c.color.clone(),
                     style: v.style.for_cue(c.style.as_ref()),
                     place: c.place,
-                    picture: c.picture.clone(),
+                    picture: c.picture.as_deref().cloned(),
                 })
                 .collect()
         });

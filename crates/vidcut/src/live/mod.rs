@@ -1199,7 +1199,7 @@ impl Live {
             let _ = r.tx.send(ReplyEvent::Done(result));
         }
         if let Some(open) = self.project.as_mut() {
-            open.save_left();
+            open.close();
         }
         if let Some(i) = &self.instance {
             ipc::registry::unregister(i);
@@ -2147,7 +2147,8 @@ impl Live {
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. } = &envelope.request
         {
-            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead);
+            let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead, large);
             if looks.is_empty() {
                 return None;
             }
@@ -2160,7 +2161,9 @@ impl Live {
             }));
         }
         if let Request::GradeMaskTrack { .. } = &envelope.request {
-            let looks = vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead);
+            let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+            let looks =
+                vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead, large);
             if looks.is_empty() {
                 return None;
             }
@@ -4372,7 +4375,7 @@ impl Live {
 
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         if let Some(old) = self.project.as_mut() {
-            old.save_left();
+            old.close();
         }
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.render.open(open.store.path());
@@ -4432,9 +4435,6 @@ impl Live {
     }
 
     fn project_changed(&mut self, response: Option<&Response>) {
-        if let Some(trouble) = self.project.as_mut().and_then(OpenProject::trouble) {
-            self.notice(trouble, true);
-        }
         let Some(open) = &self.project else {
             self.project_snap = None;
             self.missing_watch.watch(Vec::new(), Vec::new());
@@ -4580,7 +4580,7 @@ impl Live {
     fn check_media(&mut self) {
         self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
-        let media: Vec<_> = open.project().media.clone();
+        let media: Vec<_> = open.project().media.to_vec();
         let settings = open.project().settings.clone();
         let channels = settings.channels;
         self.forget_removed(&media);
@@ -4909,7 +4909,8 @@ impl Live {
         let mut p = self.project.as_ref()?.project().clone();
         for (id, picture) in &self.free_pictures {
             if let Some((t, c)) = p.find_clip(id) {
-                p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
+                p.tracks[t].clips[c].picture =
+                    (!picture.is_usual()).then(|| picture.clone().into());
             }
         }
         if let Some((id, title)) = &self.title_preview

@@ -166,10 +166,14 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 
 ## The open project
 
-- `OpenProject` keeps the `Store`, the `Editor`, and the text and stamp of the file as last read or written.
-- `OpenProject::apply` first reads the file again if its stamp moved.
-- A mutation does this under `Store::lock`, and saves with `Store::save` before the reply. History compaction (`Store::compact`) runs on `vidcut-history`.
-- A `notify` watcher on the folder of the file sends `Msg::FileChanged`. Then `OpenProject::reload` reads the file under the lock.
+- `OpenProject` keeps `Store`, `Editor`, `FileId`, and the SQLite `data_version` from the last read or write.
+- `OpenProject::reload` and `OpenProject::refresh` read again through `Store::reload_if_changed` when `FileId` or `data_version` changes.
+  - On Unix, `FileId` is the device and the inode of the file. Thus a file that another file replaces reads again.
+  - On Windows, `FileId` only tells that the file exists.
+  - A new connection always reads again (`Store::live_conn`). Why: the `data_version` of one connection does not compare with that of another.
+- `OpenProject::apply` runs mutations inside `Store::mutate_live`. History compaction (`Store::compact`) runs on `vidcut-history`.
+- A `notify` watcher on the folder watches the project file, `-wal`, and `-journal`, and sends `Msg::FileChanged`.
+- A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::close`.
 - The file is the source of truth. [requests](requests.md) tells about outside changes and undo.
 - Each timeline keeps its playhead. When another timeline opens, `Live::switch_playhead` keeps the playhead of the one before, and seeks to the playhead of the new one.
   - `playheads` holds them by timeline id, for the open project only. It loses the ids of deleted timelines at each change.
@@ -989,7 +993,7 @@ sequenceDiagram
   participant E as engine (vidcut-play-video)
   participant V as vidcut-viewer
   UI->>S: Msg::Request edit.split, from Handle::request
-  Note over S: Live::edit, OpenProject::apply<br>Store::lock, Editor::apply, Store::save
+  Note over S: Live::edit, OpenProject::apply<br>Store::mutate_live, Editor::apply, Store::save
   S->>S: project_changed, then Live::finish logs it
   S->>S: Live::tick, refresh_timeline, render::flatten_lanes
   S->>E: set_plan, a new motion

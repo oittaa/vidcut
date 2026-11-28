@@ -173,7 +173,11 @@ flowchart TD
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.
     - Thus a mask of 1.2 times the box of a path covers the face on each frame where the model found it.
-  - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
+  - Then each path holds its first box for `EDGE_SECS` before that box, and its last box for `EDGE_SECS` after that box (`widened`).
+    - Why: the model finds a face only when most of it shows. A face that comes into the picture or goes out of it shows for some frames with no box.
+    - A held box stops at a shot change and at the ends of the clip.
+    - Why a still box: on the test clips, it covers more of the face than a box that keeps moving.
+  - `FoundPath` gives the gaps of a path from its boxes before these two steps, and the mean of their scores. The held frames are no gaps.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
@@ -309,7 +313,7 @@ flowchart TD
 
 The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297)) has three parts:
 
-- The project keeps the clicks, Invert Mask and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
+- The project keeps the clicks, Invert Mask, Quality and the names of the maps (`MagicMask`, `MaskClick`, `MaskMap`).
 - `vidcut_core::masks` keeps the maps. Each map holds the logits of one subject on one frame.
 - The key stage scales each map to the frame on the GPU, and cuts it at 0.
 
@@ -317,6 +321,8 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 
 - `ops::grade_masks` changes the clicks. `clicked` chooses the subject of a new click with `subject_at`, which reads the maps of its frame.
 - `editor::mask_maps` makes the needs of the subjects that the request changed (`MaskNeed`).
+  - A change of Quality changes all the subjects of all the frames with clicks.
+  - `masks::Size::of` gives the model from Quality and the preference `ColorPrefs::magic_mask_large`. Each need holds it.
   - `mask_plan` gives the picture that comes into the corrector: the plan of `solo_plan`, with the input of the node as the output of the grade.
   - The plan leaves out the Magic Mask of the node itself. Thus a click does not change the picture that the next click reads.
   - The name of a map is a digest of the model, the plan and the clicks of its subject (`masks::name`).
@@ -352,7 +358,7 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
   - With one click, or none on a tracked frame, the output with the best predicted overlap.
   - With more clicks, the first output when it is stable, else the best one.
   - With a negative object score, no mask.
-- `mask::NET` keeps the loaded model for the next frame.
+- `mask::NET` keeps the loaded model for the next frame. A need of another `mask::Size` loads that model in its place.
 - With `gpu.acceleration` on, the model runs on the GPU. With it off, `Gpu::start_soft` gets the software adapter of wgpu.
   - The same kernels then run on the CPU: WARP on Windows, lavapipe on Linux.
   - macOS has no software adapter. There the request fails with `gpu.acceleration` off.
@@ -400,13 +406,16 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 
 **Checks.** The scripts and results are in the sam2 folder of the test data.
 
-- On the same input, the masks of vidcut and Meta's network overlap 0.9999 on average, and 0.9993 at worst.
-- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click. The model is SAM 2.1 tiny.
-- A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 on average.
+- On the same input, the masks of vidcut and Meta's network overlap 0.9999 or more on average, with each of the three models.
+  - The worst overlaps are 0.9993 (tiny), 0.9976 (base+) and 0.9997 (large).
+- The cases are 61 objects of the 30 videos of DAVIS 2017 val, on frame 0. Each object has one positive click.
+- A track on the same input gives the masks of Meta's video predictor: overlap 0.9999 or more on average, with each model.
   - The cases are 12 frames of blackswan, and two objects on 12 frames of bike-packing. The logits differ by 0.06 at most.
   - Meta's predictor keeps its memories in bfloat16. vidcut keeps them in 32-bit float.
+- Two positive clicks, a negative click and a click at the edge of the frame give the masks of Meta's network: overlap 0.9999 or more.
+- One frame each of five clips from 720 × 480 to 3840 × 2160 gives the masks of Meta's network: overlap 1.0000.
 - On the software adapter, the masks match the GPU within 8e-5.
-- Two or more clicks, negative clicks, base+ and large are not checked yet ([todo](../todo/subject-masks.md#measurements)).
+- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run ([todo](../todo/subject-masks.md#measurements)).
 
 ## In a GUI
 
