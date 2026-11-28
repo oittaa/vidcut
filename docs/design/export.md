@@ -1201,13 +1201,21 @@ The passes:
 
 ## The Gallery
 
-The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)):
 
 - `Project::stills` holds each `Still` in the project file. A still holds copies of the grades, not links to them. Thus a later change of the clip does not change the still.
 - `Project::albums` holds each `Album`, in the order in which they were made. `Still::album` names the album of a still.
   - `NextIds::album` gives the next ID and the number of the next default name. Thus an ID is not used again, and a stale ID gives an error.
   - `validate` refuses a project with no album, an album with no name, and a still whose album is not in the project.
-- `ops::gallery` holds the edits: `grab`, `remove`, `apply`, `append` and `get`.
+- `Still::track` and `Still::shot` keep the place of the clip at the grab. `ops::gallery::number` gives the still ID from them at each read.
+  - Why: a grab, a delete or a move of a still can change the third number of other stills.
+- `Project::memories` holds each `Memory`, in the order of its slot. A memory holds what a still holds, with a `slot` in place of an album and a label.
+  - `validate` refuses two memories in one slot, and a slot that is not a letter from A to Z.
+- `ops::gallery` holds the edits: `grab`, `remove`, `apply`, `append`, `label` and `get`.
+  - `grab` takes a `Holder`: an album, or the slot of a memory. Thus Save Memory draws its picture as a grab does.
+  - `copy_to_memory`, `clear_memory`, `load_memory` and `apply_memory` change the memories. A copy shares the picture file of the still.
+  - `load_memory` stores one node stack layer with `ops::grade::store`. `apply_memory` and `apply` share `given`.
+  - `load_memory` refuses a grade with keyframes. Why: Load Memory of keyframes is not measured.
   - `add_album`, `rename_album`, `remove_album` and `move_stills` change the albums. `remove_album` takes out the stills of the album with it.
   - `album_of` gives the album of a grab: the album of the request, else the first album.
   - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
@@ -1237,7 +1245,11 @@ The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-gra
   - `still::exr_rgba` reads a picture at the height of the tile, on `vidcut-still`. It averages the pixels into the smaller size, then clamps them to 8 bits.
   - The live `Selection` holds the selected stills in `stills`. `selection.set` changes it, and a still that leaves the project leaves it.
   - A `gallery.apply` with no `clips` in the Clip mode gets the clips selected in the Thumbnail timeline and the clip at the playhead (`Live::edit_at`).
-  - `Gallery` holds the open album and the switch of the Albums list. `gui.gallery` sets them (`Workspace::set_gallery`), and `gui.state` gives them.
+  - `Gallery` holds the open album and the switches of the Albums list and the memories. `gui.gallery` sets them (`Workspace::set_gallery`), and `gui.state` gives them.
+  - `Workspace::memory_bank` draws the memories. A drop of `Dragged` on a memory sends `gallery.memory.copy`.
+  - `Workspace::save_memory` and `Workspace::load_memory` send the requests of the Color > Memories menu.
+  - A `gallery.memory.load` or `gallery.memory.apply` with no `clips` gets the targets of `gallery.apply` (`Live::color_targets`).
+  - Change Label edits the label in place, in `label_field`.
   - `Workspace::shown_album` gives the open album. An album that left the project gives the first album.
   - A `gallery.grab` with no `album` gets the open album (`Live::edit_at`). Thus a script grab and a GUI grab go into the same album.
   - `Workspace::album_list` draws the Albums list. A drag of a still carries `Dragged`, and a drop on an album sends `gallery.move`.

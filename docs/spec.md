@@ -5192,7 +5192,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
   - [design](design/analysis.md#smart-reframe) gives the method.
 
-### 8.31 Gallery and Apply Grade (pp. 3050, 3332–3341, 3361–3366, 3400, 3405)
+### 8.31 Gallery and Apply Grade (pp. 3050, 3332–3348, 3361–3366, 3400, 3405)
 
 - The manual:
   - The Gallery is at the left of the viewer on the Color page (p. 3050).
@@ -5221,6 +5221,43 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A click on an album opens it. A double-click on an album renames it.
     - A drag of a still onto an album moves the still into that album.
     - Remove Current Album in the menu of an album deletes the album and its stills, after a Delete prompt.
+  - Still IDs and labels (pp. 3337–3338):
+    - A still ID has three numbers, Track.Shot.Version: the video track of the clip, its place in the timeline and the version of the grade.
+    - Change Label in the menu of a still opens a Change Still Label dialog. The label shows under the still ID.
+    - A double-click under the still ID labels the still too.
+  - Memories (pp. 3347–3348, 3364–3365):
+    - A memory holds the same as a still. Its name is a letter from A to Z.
+    - The Memories button at the right of the Albums button shows or hides the memories.
+    - A drag of a still onto a memory copies the still into it. A drag of a memory into the Gallery copies it into the album.
+    - Color > Memories > Save Memory A to H (Option-1 to Option-8) saves the grade of the current clip. It replaces what the memory held.
+    - Color > Memories > Load Memory A to H (Command-1 to Command-8) gives the grade of a memory to the selected clips.
+    - Apply Grade in the menu of a memory, or a middle-click on it, gives its grade to the current clip.
+    - Clear in the menu of a memory clears it.
+    - Color > Preview Memory (Option-Shift-P) shows a memory on the current clip before the clip takes it.
+- **Still IDs and labels**:
+  - The first number is the video track of the clip at the grab. The second is the place of the clip on that track, from 1.
+  - A generator does not count in the place. A clip put before the clip later does not change the ID of an older still.
+  - The third number is not the version of the grade. Four stills of one version had 1.1.1 to 1.1.4.
+  - The third number is the place of the still among the stills with the same album, timeline and first two numbers.
+  - These stills are in the order of their timeline frames. At the same frame, the older still is first.
+  - Thus a grab, a delete or a move of a still can change the third number of other stills.
+  - Two timelines can give the same ID in one album.
+  - Change Label opens no dialog. A text field opens under the still, with the label selected. Enter keeps the text.
+  - A double-click under the still ID turns on the wipe. It does not label the still.
+  - Ctrl+Z does not take back a label ([gotchas](gotchas.md#resolves-edits)).
+- **Memories** (two node stack layers, where the rule names one):
+  - A save into a full memory asks nothing. The new grade replaces the memory.
+  - A memory holds each node stack layer of the clip, also when L2 is shown at the save.
+  - Load Memory in the Clip mode:
+    - With L1 shown, L1 of each target takes L1 of the memory. L2 of each target was 1 empty node, before and after.
+    - With L2 shown, L2 takes L2 of the memory. L1 stays.
+    - A memory saved in a project with one layer goes into the shown layer.
+  - Load Memory in the Timeline mode replaces the timeline grade, with its node labels. The clips do not change.
+  - Project Memories in the Gallery view has 26 memories, A to Z. The Color > Memories menu has only A to H.
+  - A memory shows its picture. An empty memory is black, with its letter in the corner.
+  - A drag of a still onto a memory copies the still there. The still stays in its album.
+  - Apply Grade in the menu of a memory gives the grade of the memory to the current clip.
+- **Apply Grade of a still**: with two node stack layers, a still of one layer sets L2 of each target to 1 empty node.
 - **Keyframes of an applied still**:
   - No Keyframes: each node takes the values of its last keyframe at or before the grabbed frame. Before its first keyframe, a node has its own values.
   - There is no blend between two keyframes, also with Dynamic keyframes. The clip gets no keyframes.
@@ -5245,6 +5282,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows the stills of the open album, the oldest first.
+  - Under each still, it shows the still ID, and the label under the ID.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
     - The still goes into `album`. Left out, it goes into the open album of a running GUI. Without a GUI, it goes into the first album (not measured).
     - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
@@ -5252,7 +5290,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - It also holds the first, the grabbed and the last frame of the clip, and the source timecode of the clip.
     - The picture is the frame of the timeline with all grades and the output LUT, at the size of the timeline.
     - The picture has no display LUT. It is a 32-bit float OpenEXR file ([design](design/export.md#the-gallery)).
-    - The ID of a still is `s1`, `s2` and so on. A new still has no label.
+    - The `id` of a still is `s1`, `s2` and so on. Requests name a still by it. A new still has no label.
     - An open compound clip stops a grab.
   - A click selects one still. A Ctrl-click adds a still to the selection or takes it out. `selection.set` with `stills` does the same.
   - `gallery.remove` deletes stills. Delete Selected in the menu of a still does it, with no prompt.
@@ -5285,8 +5323,36 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The keyframes of a clip grade keep their frames.
     - A timeline grade with keyframes does not append. The request gives an error.
     - It is one undo step.
-  - `gallery.get` gives each still, with its album and the path of its picture.
+  - `gallery.get` gives each still, with its album, its still ID (`number`) and the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
+  - Still IDs and labels:
+    - The still ID follows the rules above. The still keeps the track and the place of its clip from the grab.
+    - `gallery.label` sets the label of a still. Change Label in the menu of a still does it, in a field under the still.
+    - Enter keeps the text. A click outside the field or Esc keeps the old label (not measured).
+    - An empty label takes the label away (not measured).
+    - A double-click under the still ID does nothing. The wipe comes later ([todo](todo/color-gallery.md)).
+    - Each label is one undo step ([gotchas](gotchas.md#resolves-edits)).
+  - Memories:
+    - `gallery.grab` with `memory`, a letter from A to Z, saves a memory. A save replaces what the memory held, with no prompt.
+    - Color > Memories > Save Memory A to H, and Alt+1 to Alt+8, save at the playhead.
+    - A memory holds what a still holds.
+    - The Memories button, at the right of the Albums button, shows or hides the memories above the stills.
+    - `gui.gallery` with `memories` shows or hides them too, and `gui.state` gives `memories`.
+    - The 26 memories, A to Z, show as boxes. Each box shows its picture, or black, and its letter in the corner.
+    - `gallery.memory.copy` copies a still into a memory. A drag of a still onto a memory does it.
+    - With more than one still in the drag, the first still goes into the memory (not measured).
+    - `gallery.memory.load` gives the grade of a memory. Color > Memories > Load Memory A to H does it. An empty memory is grey there.
+    - In the Clip mode, the shown node stack layer of each target takes the same layer of the memory.
+    - A memory of one layer gives that layer. The other layers of the target stay (not measured).
+    - The targets are those of `gallery.apply`.
+    - In the Timeline mode, the timeline grade of the memory replaces the timeline grade of the open timeline.
+    - A grade with keyframes does not load. The request gives an error.
+    - `gallery.memory.apply` gives the grade of a memory, as `gallery.apply` does with a still.
+    - Apply Grade in the menu of a memory, or a middle-click on it, sends `gallery.memory.apply`.
+    - `gallery.memory.clear` empties a memory. Clear in the menu of a memory does it.
+    - `gallery.memory.list` gives each memory, with its slot and the path of its picture.
+    - Each save, copy, load, apply and clear is one undo step.
+    - Ctrl+1 to Ctrl+8 for Load Memory, Preview Memory and a drag of a memory into the Gallery come later ([todo](todo/color-gallery.md)).
   - Albums:
     - A new project has one album, Stills 1, with the ID `a1`.
     - The Albums button at the top left of the Gallery shows or hides the Albums list. `gui.gallery` with `albums` does the same.
@@ -5302,7 +5368,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The last album stays. Its removal gives an error (not measured).
     - `gallery.album.list` gives each album, with its count of stills.
     - Each add, rename, move and removal is one undo step.
-  - Still IDs of the form Track.Shot.Version, labels and the drag into the viewer come later ([todo](todo/color-gallery.md)).
+  - The .T end of the ID of a still grabbed in the Timeline mode, and the drag into the viewer, come later ([todo](todo/color-gallery.md)).
   - PowerGrade albums and the sort menu of the Albums list come later ([todo](todo/color-gallery.md)).
 
 ### 8.32 Copying grades between clips (pp. 3361–3364, 3464)
@@ -5318,7 +5384,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the first clip, the commands give no change.
 - vidcut:
   - `grade.apply` gives clips the whole clip grade of another clip, with each node stack layer. It is one undo step.
-    - The grade replaces the whole grade of each target, as with `gallery.apply` ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
+    - The grade replaces the whole grade of each target, as with `gallery.apply` ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
     - The grade comes from `from` (a clip), from `prior` (1 or 2), or from `grade` (a grade that `grade.copy` gave).
     - With no `clips`, the target is the clip at the playhead.
   - Each keyframe stays on its source frame. Thus on another clip of the same media, it is on the same source timecode.
@@ -6532,7 +6598,8 @@ The Audio page follows the Fairlight page of the manual.
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129)) |
-| Ctrl+Alt+G | Color page: Grab Still ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)) |
+| Ctrl+Alt+G | Color page: Grab Still ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)) |
+| Alt+1 to Alt+8 | Color page: Save Memory A to H ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)) |
 | = / − | Color page: Apply Grade From One Clip Prior / Two Clips Prior ([§8.32](#832-copying-grades-between-clips-pp-33613364-3464)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
