@@ -667,7 +667,7 @@ fn least_span(param: KeyParam) -> f64 {
 }
 
 fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
-    let ([w, h], [fw, fh]) = (f.frame, f.mapped);
+    let ([w, h], [cw, ch]) = (f.frame, f.crop);
     match param {
         KeyParam::Position
         | KeyParam::TextPosition
@@ -681,8 +681,8 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::TextPosition
         | KeyParam::UpperPosition
         | KeyParam::LowerPosition => (v - 0.5) * w,
-        KeyParam::Anchor if y => (0.5 - v) * fh,
-        KeyParam::Anchor => (v - 0.5) * fw,
+        KeyParam::Anchor if y => (0.5 - v) * ch,
+        KeyParam::Anchor => (v - 0.5) * cw,
         KeyParam::ShadowOffset | KeyParam::BackgroundCenter if y => 0.0 - v * h,
         KeyParam::ShadowOffset | KeyParam::BackgroundCenter => v * w,
         KeyParam::Zoom
@@ -693,8 +693,8 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::Speed
         | KeyParam::ShadowOpacity
         | KeyParam::BackgroundOpacity => v * 100.0,
-        KeyParam::CropLeft | KeyParam::CropRight => v * fw,
-        KeyParam::CropTop | KeyParam::CropBottom => v * fh,
+        KeyParam::CropLeft | KeyParam::CropRight => v * cw,
+        KeyParam::CropTop | KeyParam::CropBottom => v * ch,
         KeyParam::Volume
         | KeyParam::Pan
         | KeyParam::Rotation
@@ -716,7 +716,7 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
 }
 
 fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
-    let ([w, h], [fw, fh]) = (f.frame, f.mapped);
+    let ([w, h], [cw, ch]) = (f.frame, f.crop);
     match param {
         KeyParam::Position
         | KeyParam::TextPosition
@@ -730,8 +730,8 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::TextPosition
         | KeyParam::UpperPosition
         | KeyParam::LowerPosition => v / w + 0.5,
-        KeyParam::Anchor if y => 0.5 - v / fh,
-        KeyParam::Anchor => v / fw + 0.5,
+        KeyParam::Anchor if y => 0.5 - v / ch,
+        KeyParam::Anchor => v / cw + 0.5,
         KeyParam::ShadowOffset | KeyParam::BackgroundCenter if y => 0.0 - v / h,
         KeyParam::ShadowOffset | KeyParam::BackgroundCenter => v / w,
         KeyParam::Zoom
@@ -742,8 +742,8 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::Speed
         | KeyParam::ShadowOpacity
         | KeyParam::BackgroundOpacity => v / 100.0,
-        KeyParam::CropLeft | KeyParam::CropRight => v / fw,
-        KeyParam::CropTop | KeyParam::CropBottom => v / fh,
+        KeyParam::CropLeft | KeyParam::CropRight => v / cw,
+        KeyParam::CropTop | KeyParam::CropBottom => v / ch,
         KeyParam::Volume
         | KeyParam::Pan
         | KeyParam::Rotation

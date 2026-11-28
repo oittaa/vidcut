@@ -543,6 +543,7 @@ impl FromStr for Combo {
                 "ctrl" | "cmd" | "command" => held.ctrl = true,
                 "control" if cfg!(target_os = "macos") => held.control = true,
                 "control" => held.ctrl = true,
+                "meta" if cfg!(target_os = "macos") => held.control = true,
                 "alt" | "option" => held.alt = true,
                 "shift" => held.shift = true,
                 _ => {
@@ -589,14 +590,23 @@ type Resolved = (
 
 fn resolve(custom: &Custom) -> Result<Resolved> {
     let mut keys = BTreeMap::new();
-    let mut owners = BTreeMap::new();
+    let mut listed: BTreeMap<(Panel, Combo), Vec<Action>> = BTreeMap::new();
     for (&action, combos) in custom {
         for &combo in combos {
-            owners.entry((action.panel(), combo)).or_insert(action);
+            let place = listed.entry((action.panel(), combo)).or_default();
+            if !place.contains(&action) {
+                place.push(action);
+            }
         }
         keys.insert(action, combos.clone());
     }
-    let listed = owners.clone();
+    let mut owners: BTreeMap<(Panel, Combo), Action> = listed
+        .iter()
+        .filter_map(|(&place, actions)| match actions.as_slice() {
+            [one] => Some((place, *one)),
+            _ => None,
+        })
+        .collect();
     for &action in Action::ALL {
         if custom.contains_key(&action) {
             continue;
@@ -787,9 +797,8 @@ impl Bindings {
             if self.keys(action).contains(&combo) {
                 continue;
             }
-            if let Some(other) = self.owner(action.panel(), combo)
-                && other != action
-            {
+            let others = self.owners(action.panel(), combo);
+            if let Some(&other) = others.iter().find(|&&o| o != action) {
                 return Err(Error::usage(format!(
                     "{} belongs to {} ({}): give it another key first",
                     combo.shown(),

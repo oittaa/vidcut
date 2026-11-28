@@ -331,7 +331,12 @@ pub fn stripe_at(
     }
     let row = rows.at(pos.y)?;
     let tracks = clip_tracks(p);
-    let on_row = |s: &Stripe| tracks.get(s.clip.as_str()) == Some(&row.track.as_str());
+    let on_row = |s: &Stripe| {
+        rows.bands
+            .row(&s.clip)
+            .or_else(|| tracks.get(s.clip.as_str()).copied())
+            == Some(row.track.as_str())
+    };
     let spans = d
         .stripes
         .iter()
@@ -1007,7 +1012,11 @@ impl Workspace {
         let kept = Color32::from_rgba_unmultiplied(150, 150, 155, 70);
         let lines = Color32::from_rgba_unmultiplied(205, 205, 210, 120);
         for (i, s) in d.stripes.iter().enumerate() {
-            let Some(row) = tracks.get(s.clip.as_str()).and_then(|t| rows.get(t)) else {
+            let shown = rows
+                .bands
+                .row(&s.clip)
+                .or_else(|| tracks.get(s.clip.as_str()).copied());
+            let Some(row) = shown.and_then(|t| rows.get(t)) else {
                 continue;
             };
             let rect =

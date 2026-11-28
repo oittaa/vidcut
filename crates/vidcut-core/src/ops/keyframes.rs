@@ -119,7 +119,7 @@ impl Number {
 
     fn takes(self, c: &Clip) -> bool {
         match self {
-            Self::Volume | Self::Pan => c.audio_range().is_some(),
+            Self::Volume | Self::Pan => c.audio.is_some(),
             Self::Center(_) => gradient(c).is_some(),
             Self::Effect(q) => effect_of(c, q).is_some_and(|e| e.takes(q.value)),
             Self::Title(v) => c.title.as_ref().is_some_and(|t| t.takes(v)),
@@ -1207,7 +1207,7 @@ fn holds(p: &Project, id: &str, text: bool) -> bool {
 fn picture_of(c: &Clip, text: bool) -> Option<Picture> {
     match text {
         true => c.title.as_ref().map(Title::as_picture),
-        false => c.picture.clone(),
+        false => c.picture.as_deref().cloned(),
     }
 }
 
@@ -1219,7 +1219,10 @@ fn owned_picture(p: &Project, id: &str, (v, text): Held) -> Result<(Picture, Cli
                 named((v, text))
             )));
         }
-        return Ok((q.picture.clone().unwrap_or_default(), q.as_clip()));
+        return Ok((
+            q.picture.as_deref().cloned().unwrap_or_default(),
+            q.as_clip(),
+        ));
     }
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
@@ -1240,7 +1243,7 @@ fn owned_picture(p: &Project, id: &str, (v, text): Held) -> Result<(Picture, Cli
         return Err(Error::invalid(format!("{id} has no picture")));
     }
     Ok((
-        c.picture.clone().unwrap_or_default(),
+        c.picture.as_deref().cloned().unwrap_or_default(),
         Clip {
             picture: None,
             ..c.clone()
@@ -1776,13 +1779,13 @@ mod tests {
         f.append("m1", 0, 100);
         f.ok(req(
             "keyframes.add",
-            json!({"clips": "c1", "param": "pan", "at": 0, "value": -50.0}),
+            json!({"clips": "c2", "param": "pan", "at": 0, "value": -50.0}),
         ));
         f.ok(req(
             "keyframes.add",
-            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+            json!({"clips": "c2", "param": "pan", "at": 20, "value": 50.0}),
         ));
-        let clip = f.editor.project().clip("c1").expect("a clip");
+        let clip = f.editor.project().clip("c2").expect("a clip");
         assert_eq!(clip.pan_at(10.0), Some(0.0));
     }
 
@@ -1792,13 +1795,13 @@ mod tests {
         f.append("m1", 0, 100);
         f.ok(req(
             "keyframes.add",
-            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+            json!({"clips": "c2", "param": "pan", "at": 20, "value": 50.0}),
         ));
         f.ok(req(
             "keyframes.set",
-            json!({"clips": "c1", "param": "pan", "at": 20, "by": 25.0}),
+            json!({"clips": "c2", "param": "pan", "at": 20, "by": 25.0}),
         ));
-        let listed = f.ok(req("keyframes.list", json!({"clips": "c1"}))).result;
+        let listed = f.ok(req("keyframes.list", json!({"clips": "c2"}))).result;
         assert_eq!(listed["clips"][0]["param"], "pan");
         assert_eq!(listed["clips"][0]["keyframes"][0]["value"], 75.0);
     }
@@ -1809,13 +1812,13 @@ mod tests {
         f.append("m1", 0, 100);
         f.ok(req(
             "keyframes.add",
-            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+            json!({"clips": "c2", "param": "pan", "at": 20, "value": 50.0}),
         ));
         f.ok(req(
             "keyframes.move",
-            json!({"clips": "c1", "param": "pan", "frames": 20, "to": 30}),
+            json!({"clips": "c2", "param": "pan", "frames": 20, "to": 30}),
         ));
-        let listed = f.ok(req("keyframes.list", json!({"clips": "c1"}))).result;
+        let listed = f.ok(req("keyframes.list", json!({"clips": "c2"}))).result;
         assert_eq!(listed["clips"][0]["keyframes"][0]["at"], 30);
     }
 
@@ -1825,18 +1828,18 @@ mod tests {
         f.append("m1", 0, 100);
         f.ok(req(
             "keyframes.add",
-            json!({"clips": "c1", "param": "pan", "at": 0, "value": -50.0}),
+            json!({"clips": "c2", "param": "pan", "at": 0, "value": -50.0}),
         ));
         f.ok(req(
             "keyframes.add",
-            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+            json!({"clips": "c2", "param": "pan", "at": 20, "value": 50.0}),
         ));
-        let copied = f.ok(req("keyframes.copy", json!({"clip": "c1"}))).result;
+        let copied = f.ok(req("keyframes.copy", json!({"clip": "c2"}))).result;
         f.ok(req(
             "keyframes.paste",
-            json!({"clips": "c1", "at": 40, "keyframes": copied["keyframes"]}),
+            json!({"clips": "c2", "at": 40, "keyframes": copied["keyframes"]}),
         ));
-        let clip = f.editor.project().clip("c1").expect("a clip");
+        let clip = f.editor.project().clip("c2").expect("a clip");
         assert_eq!(
             (clip.pan_at(40.0), clip.pan_at(60.0)),
             (Some(-50.0), Some(50.0))
@@ -1862,7 +1865,7 @@ mod tests {
         let a = f
             .editor
             .project()
-            .clip("c1")
+            .clip("c2")
             .unwrap()
             .audio
             .as_ref()
@@ -1885,7 +1888,7 @@ mod tests {
         assert!(
             f.editor
                 .project()
-                .clip("c1")
+                .clip("c2")
                 .and_then(|c| c.audio.as_ref())
                 .is_some_and(|a| a.pan_keys.is_empty())
         );
@@ -1927,7 +1930,7 @@ mod tests {
             "clip.set",
             json!({"clips": "c1", "pan": 100.0, "at": 20}),
         ));
-        let c = f.editor.project().clip("c1").expect("a clip");
+        let c = f.editor.project().clip("c2").expect("a clip");
         let a = c.audio.as_ref().expect("audio");
         assert_eq!((a.pan, c.pan_at(10.0)), (-20.0, Some(0.0)));
     }
@@ -1951,7 +1954,7 @@ mod tests {
         let keys = &f
             .editor
             .project()
-            .clip("c1")
+            .clip("c2")
             .unwrap()
             .audio
             .as_ref()

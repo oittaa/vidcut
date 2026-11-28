@@ -1,22 +1,18 @@
 # The clip filter
 
-**When:** after the Resolve runs that the points below need.
+**When:** now. The F4 runs measured the points below.
 
-The Color page filters its Thumbnail timeline (pp. 3114–3115). vidcut has the filters that it has data for ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
+The Color page filters its Thumbnail timeline (pp. 3114–3115). vidcut has the filters that it has data for. [Spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the measured rules.
 
 **What is left:**
 
-- All Filtered Clips in the Render menu (pp. 4099, 4128).
+- All Filtered Clips in the Render menu of the Export page (pp. 4099, 4128).
 - The prompts "Unable to Apply Filter" and "Cannot Render Single Clip".
-- Unrendered Clips, and the rendered state of each timeline clip.
-- Selected Clips, Modified Clips, Tracked and Common Media Pool Source.
-- Individual clips renders each clip that overlaps the range. In two runs, Resolve rendered only the clips wholly inside it.
+- The strip of the Export page shows the filter only with Individual clips. A filter that leaves no clip greys Add to Render Queue.
+- Unrendered Clips. It needs the rendered state of each timeline clip.
+- Selected Clips: the clips selected in the strip at the pick.
+- Modified Clips: the clips with a grade change in the last 1, 2, 3, 6 or 24 hours. It needs the time of the last grade change of each clip.
+- Tracked: the clips with a window track or a stabilization.
+- Common Media Pool Source: the clips of the media of the current clip.
 
-**Why it waits:** the measurements do not show these points:
-
-- What Cancel of "Unable to Apply Filter" keeps. If Clear Filter sets Single clip.
-- Which edits make a rendered clip unrendered again.
-- If Selected Clips and Common Media Pool Source follow a later selection or playhead.
-- Which kinds of tracking count as Tracked, and which edits count as Modified.
-- If a filtered strip keeps the numbers of the clips.
-- If a pick of a filter is an undo step.
+**Why:** each item needs a control or data that vidcut does not have yet.

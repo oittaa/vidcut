@@ -1,0 +1,226 @@
+id	cam	cond	extreme_mode	scene	src_de	leg_de	cnn_de	resolve_de	src_ch	cnn_ch	resolve_ch	src_ang	cnn_ang	resolve_ang
+c00_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_001.tiff	0.0	11.48	5.618	15.801	0.0	4.802	12.294	0.0	2.867	1.049
+c00_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_001.tiff	0.0	11.48	5.618	15.801	0.0	4.802	12.294	0.0	2.867	1.049
+c00_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_001.tiff	39.327	18.693	9.887	33.53	65.835	11.226	58.33	24.772	4.71	17.75
+c01_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_076.tiff	0.0	10.96	2.098	11.009	0.0	0.407	8.811	0.0	0.137	3.059
+c01_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_076.tiff	2.591	10.963	3.518	11.549	3.078	2.497	9.46	1.277	1.139	3.737
+c01_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_076.tiff	31.994	18.019	9.958	20.384	67.39	9.721	36.913	22.76	1.886	9.798
+c02_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1047.tiff	0.0	9.732	5.117	8.529	0.0	0.971	5.257	0.0	0.551	1.373
+c02_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1047.tiff	3.91	9.822	5.822	8.297	4.53	3.143	5.451	2.077	1.304	1.833
+c02_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_1047.tiff	22.134	15.553	7.804	19.197	46.186	6.307	29.942	20.178	0.071	15.339
+c03_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1115.tiff	0.0	17.784	6.235	11.554	0.0	4.106	10.439	0.0	1.399	2.991
+c03_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1115.tiff	0.697	17.584	6.007	11.321	1.065	3.779	9.967	0.457	1.246	2.639
+c03_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_1115.tiff	17.304	15.873	8.658	17.749	43.875	8.248	28.238	19.996	2.312	17.569
+c04_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1183.tiff	0.0	10.15	3.699	6.834	0.0	2.543	6.693	0.02	1.054	0.782
+c04_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1183.tiff	1.512	10.227	4.078	7.208	2.19	4.068	7.314	0.999	1.782	1.385
+c04_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_1183.tiff	26.187	15.33	14.766	21.499	47.672	18.535	32.177	22.522	9.25	18.092
+c05_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1252.tiff	0.0	18.787	3.112	13.159	0.0	2.936	10.101	0.0	0.903	2.121
+c05_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1252.tiff	4.29	17.648	6.26	14.042	6.878	7.819	13.545	3.828	3.606	4.828
+c05_extreme	Canon	extreme	2	Canon_5DSR/field_1_cameras/C_5DSR_field_1252.tiff	42.628	26.788	17.013	33.446	79.696	24.498	66.401	30.54	8.786	23.917
+c06_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1320.tiff	0.0	8.443	0.455	7.426	0.0	0.499	4.673	0.0	0.279	1.067
+c06_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1320.tiff	0.756	8.435	1.047	7.435	1.026	1.419	4.529	0.617	0.836	0.994
+c06_extreme	Canon	extreme	2	Canon_5DSR/field_1_cameras/C_5DSR_field_1320.tiff	40.61	23.42	12.261	45.351	73.474	13.78	93.243	34.551	4.321	29.308
+c07_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1389.tiff	0.0	16.342	3.547	9.616	0.0	4.194	5.017	0.0	1.43	4.535
+c07_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1389.tiff	2.736	16.328	3.649	9.752	4.307	3.955	5.51	1.788	1.111	5.466
+c07_extreme	Canon	extreme	2	Canon_5DSR/field_1_cameras/C_5DSR_field_1389.tiff	33.015	25.567	18.057	31.602	67.11	28.602	60.627	28.203	11.817	27.441
+c08_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1458.tiff	0.0	10.711	1.79	5.919	0.0	0.28	2.815	0.0	0.084	1.26
+c08_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1458.tiff	19.456	9.408	7.12	13.99	35.883	7.765	17.553	20.591	1.845	12.325
+c08_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_1458.tiff	27.17	14.963	8.596	21.375	56.495	7.465	40.652	25.043	2.876	17.023
+c09_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1526.tiff	0.0	8.716	3.906	6.462	0.0	0.71	4.71	0.0	0.592	0.283
+c09_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1526.tiff	8.56	8.117	6.255	9.79	13.156	5.65	12.245	5.859	2.624	6.368
+c09_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_1526.tiff	35.625	17.967	8.611	26.932	69.976	8.78	47.602	23.811	3.279	16.65
+c10_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_1594.tiff	0.0	13.146	4.364	11.326	0.0	1.615	8.975	0.0	0.764	0.371
+c10_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_1594.tiff	3.456	13.514	5.075	13.619	5.61	5.028	11.323	2.436	1.942	2.231
+c10_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_1594.tiff	37.834	19.984	5.892	30.113	66.052	7.328	50.481	23.852	0.688	15.767
+c11_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_184.tiff	0.0	13.991	5.782	13.61	0.0	2.548	9.012	0.0	1.358	0.605
+c11_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_184.tiff	16.3	17.522	10.808	16.914	33.409	5.376	22.283	13.079	2.157	11.809
+c11_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_184.tiff	20.967	20.214	10.572	21.015	48.091	7.114	34.134	20.225	2.053	18.546
+c12_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_259.tiff	0.0	11.238	2.078	8.305	0.0	1.082	3.898	0.02	0.485	1.07
+c12_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_259.tiff	14.718	11.92	9.969	16.723	26.329	14.826	24.271	15.12	8.736	19.912
+c12_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_259.tiff	19.012	13.871	11.363	19.887	37.864	15.775	31.207	21.923	9.323	25.153
+c13_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_334.tiff	0.0	7.974	0.609	5.153	0.0	0.316	3.511	0.0	0.063	0.985
+c13_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_334.tiff	3.314	8.007	3.223	4.985	3.783	3.592	4.431	2.608	2.371	1.909
+c13_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_334.tiff	18.221	11.141	6.382	14.839	31.001	5.483	18.645	21.895	1.01	14.579
+c14_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_410.tiff	0.0	15.54	3.035	16.526	0.0	4.602	20.636	0.02	1.354	5.636
+c14_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_410.tiff	7.375	18.077	7.704	18.662	14.258	14.099	25.448	5.72	5.344	8.38
+c14_extreme	Canon	extreme	2	Canon_5DSR/field_1_cameras/C_5DSR_field_410.tiff	38.082	30.302	22.281	38.553	72.518	42.628	80.099	27.61	20.791	30.61
+c15_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_485.tiff	0.0	9.192	4.74	9.475	0.0	3.293	6.468	0.0	1.753	1.101
+c15_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_485.tiff	1.788	9.141	4.612	9.696	2.278	2.212	6.787	1.132	1.049	1.244
+c15_extreme	Canon	extreme	2	Canon_5DSR/field_1_cameras/C_5DSR_field_485.tiff	36.979	31.439	9.439	38.502	92.796	9.284	115.127	36.567	1.938	34.746
+c16_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_560.tiff	0.0	7.87	0.631	6.729	0.0	0.296	6.242	0.02	0.079	0.967
+c16_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_560.tiff	2.075	7.828	2.091	6.437	2.404	2.238	5.712	1.575	1.423	0.095
+c16_extreme	Canon	extreme	2	Canon_5DSR/field_1_cameras/C_5DSR_field_560.tiff	38.75	24.078	10.808	48.037	72.111	10.199	104.915	34.621	2.176	30.118
+c17_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_636.tiff	0.0	14.097	3.782	8.908	0.0	3.452	6.479	0.028	1.219	1.442
+c17_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_636.tiff	12.265	18.141	4.853	13.713	23.869	6.088	12.088	14.092	1.33	11.455
+c17_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_636.tiff	31.942	17.605	11.264	30.809	54.938	13.698	51.553	24.745	4.021	24.705
+c18_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_711.tiff	0.0	10.956	3.924	8.69	0.0	1.976	6.241	0.0	1.486	2.136
+c18_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_711.tiff	4.612	10.993	5.662	9.583	6.365	6.233	7.553	3.485	4.026	4.811
+c18_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_711.tiff	32.81	14.86	8.698	28.337	57.838	9.141	45.839	23.576	0.655	14.122
+c19_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_786.tiff	0.0	11.033	0.294	6.904	0.0	0.247	5.272	0.0	0.084	1.435
+c19_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_786.tiff	0.306	11.034	0.396	7.003	0.34	0.389	5.318	0.179	0.131	1.469
+c19_extreme	Canon	extreme	0	Canon_5DSR/field_1_cameras/C_5DSR_field_786.tiff	28.256	14.767	8.563	23.868	51.995	9.942	41.106	25.369	2.047	19.226
+c20_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_862.tiff	0.0	22.937	16.44	9.941	0.0	8.44	7.76	0.02	2.018	1.454
+c20_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_862.tiff	0.239	22.949	16.404	9.947	0.218	8.358	7.743	0.079	1.995	1.439
+c20_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_862.tiff	30.93	30.477	22.078	26.253	56.579	24.168	46.875	21.291	9.042	19.689
+c21_clean	Canon	clean		Canon_5DSR/field_1_cameras/C_5DSR_field_937.tiff	0.0	11.594	3.572	7.447	0.0	3.328	7.135	0.0	1.444	1.938
+c21_daylight	Canon	daylight		Canon_5DSR/field_1_cameras/C_5DSR_field_937.tiff	2.172	11.65	4.33	7.587	2.984	4.959	7.563	1.387	2.22	0.943
+c21_extreme	Canon	extreme	1	Canon_5DSR/field_1_cameras/C_5DSR_field_937.tiff	25.161	18.315	10.571	20.899	47.78	11.729	35.941	21.768	5.315	18.2
+c22_clean	Canon	clean		Canon_5DSR/field_3_cameras/C_5DSR_field3cam_013.tiff	0.0	13.938	3.851	8.273	0.0	2.133	4.839	0.0	0.575	1.013
+c22_daylight	Canon	daylight		Canon_5DSR/field_3_cameras/C_5DSR_field3cam_013.tiff	2.472	14.153	4.388	8.303	2.747	3.807	5.067	0.762	1.049	0.628
+c22_extreme	Canon	extreme	1	Canon_5DSR/field_3_cameras/C_5DSR_field3cam_013.tiff	24.347	17.281	16.107	22.711	49.725	23.97	38.787	21.188	9.999	20.518
+c23_clean	Canon	clean		Canon_5DSR/field_3_cameras/C_5DSR_field3cam_089.tiff	0.0	9.078	2.065	9.059	0.0	0.543	10.729	0.0	0.242	3.746
+c23_daylight	Canon	daylight		Canon_5DSR/field_3_cameras/C_5DSR_field3cam_089.tiff	1.759	9.071	3.049	9.6	2.384	2.103	12.503	1.18	1.201	4.792
+c23_extreme	Canon	extreme	2	Canon_5DSR/field_3_cameras/C_5DSR_field3cam_089.tiff	35.553	24.938	9.293	39.419	85.458	8.655	107.482	35.026	1.505	33.106
+c24_clean	Canon	clean		Canon_5DSR/lab_realscene/C_5DSR_lab_realscene_020.tiff	0.0	9.259	5.448	6.191	0.0	1.802	3.329	0.0	0.673	0.532
+c24_daylight	Canon	daylight		Canon_5DSR/lab_realscene/C_5DSR_lab_realscene_020.tiff	15.027	8.77	11.309	7.637	22.469	13.347	4.884	7.846	5.11	1.122
+c24_extreme	Canon	extreme	2	Canon_5DSR/lab_realscene/C_5DSR_lab_realscene_020.tiff	38.614	38.679	9.757	35.016	109.944	11.24	107.962	35.779	3.041	34.046
+n00_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_001.tiff	0.0	20.076	14.785	14.143	0.0	2.34	7.764	0.0	2.018	1.449
+n00_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_001.tiff	14.048	20.43	13.115	15.311	18.503	3.317	14.015	7.845	0.76	4.136
+n00_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_001.tiff	34.14	23.336	11.124	25.908	70.132	7.575	50.882	27.738	2.265	18.116
+n01_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1004.tiff	0.0	16.117	11.053	16.448	0.0	11.754	14.374	0.0	2.916	4.312
+n01_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1004.tiff	3.182	15.956	9.924	16.682	6.37	9.941	15.921	2.443	2.989	5.868
+n01_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_1004.tiff	58.288	31.212	19.118	34.834	109.545	26.981	62.096	29.488	6.303	14.451
+n02_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1099.tiff	0.0	16.757	4.431	7.079	0.0	6.766	6.427	0.0	4.173	1.939
+n02_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1099.tiff	3.36	16.732	4.575	6.478	6.358	6.817	5.393	3.465	4.222	0.419
+n02_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_1099.tiff	13.569	17.446	7.093	10.774	32.43	10.236	16.083	18.62	5.699	8.162
+n03_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1193.tiff	0.0	16.605	3.757	8.519	0.0	4.158	11.938	0.0	0.745	2.239
+n03_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1193.tiff	1.549	16.46	3.694	15.693	2.918	3.904	18.128	1.418	1.128	8.221
+n03_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_1193.tiff	34.977	21.471	13.61	25.834	71.434	14.418	32.065	27.452	3.865	13.983
+n04_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1287.tiff	0.0	15.1	2.684	10.011	0.0	2.533	11.544	0.0	0.719	3.832
+n04_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1287.tiff	5.057	14.697	4.653	9.065	10.001	5.027	9.79	4.112	1.661	2.003
+n04_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_1287.tiff	15.08	14.136	9.081	11.7	36.78	10.949	18.775	17.759	3.915	9.155
+n05_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1381.tiff	0.0	17.52	9.911	14.507	0.0	1.499	6.545	0.0	0.304	1.342
+n05_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1381.tiff	3.24	17.398	10.45	14.466	3.609	0.991	6.464	1.77	0.198	0.344
+n05_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_1381.tiff	35.07	24.994	11.811	35.06	65.806	5.722	58.191	27.932	1.06	28.129
+n06_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1476.tiff	0.0	25.701	10.734	17.153	0.0	6.218	22.557	0.0	0.97	5.15
+n06_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1476.tiff	3.735	25.33	8.852	14.065	7.171	5.124	17.716	2.69	0.758	4.143
+n06_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_1476.tiff	53.23	37.07	10.444	43.089	106.707	10.739	91.32	30.433	2.58	22.441
+n07_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1570.tiff	0.0	12.022	4.81	8.424	0.0	2.164	4.573	0.0	0.854	0.957
+n07_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1570.tiff	0.602	11.988	4.909	8.258	0.549	2.221	4.462	0.168	0.847	0.893
+n07_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_1570.tiff	18.323	13.186	7.618	17.598	41.191	8.127	27.67	19.756	3.983	16.53
+n08_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1665.tiff	0.0	12.551	6.238	11.014	0.0	3.353	3.726	0.0	1.832	1.618
+n08_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1665.tiff	3.707	12.49	6.687	11.13	4.091	3.222	4.58	1.39	1.9	2.173
+n08_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_1665.tiff	31.987	16.682	8.456	21.525	64.017	8.267	30.482	30.171	4.265	14.6
+n09_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1759.tiff	0.0	28.617	12.084	18.427	0.0	19.444	18.23	0.028	9.12	4.939
+n09_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1759.tiff	2.427	29.321	12.179	17.684	4.012	20.341	15.979	2.296	9.534	2.608
+n09_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_1759.tiff	17.191	23.526	11.649	17.738	35.024	19.499	25.236	19.36	8.32	20.45
+n10_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1853.tiff	0.0	14.448	14.678	10.292	0.0	5.962	2.903	0.0	2.083	0.156
+n10_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1853.tiff	7.652	14.615	16.866	12.164	8.439	7.697	5.325	3.852	3.428	1.586
+n10_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_1853.tiff	28.939	19.014	14.023	19.267	76.582	10.709	45.791	32.694	5.409	21.239
+n11_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_1948.tiff	0.0	18.155	15.953	17.124	0.0	12.504	18.832	0.0	5.101	4.551
+n11_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_1948.tiff	15.823	18.213	17.372	18.99	26.334	21.831	23.639	11.141	11.98	9.403
+n11_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_1948.tiff	44.114	32.184	27.821	36.346	106.027	20.603	100.043	37.74	12.337	28.565
+n12_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_2042.tiff	0.0	17.57	9.658	12.23	0.0	2.896	8.536	0.0	0.0	6.033
+n12_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_2042.tiff	11.513	17.823	10.325	15.523	26.952	6.488	24.094	11.378	1.305	15.387
+n12_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_2042.tiff	15.485	18.821	8.99	19.755	40.989	6.29	31.896	18.148	0.33	21.893
+n13_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_2137.tiff	0.0	10.692	3.974	12.631	0.0	2.794	16.323	0.0	1.654	5.796
+n13_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_2137.tiff	14.253	11.473	10.49	13.512	22.939	14.153	12.914	11.718	7.989	7.246
+n13_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_2137.tiff	30.976	16.981	10.878	22.784	63.74	8.677	47.943	33.064	2.557	22.265
+n14_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_2231.tiff	0.0	16.448	15.678	10.335	0.0	6.086	6.858	0.0	1.986	1.792
+n14_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_2231.tiff	33.629	25.845	19.101	35.41	77.184	22.782	66.399	30.89	8.794	37.368
+n14_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_2231.tiff	40.846	36.853	12.04	31.971	117.809	8.885	114.175	38.917	1.663	34.998
+n15_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_2326.tiff	0.0	23.245	8.86	12.06	0.0	5.308	12.014	0.028	1.644	5.972
+n15_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_2326.tiff	17.183	19.003	10.06	21.675	50.646	13.957	33.084	24.737	4.78	26.327
+n15_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_2326.tiff	15.484	15.653	6.7	17.252	42.529	5.93	35.242	18.293	0.276	22.802
+n16_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_332.tiff	0.0	10.928	11.71	13.311	0.0	5.546	13.516	0.02	2.102	8.92
+n16_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_332.tiff	25.277	13.751	16.32	13.578	38.548	22.926	18.565	16.435	14.33	9.424
+n16_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_332.tiff	37.822	35.854	28.27	34.748	108.828	22.004	109.294	39.874	13.545	35.445
+n17_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_436.tiff	0.0	11.874	6.539	9.622	0.0	3.142	15.568	0.02	1.876	8.312
+n17_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_436.tiff	3.338	11.975	6.472	8.64	5.646	2.777	15.735	2.986	1.056	5.434
+n17_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_436.tiff	22.052	13.676	16.524	18.259	42.885	28.476	33.96	21.236	14.782	18.848
+n18_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_540.tiff	0.0	8.752	3.242	5.147	0.0	4.591	4.48	0.0	2.924	2.101
+n18_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_540.tiff	3.436	8.743	4.566	4.556	4.66	6.694	4.36	2.922	4.285	1.182
+n18_extreme	Nikon	extreme	0	Nikon_D810/field_1_cameras/N_D810_field_540.tiff	30.169	16.428	10.362	26.059	50.819	9.631	40.56	29.41	3.831	16.487
+n19_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_644.tiff	0.0	20.188	23.695	15.31	0.0	4.212	5.721	0.0	1.761	1.554
+n19_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_644.tiff	2.844	20.392	24.662	15.073	3.249	4.653	5.355	1.123	0.624	0.715
+n19_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_644.tiff	43.743	45.874	12.404	35.444	114.646	7.343	115.944	39.376	1.716	35.055
+n20_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_748.tiff	0.0	14.67	12.522	11.617	0.0	2.617	7.982	0.02	2.189	2.08
+n20_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_748.tiff	3.841	15.252	12.311	11.167	5.771	7.148	10.088	2.272	4.435	3.916
+n20_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_748.tiff	18.159	20.202	10.318	21.769	46.04	6.363	48.707	17.995	2.403	23.668
+n21_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_851.tiff	0.0	14.453	9.842	10.963	0.0	3.567	5.904	0.02	1.755	0.252
+n21_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_851.tiff	5.804	14.018	11.309	10.828	8.491	9.887	8.409	3.363	5.075	2.91
+n21_extreme	Nikon	extreme	2	Nikon_D810/field_1_cameras/N_D810_field_851.tiff	47.734	41.037	16.101	42.265	113.382	11.921	113.369	36.737	3.677	32.997
+n22_clean	Nikon	clean		Nikon_D810/field_1_cameras/N_D810_field_955.tiff	0.0	11.516	2.869	6.591	0.0	1.447	3.165	0.0	0.573	0.131
+n22_daylight	Nikon	daylight		Nikon_D810/field_1_cameras/N_D810_field_955.tiff	2.042	11.475	2.81	6.731	2.512	1.187	3.323	1.098	0.419	0.532
+n22_extreme	Nikon	extreme	1	Nikon_D810/field_1_cameras/N_D810_field_955.tiff	17.509	13.244	6.746	15.5	36.15	5.875	22.393	19.619	1.399	15.851
+n23_clean	Nikon	clean		Nikon_D810/field_3_cameras/N_D810_field3cam_060.tiff	0.0	11.055	2.141	10.537	0.0	0.829	8.134	0.0	0.558	2.26
+n23_daylight	Nikon	daylight		Nikon_D810/field_3_cameras/N_D810_field3cam_060.tiff	16.715	14.841	8.887	18.139	33.95	11.005	28.245	15.839	4.698	17.924
+n23_extreme	Nikon	extreme	0	Nikon_D810/field_3_cameras/N_D810_field3cam_060.tiff	33.156	17.494	8.557	28.507	61.021	6.674	54.442	26.921	0.655	20.79
+n24_clean	Nikon	clean		Nikon_D810/lab_realscene/N_D810_lab_realscene_020.tiff	0.0	8.12	4.923	5.628	0.0	1.886	2.285	0.0	0.525	0.114
+n24_daylight	Nikon	daylight		Nikon_D810/lab_realscene/N_D810_lab_realscene_020.tiff	19.467	11.46	9.715	10.09	32.338	11.221	9.596	12.029	3.69	3.9
+n24_extreme	Nikon	extreme	2	Nikon_D810/lab_realscene/N_D810_lab_realscene_020.tiff	41.459	35.25	13.421	35.356	110.933	10.912	106.305	38.154	3.569	34.163
+s00_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_001.tiff	0.0	13.726	14.789	10.199	0.0	3.933	7.753	0.0	1.424	0.967
+s00_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_001.tiff	25.656	20.806	13.12	26.625	54.341	11.843	46.219	21.958	4.411	23.583
+s00_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_001.tiff	38.04	23.03	14.613	29.831	89.543	10.928	64.706	29.143	4.153	19.437
+s01_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_077.tiff	0.0	10.991	2.955	5.64	0.0	1.926	5.22	0.0	0.691	0.894
+s01_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_077.tiff	7.115	10.797	6.889	6.92	10.279	9.13	4.859	4.325	3.736	1.732
+s01_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_077.tiff	21.185	16.172	9.909	20.253	49.161	13.265	44.729	28.009	5.811	28.526
+s02_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1048.tiff	0.0	11.67	7.821	10.106	0.0	1.958	4.429	0.02	0.942	0.219
+s02_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1048.tiff	3.17	11.733	9.639	10.645	2.973	3.234	4.837	1.661	1.951	0.929
+s02_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1048.tiff	38.508	33.652	9.39	36.833	102.52	7.986	118.978	39.716	2.531	36.032
+s03_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1116.tiff	0.0	14.738	12.578	16.209	0.0	2.033	10.181	0.0	0.892	3.556
+s03_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1116.tiff	3.663	14.82	13.149	15.995	3.857	3.034	10.584	1.704	0.886	3.251
+s03_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1116.tiff	48.171	44.902	8.294	44.278	115.752	7.157	120.555	39.674	0.465	36.027
+s04_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1185.tiff	0.0	24.619	14.332	12.33	0.0	10.001	12.503	0.0	2.906	1.439
+s04_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1185.tiff	11.223	23.08	14.0	16.751	28.991	11.35	42.138	12.356	3.543	21.217
+s04_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1185.tiff	42.54	29.073	13.178	38.432	76.949	12.269	72.614	27.546	3.612	22.327
+s05_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1254.tiff	0.0	11.99	2.492	9.022	0.0	0.429	6.95	0.02	0.386	1.903
+s05_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1254.tiff	3.363	12.218	3.71	8.817	3.98	3.602	6.712	2.418	2.364	0.928
+s05_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1254.tiff	23.624	16.287	9.789	26.354	45.606	8.56	43.001	27.854	3.445	32.472
+s06_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1323.tiff	0.0	7.303	2.827	4.502	0.0	0.322	4.161	0.028	0.208	0.473
+s06_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1323.tiff	10.529	7.572	8.604	8.354	13.925	10.525	9.724	7.135	5.583	5.1
+s06_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1323.tiff	30.882	24.742	8.314	31.67	87.968	7.784	112.474	38.528	1.138	35.268
+s07_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1392.tiff	0.0	8.922	0.381	3.675	0.0	0.129	1.992	0.0	0.066	0.416
+s07_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1392.tiff	18.111	11.183	4.896	15.859	39.511	4.914	25.032	25.956	0.818	21.38
+s07_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1392.tiff	30.689	14.911	6.858	21.412	57.225	6.987	34.601	29.588	2.099	15.098
+s08_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1460.tiff	0.0	13.774	2.723	8.261	0.0	1.825	6.237	0.02	0.499	1.535
+s08_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1460.tiff	7.78	13.509	6.224	8.172	11.5	7.696	9.068	5.181	3.755	2.887
+s08_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1460.tiff	33.511	18.66	10.401	25.331	68.777	14.146	51.875	29.24	5.741	19.104
+s09_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_153.tiff	0.0	11.611	2.902	11.137	0.0	1.921	12.061	0.0	0.422	4.37
+s09_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_153.tiff	17.944	16.728	5.646	19.793	47.766	3.903	46.726	21.917	0.18	26.379
+s09_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_153.tiff	21.155	19.787	8.115	20.289	58.728	7.656	45.024	30.438	1.385	28.608
+s10_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1599.tiff	0.0	9.989	2.89	9.461	0.0	1.104	7.042	0.028	0.721	2.474
+s10_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1599.tiff	2.187	10.115	3.913	9.498	2.482	2.826	7.553	1.398	1.851	3.507
+s10_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_1599.tiff	43.261	30.935	8.83	43.972	94.278	7.485	116.042	38.853	2.124	33.517
+s11_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_178.tiff	0.0	6.923	0.739	7.99	0.0	0.594	6.866	0.0	0.271	5.369
+s11_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_178.tiff	5.64	7.114	3.269	8.457	6.949	3.739	8.687	4.913	2.776	7.023
+s11_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_178.tiff	26.637	11.538	6.041	19.667	42.934	6.976	27.746	29.69	1.572	16.855
+s12_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_254.tiff	0.0	13.701	6.255	13.378	0.0	2.28	9.2	0.0	2.049	3.096
+s12_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_254.tiff	3.727	13.789	7.192	13.15	3.999	2.322	9.191	1.252	2.143	2.544
+s12_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_254.tiff	19.944	16.98	13.634	21.696	51.367	24.028	38.278	27.812	13.551	29.394
+s13_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_329.tiff	0.0	10.604	4.148	9.777	0.0	1.089	9.78	0.0	0.416	3.644
+s13_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_329.tiff	7.358	10.647	8.791	9.196	10.925	10.64	8.179	4.934	5.157	1.423
+s13_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_329.tiff	26.156	17.955	14.622	25.219	56.518	21.36	38.765	27.836	10.23	25.297
+s14_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_405.tiff	0.0	28.578	15.219	13.342	0.0	10.53	10.758	0.028	2.334	8.081
+s14_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_405.tiff	3.38	28.373	14.863	13.692	7.684	10.041	21.49	3.165	2.086	14.402
+s14_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_405.tiff	56.352	43.162	11.938	53.0	117.268	14.379	120.706	35.565	4.402	31.213
+s15_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_481.tiff	0.0	25.248	13.827	9.918	0.0	4.679	6.866	0.02	0.182	3.056
+s15_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_481.tiff	4.274	25.111	13.88	11.936	7.413	3.37	9.662	2.808	1.189	0.465
+s15_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_481.tiff	46.767	40.396	9.638	31.221	85.423	7.257	47.984	27.024	1.263	14.275
+s16_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_557.tiff	0.0	15.161	7.379	10.277	0.0	6.082	7.816	0.0	1.623	1.744
+s16_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_557.tiff	6.015	13.846	6.117	9.576	12.846	5.677	7.787	5.12	1.575	3.793
+s16_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_557.tiff	19.681	20.834	12.521	20.84	56.537	17.183	59.125	28.915	6.61	30.103
+s17_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_632.tiff	0.0	24.282	18.183	19.87	0.0	9.749	8.819	0.0	0.858	5.541
+s17_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_632.tiff	9.183	24.847	20.01	25.127	16.249	13.07	22.056	7.26	2.855	6.577
+s17_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_632.tiff	24.703	23.578	18.035	37.985	52.536	25.821	70.612	27.372	7.181	34.401
+s18_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_708.tiff	0.0	13.931	9.179	11.669	0.0	0.936	6.687	0.0	0.854	0.719
+s18_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_708.tiff	4.453	14.136	9.653	11.697	4.927	2.356	7.168	1.412	0.502	1.042
+s18_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_708.tiff	43.869	38.248	12.704	39.441	110.046	10.962	116.714	38.42	2.668	34.937
+s19_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_784.tiff	0.0	15.623	5.74	15.563	0.0	6.606	17.577	0.028	2.194	6.876
+s19_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_784.tiff	5.848	13.761	6.887	12.968	12.643	9.071	11.468	4.982	3.234	3.033
+s19_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_784.tiff	44.205	26.207	10.833	31.614	82.472	13.517	44.744	27.575	5.304	17.879
+s20_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_860.tiff	0.0	18.991	16.799	14.676	0.0	4.333	7.086	0.0	0.194	1.649
+s20_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_860.tiff	3.938	18.366	15.597	15.733	6.798	3.729	12.337	2.75	0.196	6.683
+s20_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_860.tiff	21.003	23.783	11.084	43.488	60.97	7.697	104.64	30.131	2.347	27.34
+s21_clean	Sony	clean		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_936.tiff	0.0	21.77	15.283	16.866	0.0	6.164	9.579	0.02	2.024	0.805
+s21_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_936.tiff	1.614	21.753	15.008	16.165	1.784	6.641	9.127	0.732	2.026	0.875
+s21_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_1_cameras/S_IMX135_BLCCSC_field_936.tiff	57.268	38.134	13.387	55.644	116.17	13.43	128.034	39.516	3.596	36.4
+s22_clean	Sony	clean		Sony_IMX135_BLCCSC/field_3_cameras/S_IMX135_BLCCSC_field3cam_012.tiff	0.0	18.48	9.757	14.648	0.0	4.774	8.007	0.0	1.044	2.34
+s22_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_3_cameras/S_IMX135_BLCCSC_field3cam_012.tiff	6.596	19.641	8.764	15.089	12.28	6.568	9.4	6.074	4.398	8.788
+s22_extreme	Sony	extreme	2	Sony_IMX135_BLCCSC/field_3_cameras/S_IMX135_BLCCSC_field3cam_012.tiff	53.658	35.616	16.867	52.505	108.217	13.515	117.83	38.418	2.801	37.232
+s23_clean	Sony	clean		Sony_IMX135_BLCCSC/field_3_cameras/S_IMX135_BLCCSC_field3cam_088.tiff	0.0	7.665	2.777	4.866	0.0	0.824	4.096	0.0	0.303	0.927
+s23_daylight	Sony	daylight		Sony_IMX135_BLCCSC/field_3_cameras/S_IMX135_BLCCSC_field3cam_088.tiff	5.848	7.967	5.968	5.681	6.752	6.796	4.07	3.828	3.834	1.523
+s23_extreme	Sony	extreme	0	Sony_IMX135_BLCCSC/field_3_cameras/S_IMX135_BLCCSC_field3cam_088.tiff	29.938	14.796	10.009	24.366	69.716	8.498	62.118	31.79	4.43	22.649
+s24_clean	Sony	clean		Sony_IMX135_BLCCSC/lab_realscene/S_IMX135_BLCCSC_lab_realscene_020.tiff	0.0	11.59	8.56	8.498	0.0	4.917	3.346	0.028	1.878	0.13
+s24_daylight	Sony	daylight		Sony_IMX135_BLCCSC/lab_realscene/S_IMX135_BLCCSC_lab_realscene_020.tiff	21.32	12.422	14.421	15.143	35.614	16.485	16.515	12.853	6.404	7.31
+s24_extreme	Sony	extreme	1	Sony_IMX135_BLCCSC/lab_realscene/S_IMX135_BLCCSC_lab_realscene_020.tiff	27.692	20.012	10.532	28.633	63.544	11.342	49.547	25.786	3.389	27.058

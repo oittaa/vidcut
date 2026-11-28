@@ -60,9 +60,8 @@ fn files_without_audio_tracks_bring_media_audio() {
         .with("/media/A002.mov", media_info(10.0, fps, false));
     f.ok(req("timeline.delete", json!({ "timeline": "t1" })));
     f.ok(req("timeline.import", json!({ "otio": doc })));
-    let p = f.editor.project();
-    assert_eq!(p.clip("c1").unwrap().audio_range(), Some((0, 48)));
-    assert!(p.clip("c2").unwrap().audio.is_none(), "A002 has no audio");
+    assert_eq!(f.sound("c1"), Some((0, 48)));
+    assert!(f.sound("c2").is_none(), "A002 has no audio");
     let _ = (AudioInfo::clone, MediaInfo::clone);
 }
 
@@ -454,7 +453,7 @@ fn keyed_pan_round_trips_without_vidcut_metadata() {
     let mut other = Fixture::new(&[(10.0, true)]);
     let res = other.ok(req("timeline.import", json!({"otio": doc})));
     assert_eq!(res.result["warnings"], json!([]));
-    let a = other.editor.project().tracks[0].clips[0]
+    let a = other.editor.project().track("A1").unwrap().clips[0]
         .audio
         .as_ref()
         .expect("audio");
@@ -489,7 +488,7 @@ fn disabled_keyed_pan_round_trips_without_vidcut_metadata() {
     let mut other = Fixture::new(&[(10.0, true)]);
     let res = other.ok(req("timeline.import", json!({"otio": doc})));
     assert_eq!(res.result["warnings"], json!([]));
-    let a = other.editor.project().tracks[0].clips[0]
+    let a = other.editor.project().track("A1").unwrap().clips[0]
         .audio
         .as_ref()
         .expect("audio");
@@ -516,7 +515,7 @@ fn keyed_centered_pan_round_trips_with_vidcut_metadata() {
     let mut other = Fixture::new(&[(10.0, true)]);
     let res = other.ok(req("timeline.import", json!({"otio": written(&f)})));
     assert_eq!(res.result["warnings"], json!([]));
-    let a = other.editor.project().tracks[0].clips[0]
+    let a = other.editor.project().track("A1").unwrap().clips[0]
         .audio
         .as_ref()
         .expect("audio");
@@ -875,7 +874,7 @@ fn an_equalizer_survives_a_stripped_otio_round_trip() {
             },
         }),
     ));
-    let original = f.editor.project().tracks[0].clips[0]
+    let original = f.editor.project().track("A1").unwrap().clips[0]
         .audio
         .as_ref()
         .unwrap()
@@ -885,7 +884,7 @@ fn an_equalizer_survives_a_stripped_otio_round_trip() {
     strip_vidcut(&mut doc);
     let mut other = Fixture::new(&[(10.0, true)]);
     let ans = other.ok(req("timeline.import", json!({"otio": doc})));
-    let imported = other.editor.project().tracks[0].clips[0]
+    let imported = other.editor.project().track("A1").unwrap().clips[0]
         .audio
         .as_ref()
         .unwrap()
@@ -1105,7 +1104,7 @@ fn a_compound_clip_opened_from_a_bundle_plays_the_bundles_media() {
         .flat_map(|t| &t.clips)
         .map(|c| c.media.as_str())
         .collect();
-    assert_eq!((p.media.len(), played), (1, vec!["m1"]));
+    assert_eq!((p.media.len(), played), (1, vec!["m1", "m1"]));
 }
 
 fn opened_bundle(f: &Fixture) -> Fixture {
@@ -1183,7 +1182,7 @@ fn a_clip_relinked_in_the_file_takes_the_files_media() {
 }
 
 #[test]
-fn a_clip_that_overlaps_another_on_its_track_is_left_out() {
+fn each_audio_track_of_a_file_is_its_own_track() {
     let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": v});
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
     let music = json!({"OTIO_SCHEMA": "Clip.1", "name": "Music", "source_range": r(0.0, 48.0),
@@ -1199,13 +1198,13 @@ fn a_clip_that_overlaps_another_on_its_track_is_left_out() {
             a1(json!([{"OTIO_SCHEMA": "Gap.1", "source_range": r(0.0, 24.0)}, music])),
         ]},
     });
-    let starts: Vec<i64> = import(&doc, None)
+    let placed: Vec<(String, i64)> = import(&doc, None)
         .unwrap()
         .clips
         .iter()
-        .map(|c| c.start)
+        .map(|c| (c.track.clone(), c.start))
         .collect();
-    assert_eq!(starts, [0]);
+    assert_eq!(placed, [("A1".to_string(), 0), ("A2".to_string(), 24)]);
 }
 
 fn dissolve() -> Value {
@@ -1238,7 +1237,7 @@ fn a_split_before_a_dissolve_changes_only_the_dissolve() {
     let track = &timeline["tracks"]["items"]["changed"]["V1"]["fields"];
     assert_eq!(
         track["transitions"],
-        json!({"items": {"changed": {"t1": {"fields": {"from": {"set": {"was": "c1", "is": "c3"}}}}}}})
+        json!({"items": {"changed": {"t1": {"fields": {"from": {"set": {"was": "c1", "is": "c5"}}}}}}})
     );
 }
 

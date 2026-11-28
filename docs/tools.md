@@ -285,8 +285,10 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
   - A check against a PyTorch version of a model reads them.
 - `VIDCUT_MASK_DUMP=DIR` makes the Magic Mask model write its stages as `.npy` files into `DIR`, all float, `[H, W, C]`.
-  - `image.npy`: the input at the model size, normalized. `feat-s0.npy` and `feat-s1.npy`: the high-resolution features. `embedding.npy`: the image embedding.
+  - `image.npy`: the input at the model size, normalized. `feat-s0.npy` and `feat-s1.npy`: the high-resolution features. `vision.npy`: the image features.
+  - In a track, each frame writes these four files with its step number, for example `image-3.npy`. Step 0 is the frame of the clicks.
   - `masks-N.npy` and `scores-N.npy`, for each subject: the 256 × 256 logits of the four outputs, then their predicted overlaps and the object score.
+  - `N` counts the decodes of the run, from 0.
   - The scripts in the sam2 folder of the test data compare them with the official SAM 2.1 code.
 - `VIDCUT_SUBJECTS_DUMP=DIR` makes `motion.find` write what the model gets and what it finds as `.npy` files into `DIR`.
   - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
@@ -319,8 +321,11 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   4. Run `vidcut models check MODEL --download`, then the commit gate.
   5. The pull request lists each changed field: the old value, the new value and the source.
 
-- **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` from scratch.
-  - Datasets: SimpleCube++ (`train`, Zenodo record 4153431, CC BY 4.0), YouTube UGC (`ugc-*`, CC BY 4.0) and `tests/media-manifest.toml` clips.
-  - Manifest clips used: `tos-720p-mov` (CC BY 3.0), `stab-night-market` and `stab-dashcam` (CC0), and `stab-road-4k`, `stab-moto`, `stab-rally` and `stab-crowd-4k` (CC BY 4.0).
-  - Extract evenly spaced PNG frames per clip, excluding test clips, and name files `<clip>_<frame>.png`.
-  - Run `python scripts/auto-color-train.py --simplecube DIR/SimpleCube++ --frames DIR/frames --exclude-dir DIR/holdout --out crates/vidcut-av/src/auto_color.safetensors`.
+- **Auto Color training:** `scripts/auto-color-train.py` trains `crates/vidcut-av/src/auto_color.safetensors` deterministically.
+  - Run `python scripts/auto-color-train.py`.
+  - When absent, the script downloads and verifies about 11.6 GB of data into `$VIDCUT_TEST_DATA/auto-color/`:
+    - SimpleCube++ `train` (`CC BY 4.0`, Zenodo record 4153431).
+    - `marcosv/rgb2raw` (`MIT`).
+    - Four `CommonCatalog CC-BY` shards (`CC BY 4.0`).
+  - Exact weights match only on the same GPU and library versions (recorded with the SHA-256 in `tests/auto-color/summary.json`).
+  - Benchmark tables and DaVinci Resolve 21.2 baselines live in `tests/auto-color/summary.json`, `tests/auto-color/simplecube-test.tsv`, `tests/auto-color/intel-tau-225.tsv`, and `tests/auto-color/resolve-compare-100.tsv`.

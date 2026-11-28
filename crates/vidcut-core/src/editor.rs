@@ -2,7 +2,7 @@ use crate::validate::{GAIN, PAN};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
@@ -13,11 +13,12 @@ use crate::analysis::{
 use crate::change::Change;
 use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
-use crate::history::HistoryFile;
+use crate::history::{Added, EntryCache, HistoryDb};
+use crate::lru::ByBytes;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
-    Media, MediaInfo, Picture, Project, Proxy, Subject, Timeline, Title, Track, TrackKind,
-    Transition, VideoInfo, WordsChange,
+    Media, MediaInfo, Picture, Project, Proxy, Subject, SubtitleTrack, Timeline, Title, Track,
+    TrackKind, Transition, VideoInfo, WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -27,6 +28,7 @@ use crate::request::{
     ImportMode, NewTrack, OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
 use crate::retime;
+use crate::shared::{Shared, SharedVec};
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode, rescale};
 use crate::transcript::{self, Speech};
@@ -151,10 +153,22 @@ pub trait Env {
     fn subject_masks(
         &self,
         plan: &RenderPlan,
+        size: crate::masks::Size,
         subjects: &[Vec<crate::masks::Point>],
         download: bool,
     ) -> Result<Vec<Arc<[f32]>>> {
-        let _ = (plan, subjects, download);
+        let _ = (plan, size, subjects, download);
+        Err(Error::usage(
+            "the Magic Mask reads the picture in the vidcut program",
+        ))
+    }
+
+    fn subject_tracks(
+        &self,
+        need: &TrackNeed,
+        each: &mut dyn FnMut(i64, Vec<Arc<[f32]>>) -> Result<()>,
+    ) -> Result<()> {
+        let _ = (need, each);
         Err(Error::usage(
             "the Magic Mask reads the picture in the vidcut program",
         ))
@@ -455,6 +469,7 @@ pub enum Moved {
 }
 
 pub const HISTORY_CAP: usize = 1 << 17;
+pub const HISTORY_ENTRIES_BYTES: usize = 32 << 20;
 
 pub const EXTERNAL: &str = "Changed outside vidcut";
 
@@ -470,9 +485,12 @@ pub struct Editor {
     project: Project,
     history: History,
     moved: Vec<Moved>,
-    pub(crate) file: Option<(HistoryFile, String)>,
+    pub(crate) db: Option<HistoryDb>,
+    base_counts: (usize, usize),
+    db_generation: u64,
+    saved: Option<Project>,
+    entry_cache: EntryCache,
     opened: Option<u64>,
-    blocked: Option<(String, String)>,
 }
 
 fn now_ms() -> u64 {
@@ -488,44 +506,12 @@ impl Editor {
             project,
             history,
             moved: Vec::new(),
-            file: None,
+            db: None,
+            base_counts: (0, 0),
+            db_generation: 0,
+            saved: None,
+            entry_cache: Mutex::new(ByBytes::new()),
             opened: None,
-            blocked: None,
-        }
-    }
-
-    pub(crate) fn unreadable(project: Project, hash: String, why: String) -> Self {
-        Self {
-            blocked: Some((hash, why)),
-            ..Self::new(project, History::default())
-        }
-    }
-
-    pub fn history_trouble(&self) -> Option<&str> {
-        self.blocked.as_ref().map(|(_, why)| why.as_str())
-    }
-
-    pub(crate) fn blocked_on(&self) -> Option<&str> {
-        self.blocked.as_ref().map(|(hash, _)| hash.as_str())
-    }
-
-    pub(crate) fn stands_on(&self) -> Option<&str> {
-        match (&self.file, &self.blocked) {
-            (Some((_, hash)), _) | (None, Some((hash, _))) => Some(hash),
-            (None, None) => None,
-        }
-    }
-
-    pub(crate) fn block(&mut self, why: String) {
-        if let Some((_, hash)) = self.file.take() {
-            for m in &self.moved {
-                if let Moved::Step(e) = m {
-                    self.history.undo.push((**e).clone());
-                }
-            }
-            self.blocked = Some((hash, why));
-        } else if let Some((_, was)) = &mut self.blocked {
-            *was = why;
         }
     }
 
@@ -533,10 +519,25 @@ impl Editor {
         self.opened = Some(ms);
     }
 
-    pub(crate) fn on_file(project: Project, file: HistoryFile, hash: String) -> Self {
+    pub(crate) fn on_db(
+        project: Project,
+        db: HistoryDb,
+        base_counts: (usize, usize),
+        db_generation: u64,
+        saved: Option<Project>,
+    ) -> Self {
         Self {
-            file: Some((file, hash)),
+            db: Some(db),
+            base_counts,
+            db_generation,
+            saved,
             ..Self::new(project, History::default())
+        }
+    }
+
+    pub fn close_db(&self) {
+        if let Some(db) = &self.db {
+            db.close();
         }
     }
 
@@ -544,29 +545,56 @@ impl Editor {
         &self.project
     }
 
-    pub(crate) fn project_mut(&mut self) -> &mut Project {
-        &mut self.project
+    pub(crate) fn saved_state(&self) -> Option<&Project> {
+        self.saved.as_ref()
+    }
+
+    pub(crate) fn has_db(&self) -> bool {
+        self.db.is_some()
+    }
+
+    pub(crate) fn db_generation(&self) -> u64 {
+        self.db_generation
     }
 
     pub(crate) fn held(&self) -> &History {
         &self.history
     }
 
-    pub(crate) fn take_moved(&mut self) -> Vec<Moved> {
-        std::mem::take(&mut self.moved)
+    pub(crate) fn moved(&self) -> &[Moved] {
+        &self.moved
     }
 
-    pub(crate) fn saved_to(&mut self, file: HistoryFile, hash: String) {
+    pub(crate) fn commit_saved(
+        &mut self,
+        db: HistoryDb,
+        base_counts: (usize, usize),
+        db_generation: u64,
+        project: Project,
+        added: Vec<Added>,
+    ) {
+        self.moved.clear();
         self.history = History::default();
-        self.file = Some((file, hash));
-        self.blocked = None;
+        if self.db.as_ref().is_none_or(|d| d.path() != db.path()) {
+            self.db = Some(db);
+        }
+        self.base_counts = base_counts;
+        self.db_generation = db_generation;
+        self.saved = Some(project);
+        if !added.is_empty() {
+            let mut cache = self.entry_cache.lock().unwrap_or_else(|e| e.into_inner());
+            for (seq, entry, bytes) in added {
+                cache.insert((db_generation, seq), entry, bytes);
+            }
+            cache.fit(HISTORY_ENTRIES_BYTES);
+        }
     }
 
     pub fn history_counts(&self) -> (usize, usize) {
-        let Some((file, _)) = &self.file else {
+        let Some(_) = &self.db else {
             return (self.history.undo.len(), self.history.redo.len());
         };
-        let (mut u, mut r) = file.tail().map_or((0, 0), |(t, _)| (t.undo, t.redo));
+        let (mut u, mut r) = self.base_counts;
         for m in &self.moved {
             match m {
                 Moved::Step(_) => (u, r) = (u + 1, 0),
@@ -593,11 +621,15 @@ impl Editor {
     }
 
     pub fn on_its_file(&self) -> bool {
-        self.file.is_some() && self.moved.is_empty()
+        self.db.is_some() && self.moved.is_empty()
     }
 
     pub fn history_view(&self, n: usize) -> Result<History> {
-        let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
+        let (undo, redo) = self.view(
+            n,
+            |db, nu, nr| db.top(nu, nr, Some(&self.entry_cache)),
+            Entry::clone,
+        )?;
         Ok(History {
             undo,
             redo,
@@ -606,12 +638,12 @@ impl Editor {
     }
 
     pub fn history_labels(&self, n: usize) -> Result<Labels> {
-        let (undo, redo) = self.view(n, HistoryFile::top_labels, |e| e.step.label.clone())?;
+        let (undo, redo) = self.view(n, HistoryDb::top_labels, |e| e.step.label.clone())?;
         Ok(Labels { undo, redo })
     }
 
     pub fn history_steps(&self, cache: &mut StepsCache) -> Result<Steps> {
-        let Some((file, _)) = &self.file else {
+        let Some(db) = &self.db else {
             let mut steps = Steps::default();
             for e in &self.history.undo {
                 steps.place(e.step.clone());
@@ -626,13 +658,7 @@ impl Editor {
             }
             return Ok(steps);
         };
-        let unreadable = |e: std::io::Error| {
-            Error::internal(format!(
-                "the undo history {} can't be read: {e}",
-                file.path().display()
-            ))
-        };
-        let mut steps = match file.steps_now(cache).map_err(unreadable)? {
+        let mut steps = match db.steps_now(cache)? {
             true => cache.steps.clone(),
             false => Steps::default(),
         };
@@ -687,19 +713,10 @@ impl Editor {
         if lo == hi {
             return Ok(Vec::new());
         }
-        if let Some((file, _)) = &self.file
+        if let Some(db) = &self.db
             && self.moved.is_empty()
         {
-            let unreadable = |e: std::io::Error| {
-                Error::internal(format!(
-                    "the undo history {} can't be read: {e}",
-                    file.path().display()
-                ))
-            };
-            let Some((tail, end)) = file.read_tail().map_err(unreadable)? else {
-                return Err(Error::internal("the undo history is gone"));
-            };
-            return file.between(&tail, end, lo, hi).map_err(unreadable);
+            return db.between(lo, hi, Some(&self.entry_cache));
         }
         if hi <= u {
             let h = self.history_view(u - lo)?;
@@ -713,39 +730,21 @@ impl Editor {
     fn view<T: Clone>(
         &self,
         n: usize,
-        top: impl Fn(
-            &HistoryFile,
-            &crate::history::Tail,
-            u64,
-            usize,
-            usize,
-        ) -> std::io::Result<(Vec<T>, Vec<T>)>,
+        top: impl Fn(&HistoryDb, usize, usize) -> Result<(Vec<T>, Vec<T>)>,
         of: impl Fn(&Entry) -> T,
     ) -> Result<(Vec<T>, Vec<T>)> {
         let newest = |v: &[T]| v[v.len().saturating_sub(n)..].to_vec();
-        let Some((file, _)) = &self.file else {
+        let Some(db) = &self.db else {
             let all = |v: &[Entry]| v.iter().map(&of).collect::<Vec<_>>();
             return Ok((
                 newest(&all(&self.history.undo)),
                 newest(&all(&self.history.redo)),
             ));
         };
-        let unreadable = |e: std::io::Error| {
-            Error::internal(format!(
-                "the undo history {} can't be read: {e}",
-                file.path().display()
-            ))
-        };
         let k = n + self.moved.len();
-        let (mut undo, mut redo) = match file.read_tail().map_err(unreadable)? {
-            Some((tail, end)) => {
-                let (mut undo, mut redo) = top(file, &tail, end, k, k).map_err(unreadable)?;
-                undo.reverse();
-                redo.reverse();
-                (undo, redo)
-            }
-            None => (Vec::new(), Vec::new()),
-        };
+        let (mut undo, mut redo) = top(db, k, k)?;
+        undo.reverse();
+        redo.reverse();
         for m in &self.moved {
             match m {
                 Moved::Step(e) => {
@@ -761,7 +760,7 @@ impl Editor {
     }
 
     fn push(&mut self, mut entry: Entry) {
-        if self.file.is_none() && entry.step.id.is_none() {
+        if self.db.is_none() && entry.step.id.is_none() {
             let next = self
                 .history
                 .undo
@@ -774,7 +773,7 @@ impl Editor {
             entry.step.id = Some(next);
         }
         self.moved.push(Moved::Step(Box::new(entry.clone())));
-        if self.file.is_none() {
+        if self.db.is_none() {
             self.history.undo.push(entry);
             self.history.redo.clear();
             let over = over(self.history.undo.len());
@@ -829,11 +828,7 @@ impl Editor {
                 result,
                 dry_run: false,
                 via: String::new(),
-                warnings: self
-                    .history_trouble()
-                    .map(String::from)
-                    .into_iter()
-                    .collect(),
+                warnings: Vec::new(),
             });
         }
         if !request.is_mutation() {
@@ -1011,7 +1006,7 @@ impl Editor {
                 }),
                 None => Moved::Unmark(id),
             };
-            if self.file.is_none() {
+            if self.db.is_none() {
                 self.history.marks.retain(|m| m.step != id);
                 if let Moved::Mark(m) = &moved {
                     self.history.marks.push(m.clone());
@@ -1030,7 +1025,7 @@ impl Editor {
     }
 
     fn restore(&mut self, id: u64, dry_run: bool) -> Result<Response> {
-        if self.file.is_none() {
+        if self.db.is_none() {
             return Err(Error::invalid(
                 "this project's undo history isn't saved yet, so it keeps no versions",
             ));
@@ -1099,19 +1094,10 @@ impl Editor {
                 "no version {id}: history.get lists them in branches"
             ))
         };
-        let Some((file, _)) = &self.file else {
+        let Some(db) = &self.db else {
             return Err(missing());
         };
-        match file.tail() {
-            Some((_, end)) => file.chain(end, id).map_err(|e| {
-                Error::internal(format!(
-                    "the undo history {} can't be read: {e}",
-                    file.path().display()
-                ))
-            })?,
-            None => None,
-        }
-        .ok_or_else(missing)
+        db.chain(id)?.ok_or_else(missing)
     }
 
     fn revert(&mut self, step: usize, client: Option<Client>, dry_run: bool) -> Result<Response> {
@@ -1265,7 +1251,7 @@ impl Editor {
         #[cfg(debug_assertions)]
         let mut json = to_json(&self.project);
         let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
-        let mut history = match self.file {
+        let mut history = match self.db {
             None => self.history.clone(),
             Some(_) => self.history_view(steps as usize)?,
         };
@@ -1339,7 +1325,7 @@ impl Editor {
         project.rev = self.project.rev + 1;
         project.edited = Some(now_ms());
         self.project = project;
-        if self.file.is_none() {
+        if self.db.is_none() {
             self.history = history;
         }
         self.moved.push(if undo {
@@ -1408,7 +1394,9 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     let lists = [
         (
             "media",
-            Change::of_items(&mut media.0, &mut media.1, |m| &m.id, leaf),
+            diff_vec(&mut media.0, &mut media.1, |a, b| {
+                Change::of_items(a, b, |m| &m.id, leaf)
+            }),
         ),
         (
             "timelines",
@@ -1429,11 +1417,47 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     joined(rest, lists)
 }
 
-fn listed<T: serde::Serialize>(
+fn diff_vec<T: serde::Serialize + Clone + PartialEq>(
+    a: &mut SharedVec<T>,
+    b: &mut SharedVec<T>,
+    items: impl FnOnce(&mut [T], &mut [T]) -> Option<Change>,
+) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    items(a, b)
+}
+
+fn listed<T: serde::Serialize + Clone + PartialEq>(
+    a: &mut SharedVec<T>,
+    b: &mut SharedVec<T>,
+    items: impl FnOnce(&mut SharedVec<T>, &mut SharedVec<T>) -> Option<Change>,
+) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(Change::Set {
+            before: Some(to_value(&**a)),
+            after: None,
+        }),
+        (true, false) => Some(Change::Set {
+            before: None,
+            after: Some(to_value(&**b)),
+        }),
+        (false, false) => items(a, b),
+    }
+}
+
+fn listed_vec<T: serde::Serialize + PartialEq>(
     a: &mut Vec<T>,
     b: &mut Vec<T>,
     items: impl FnOnce(&mut Vec<T>, &mut Vec<T>) -> Option<Change>,
 ) -> Option<Change> {
+    if a == b {
+        return None;
+    }
     match (a.is_empty(), b.is_empty()) {
         (true, true) => None,
         (false, true) => Some(Change::Set {
@@ -1449,8 +1473,9 @@ fn listed<T: serde::Serialize>(
 }
 
 fn tracks_markers_change(
-    tracks: (&mut Vec<Track>, &mut Vec<Track>),
+    tracks: (&mut SharedVec<Track>, &mut SharedVec<Track>),
     markers: (&mut Vec<Marker>, &mut Vec<Marker>),
+    subtitles: Option<(&mut SharedVec<SubtitleTrack>, &mut SharedVec<SubtitleTrack>)>,
     rest: Option<Change>,
     skip_empty_tracks: bool,
 ) -> Option<Change> {
@@ -1459,9 +1484,11 @@ fn tracks_markers_change(
             Change::of_items(a, b, |t| &t.id, track_change)
         })
     } else {
-        Change::of_items(tracks.0, tracks.1, |t| &t.id, track_change)
+        diff_vec(tracks.0, tracks.1, |a, b| {
+            Change::of_items(a, b, |t| &t.id, track_change)
+        })
     };
-    let markers_change = listed(markers.0, markers.1, |a, b| {
+    let markers_change = listed_vec(markers.0, markers.1, |a, b| {
         Change::of_items(
             a,
             b,
@@ -1469,7 +1496,16 @@ fn tracks_markers_change(
             |a, b| moved_only(a, b, |k| &mut k.at, "at"),
         )
     });
-    let lists = [("tracks", tracks_change), ("markers", markers_change)];
+    let subtitles_change = subtitles.and_then(|(a, b)| {
+        listed(a, b, |a, b| {
+            Change::of_items(a, b, |s| &s.id, subtitle_track_change)
+        })
+    });
+    let lists = [
+        ("tracks", tracks_change),
+        ("markers", markers_change),
+        ("subtitles", subtitles_change),
+    ];
     joined(rest, lists)
 }
 
@@ -1478,19 +1514,22 @@ fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
     if a == b {
         return None;
     }
-    let (mut tracks, mut markers) = (
+    let (mut tracks, mut markers, mut subtitles) = (
         (take(&mut a.tracks), take(&mut b.tracks)),
         (take(&mut a.markers), take(&mut b.markers)),
+        (take(&mut a.subtitles), take(&mut b.subtitles)),
     );
     let rest = Change::between(&to_value(&*a), &to_value(&*b));
     let out = tracks_markers_change(
         (&mut tracks.0, &mut tracks.1),
         (&mut markers.0, &mut markers.1),
+        Some((&mut subtitles.0, &mut subtitles.1)),
         rest,
         false,
     );
     (a.tracks, b.tracks) = tracks;
     (a.markers, b.markers) = markers;
+    (a.subtitles, b.subtitles) = subtitles;
     out
 }
 
@@ -1507,6 +1546,7 @@ fn compound_change(a: &mut Compound, b: &mut Compound) -> Option<Change> {
     let out = tracks_markers_change(
         (&mut tracks.0, &mut tracks.1),
         (&mut markers.0, &mut markers.1),
+        None,
         rest,
         true,
     );
@@ -1525,32 +1565,42 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
         (take(&mut a.transitions), take(&mut b.transitions)),
     );
     let rest = Change::between(&to_value(&*a), &to_value(&*b));
-    let transitions_change = match (transitions.0.is_empty(), transitions.1.is_empty()) {
-        (true, true) => None,
-        (false, true) => Some(Change::Set {
-            before: Some(to_value(&transitions.0)),
-            after: None,
-        }),
-        (true, false) => Some(Change::Set {
-            before: None,
-            after: Some(to_value(&transitions.1)),
-        }),
-        (false, false) => Change::of_items(&mut transitions.0, &mut transitions.1, |x| &x.id, leaf),
-    };
+    let transitions_change = listed_vec(&mut transitions.0, &mut transitions.1, |a, b| {
+        Change::of_items(a, b, |x| &x.id, leaf)
+    });
     let lists = [
         (
             "clips",
-            Change::of_items(
-                &mut clips.0,
-                &mut clips.1,
-                |c| &c.id,
-                |a, b| moved_only(a, b, |c| &mut c.start, "start"),
-            ),
+            diff_vec(&mut clips.0, &mut clips.1, |a, b| {
+                Change::of_items(a, b, |c| &c.id, clip_change)
+            }),
         ),
         ("transitions", transitions_change),
     ];
     (a.clips, b.clips) = clips;
     (a.transitions, b.transitions) = transitions;
+    joined(rest, lists)
+}
+
+fn subtitle_track_change(a: &mut SubtitleTrack, b: &mut SubtitleTrack) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let mut cues = (take(&mut a.cues), take(&mut b.cues));
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    let lists = [(
+        "cues",
+        diff_vec(&mut cues.0, &mut cues.1, |a, b| {
+            Change::of_items(
+                a,
+                b,
+                |c| &c.id,
+                |a, b| moved_only(a, b, |c| &mut c.start, "start"),
+            )
+        }),
+    )];
+    (a.cues, b.cues) = cues;
     joined(rest, lists)
 }
 
@@ -1632,8 +1682,9 @@ fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Re
 }
 
 fn tracks_markers_step(
-    tracks: &mut Vec<Track>,
+    tracks: &mut SharedVec<Track>,
     markers: &mut Vec<Marker>,
+    mut subtitles: Option<&mut SharedVec<SubtitleTrack>>,
     lists: &[(&str, &Change)],
     forward: bool,
 ) -> std::result::Result<(), String> {
@@ -1641,6 +1692,11 @@ fn tracks_markers_step(
     for &(name, c) in lists {
         match name {
             "tracks" => c.apply_to_items(tracks, forward, |t| &t.id, track_step, shift_json)?,
+            "subtitles" => {
+                if let Some(subs) = subtitles.as_deref_mut() {
+                    c.apply_to_items(subs, forward, |s| &s.id, subtitle_track_step, shift_json)?;
+                }
+            }
             _ => c.apply_to_items(
                 markers,
                 forward,
@@ -1672,14 +1728,24 @@ fn timeline_step(
     let Change::Fields(fields) = change else {
         return apply_json(t, change, forward);
     };
-    let (lists, rest) = split_fields(fields, &["tracks", "markers"]);
+    let (lists, rest) = split_fields(fields, &["tracks", "markers", "subtitles"]);
     if !rest.is_empty() {
         use std::mem::take;
-        let kept = (take(&mut t.tracks), take(&mut t.markers));
+        let kept = (
+            take(&mut t.tracks),
+            take(&mut t.markers),
+            take(&mut t.subtitles),
+        );
         apply_json(t, &Change::Fields(rest), forward)?;
-        (t.tracks, t.markers) = kept;
+        (t.tracks, t.markers, t.subtitles) = kept;
     }
-    tracks_markers_step(&mut t.tracks, &mut t.markers, &lists, forward)
+    tracks_markers_step(
+        &mut t.tracks,
+        &mut t.markers,
+        Some(&mut t.subtitles),
+        &lists,
+        forward,
+    )
 }
 
 fn compound_step(
@@ -1698,7 +1764,45 @@ fn compound_step(
         apply_json(k, &Change::Fields(rest), forward)?;
         (k.tracks, k.markers) = kept;
     }
-    tracks_markers_step(&mut k.tracks, &mut k.markers, &lists, forward)
+    tracks_markers_step(&mut k.tracks, &mut k.markers, None, &lists, forward)
+}
+
+fn subtitle_track_step(
+    s: &mut SubtitleTrack,
+    change: &Change,
+    forward: bool,
+) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(s, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["cues"]);
+    if !rest.is_empty() {
+        let kept = std::mem::take(&mut s.cues);
+        apply_json(s, &Change::Fields(rest), forward)?;
+        s.cues = kept;
+    }
+    for (_, c) in lists {
+        c.apply_to_items(
+            &mut s.cues,
+            forward,
+            |c| &c.id,
+            apply_json,
+            |c, field, by| {
+                match field {
+                    "start" => {
+                        c.start = c
+                            .start
+                            .checked_add(by)
+                            .ok_or(format!("start of {} goes out of range", c.id))?
+                    }
+                    _ => shift_json(c, field, by)?,
+                }
+                Ok(())
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Result<(), String> {
@@ -1719,7 +1823,7 @@ fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Res
                 &mut t.clips,
                 forward,
                 |c| &c.id,
-                apply_json,
+                clip_step,
                 |c, field, by| {
                     match field {
                         "start" => {
@@ -1763,6 +1867,38 @@ fn split_fields<'a>(
         }
     }
     (named, rest)
+}
+
+fn clip_change(a: &mut Clip, b: &mut Clip) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    let same_pic = match (&a.picture, &b.picture) {
+        (None, None) => true,
+        (Some(pa), Some(pb)) => Shared::ptr_eq(pa, pb) || pa == pb,
+        _ => false,
+    };
+    if same_pic {
+        let pa = a.picture.take();
+        let pb = b.picture.take();
+        let out = moved_only(a, b, |c| &mut c.start, "start");
+        a.picture = pa;
+        b.picture = pb;
+        return out;
+    }
+    moved_only(a, b, |c| &mut c.start, "start")
+}
+
+fn clip_step(c: &mut Clip, change: &Change, forward: bool) -> std::result::Result<(), String> {
+    if let Change::Fields(fields) = change
+        && !fields.contains_key("picture")
+    {
+        let pic = c.picture.take();
+        let out = crate::change::apply_json(c, change, forward);
+        c.picture = pic;
+        return out;
+    }
+    crate::change::apply_json(c, change, forward)
 }
 
 fn moved_only<T: serde::Serialize + PartialEq>(
@@ -1839,32 +1975,55 @@ fn diff(before: &Project, after: &Project) -> Changes {
             Option<&'a crate::model::Grade>,
         ),
     }
-    fn index(p: &Project, sheet: bool) -> HashMap<&str, Named<'_>> {
+    struct DiffSkip<'a> {
+        sheet: bool,
+        media: bool,
+        groups: bool,
+        timelines: bool,
+        markers: bool,
+        tracks: HashSet<&'a str>,
+        subs: HashSet<&'a str>,
+    }
+    fn index<'a>(p: &'a Project, skip: &DiffSkip<'_>) -> HashMap<&'a str, Named<'a>> {
         let mut m = HashMap::new();
-        for media in &p.media {
-            m.insert(media.id.as_str(), Named::Media(media));
+        if !skip.media {
+            for media in &p.media {
+                m.insert(media.id.as_str(), Named::Media(media));
+            }
         }
-        for g in &p.groups {
-            m.insert(g.id.as_str(), Named::Group(g));
+        if !skip.groups {
+            for g in &p.groups {
+                m.insert(g.id.as_str(), Named::Group(g));
+            }
         }
-        for t in &p.timelines {
-            m.insert(
-                t.id.as_str(),
-                Named::Timeline(&t.name, &t.bin, t.start_tc, t.own, t.grade.as_ref()),
-            );
+        if !skip.timelines {
+            for t in &p.timelines {
+                m.insert(
+                    t.id.as_str(),
+                    Named::Timeline(&t.name, &t.bin, t.start_tc, t.own, t.grade.as_ref()),
+                );
+            }
         }
-        if !sheet {
+        if !skip.sheet {
             return m;
         }
         for t in &p.tracks {
+            if skip.tracks.contains(t.id.as_str()) {
+                continue;
+            }
             for c in &t.clips {
                 m.insert(c.id.as_str(), Named::Clip(&t.id, c));
             }
         }
-        for k in &p.markers {
-            m.insert(k.id.as_str(), Named::Marker(k));
+        if !skip.markers {
+            for k in &p.markers {
+                m.insert(k.id.as_str(), Named::Marker(k));
+            }
         }
         for t in &p.subtitles {
+            if skip.subs.contains(t.id.as_str()) {
+                continue;
+            }
             for c in &t.cues {
                 m.insert(c.id.as_str(), Named::Cue(&t.id, c));
             }
@@ -1872,7 +2031,52 @@ fn diff(before: &Project, after: &Project) -> Changes {
         m
     }
     let same = before.sheet_key() == after.sheet_key();
-    let (a, b) = (index(before, same), index(after, same));
+    let mut skip_tracks = HashSet::new();
+    let mut skip_subs = HashSet::new();
+    if same {
+        if SharedVec::ptr_eq(&before.tracks, &after.tracks) {
+            for t in &before.tracks {
+                skip_tracks.insert(t.id.as_str());
+            }
+        } else {
+            for bt in &before.tracks {
+                if after
+                    .tracks
+                    .iter()
+                    .find(|at| at.id == bt.id)
+                    .is_some_and(|at| SharedVec::ptr_eq(&bt.clips, &at.clips))
+                {
+                    skip_tracks.insert(bt.id.as_str());
+                }
+            }
+        }
+        if SharedVec::ptr_eq(&before.subtitles, &after.subtitles) {
+            for s in &before.subtitles {
+                skip_subs.insert(s.id.as_str());
+            }
+        } else {
+            for bs in &before.subtitles {
+                if after
+                    .subtitles
+                    .iter()
+                    .find(|as_| as_.id == bs.id)
+                    .is_some_and(|as_| SharedVec::ptr_eq(&bs.cues, &as_.cues))
+                {
+                    skip_subs.insert(bs.id.as_str());
+                }
+            }
+        }
+    }
+    let skip = DiffSkip {
+        sheet: same,
+        media: SharedVec::ptr_eq(&before.media, &after.media),
+        groups: before.groups == after.groups,
+        timelines: SharedVec::ptr_eq(&before.timelines, &after.timelines),
+        markers: before.markers == after.markers,
+        tracks: skip_tracks,
+        subs: skip_subs,
+    };
+    let (a, b) = (index(before, &skip), index(after, &skip));
     let mut c = Changes::default();
     for (id, v) in &b {
         match a.get(id) {
@@ -2062,9 +2266,10 @@ fn clip_speech(
             continue;
         }
         for c in &t.clips {
-            let (Some(sound), Some((from, to))) = (&c.audio, c.audio_range()) else {
+            let Some(sound) = &c.audio else {
                 continue;
             };
+            let (from, to) = (c.start, c.end());
             if !c.enabled || sound.muted || to <= a || from >= b {
                 continue;
             }
@@ -2616,6 +2821,21 @@ fn resolve_holder(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<Str
         return resolve_cue(p, r, playhead);
     }
     resolve_clip(p, r, playhead)
+}
+
+fn key_holders(
+    p: &Project,
+    refs: &[ClipRef],
+    playhead: Option<i64>,
+    param: crate::request::KeyParam,
+) -> Result<Vec<String>> {
+    let ids = resolve_holders(p, refs, playhead)?;
+    Ok(match param {
+        crate::request::KeyParam::Volume | crate::request::KeyParam::Pan => {
+            ops::linked::sounds(p, &ids)
+        }
+        _ => ids,
+    })
 }
 
 fn resolve_holders(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
@@ -4151,7 +4371,7 @@ fn mutate(
                     )?;
                     let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
                     let mut parts = Vec::new();
-                    for id in &ids {
+                    for id in &ops::linked::sounds(p, &ids) {
                         let c = p.clip(id).expect("resolved");
                         if c.is_block() || c.is_frozen() {
                             continue;
@@ -4374,12 +4594,15 @@ fn mutate(
             ripple,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let source = match (from, copied) {
+            let source: Vec<Clip> = match (from, copied) {
                 (Some(r), None) => {
                     let id = resolve_clip(p, r, playhead)?;
-                    p.clip(&id).cloned().expect("resolved")
+                    std::iter::once(id.clone())
+                        .chain(p.tied(&id))
+                        .filter_map(|x| p.clip(&x).cloned())
+                        .collect()
                 }
-                (None, Some(t)) => t.clip.clone(),
+                (None, Some(t)) => ops::attributes::source(t),
                 (None, None) => return Err(Error::invalid("no clip is copied")),
                 (Some(_), Some(_)) => {
                     return Err(Error::usage("give `from` or `copied`, not both"));
@@ -4405,6 +4628,7 @@ fn mutate(
             relative,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = ops::linked::sounds(p, &ids);
             if ids.is_empty() {
                 return Err(Error::usage("clip.normalize needs at least one clip"));
             }
@@ -4448,7 +4672,7 @@ fn mutate(
             value,
             ease,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead
@@ -4474,7 +4698,7 @@ fn mutate(
             in_handle,
             out_handle,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let change = ops::keyframes::KeyChange {
                 value: *value,
@@ -4496,7 +4720,7 @@ fn mutate(
             by,
             to,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::keyframes::on_line(p, &ids, *param, |p, param| {
@@ -4510,7 +4734,7 @@ fn mutate(
             frames,
             at,
         } => {
-            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
+            let ids = key_holders(p, &clips.to_vec(), playhead, *param)?;
             let pick = key_pick(p, frames, at, playhead)?;
             ops::keyframes::on_line(p, &ids, *param, |p, param| {
                 ops::keyframes::remove(p, &ids, param, &pick)
@@ -5453,11 +5677,21 @@ fn mutate(
         Request::GradeMaskClick { .. }
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. } => {
-            let edit = mask_edit(p, request, playhead)?;
+            let large = env.printer_lights().magic_mask_large;
+            let edit = mask_edit(p, request, playhead, large)?;
             if !dry_run {
                 for need in &edit.needs {
                     mask_made(env, need)?;
                 }
+            }
+            ops::grade_masks::put(p, &edit.of, edit.n, edit.mask)?;
+            edit.out
+        }
+        Request::GradeMaskTrack { .. } => {
+            let large = env.printer_lights().magic_mask_large;
+            let edit = mask_track(p, request, playhead, large)?;
+            if !dry_run && let Some(need) = &edit.need {
+                mask_tracked(env, need)?;
             }
             ops::grade_masks::put(p, &edit.of, edit.n, edit.mask)?;
             edit.out
@@ -7008,9 +7242,6 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
         };
         c.counted = otio::Counted::InItem;
         let (start, end) = (conv(c.start), conv(c.end()));
-        if let Some((h, tl)) = c.audio {
-            c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
-        }
         let plays = c.compound.is_some() || m.is_some_and(|m| !m.is_still());
         let paced = (keep && plays).then(|| faster(c.speed.as_ref(), ratio));
         let (was, now) = paced.as_ref().map_or((0, 0), |(_, was, now)| (*was, *now));
@@ -7164,7 +7395,7 @@ fn register_imported_compound(
         drop_frame: ic.drop_frame,
         start_tc: ic.start_tc,
         frames,
-        tracks: Vec::new(),
+        tracks: SharedVec::new(),
         marks: Marks::default(),
         markers: ic.markers.clone(),
         kept_otio: Some(ic.stack.clone()),
@@ -7237,19 +7468,6 @@ fn place_imported(
             list: list.iter().cloned().map(Kept::from).collect(),
         })
     };
-    let mut floors: HashMap<String, i64> = p
-        .tracks
-        .iter()
-        .map(|t| {
-            let end = t
-                .clips
-                .iter()
-                .filter(|c| c.start < offset)
-                .filter_map(|c| c.audio_range().map(|r| r.1))
-                .max();
-            (t.id.clone(), end.unwrap_or(0))
-        })
-        .collect();
 
     let mut clips = Vec::new();
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
@@ -7295,7 +7513,7 @@ fn place_imported(
                 }),
                 title,
                 adjustment: c.adjustment,
-                picture,
+                picture: picture.map(Into::into),
                 compound: None,
                 speed: c.speed.clone(),
                 retime: c.retime,
@@ -7336,8 +7554,7 @@ fn place_imported(
         let mut start = offset + c.start;
         let end = offset + c.end();
         let mut source_in = c.source_in;
-        let sound_from = c.source_in + c.audio.map_or(0, |a| a.0);
-        let keys_from = c.key_origin() + c.audio.map_or(0, |a| a.0);
+        let keys_from = c.key_origin();
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -7373,74 +7590,50 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
-        let audio = match (c.audio, t.has_audio_tracks) {
-            (Some((h, tl)), _) => Some((
-                offset + c.start + h - start,
-                offset + c.end() + tl - (start + duration),
-            )),
-            (None, false) => Some((0, 0)),
-            (None, true) => None,
-        };
-        let audio = audio
-            .filter(|_| !m.info.audio.is_empty())
-            .and_then(|(h, tl)| {
-                let floor = floors.get(&track_of(&c.track)).copied().unwrap_or(0);
-                let h = match h {
-                    h if h < 0 => -reach(-h, |n| inside(-n)),
-                    h => h,
-                }
-                .max(floor - start);
-                let tl = match tl {
-                    tl if tl > 0 => reach(tl, |n| inside(duration + n - 1)),
-                    tl => tl,
-                };
-                (duration + tl - h >= 1).then_some(ClipAudio {
-                    stream: if (c.stream as usize) < m.info.audio.len() {
-                        c.stream
-                    } else {
-                        0
-                    },
-                    head: h,
-                    tail: tl,
-                    gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
-                    gain_keys: c
-                        .gain_keys
-                        .iter()
-                        .map(|k| crate::model::Keyframe {
-                            frame: k.frame + keys_from,
-                            ..*k
-                        })
-                        .collect(),
-                    muted: c.muted,
-                    pan: c.pan.clamp(*PAN.start(), *PAN.end()),
-                    pan_on: c.pan_on,
-                    pan_keys: c
-                        .pan_keys
-                        .iter()
-                        .map(|k| crate::model::Keyframe {
-                            frame: k.frame + keys_from,
-                            ..*k
-                        })
-                        .collect(),
-                    equalizer: c
-                        .equalizer
-                        .clone()
-                        .filter(|e| crate::equalizer::problem(e).is_none()),
-                    dialogue_leveler: c
-                        .dialogue_leveler
-                        .filter(|l| crate::leveler::problem(l).is_none()),
-                    compressor: c
-                        .compressor
-                        .filter(|k| crate::compressor::problem(k).is_none()),
-                    noise_reduction: c
-                        .noise_reduction
-                        .filter(|n| crate::noise_reduction::problem(n).is_none()),
-                    effects: carry(&c.audio_effects, sound_from),
-                    voice_isolation: c
-                        .voice_isolation
-                        .filter(|v| ops::ISOLATION.contains(&v.amount)),
+        let audio = (c.audio && !m.info.audio.is_empty()).then(|| ClipAudio {
+            stream: if (c.stream as usize) < m.info.audio.len() {
+                c.stream
+            } else {
+                0
+            },
+            gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
+            gain_keys: c
+                .gain_keys
+                .iter()
+                .map(|k| crate::model::Keyframe {
+                    frame: k.frame + keys_from,
+                    ..*k
                 })
-            });
+                .collect(),
+            muted: c.muted,
+            pan: c.pan.clamp(*PAN.start(), *PAN.end()),
+            pan_on: c.pan_on,
+            pan_keys: c
+                .pan_keys
+                .iter()
+                .map(|k| crate::model::Keyframe {
+                    frame: k.frame + keys_from,
+                    ..*k
+                })
+                .collect(),
+            equalizer: c
+                .equalizer
+                .clone()
+                .filter(|e| crate::equalizer::problem(e).is_none()),
+            dialogue_leveler: c
+                .dialogue_leveler
+                .filter(|l| crate::leveler::problem(l).is_none()),
+            compressor: c
+                .compressor
+                .filter(|k| crate::compressor::problem(k).is_none()),
+            noise_reduction: c
+                .noise_reduction
+                .filter(|n| crate::noise_reduction::problem(n).is_none()),
+            effects: carry(&c.audio_effects, c.source_in),
+            voice_isolation: c
+                .voice_isolation
+                .filter(|v| ops::ISOLATION.contains(&v.amount)),
+        });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(
                 "{label}: gain {:.1} dB set to the nearest of -100..30 dB",
@@ -7450,9 +7643,6 @@ fn place_imported(
         if !c.video && audio.is_none() {
             warnings.push(format!("{label}: {} has no audio; left out", m.name));
             continue;
-        }
-        if let Some(a) = &audio {
-            floors.insert(track_of(&c.track), start + duration + a.tail);
         }
         let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
             .then(|| c.name.clone());
@@ -7482,13 +7672,13 @@ fn place_imported(
             generator: None,
             title: None,
             adjustment: false,
-            picture,
+            picture: picture.map(Into::into),
             compound: None,
             speed: c.speed.clone(),
             retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
-            link: None,
+            link: c.link.map(|l| links.of(l)),
         });
         placed.insert(track_of(&c.track));
     }
@@ -7498,6 +7688,20 @@ fn place_imported(
         }
     }
     ops::linked::link_blocks(p, &clips);
+    if !t.has_audio_tracks {
+        let pictures: Vec<String> = clips
+            .iter()
+            .filter(|id| {
+                p.find_clip(id).is_some_and(|(ti, ci)| {
+                    let c = &p.tracks[ti].clips[ci];
+                    c.video && !c.is_block()
+                })
+            })
+            .cloned()
+            .collect();
+        let sounds = ops::linked::with_sound(p, pictures.clone(), &ops::Source::default())?;
+        clips.extend(sounds.into_iter().skip(pictures.len()));
+    }
     for x in &t.transitions {
         let side = |k: Option<usize>| match k {
             None => Some(None),
@@ -7525,7 +7729,6 @@ fn place_imported(
             .transitions
             .push(Transition {
                 id,
-                sound: x.sound,
                 from: from.map(|f| f.0.clone()),
                 to: to.map(|g| g.0.clone()),
                 before: x.before,
@@ -7616,10 +7819,7 @@ fn stack_imported(
     let mut t = otio::import(&doc, base)?;
     if video == Some(true) {
         t.has_audio_tracks = true;
-        for c in &mut t.clips {
-            c.audio = None;
-            c.audio_effects.clear();
-        }
+        t.clips.retain(|c| c.video);
     }
     Ok(t)
 }
@@ -7699,7 +7899,7 @@ fn unpack_compound(
         .collect();
     let inner_end = ops::compound::end_of(&tracks);
     if let Some(target) = p.compound_mut(cid) {
-        target.tracks = tracks;
+        target.tracks = tracks.into();
         target.frames = target.frames.max(inner_end);
         for m in inner.markers {
             let same = target.markers.iter().any(|x| {
@@ -8285,13 +8485,13 @@ pub fn open_otio(
     };
     let mut p = Project::new(meta.settings);
     p.next_id = meta.next_id;
-    p.media = meta.media;
+    p.media = meta.media.into();
     p.bins = meta.bins;
     p.groups = meta.groups;
     p.tape_marks = meta.tape_marks;
-    p.timelines = meta.timelines;
+    p.timelines = meta.timelines.into();
     p.recent = meta.recent;
-    p.compounds = meta.compounds;
+    p.compounds = meta.compounds.into();
     if p.timeline().is_none() {
         let name = match t.name.trim() {
             "" => p.next_timeline_name(),
@@ -8302,7 +8502,7 @@ pub fn open_otio(
         p.timelines.push(timeline);
     }
     p.check_out();
-    p.subtitles = meta.subtitles;
+    p.subtitles = meta.subtitles.into();
     p.set_start_tc(t.start_tc);
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();
@@ -8545,6 +8745,7 @@ fn track_start(
         area: start.bounds.map(|v| v as f32),
         backward: way.backward(),
         forward: way.forward(),
+        point: start.point,
     };
     Ok((media, start, plan, follow))
 }
@@ -8607,17 +8808,20 @@ fn auto_color_plan(
         None => return Err(ops::grade::no_node(n)),
     }
     g.output = Some(crate::model::GradeLink::picture(n));
-    solo_plan(p, (id, *layer), (frame, t), g)
+    solo_plan(p, (id, *layer), (Some(frame), (t, t + 1)), g)
 }
 
 fn solo_plan(
     p: &Project,
     (id, layer): (&str, usize),
-    (frame, t): (i64, i64),
+    (frame, (t0, t1)): (Option<i64>, (i64, i64)),
     g: crate::model::Grade,
 ) -> Result<RenderPlan> {
     let size = p.frame_size();
-    let below = ops::grade::whole(p, id)?.map(|w| w.at(frame as f64).into_owned());
+    let below = ops::grade::whole(p, id)?.map(|w| match frame {
+        Some(f) => w.at(f as f64).into_owned(),
+        None => w,
+    });
     let g = below
         .unwrap_or_else(|| crate::model::Grade::usual(size))
         .below(layer, g, size);
@@ -8642,7 +8846,7 @@ fn solo_plan(
     picture.opacity_keys.clear();
     picture.composite_mode = None;
     picture.grade = Some(g);
-    let mut plan = crate::render::flatten(&solo, t, t + 1)?;
+    let mut plan = crate::render::flatten(&solo, t0, t1)?;
     plan.timeline_grade = None;
     Ok(plan)
 }
@@ -8668,12 +8872,33 @@ fn mask_plan(p: &Project, of: &ops::grade::GradeOf, n: u32, t: i64) -> Result<Re
     let input = (d.inputs.first().copied().flatten())
         .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
     g.output = Some(input);
-    solo_plan(p, (id, *layer), (frame, t), g)
+    solo_plan(p, (id, *layer), (Some(frame), (t, t + 1)), g)
+}
+
+fn mask_track_plan(
+    p: &Project,
+    of: &ops::grade::GradeOf,
+    n: u32,
+    frames: (i64, i64),
+) -> Result<RenderPlan> {
+    let ops::grade::GradeOf::Clip(id, layer) = of else {
+        return Err(Error::invalid(
+            "the Magic Mask works on the grade of a clip",
+        ));
+    };
+    let mut g = ops::grade::stored(p, of)?;
+    let d = g.node_mut(n).ok_or_else(|| ops::grade::no_node(n))?;
+    d.magic_mask = None;
+    let input = (d.inputs.first().copied().flatten())
+        .ok_or_else(|| Error::invalid(format!("nothing comes into node {n}")))?;
+    g.output = Some(input);
+    solo_plan(p, (id, *layer), (None, frames), g)
 }
 
 #[derive(Debug, Clone)]
 pub struct MaskNeed {
     pub plan: RenderPlan,
+    pub size: crate::masks::Size,
     pub subjects: Vec<(String, Vec<crate::masks::Point>)>,
     pub download: bool,
 }
@@ -8686,7 +8911,12 @@ struct MaskEdit {
     out: Value,
 }
 
-fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<MaskEdit> {
+fn mask_edit(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Result<MaskEdit> {
     use ops::grade_masks::{ClickChange, click_changed, click_removed, clicked, mask_of};
     let opened = |clip: &Option<ClipRef>, layer: &Option<usize>, node: &Option<u32>| {
         let of = grade_of(p, clip, (false, *layer), playhead)?;
@@ -8719,6 +8949,7 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
             layer,
             node,
             invert,
+            quality,
             click,
             on,
             place,
@@ -8731,24 +8962,31 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
                 place: *place,
                 negative: *negative,
             };
+            if (invert.is_some() || quality.is_some()) && mask.clicks.is_empty() {
+                return Err(Error::invalid(format!(
+                    "the Magic Mask of node {n} has no click: click first"
+                )));
+            }
             if let Some(v) = invert {
-                if mask.clicks.is_empty() {
-                    return Err(Error::invalid(format!(
-                        "the Magic Mask of node {n} has no click: click first"
-                    )));
-                }
                 mask.invert = *v;
             }
-            let touched = match click {
+            let other = quality.filter(|q| *q != mask.quality);
+            let mut touched = match click {
                 Some(k) => vec![click_changed(&mut mask, *k, &change)?],
                 None if change != ClickChange::default() => {
                     return Err(Error::usage("`on`, `place` and `negative` need `click`"));
                 }
-                None if invert.is_none() => {
-                    return Err(Error::usage("give `invert` or `click`"));
+                None if invert.is_none() && quality.is_none() => {
+                    return Err(Error::usage("give `invert`, `quality` or `click`"));
                 }
                 None => Vec::new(),
             };
+            if let Some(q) = other {
+                mask.quality = q;
+                touched.extend(mask.clicks.iter().map(|c| (c.frame, c.subject)));
+                touched.sort_unstable();
+                touched.dedup();
+            }
             (of, n, mask, touched, Value::Null, *download)
         }
         Request::GradeMaskClear {
@@ -8770,7 +9008,7 @@ fn mask_edit(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Ma
         }
         _ => return Err(Error::invalid("not a Magic Mask request")),
     };
-    let needs = mask_maps(p, (&of, n), &mut mask, &touched, download)?;
+    let needs = mask_maps(p, (&of, n), &mut mask, &touched, (download, large))?;
     Ok(MaskEdit {
         of,
         n,
@@ -8785,11 +9023,16 @@ fn mask_maps(
     (of, n): (&ops::grade::GradeOf, u32),
     mask: &mut crate::model::MagicMask,
     touched: &[(i64, u32)],
-    download: bool,
+    (download, large): (bool, bool),
 ) -> Result<Vec<MaskNeed>> {
+    let size = crate::masks::Size::of(mask.quality, large);
     let mut frames: Vec<i64> = touched.iter().map(|v| v.0).collect();
     frames.sort_unstable();
     frames.dedup();
+    if crate::masks::RULES.clicks_drop_tracked {
+        mask.maps
+            .retain(|m| m.from.is_none_or(|f| !touched.contains(&(f, m.subject))));
+    }
     let mut needs = Vec::new();
     for frame in frames {
         let Ok(t) = ops::grade_masks::time_at(p, of, frame) else {
@@ -8807,7 +9050,7 @@ fn mask_maps(
             if points.is_empty() {
                 continue;
             }
-            let name = crate::masks::name(crate::catalog::SAM21_TINY.id, &picture, &points);
+            let name = crate::masks::name(size.model().id, &picture, &points);
             if !crate::masks::has(&name) && !subjects.iter().any(|(v, _)| *v == name) {
                 subjects.push((name.clone(), points));
             }
@@ -8815,11 +9058,13 @@ fn mask_maps(
                 frame,
                 subject: s,
                 name,
+                from: None,
             });
         }
         if !subjects.is_empty() {
             needs.push(MaskNeed {
                 plan,
+                size,
                 subjects,
                 download,
             });
@@ -8829,10 +9074,187 @@ fn mask_maps(
     Ok(needs)
 }
 
+#[derive(Debug, Clone)]
+pub struct TrackNeed {
+    pub plan: RenderPlan,
+    pub size: crate::masks::Size,
+    pub source: std::path::PathBuf,
+    pub at: i64,
+    pub backward: bool,
+    pub forward: bool,
+    pub subjects: Vec<Vec<crate::masks::Point>>,
+    pub names: Vec<(i64, usize, String)>,
+    pub download: bool,
+}
+
+struct TrackEdit {
+    of: ops::grade::GradeOf,
+    n: u32,
+    mask: crate::model::MagicMask,
+    need: Option<TrackNeed>,
+    out: Value,
+}
+
+fn mask_track(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Result<TrackEdit> {
+    let Request::GradeMaskTrack {
+        clip,
+        layer,
+        node,
+        at,
+        way,
+        length,
+        download,
+    } = request
+    else {
+        return Err(Error::invalid("not a grade.mask.track request"));
+    };
+    if *length == Some(0) {
+        return Err(Error::usage("a track's length is from 1"));
+    }
+    let of = grade_of(p, clip, (false, *layer), playhead)?;
+    let n = node.unwrap_or(1);
+    let mut mask = ops::grade_masks::mask_of(p, &of, n)?;
+    let size = crate::masks::Size::of(mask.quality, large);
+    let t = time_or_playhead(p, at.as_ref(), playhead)?
+        .ok_or_else(|| Error::usage("grade.mask.track needs `at` (--at): there is no playhead"))?;
+    let ops::grade::GradeOf::Clip(id, _) = &of else {
+        return Err(Error::invalid(
+            "the Magic Mask works on the grade of a clip",
+        ));
+    };
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    if t < c.start || t >= c.end() {
+        return Err(Error::invalid(format!(
+            "{id} is not at frame {t}: the Magic Mask tracks from a frame of the clip"
+        )));
+    }
+    let frame = ops::grade::frame_of(p, &of, t)?;
+    let subjects = ops::grade_masks::clicked_subjects(&mask, frame);
+    if subjects.is_empty() {
+        return Err(Error::invalid(format!(
+            "the Magic Mask of node {n} has no click on frame {frame}: click first"
+        )));
+    }
+    let reach = length.map_or(i64::MAX, i64::from);
+    let t0 = match way.backward() {
+        true => t.saturating_sub(reach).max(c.start),
+        false => t,
+    };
+    let t1 = match way.forward() {
+        true => t.saturating_add(reach).min(c.end() - 1) + 1,
+        false => t + 1,
+    };
+    let source = (p.media(&c.media).map(|m| m.path.clone())).unwrap_or_default();
+    let plan = mask_track_plan(p, &of, n, (t0, t1))?;
+    let picture = crate::fingerprint::digest(&serde_json::to_vec(&plan).unwrap_or_default());
+    let mut seen = std::collections::BTreeSet::from([frame]);
+    let mut reached = Vec::new();
+    for u in (t + 1..t1).chain((t0..t).rev()) {
+        let f = ops::grade::frame_of(p, &of, u)?;
+        if seen.insert(f) {
+            reached.push((u - t0, f));
+        }
+    }
+    let clicked: Vec<Vec<crate::masks::Point>> = (subjects.iter())
+        .map(|s| ops::grade_masks::points(&mask, frame, *s))
+        .collect();
+    let mut names = Vec::new();
+    let mut made = Vec::new();
+    for &(i, f) in &reached {
+        for (k, &s) in subjects.iter().enumerate() {
+            let stays = !ops::grade_masks::points(&mask, f, s).is_empty();
+            if stays && crate::masks::RULES.clicked_stays {
+                continue;
+            }
+            let looked = format!("{picture}\ntrack {frame} {f}");
+            let name = crate::masks::name(size.model().id, &looked, &clicked[k]);
+            names.push((i, k, name.clone()));
+            made.push(crate::model::MaskMap {
+                frame: f,
+                subject: s,
+                name,
+                from: Some(frame),
+            });
+        }
+    }
+    let over: std::collections::BTreeSet<(i64, u32)> =
+        made.iter().map(|m| (m.frame, m.subject)).collect();
+    mask.maps.retain(|m| {
+        let again = m.from == Some(frame) && subjects.contains(&m.subject);
+        !again && !over.contains(&(m.frame, m.subject))
+    });
+    let count = made.len();
+    mask.maps.extend(made);
+    mask.maps.sort_by_key(|m| (m.frame, m.subject));
+    let ends = reached.iter().map(|v| v.1).chain([frame]);
+    let out = json!({
+        "subjects": subjects,
+        "first": ends.clone().min(),
+        "last": ends.max(),
+        "maps": count,
+    });
+    let need = (!names.is_empty()).then(|| TrackNeed {
+        plan,
+        size,
+        source,
+        at: t - t0,
+        backward: way.backward(),
+        forward: way.forward(),
+        subjects: clicked,
+        names,
+        download: *download,
+    });
+    Ok(TrackEdit {
+        of,
+        n,
+        mask,
+        need,
+        out,
+    })
+}
+
+pub fn mask_tracked(env: &dyn Env, need: &TrackNeed) -> Result<()> {
+    if need
+        .names
+        .iter()
+        .all(|(_, _, name)| crate::masks::has(name))
+    {
+        return Ok(());
+    }
+    env.subject_tracks(need, &mut |f, maps| {
+        for (_, k, name) in need.names.iter().filter(|v| v.0 == f) {
+            if let Some(map) = maps.get(*k) {
+                crate::masks::put(name, map.clone());
+            }
+        }
+        Ok(())
+    })
+}
+
+pub fn mask_track_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Vec<TrackNeed> {
+    mask_track(p, request, playhead, large)
+        .ok()
+        .and_then(|e| e.need)
+        .into_iter()
+        .collect()
+}
+
 pub fn mask_made(env: &dyn Env, need: &MaskNeed) -> Result<()> {
     let points: Vec<Vec<crate::masks::Point>> =
         need.subjects.iter().map(|(_, p)| p.clone()).collect();
-    let maps = env.subject_masks(&need.plan, &points, need.download)?;
+    let maps = env.subject_masks(&need.plan, need.size, &points, need.download)?;
     for ((name, _), map) in need.subjects.iter().zip(maps) {
         crate::masks::put(name, map);
     }
@@ -8854,19 +9276,81 @@ fn played_compounds(p: &Project) -> Vec<String> {
     found
 }
 
-pub fn mask_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
-    let mut needs = sheet_remakes(p, download);
+pub fn mask_remakes(
+    p: &Project,
+    (download, large): (bool, bool),
+) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
+    let mut needs = sheet_remakes(p, (download, large));
     for id in played_compounds(p) {
         let mut inside = p.clone();
         if ops::compound::open_alone(&mut inside, &id).is_ok() {
-            needs.extend(sheet_remakes(&inside, download));
+            let (clicks, tracks) = sheet_remakes(&inside, (download, large));
+            needs.0.extend(clicks);
+            needs.1.extend(tracks);
         }
     }
     needs
 }
 
-fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
+fn track_remake(
+    p: &Project,
+    (of, n): (&ops::grade::GradeOf, u32),
+    mask: &crate::model::MagicMask,
+    (from, download, large): (i64, bool, bool),
+) -> Option<TrackNeed> {
+    let ops::grade::GradeOf::Clip(id, _) = of else {
+        return None;
+    };
+    let ours: Vec<&crate::model::MaskMap> =
+        (mask.maps.iter().filter(|m| m.from == Some(from))).collect();
+    let missing: Vec<&crate::model::MaskMap> = (ours.iter().copied())
+        .filter(|m| !crate::masks::has(&m.name))
+        .collect();
+    if !(missing.iter()).any(|m| ops::grade_masks::time_at(p, of, m.frame).is_ok()) {
+        return None;
+    }
+    let lo = ours.iter().map(|m| m.frame).chain([from]).min()?;
+    let hi = ours.iter().map(|m| m.frame).chain([from]).max()?;
+    let wide = widened(p, id, (lo, hi))?;
+    let c = wide.clip(id)?;
+    let plan = mask_track_plan(&wide, of, n, (c.start, c.end())).ok()?;
+    let subjects = ops::grade_masks::clicked_subjects(mask, from);
+    let clicked: Vec<Vec<crate::masks::Point>> = (subjects.iter())
+        .map(|s| ops::grade_masks::points(mask, from, *s))
+        .collect();
+    let names: Vec<(i64, usize, String)> = (missing.iter())
+        .filter_map(|m| {
+            let k = subjects.iter().position(|s| *s == m.subject)?;
+            Some((m.frame - lo, k, m.name.clone()))
+        })
+        .collect();
+    let source = (p.media(&c.media).map(|m| m.path.clone())).unwrap_or_default();
+    Some(TrackNeed {
+        plan,
+        size: crate::masks::Size::of(mask.quality, large),
+        source,
+        at: from - lo,
+        backward: lo < from,
+        forward: from < hi,
+        subjects: clicked,
+        names,
+        download,
+    })
+}
+
+fn widened(p: &Project, id: &str, (lo, hi): (i64, i64)) -> Option<Project> {
+    let mut wide = p.clone();
+    let c = (wide.tracks.iter_mut())
+        .flat_map(|t| t.clips.iter_mut())
+        .find(|c| c.id == id)?;
+    c.walk(lo - c.content_at(c.start));
+    c.duration = hi - lo + 1;
+    Some(wide)
+}
+
+fn sheet_remakes(p: &Project, (download, large): (bool, bool)) -> (Vec<MaskNeed>, Vec<TrackNeed>) {
     let mut needs = Vec::new();
+    let mut tracks = Vec::new();
     let clips = p.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.enabled);
     for c in clips {
         let Some(whole) = c.picture.as_ref().and_then(|v| v.grade.as_ref()) else {
@@ -8879,8 +9363,20 @@ fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
                 let Some(mask) = &d.magic_mask else {
                     continue;
                 };
-                let missing: Vec<&crate::model::MaskMap> =
-                    (mask.maps.iter().filter(|m| !crate::masks::has(&m.name))).collect();
+                let mut froms: Vec<i64> = (mask.maps.iter())
+                    .filter(|m| !crate::masks::has(&m.name))
+                    .filter_map(|m| m.from)
+                    .collect();
+                froms.sort_unstable();
+                froms.dedup();
+                let on = (&of, k as u32 + 1);
+                let remade = froms
+                    .into_iter()
+                    .filter_map(|f| track_remake(p, on, mask, (f, download, large)));
+                tracks.extend(remade);
+                let missing: Vec<&crate::model::MaskMap> = (mask.maps.iter())
+                    .filter(|m| m.from.is_none() && !crate::masks::has(&m.name))
+                    .collect();
                 let mut frames: Vec<i64> = missing.iter().map(|m| m.frame).collect();
                 frames.sort_unstable();
                 frames.dedup();
@@ -8901,6 +9397,7 @@ fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
                     if !subjects.is_empty() {
                         needs.push(MaskNeed {
                             plan,
+                            size: crate::masks::Size::of(mask.quality, large),
                             subjects,
                             download,
                         });
@@ -8909,11 +9406,16 @@ fn sheet_remakes(p: &Project, download: bool) -> Vec<MaskNeed> {
             }
         }
     }
-    needs
+    (needs, tracks)
 }
 
-pub fn mask_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<MaskNeed> {
-    mask_edit(p, request, playhead).map_or_else(|_| Vec::new(), |e| e.needs)
+pub fn mask_looks(
+    p: &Project,
+    request: &Request,
+    playhead: Option<i64>,
+    large: bool,
+) -> Vec<MaskNeed> {
+    mask_edit(p, request, playhead, large).map_or_else(|_| Vec::new(), |e| e.needs)
 }
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {
@@ -9250,6 +9752,7 @@ fn reframe_reference(
         .map(|v| v as f32),
         backward: true,
         forward: true,
+        point: None,
     };
     let plan = Box::new(crate::render::own_picture(p, &c.id)?);
     Ok(Follows::Reference { plan, follow, base })
@@ -10804,18 +11307,24 @@ fn targets<'a>(
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             Ok(vec![Target::Media(m)])
         }
-        (None, Some(refs)) => resolve_clips(p, &refs.to_vec(), playhead)?
-            .iter()
-            .map(|id| {
-                let c = p.clip(id).expect("resolved");
-                if c.is_block() {
-                    return Err(Error::invalid(format!(
-                        "{id} is a block from another editor: it has no media"
-                    )));
-                }
-                Ok(Target::Clip(c))
-            })
-            .collect(),
+        (None, Some(refs)) => {
+            let ids = resolve_clips(p, &refs.to_vec(), playhead)?;
+            match audio {
+                true => ops::linked::sounds(p, &ids),
+                false => ids,
+            }
+        }
+        .iter()
+        .map(|id| {
+            let c = p.clip(id).expect("resolved");
+            if c.is_block() {
+                return Err(Error::invalid(format!(
+                    "{id} is a block from another editor: it has no media"
+                )));
+            }
+            Ok(Target::Clip(c))
+        })
+        .collect(),
         (None, None) => Ok(p
             .tracks
             .iter()
@@ -11554,6 +12063,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         "source_in_tc": p.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
+    if let Some(link) = c.link {
+        v["link"] = json!(link);
+    }
     if let Some(color) = c.shown_color(media) {
         v["color"] = json!(color);
     }
@@ -11578,7 +12090,7 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         v["effects"] = json!(e.names());
     }
     if let Some(a) = &c.audio {
-        v["audio"] = json!({ "stream": a.stream, "head": a.head, "tail": a.tail, "gain_db": a.gain_db, "muted": a.muted });
+        v["audio"] = json!({ "stream": a.stream, "gain_db": a.gain_db, "muted": a.muted });
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
         }
@@ -11649,7 +12161,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                     let at = cuts.place(p, x)?;
                     (at >= a && at <= b).then(|| {
                         json!({ "id": x.id, "name": otio::transitions::name(x), "at": at, "before": x.before,
-                            "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
+                            "after": x.after, "from": x.from, "to": x.to })
                     })
                 })
                 .collect();

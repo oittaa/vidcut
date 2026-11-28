@@ -1065,12 +1065,7 @@ fn vignette_bytes(shading: &Shading, effect: &Working) -> Vec<u8> {
 }
 
 fn sharpen_bytes(sharpening: &Sharpening, effect: &Working) -> Vec<u8> {
-    float_bytes(&[
-        effect.blend,
-        flag(effect.use_alpha),
-        flag(sharpening.colors()),
-        0.0,
-    ])
+    float_bytes(&[effect.blend, flag(sharpening.colors()), 0.0, 0.0])
 }
 
 pub(super) struct Texture {
@@ -1501,6 +1496,28 @@ impl Blurred {
             effects,
             encoder,
         );
+        &own.view
+    }
+
+    pub(super) fn scaled(
+        &mut self,
+        gpu: &Gpu,
+        i: usize,
+        (from, at): (&wgpu::TextureView, (u32, u32)),
+        kernel: u32,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> &wgpu::TextureView {
+        let size = self.size;
+        self.masks[i] = None;
+        let own = self.layers[i].get_or_insert_with(|| Texture::new(gpu, size));
+        let level = Level::centered(at, size);
+        let read = wgpu::Extent3d {
+            width: at.0,
+            height: at.1,
+            depth_or_array_layers: 1,
+        };
+        let bind = levels_bind(gpu, from, &level, [1.0, 0.0, 0.0, 6.0], (read, kernel));
+        add(gpu, &own.view, &bind, encoder);
         &own.view
     }
 
@@ -2660,11 +2677,11 @@ pub(super) fn opened(placing: &Placing) -> Placing {
 fn levels_bind(
     gpu: &Gpu,
     view: &wgpu::TextureView,
-    placing: &Placing,
+    level: &Level,
     [opacity, mode, adds, made]: [f64; 4],
     (size, kernel): (wgpu::Extent3d, u32),
 ) -> wgpu::BindGroup {
-    let levels = super::level_floats(Some(&placing.level));
+    let levels = super::level_floats(Some(level));
     let mut floats = vec![0.0_f64; super::PARAMS / 4 - levels.len()];
     floats[4..6].copy_from_slice(&[f64::from(size.width), f64::from(size.height)]);
     floats[40..45].copy_from_slice(&[1.0, opacity, mode, adds, made]);
@@ -2678,7 +2695,7 @@ fn mask_bind(gpu: &Gpu, view: &wgpu::TextureView, placing: &Placing) -> wgpu::Bi
     levels_bind(
         gpu,
         view,
-        placing,
+        &placing.level,
         [1.0, 0.0, 0.0, 4.0],
         (wgpu::Extent3d::default(), 0),
     )
@@ -2695,7 +2712,7 @@ pub(super) fn canvas_bind(
     levels_bind(
         gpu,
         &canvas.view,
-        placing,
+        &placing.level,
         made,
         (canvas.texture.size(), kernel),
     )

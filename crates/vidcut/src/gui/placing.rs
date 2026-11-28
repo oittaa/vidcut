@@ -10,8 +10,8 @@ use vidcut_core::model::{
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::picture::{has_picture, takes_effects, zoom_shown};
 use vidcut_core::place::{
-    Extent, Level, Mixes, Placing, anchored, apply, flipped, frame_back, map_of, mapped_rect,
-    window_back,
+    Extent, Level, Mixes, Placing, anchored, apply, fitted, flipped, frame_back, map_of,
+    mapped_rect, window_back,
 };
 use vidcut_core::render::{Placed, Run, VideoPiece};
 
@@ -398,23 +398,18 @@ impl Shown {
 }
 
 fn content(p: &Project, media: &str, (w, h): (f64, f64)) -> [f64; 4] {
-    let shown = p
-        .media(media)
+    p.media(media)
         .and_then(|m| m.info.video.as_ref())
-        .map(vidcut_core::model::VideoInfo::display_size)
-        .filter(|(dw, dh)| *dw > 0 && *dh > 0);
-    match shown {
-        Some((dw, dh)) => {
-            let dar = f64::from(dw) / f64::from(dh);
-            let (fw, fh) = if dar > w / h {
-                (w, w / dar)
-            } else {
-                (h * dar, h)
-            };
-            [(w - fw) / 2.0, (h - fh) / 2.0, fw, fh]
-        }
-        None => [0.0, 0.0, w, h],
-    }
+        .filter(|v| v.width > 0 && v.height > 0)
+        .map_or([0.0, 0.0, w, h], |v| {
+            let sar = (v.sar[0], v.sar[1]);
+            fitted(
+                (v.width, v.height),
+                sar,
+                v.rotation,
+                (p.width(), p.height()),
+            )
+        })
 }
 
 fn mapped_content(p: &Project, c: &Clip, scaling: ClipScaling, frame: (f64, f64)) -> [f64; 4] {
@@ -911,7 +906,10 @@ impl Workspace {
             Some(c) => c,
             None => p.clip(&topmost(&p, at)?)?,
         };
-        Some((c.id.clone(), c.picture.clone().unwrap_or_default()))
+        Some((
+            c.id.clone(),
+            c.picture.as_deref().cloned().unwrap_or_default(),
+        ))
     }
 
     pub(super) fn picture_tools_row(&mut self, ui: &mut egui::Ui) {
@@ -1105,7 +1103,7 @@ impl Workspace {
                     of: c.duration,
                     held: false,
                 };
-                let picture = c.picture.clone().unwrap_or_default();
+                let picture = c.picture.as_deref().cloned().unwrap_or_default();
                 let fit = mapped_content(&p, c, picture.scaling, (w, h));
                 let pixels = pixels_of(&p, &c.media, (w, h));
                 let placed = Placed::at(c, picture, run, at);
@@ -1133,7 +1131,7 @@ impl Workspace {
             .find(|(id, _)| *id == c.id)
         {
             Some((_, x)) => x,
-            None => c.picture.clone().unwrap_or_default(),
+            None => c.picture.as_deref().cloned().unwrap_or_default(),
         };
         shape_of(&p, c, shown, picture, at)
     }

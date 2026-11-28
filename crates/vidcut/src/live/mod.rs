@@ -1199,7 +1199,7 @@ impl Live {
             let _ = r.tx.send(ReplyEvent::Done(result));
         }
         if let Some(open) = self.project.as_mut() {
-            open.save_left();
+            open.close();
         }
         if let Some(i) = &self.instance {
             ipc::registry::unregister(i);
@@ -2147,7 +2147,8 @@ impl Live {
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. } = &envelope.request
         {
-            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead);
+            let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+            let looks = vidcut_core::editor::mask_looks(p, &envelope.request, playhead, large);
             if looks.is_empty() {
                 return None;
             }
@@ -2155,6 +2156,21 @@ impl Live {
                 let env = AvEnv::new();
                 for need in &looks {
                     vidcut_core::editor::mask_made(&env, need)?;
+                }
+                Ok(())
+            }));
+        }
+        if let Request::GradeMaskTrack { .. } = &envelope.request {
+            let large = crate::preferences::load().is_ok_and(|p| p.color.magic_mask_large);
+            let looks =
+                vidcut_core::editor::mask_track_looks(p, &envelope.request, playhead, large);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                let env = AvEnv::new();
+                for need in &looks {
+                    vidcut_core::editor::mask_tracked(&env, need)?;
                 }
                 Ok(())
             }));
@@ -3504,6 +3520,7 @@ impl Live {
                 clips,
                 cues,
                 media,
+                thumbnails,
                 edit,
                 track,
                 side,
@@ -3561,7 +3578,7 @@ impl Live {
                     None if clear => Some(OneOrMany::Many(Vec::new())),
                     c => c,
                 };
-                if let Err(e) = self.set_selection(clips, cues, media) {
+                if let Err(e) = self.set_selection(clips, cues, media, thumbnails) {
                     return Step::Now(Err(e));
                 }
                 if changes.is_empty() {
@@ -3957,6 +3974,15 @@ impl Live {
                 Some(measure) => Step::Encode(measure, Box::new(envelope), "Track".into(), "track"),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
+            Request::GradeMaskTrack { .. } if !envelope.dry_run => {
+                match self.measuring(&envelope) {
+                    Some(measure) => {
+                        let title = "Track Mask".into();
+                        Step::Encode(measure, Box::new(envelope), title, "mask_track")
+                    }
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::PictureStabilize { .. } if !envelope.dry_run => {
                 match self.measuring(&envelope) {
                     Some(measure) => {
@@ -3982,6 +4008,7 @@ impl Live {
             | Request::GradeMaskClick { .. }
             | Request::GradeMaskSet { .. }
             | Request::GradeMaskClear { .. }
+            | Request::GradeMaskTrack { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
@@ -4177,9 +4204,10 @@ impl Live {
         let first = &self.clipboard.first()?.clip;
         let p = self.project.as_ref()?.project();
         self.copies += 1;
+        let source = vidcut_core::ops::attributes::source(&self.clipboard);
         Some(Arc::new(CopiedClip {
             name: p.clip_name(first).unwrap_or_default(),
-            picked: vidcut_core::ops::attributes::picked_at_open(first),
+            picked: vidcut_core::ops::attributes::picked_at_open(&source),
             copy: self.copies,
         }))
     }
@@ -4214,10 +4242,10 @@ impl Live {
             Request::ClipPasteAttributes { from, copied, .. }
                 if from.is_none() && copied.is_none() =>
             {
-                let Some(first) = self.clipboard.first() else {
+                if self.clipboard.is_empty() {
                     return Err(Error::usage("the clipboard has no clip"));
-                };
-                *copied = Some(Box::new(first.clone()));
+                }
+                *copied = Some(self.clipboard.clone());
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
@@ -4389,7 +4417,7 @@ impl Live {
 
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         if let Some(old) = self.project.as_mut() {
-            old.save_left();
+            old.close();
         }
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.render.open(open.store.path());
@@ -4449,9 +4477,6 @@ impl Live {
     }
 
     fn project_changed(&mut self, response: Option<&Response>) {
-        if let Some(trouble) = self.project.as_mut().and_then(OpenProject::trouble) {
-            self.notice(trouble, true);
-        }
         let Some(open) = &self.project else {
             self.project_snap = None;
             self.missing_watch.watch(Vec::new(), Vec::new());
@@ -4495,6 +4520,7 @@ impl Live {
         let media: HashSet<String> = p.pool_media().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
+        self.selection.thumbnails.retain(|c| p.clip(c).is_some());
         self.selection.cues.retain(|c| p.cue(c).is_some());
         self.selection.keep_order();
         if self
@@ -4555,6 +4581,7 @@ impl Live {
         }
         if same_project {
             self.selection.clips.clear();
+            self.selection.thumbnails.clear();
             self.selection.cues.clear();
         }
         let Some((_, id)) = now else { return };
@@ -4595,7 +4622,7 @@ impl Live {
     fn check_media(&mut self) {
         self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
-        let media: Vec<_> = open.project().media.clone();
+        let media: Vec<_> = open.project().media.to_vec();
         let settings = open.project().settings.clone();
         let channels = settings.channels;
         self.forget_removed(&media);
@@ -4924,7 +4951,8 @@ impl Live {
         let mut p = self.project.as_ref()?.project().clone();
         for (id, picture) in &self.free_pictures {
             if let Some((t, c)) = p.find_clip(id) {
-                p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
+                p.tracks[t].clips[c].picture =
+                    (!picture.is_usual()).then(|| picture.clone().into());
             }
         }
         if let Some((id, title)) = &self.title_preview
@@ -5659,18 +5687,22 @@ impl Live {
         clips: Option<OneOrMany<String>>,
         cues: Option<OneOrMany<String>>,
         media: Option<OneOrMany<String>>,
+        thumbnails: Option<OneOrMany<String>>,
     ) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
         let playhead = Some(self.player.position(TIMELINE));
-        let clips = clips
-            .map(|c| {
+        let resolve = |refs: Option<OneOrMany<String>>| {
+            refs.map(|c| {
                 c.to_vec()
                     .iter()
                     .map(|r| resolve_clip(p, r, playhead))
                     .collect::<Result<Vec<_>>>()
             })
-            .transpose()?;
+            .transpose()
+        };
+        let clips = resolve(clips)?;
+        let thumbnails = resolve(thumbnails)?;
         let cues = cues
             .map(|c| {
                 c.to_vec()
@@ -5695,6 +5727,11 @@ impl Live {
         }
         if let Some(m) = media {
             self.selection.media = m.to_vec();
+        }
+        if let Some(mut t) = thumbnails {
+            let mut seen = HashSet::new();
+            t.retain(|c| seen.insert(c.clone()));
+            self.selection.thumbnails = t;
         }
         self.selection.keep_order();
         Ok(())
@@ -6077,6 +6114,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::GradeMaskClick { .. }
         | Request::GradeMaskSet { .. }
         | Request::GradeMaskClear { .. }
+        | Request::GradeMaskTrack { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
         | Request::PictureReframe { .. }

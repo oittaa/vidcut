@@ -14,21 +14,16 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 1. **Measure the effects:**
    - Measure each new effect in Resolve first: its values, their ranges and defaults, and its math.
    - **Glow, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
-     - Opacity below 1 on a picture with alpha, on the Edit page.
-     - The size of the Atmosphere noise on other timeline sizes, with Threshold 0.25 and Spread 0 on a gray picture.
-     - The exact sigma between 580.8 and 633.6 pixels that moves the mirror to the grid of 16.
-     - A Zoom with Secondary Glow.
+     - Invert Effect on a picture with alpha.
+     - The second step of the grid. At a sigma of 1200 on 3840×2160, the glow differs from vidcut by up to 0.8%.
+     - The steps on 1280×720. They tell whether a step follows the pixels or the Spread.
+     - A Zoom above 1. On two pictures, the renders are brighter than vidcut only near the left edge of the frame.
    - **Film Grain, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
      - What a film stock does to the other values, and when Film Grain Presets shows Custom.
-     - Detail Loss on a square frame, for example 1440×1440. Does its sigma follow the area or the short side?
-     - Symmetry at Grain Strength 0.25 to 1, below 0.3 and above 0.9.
-     - Red, Green and Blue with a Symmetry other than 0.5.
-     - Texture under 0.25 and Grain Aspect Ratio under 0.5.
-   - **Sharpen, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
-     - Blend on the Edit page, at 0.5.
-     - A picture with alpha on the Edit page, over black and over white.
-     - A viewer that draws fewer pixels than the frame.
-     - A Sharpen Chroma between 1 and 2, for example 1.01 and 1.5, with Fine Details 3.
+     - Grain Strength above 0.5. At 1, vidcut's grain is 7% to 9% stronger than the renders, with longer tails.
+     - Texture under 0.25. At 0.1 and 0.2, vidcut's grain is 2% to 5% stronger, mostly at low frequencies.
+   - **Sharpen with fewer pixels than the frame, on other layers.** A clip draws at the frame size, then scales down, as measured.
+     - An adjustment clip, a compound clip and a frame that a retime makes still sharpen at the size of the picture. Measure one of them first.
    - **Vignette, measure these.** vidcut's choices for them are in the [spec](../spec.md#816-effects-pp-765-3526-3536):
      - Blend on the Edit page, at 0.5.
      - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.

@@ -1,4 +1,8 @@
+mod memory;
+
 use std::path::Path;
+
+pub(super) use memory::{Bank, Work};
 
 use super::kernels::{self, Axis, Grid, Heads, Kernels, Rows};
 use super::{Click, Config, Found};
@@ -181,6 +185,7 @@ struct Space {
     l3: View,
     src: View,
     dense: View,
+    gemm: kernels::Gemm,
     q: View,
     q2: View,
     qpe: View,
@@ -220,6 +225,7 @@ struct Model {
     s0: Conv,
     s1: Conv,
     decoder: Decoder,
+    memory: memory::Memory,
     space: Space,
     staging: wgpu::Buffer,
 }
@@ -478,26 +484,44 @@ fn tokens(p: &Prompts, clicks: &[Click]) -> Vec<f32> {
     out
 }
 
-fn chosen(masks: &[f32], iou: &[f32], object: f32, clicks: usize) -> Vec<f32> {
-    let plane = (MAP * MAP) as usize;
-    let mask = |i: usize| (0..plane).map(move |px| masks[px * MASKS as usize + i]);
+fn mask(masks: &[f32], i: usize) -> impl Iterator<Item = f32> + '_ {
+    (0..(MAP * MAP) as usize).map(move |px| masks[px * MASKS as usize + i])
+}
+
+fn pick(masks: &[f32], iou: &[f32], clicks: usize) -> usize {
     let best = (1..MASKS as usize).fold(1, |b, i| if iou[i] > iou[b] { i } else { b });
-    let pick = match clicks {
+    match clicks {
         0 | 1 => best,
         _ => {
-            let inner = mask(0).filter(|v| *v > STABLE_DELTA).count();
-            let outer = mask(0).filter(|v| *v > -STABLE_DELTA).count();
+            let inner = mask(masks, 0).filter(|v| *v > STABLE_DELTA).count();
+            let outer = mask(masks, 0).filter(|v| *v > -STABLE_DELTA).count();
             let score = match outer {
                 0 => 1.0,
                 n => inner as f32 / n as f32,
             };
             if score >= STABLE { 0 } else { best }
         }
-    };
-    match object > 0.0 {
-        true => mask(pick).collect(),
-        false => vec![NO_OBJECT; plane],
     }
+}
+
+fn plane(masks: &[f32], pick: usize, object: f32) -> Vec<f32> {
+    match object > 0.0 {
+        true => mask(masks, pick).collect(),
+        false => vec![NO_OBJECT; (MAP * MAP) as usize],
+    }
+}
+
+fn pointer_token(pick: usize, clicks: usize) -> usize {
+    match clicks {
+        0 | 1 => pick,
+        _ => 0,
+    }
+}
+
+struct Decoded {
+    found: Found,
+    pick: usize,
+    pointer: Vec<f32>,
 }
 
 fn need(plans: &[Plan]) -> [u32; 5] {
@@ -547,6 +571,7 @@ fn space(gpu: &Gpu, plans: &[Plan]) -> Space {
         l3: tensor(gpu, 1, EMBED / 2, EMBED / 2, DIM),
         src: tensor(gpu, 1, EMBED, EMBED, DIM),
         dense: rows(e, DIM),
+        gemm: global_gemm(gpu, plans),
         q: rows(MOST_TOKENS, DIM),
         q2: rows(MOST_TOKENS, DIM),
         qpe: rows(MOST_TOKENS, DIM),
@@ -585,6 +610,15 @@ fn space(gpu: &Gpu, plans: &[Plan]) -> Space {
     }
 }
 
+fn global_gemm(gpu: &Gpu, plans: &[Plan]) -> kernels::Gemm {
+    let global = plans.iter().filter(|p| p.window == 0);
+    let dim = global.clone().map(|p| p.dout / p.heads).max().unwrap_or(16);
+    let keys = global.map(|p| p.side * p.side).max().unwrap_or(64);
+    kernels::Gemm::new(gpu, dim, keys, keys.min(GLOBAL_QUERIES))
+}
+
+const GLOBAL_QUERIES: u32 = 4096;
+
 fn row(v: &View, i: u32, c: u32) -> View {
     View {
         base: v.base + i * v.stride,
@@ -603,8 +637,12 @@ fn read_view(gpu: &Gpu, v: &View) -> Result<Vec<f32>> {
 }
 
 impl Net {
-    pub(super) fn load(path: &Path, title: &'static str, c: &Config) -> Result<Self> {
-        let gpu = Gpu::start(title, ops::SHARED).map_err(Error::Invalid)?;
+    pub(super) fn load(path: &Path, title: &'static str, c: &Config, on_gpu: bool) -> Result<Self> {
+        let gpu = match on_gpu {
+            true => Gpu::start(title, ops::SHARED),
+            false => Gpu::start_soft(title, ops::SHARED),
+        };
+        let gpu = gpu.map_err(Error::Invalid)?;
         let t = Torch::open(path, title)?;
         let device = gpu.device.clone();
         let m = compute::checked(&device, title, || {
@@ -650,21 +688,16 @@ impl Net {
                 Act::None,
                 None,
             );
-            let mut shift = load.floats("no_mem_embed", &[1, 1, DIM])?;
-            let none = load.floats("sam_prompt_encoder.no_mask_embed.weight", &[1, DIM])?;
-            for (s, n) in shift.iter_mut().zip(&none) {
-                *s += n;
-            }
             let lateral = (0..4)
                 .map(|level| {
                     let name = format!("image_encoder.neck.convs.{}.conv", 3 - level);
-                    let add: &[f32] = if level == 2 { &shift } else { &[] };
-                    load.pointwise(&name, (ends[level], DIM), add)
+                    load.pointwise(&name, (ends[level], DIM), &[])
                 })
                 .collect::<Result<Vec<_>>>()?;
             let s0 = load.pointwise("sam_mask_decoder.conv_s0", (DIM, HYPER), &[])?;
             let s1 = load.pointwise("sam_mask_decoder.conv_s1", (DIM, DIM / 4), &[])?;
             let decoder = load.decoder()?;
+            let memory = load.memory()?;
             let space = space(&gpu, &plans);
             gpu.queue
                 .write_buffer(&space.dense.buf, 0, &bytes(&dense(&decoder.prompts.gauss)));
@@ -673,7 +706,7 @@ impl Net {
                 .enumerate()
                 .map(|(i, p)| load.block(i, p))
                 .collect::<Result<Vec<_>>>()?;
-            let staging = gpu.staging(u64::from(MAP * MAP * MASKS + MASKS + 1) * 4);
+            let staging = gpu.staging(u64::from(MAP * MAP * MASKS + MASKS + 1 + MASKS * DIM) * 4);
             Ok(Model {
                 basic: Basic::new(&gpu),
                 own: Kernels::new(&gpu),
@@ -684,6 +717,7 @@ impl Net {
                 s0,
                 s1,
                 decoder,
+                memory,
                 space,
                 staging,
             })
@@ -815,20 +849,37 @@ impl Net {
             dim: p.dout / p.heads,
         };
         let (k, v) = (qkv.part(p.dout, p.dout), qkv.part(2 * p.dout, p.dout));
-        kernels::attend(
-            ops,
-            &heads,
-            Rows {
-                view: &q,
-                each: q_each,
-            },
-            Rows { view: &k, each },
-            Rows { view: &v, each },
-            Rows {
-                view: &att,
-                each: lq * p.dout,
-            },
-        );
+        if count == 1 && !p.pool {
+            let d = p.dout / p.heads;
+            for h in 0..p.heads {
+                let head = |v: &View, at: u32| View {
+                    n: 1,
+                    h: 1,
+                    w: lq,
+                    c: d,
+                    at: v.at + at,
+                    ..v.clone()
+                };
+                let views = (&head(&q, h * d), &head(&k, h * d), &head(&v, h * d));
+                let out = head(&att.shaped(1, 1, lq, p.dout), h * d);
+                kernels::attend_gemm(ops, &self.m.own, &s.gemm, (views.0, views.1, views.2, &out));
+            }
+        } else {
+            kernels::attend(
+                ops,
+                &heads,
+                Rows {
+                    view: &q,
+                    each: q_each,
+                },
+                Rows { view: &k, each },
+                Rows { view: &v, each },
+                Rows {
+                    view: &att,
+                    each: lq * p.dout,
+                },
+            );
+        }
         let aw = s.aw.shaped(1, 1, count * lq, p.dout);
         ops.conv(&b.proj, &att, &aw, Res::None);
         match p.window > 0 {
@@ -918,7 +969,7 @@ impl Net {
         ops.conv(&layers[2], hb, out, Res::None);
     }
 
-    fn transformer(&self, ops: &mut Ops, t: u32) {
+    fn transformer(&self, ops: &mut Ops, t: u32, (image, add): (&View, &View)) {
         let s = &self.m.space;
         let d = &self.m.decoder;
         let e = EMBED * EMBED;
@@ -931,7 +982,8 @@ impl Net {
         );
         let kpe = s.dense.shaped(1, 1, e, DIM);
         let hid = s.mlp.shaped(1, 1, t, MLP);
-        ops.copy(&s.src.shaped(1, 1, e, DIM), &k, 1.0, 0.0, Act::None);
+        let flat = |v: &View| v.shaped(1, 1, e, DIM);
+        ops.combine(&flat(image), &flat(add), &k, 1.0, 1.0);
         for (i, l) in d.layers.iter().enumerate() {
             if i == 0 {
                 let po = self.attention(ops, &l.own, (&q, &q, &q));
@@ -1008,6 +1060,51 @@ impl Net {
     }
 
     pub(super) fn decode(&self, clicks: &[Click]) -> Result<Found> {
+        let s = &self.m.space;
+        let image = (s.src.clone(), self.m.memory.shift.clone());
+        let d = self.decoded(clicks, None, |_| image)?;
+        Ok(d.found)
+    }
+
+    pub(super) fn work(&self) -> Work {
+        memory::work(&self.gpu)
+    }
+
+    pub(super) fn bank(&self) -> Bank {
+        Bank::new(&self.gpu)
+    }
+
+    pub(super) fn first(&self, w: &Work, bank: &mut Bank, clicks: &[Click]) -> Result<Found> {
+        let s = &self.m.space;
+        let image = (s.src.clone(), self.m.memory.shift.clone());
+        let d = self.decoded(clicks, Some(w), |_| image)?;
+        let way = match d.found.object > 0.0 {
+            true => kernels::Remembered::Cut,
+            false => kernels::Remembered::Empty,
+        };
+        self.remember(w, bank, (d.pick, way), d.pointer)?;
+        Ok(d.found)
+    }
+
+    pub(super) fn next(&self, w: &Work, bank: &mut Bank, frames: usize) -> Result<Found> {
+        let r = memory::Recall::of(bank, frames);
+        self.recall_upload(w, &r);
+        let none = self.m.memory.none.clone();
+        let d = self.decoded(&[], Some(w), |ops| (self.recall(ops, w, bank, &r), none))?;
+        let way = match d.found.object > 0.0 {
+            true => kernels::Remembered::Soft,
+            false => kernels::Remembered::Empty,
+        };
+        self.remember(w, bank, (d.pick, way), d.pointer)?;
+        Ok(d.found)
+    }
+
+    fn decoded(
+        &self,
+        clicks: &[Click],
+        work: Option<&Work>,
+        image: impl FnOnce(&mut Ops) -> (View, View),
+    ) -> Result<Decoded> {
         if clicks.len() > MOST_CLICKS {
             return Err(Error::Invalid(format!(
                 "a subject takes {MOST_CLICKS} clicks at most"
@@ -1015,9 +1112,15 @@ impl Net {
         }
         let gpu = &self.gpu;
         let s = &self.m.space;
-        let made = tokens(&self.m.decoder.prompts, clicks);
+        let mut made = tokens(&self.m.decoder.prompts, clicks);
+        if clicks.is_empty() {
+            made.extend(&self.m.decoder.prompts.none);
+        }
         let t = (made.len() / DIM as usize) as u32;
-        let plane = u64::from(MAP * MAP * MASKS) * 4;
+        let plane_bytes = u64::from(MAP * MAP * MASKS) * 4;
+        let iou_bytes = u64::from(MASKS) * 4;
+        let scores = iou_bytes + 4;
+        let pointers = u64::from(MASKS * DIM) * 4;
         self.checked(|| {
             gpu.queue
                 .write_buffer(&s.q.buf, u64::from(s.q.base) * 4, &bytes(&made));
@@ -1031,30 +1134,34 @@ impl Net {
                     k: &self.m.basic,
                     pass: &mut pass,
                 };
-                self.transformer(&mut ops, t);
+                let (image, add) = image(&mut ops);
+                self.transformer(&mut ops, t, (&image, &add));
                 self.heads(&mut ops);
+                if let Some(w) = work {
+                    let tokens = View {
+                        base: s.q.base + 2 * DIM,
+                        ..s.q.shaped(1, 1, MASKS, DIM)
+                    };
+                    let into = (&w.pa, &w.pb, &w.ptr);
+                    Self::mlp(&mut ops, &self.m.memory.pointer, &tokens, into);
+                }
             }
             let at = |v: &View| u64::from(v.base) * 4;
-            enc.copy_buffer_to_buffer(&s.masks.buf, at(&s.masks), &self.m.staging, 0, plane);
-            enc.copy_buffer_to_buffer(
-                &s.iou.buf,
-                at(&s.iou),
-                &self.m.staging,
-                plane,
-                u64::from(MASKS) * 4,
-            );
-            enc.copy_buffer_to_buffer(
-                &s.object.buf,
-                at(&s.object),
-                &self.m.staging,
-                plane + u64::from(MASKS) * 4,
-                4,
-            );
+            let st = &self.m.staging;
+            enc.copy_buffer_to_buffer(&s.masks.buf, at(&s.masks), st, 0, plane_bytes);
+            enc.copy_buffer_to_buffer(&s.iou.buf, at(&s.iou), st, plane_bytes, iou_bytes);
+            let after = plane_bytes + iou_bytes;
+            enc.copy_buffer_to_buffer(&s.object.buf, at(&s.object), st, after, 4);
+            if let Some(w) = work {
+                let to = plane_bytes + scores;
+                enc.copy_buffer_to_buffer(&w.ptr.buf, at(&w.ptr), st, to, pointers);
+            }
             gpu.flush();
             gpu.queue.submit([enc.finish()]);
             Ok(())
         })?;
-        let raw = gpu.fetch(&self.m.staging, plane + u64::from(MASKS + 1) * 4, None)?;
+        let size = plane_bytes + scores + work.map_or(0, |_| pointers);
+        let raw = gpu.fetch(&self.m.staging, size, None)?;
         let all = compute::floats(&raw);
         let n = (MAP * MAP * MASKS) as usize;
         let (masks, rest) = all.split_at(n);
@@ -1069,27 +1176,45 @@ impl Net {
             crate::npy::write(
                 &dir.join(format!("scores-{at}.npy")),
                 &[MASKS as usize + 1],
-                rest,
+                &rest[..=MASKS as usize],
             )?;
         }
-        Ok(Found {
-            logits: chosen(masks, iou, object, clicks.len()),
-            object,
+        let pick = pick(masks, iou, clicks.len());
+        let pointer = match (work, object > 0.0) {
+            (None, _) => Vec::new(),
+            (Some(_), false) => self.no_pointer(),
+            (Some(_), true) => {
+                let token = pointer_token(pick, clicks.len());
+                let from = MASKS as usize + 1 + token * DIM as usize;
+                rest[from..from + DIM as usize].to_vec()
+            }
+        };
+        Ok(Decoded {
+            found: Found {
+                logits: plane(masks, pick, object),
+                object,
+            },
+            pick,
+            pointer,
         })
     }
 
-    pub(super) fn dump(&self, dir: &Path) -> Result<()> {
+    pub(super) fn dump(&self, dir: &Path, frame: Option<usize>) -> Result<()> {
         let s = &self.m.space;
         let named = [
             ("image", &s.image),
             ("feat-s0", &s.fs0),
             ("feat-s1", &s.fs1),
-            ("embedding", &s.src),
+            ("vision", &s.src),
         ];
         for (name, v) in named {
             let data = read_view(&self.gpu, v)?;
             let shape = sizes(&[v.h, v.w, v.c]);
-            crate::npy::write(&dir.join(format!("{name}.npy")), &shape, &data)?;
+            let file = match frame {
+                Some(n) => format!("{name}-{n}.npy"),
+                None => format!("{name}.npy"),
+            };
+            crate::npy::write(&dir.join(file), &shape, &data)?;
         }
         Ok(())
     }

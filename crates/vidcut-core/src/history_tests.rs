@@ -128,7 +128,10 @@ fn a_ripple_delete_takes_place_where_the_clip_was() {
     let step = steps(&f).undo().cloned().unwrap();
     assert_eq!(
         serde_json::to_value(&step.spans).unwrap(),
-        json!([{"track": "V1", "from": 0, "to": 50}])
+        json!([
+            {"track": "A1", "from": 0, "to": 50},
+            {"track": "V1", "from": 0, "to": 50}
+        ])
     );
 }
 
@@ -137,9 +140,9 @@ fn a_moved_clip_is_where_its_step_happened() {
     let mut f = trimmed();
     f.ok(req(
         "edit.move",
-        json!({"clips": "c2", "to": 200, "mode": "overwrite"}),
+        json!({"clips": "c3", "to": 200, "mode": "overwrite"}),
     ));
-    assert_eq!(steps(&f).undo().unwrap().clips, ["c2"]);
+    assert_eq!(steps(&f).undo().unwrap().clips, ["c3", "c4"]);
 }
 
 #[test]
@@ -255,4 +258,38 @@ fn an_applys_parts_leave_out_its_queries() {
         ]}),
     ));
     assert_eq!(steps(&f).undo().unwrap().parts, ["New bin a"]);
+}
+
+#[test]
+fn editing_a_cue_records_an_item_delta() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "Hello", "at": "0f", "duration": "24f"}),
+    ));
+    f.ok(req(
+        "subtitles.set",
+        json!({"cue": "q1", "text": "Updated"}),
+    ));
+    let val = serde_json::to_value(&f.editor.history_view(1).unwrap().undo[0].change).unwrap();
+    assert_eq!(
+        val["fields"]["timelines"]["items"]["changed"]["t1"]["fields"]["subtitles"]["items"]["changed"]
+            ["S1"]["fields"]["cues"]["items"]["changed"]["q1"]["fields"]["text"],
+        json!({"set": {"was": "Hello", "is": "Updated"}})
+    );
+}
+
+#[test]
+fn undoing_a_cue_edit_restores_its_previous_text() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "Hello", "at": "0f", "duration": "24f"}),
+    ));
+    f.ok(req(
+        "subtitles.set",
+        json!({"cue": "q1", "text": "Updated"}),
+    ));
+    f.ok(req("history.undo", json!({})));
+    assert_eq!(f.editor.project().cue("q1").unwrap().text, "Hello");
 }

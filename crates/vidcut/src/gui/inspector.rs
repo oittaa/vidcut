@@ -14,19 +14,19 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
-    Border, BorderLevel, CellShape, Clip, ClipRetime, ClipScaling, CompositeMode, Composition,
-    Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
-    FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
-    JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
-    Retime, ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
-    Tracker, TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    AdaptiveMode, Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping,
+    BlurFilter, Border, BorderLevel, CellShape, Clip, ClipRetime, ClipScaling, CompositeMode,
+    Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
+    FastNoise, FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha,
+    GlowFraming, GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite,
+    GrainPreset, JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges, MergeOperator,
+    MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture,
+    PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement, Sharpen, Speed,
+    SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
-use vidcut_core::place::mapped;
+use vidcut_core::place::{crop_unit, mapped};
 use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::{GAIN, PAN};
 
@@ -866,6 +866,7 @@ impl Direction {
 pub(super) struct Shape {
     pub(super) frame: [f64; 2],
     pub(super) mapped: [f64; 2],
+    pub(super) crop: [f64; 2],
 }
 
 impl Field {
@@ -993,6 +994,7 @@ impl Field {
         let p = owned.as_ref().unwrap_or(p);
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
         let ([w, h], [fw, fh], [ax, ay]) = (s.frame, s.mapped, p.pivot());
+        let [cw, ch] = s.crop;
         let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
         match self {
             Field::Zoom | Field::ZoomX => zx * 100.0,
@@ -1000,14 +1002,14 @@ impl Field {
             Field::X => (x - 0.5) * w,
             Field::Y => (0.5 - y) * h,
             Field::Rotation => p.turn(),
-            Field::AnchorX => (ax - 0.5) * fw,
-            Field::AnchorY => (0.5 - ay) * fh,
+            Field::AnchorX => (ax - 0.5) * cw,
+            Field::AnchorY => (0.5 - ay) * ch,
             Field::Pitch => p.pitch(),
             Field::Yaw => p.yaw(),
-            Field::Left => c.left * fw,
-            Field::Right => c.right * fw,
-            Field::Top => c.top * fh,
-            Field::Bottom => c.bottom * fh,
+            Field::Left => c.left * cw,
+            Field::Right => c.right * cw,
+            Field::Top => c.top * ch,
+            Field::Bottom => c.bottom * ch,
             Field::Softness => p.softness(),
             Field::Opacity => p.opaque() * 100.0,
             Field::StartZoom | Field::EndZoom => 100.0 / b.size,
@@ -1055,11 +1057,11 @@ impl Field {
             Field::X => -reach * w..=reach * w,
             Field::Y => -reach * h..=reach * h,
             Field::Rotation => -turns..=turns,
-            Field::AnchorX => -reach * fw..=reach * fw,
-            Field::AnchorY => -reach * fh..=reach * fh,
+            Field::AnchorX => -reach * s.crop[0]..=reach * s.crop[0],
+            Field::AnchorY => -reach * s.crop[1]..=reach * s.crop[1],
             Field::Pitch | Field::Yaw => -lean..=lean,
-            Field::Left | Field::Right => 0.0..=fw,
-            Field::Top | Field::Bottom => 0.0..=fh,
+            Field::Left | Field::Right => 0.0..=s.crop[0],
+            Field::Top | Field::Bottom => 0.0..=s.crop[1],
             Field::Softness => -soft..=soft,
             Field::Opacity => 0.0..=100.0,
             Field::StartZoom | Field::EndZoom => 100.0 / box_size.1..=100.0 / box_size.0,
@@ -1104,14 +1106,14 @@ impl Field {
             Field::X => out.position = Some([at(0.5 + v / w), y]),
             Field::Y => out.position = Some([x, at(0.5 - v / h)]),
             Field::Rotation => out.rotation = Some(v),
-            Field::AnchorX => out.anchor = Some([at(0.5 + v / fw), ay]),
-            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / fh)]),
+            Field::AnchorX => out.anchor = Some([at(0.5 + v / s.crop[0]), ay]),
+            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / s.crop[1])]),
             Field::Pitch => out.pitch = Some(v),
             Field::Yaw => out.yaw = Some(v),
-            Field::Left => out.crop.left = v / fw,
-            Field::Right => out.crop.right = v / fw,
-            Field::Top => out.crop.top = v / fh,
-            Field::Bottom => out.crop.bottom = v / fh,
+            Field::Left => out.crop.left = v / s.crop[0],
+            Field::Right => out.crop.right = v / s.crop[0],
+            Field::Top => out.crop.top = v / s.crop[1],
+            Field::Bottom => out.crop.bottom = v / s.crop[1],
             Field::Softness => out.crop_softness = Some(v),
             Field::Opacity => out.opacity = Some(v / 100.0),
             Field::StartZoom
@@ -2931,12 +2933,16 @@ impl Workspace {
                 false,
             );
             let full = t.patterns.len() >= vidcut_core::model::Tracker::PATTERNS_KEPT;
-            if ui
-                .add_enabled(!full, egui::Button::new("Add Pattern"))
-                .clicked()
-            {
-                sends.push(set(json!({ "add_pattern": true })));
-            }
+            ui.horizontal(|ui| {
+                let adds = [("Add Pattern", "add_pattern"), ("Add Point", "add_point")];
+                for (name, put) in adds {
+                    if ui.add_enabled(!full, egui::Button::new(name)).clicked() {
+                        let mut params = json!({});
+                        params[put] = json!(true);
+                        sends.push(set(params));
+                    }
+                }
+            });
             ui.end_row();
             if let Some(pattern) = t.patterns.get(pick) {
                 label(ui, "Name", false);
@@ -2969,6 +2975,73 @@ impl Workspace {
                         let mut to = now;
                         to[axis] = v;
                         sends.push(set(json!({ "pattern": pick + 1, "pattern_offset": to })));
+                    }
+                }
+                if pattern.kind() == PatternKind::Point {
+                    let now = pattern.search();
+                    let sides = [
+                        ("Search Width", "search_width"),
+                        ("Search Height", "search_height"),
+                    ];
+                    for (axis, (name, put)) in sides.into_iter().enumerate() {
+                        let id = ui.scope_id().with((
+                            "pattern-search",
+                            &clip.id,
+                            &node.name,
+                            pick,
+                            axis,
+                        ));
+                        let usual = (now[axis], Pattern::SEARCH);
+                        if let Some(v) =
+                            number_row(ui, (id, name), usual, (Pattern::SEARCHES, 0.001))
+                        {
+                            let mut params = json!({ "pattern": pick + 1 });
+                            params[put] = json!(v);
+                            sends.push(set(params));
+                        }
+                    }
+                    let channel = pattern.channel();
+                    let changed = channel != PatternChannel::default();
+                    label(ui, "Channel", changed);
+                    let mut to = None;
+                    egui::ComboBox::from_id_salt(("pattern-channel", &clip.id, &node.name, pick))
+                        .selected_text(channel.label())
+                        .show_ui(ui, |ui| {
+                            for c in PatternChannel::ALL {
+                                if ui.selectable_label(c == channel, c.label()).clicked() {
+                                    to = Some(c).filter(|c| *c != channel);
+                                }
+                            }
+                        });
+                    if reset(ui, changed) {
+                        to = Some(PatternChannel::default());
+                    }
+                    ui.end_row();
+                    if let Some(c) = to {
+                        sends.push(set(json!({ "pattern": pick + 1, "pattern_channel": c })));
+                    }
+                    let modes = (
+                        &AdaptiveMode::ALL[..],
+                        AdaptiveMode::label as fn(AdaptiveMode) -> &'static str,
+                    );
+                    let mode = (t.adaptive(), AdaptiveMode::default());
+                    choice_row(
+                        ui,
+                        (slot, "Adaptive Mode", "adaptive_mode"),
+                        mode,
+                        modes,
+                        acts,
+                    );
+                    if t.adaptive() == AdaptiveMode::BestMatch {
+                        let id = ui
+                            .scope_id()
+                            .with(("match-tolerance", &clip.id, &node.name));
+                        let usual = (t.tolerance(), Tracker::TOLERANCE);
+                        if let Some(v) =
+                            number_row(ui, (id, "Match Tolerance"), usual, ((0.0, 1.0), 0.01))
+                        {
+                            acts.push(node_set(slot, "match_tolerance", json!(v)));
+                        }
                     }
                 }
             }
@@ -3110,7 +3183,19 @@ impl Workspace {
             self.inspector.stopping = Some(true);
         }
         if !tracks.is_empty() {
-            self.ask(tracks, Wanted::Tracker);
+            let point = |params: &Value| {
+                let k = params["pattern"].as_u64().unwrap_or(1) as usize;
+                let kind = t.patterns.get(k.saturating_sub(1)).map(Pattern::kind);
+                kind == Some(PatternKind::Point)
+            };
+            let (points, models): (Vec<_>, Vec<_>) =
+                tracks.into_iter().partition(|(_, params)| point(params));
+            for (method, params) in points {
+                self.send(method, params);
+            }
+            if !models.is_empty() {
+                self.ask(models, Wanted::Tracker);
+            }
             if let Some(at) = stepped {
                 self.page_ask(json!({ "at": at }));
             }
@@ -3356,11 +3441,11 @@ fn rate(p: &Project, c: &Clip) -> f64 {
 pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
     let (w, h) = (p.width().max(1), p.height().max(1));
     let frame = [f64::from(w), f64::from(h)];
-    let size = p
+    let (mapped, crop) = p
         .media(&c.media)
         .and_then(|m| m.info.video.as_ref())
         .filter(|v| v.width > 0 && v.height > 0)
-        .map_or(frame, |v| {
+        .map_or((frame, frame), |v| {
             let sar = (v.sar[0], v.sar[1]);
             let scaling = c
                 .picture
@@ -3368,11 +3453,13 @@ pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
                 .map_or(ClipScaling::Project, |q| q.scaling);
             let to = scaling.or(p.scaling());
             let [_, _, fw, fh] = mapped(to, (v.width, v.height), sar, v.rotation, (w, h));
-            [fw.max(1.0), fh.max(1.0)]
+            let size = [fw.max(1.0), fh.max(1.0)];
+            (size, crop_unit(size, sar, v.rotation))
         });
     Shape {
         frame,
-        mapped: size,
+        mapped,
+        crop,
     }
 }
 
@@ -5515,7 +5602,7 @@ impl Workspace {
                 let (ti, ci) = p.find_clip(id)?;
                 let c = &p.tracks[ti].clips[ci];
                 (p.tracks[ti].kind == TrackKind::Video && has_picture(c)).then(|| {
-                    let stored = c.picture.clone().unwrap_or_default();
+                    let stored = c.picture.as_deref().cloned().unwrap_or_default();
                     let shown = wanted
                         .iter()
                         .find(|(w, _)| *w == c.id)
@@ -5552,9 +5639,7 @@ impl Workspace {
         };
         let gained = self.inspector.gained.as_ref();
         let at = self.snap.timeline.position as f64;
-        self.snap
-            .selection
-            .clips
+        vidcut_core::ops::linked::sounds(p, &self.snap.selection.clips)
             .iter()
             .filter_map(|id| {
                 let c = p.clip(id)?;

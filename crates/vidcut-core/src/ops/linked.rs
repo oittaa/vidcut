@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{clear_range, fix_audio, locate, main_index, place, split_at, tracks};
+use super::{
+    Source, clear_range, ensure_track, locate, main_index, place, split_at, tracks, unlocked,
+};
 use crate::error::Result;
-use crate::model::{Clip, Project};
+use crate::model::{Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, TrackKind};
 
 #[derive(Debug, Default)]
 pub(super) struct Parts {
@@ -19,22 +21,39 @@ pub(super) struct Taken {
 pub(crate) struct Relink {
     next: u32,
     given: HashMap<i64, u32>,
+    used: HashSet<u32>,
 }
 
 impl Relink {
     pub fn new(p: &Project) -> Self {
         Self {
-            next: p.free_link(),
+            next: 1,
             given: HashMap::new(),
+            used: p
+                .tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter_map(|c| c.link)
+                .collect(),
         }
     }
 
     pub fn of(&mut self, old: i64) -> u32 {
-        let next = &mut self.next;
-        *self.given.entry(old).or_insert_with(|| {
-            *next += 1;
-            *next - 1
-        })
+        if let Some(&l) = self.given.get(&old) {
+            return l;
+        }
+        let l = match u32::try_from(old) {
+            Ok(o) if o > 0 && !self.used.contains(&o) => o,
+            _ => {
+                while self.used.contains(&self.next) {
+                    self.next += 1;
+                }
+                self.next
+            }
+        };
+        self.used.insert(l);
+        self.given.insert(old, l);
+        l
     }
 
     pub fn clip(&mut self, c: &mut Clip) {
@@ -111,6 +130,31 @@ pub fn with_ties(p: &Project, ids: &[String]) -> Vec<String> {
     all
 }
 
+pub fn sounds(p: &Project, ids: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        let heard: Vec<String> = match p.clip(id) {
+            Some(c) if c.audio.is_none() => p
+                .tied(id)
+                .into_iter()
+                .filter(|x| p.clip(x).is_some_and(|c| c.audio.is_some()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let list = if heard.is_empty() {
+            vec![id.clone()]
+        } else {
+            heard
+        };
+        for x in list {
+            if !out.contains(&x) {
+                out.push(x);
+            }
+        }
+    }
+    out
+}
+
 pub(super) fn tied_to(p: &Project, id: &str) -> Vec<(String, String)> {
     p.tied(id)
         .into_iter()
@@ -158,7 +202,6 @@ pub(super) fn put(p: &mut Project, track: &str, c: Clip) {
     let ti = p.track_index(track).expect("tracks stay");
     clear_range(p, ti, c.start, c.end());
     place(p, ti, c);
-    fix_audio(p, ti);
 }
 
 pub(super) fn put_free(p: &mut Project, track: &str, c: Clip) {
@@ -179,9 +222,75 @@ pub(super) fn put_free(p: &mut Project, track: &str, c: Clip) {
                 .any(|o| o.start < c.end() && c.start < o.end())
         {
             place(p, ti, c);
-            fix_audio(p, ti);
             return;
         }
         n += 1;
     }
+}
+
+fn sound_of(c: &Clip, stream: Option<u32>) -> Clip {
+    Clip {
+        video: false,
+        audio: stream.map(ClipAudio::of),
+        picture: None,
+        effects: None,
+        retime: ClipRetime::Project,
+        render_cache: ClipCache::Auto,
+        ..c.clone()
+    }
+}
+
+fn sound_parts(p: &Project, c: &Clip, src: &Source) -> Vec<Clip> {
+    if src.video_only {
+        return Vec::new();
+    }
+    if c.compound.is_some() {
+        let heard = c.video && p.clip_compound(c).is_some_and(Compound::has_sound);
+        return heard.then(|| sound_of(c, None)).into_iter().collect();
+    }
+    let Some(m) = p.media(&c.media) else {
+        return Vec::new();
+    };
+    let own = c.audio.as_ref().map(|a| a.stream);
+    (0..m.info.audio.len() as u32)
+        .filter(|&k| Some(k) != own)
+        .map(|k| sound_of(c, Some(k)))
+        .collect()
+}
+
+pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
+    let mut out = ids.clone();
+    for id in &ids {
+        let (mut ti, ci) = locate(p, id)?;
+        let n = p.tracks[ti].number();
+        if p.tracks[ti].kind == TrackKind::Video && !p.tracks[ti].clips[ci].video {
+            let c = p.tracks[ti].clips.remove(ci);
+            ti = ensure_track(p, &format!("A{n}"))?;
+            unlocked(p, ti)?;
+            clear_range(p, ti, c.start, c.end());
+            place(p, ti, c);
+        }
+        let (ti, ci) = locate(p, id)?;
+        let c = &p.tracks[ti].clips[ci];
+        let parts = sound_parts(p, c, src);
+        if parts.is_empty() {
+            continue;
+        }
+        let first = match c.video {
+            true => n,
+            false => p.tracks[ti].number() + 1,
+        };
+        let link = c.link.unwrap_or_else(|| p.free_link());
+        p.tracks[ti].clips[ci].link = Some(link);
+        for (k, mut s) in parts.into_iter().enumerate() {
+            let ai = ensure_track(p, &format!("A{}", first + k))?;
+            unlocked(p, ai)?;
+            s.id = p.alloc_clip_id();
+            s.link = Some(link);
+            clear_range(p, ai, s.start, s.end());
+            out.push(s.id.clone());
+            place(p, ai, s);
+        }
+    }
+    Ok(out)
 }

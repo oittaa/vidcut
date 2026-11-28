@@ -449,7 +449,7 @@ impl Drag {
             } => {
                 let d = moved(ctx, self.press, pos);
                 let grow = if *end { d } else { -d };
-                let room = vidcut_core::ops::dissolve_room(ctx.project, track, *at, false)
+                let room = vidcut_core::ops::dissolve_room(ctx.project, track, *at)
                     .unwrap_or((*before, *after));
                 let (b, a) = crate::gui::trim_strips::grown(*before, *after, grow, room);
                 let edge = if *end { a - after } else { before - b };
@@ -1565,9 +1565,7 @@ fn marquee_preview(ctx: &Ctx, press: Pos2, pos: Pos2, additive: bool) -> Preview
 #[cfg(test)]
 mod tests {
     use eframe::egui::{pos2, vec2};
-    use vidcut_core::model::{
-        AudioInfo, ClipAudio, Marks, Media, MediaInfo, Settings, TrackKind, VideoInfo,
-    };
+    use vidcut_core::model::{AudioInfo, Marks, Media, MediaInfo, Settings, TrackKind, VideoInfo};
     use vidcut_core::time::Rational;
 
     use super::*;
@@ -1648,23 +1646,7 @@ mod tests {
             source_in,
             phase: 0.0,
             video: true,
-            audio: Some(ClipAudio {
-                stream: 0,
-                head: 0,
-                tail: 0,
-                gain_db: 0.0,
-                gain_keys: Vec::new(),
-                muted: false,
-                pan: 0.0,
-                pan_on: true,
-                pan_keys: Vec::new(),
-                equalizer: None,
-                dialogue_leveler: None,
-                compressor: None,
-                noise_reduction: None,
-                effects: None,
-                voice_isolation: None,
-            }),
+            audio: None,
             enabled: true,
             name: None,
             effects: None,
@@ -1694,7 +1676,8 @@ mod tests {
                 clip("c1", 0, 100, 0),
                 clip("c2", 100, 50, 200),
                 clip("c3", 150, 100, 300),
-            ],
+            ]
+            .into(),
             ..Track::new("V1", TrackKind::Video)
         };
         p
@@ -1731,6 +1714,7 @@ mod tests {
         Rows {
             rows,
             area: Rect::from_min_max(pos2(0.0, 26.0), pos2(1000.0, 260.0)),
+            bands: super::super::geometry::Bands::default(),
         }
     }
 
@@ -1751,7 +1735,7 @@ mod tests {
             p.tracks.insert(
                 1,
                 Track {
-                    clips,
+                    clips: clips.into(),
                     ..Track::new("V2", TrackKind::Video)
                 },
             );
@@ -2067,9 +2051,7 @@ mod tests {
 
     #[test]
     fn marquee_selects_across_rows() {
-        let mut b = clip("b1", 40, 30, 0);
-        b.audio = None;
-        let w = World::with_v2(vec![b]);
+        let w = World::with_v2(vec![clip("b1", 40, 30, 0)]);
         let r = w
             .drag(
                 Gesture::Marquee { additive: false },

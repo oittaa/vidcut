@@ -90,10 +90,6 @@ pub fn clip(p: &Project, c: &mut Clip, r: Rates) {
     let (was_start, was_end) = (c.start, c.end());
     let (start, end) = (conv(was_start), conv(was_end));
     if let Some(a) = c.audio.as_mut() {
-        (a.head, a.tail) = (
-            conv(was_start + a.head) - start,
-            conv(was_end + a.tail) - end,
-        );
         a.gain_keys = crate::keyframes::scaled(&a.gain_keys, conv, ratio);
         a.pan_keys = crate::keyframes::scaled(&a.pan_keys, conv, ratio);
         if let Some(e) = a.effects.as_mut() {

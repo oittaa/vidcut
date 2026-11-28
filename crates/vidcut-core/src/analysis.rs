@@ -198,6 +198,15 @@ pub struct Follow {
     pub area: [f32; 4],
     pub backward: bool,
     pub forward: bool,
+    pub point: Option<Pointed>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pointed {
+    pub search: [f32; 2],
+    pub channel: crate::model::PatternChannel,
+    pub adaptive: crate::model::AdaptiveMode,
+    pub tolerance: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

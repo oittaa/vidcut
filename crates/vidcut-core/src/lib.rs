@@ -46,6 +46,7 @@ pub mod request;
 pub mod retime;
 pub mod rich;
 pub mod sequence;
+pub mod shared;
 pub mod shortcuts;
 pub mod slate;
 pub mod speakers;

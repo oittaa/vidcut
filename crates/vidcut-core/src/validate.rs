@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{Generator, Media, Project, TrackKind};
+use crate::model::{Generator, Media, Project, Track, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
@@ -8,6 +8,30 @@ pub const PAN: std::ops::RangeInclusive<f64> = -100.0..=100.0;
 
 pub fn fader_silent(volume_db: f64) -> bool {
     volume_db <= *FADER.start()
+}
+
+fn sound_on_video(t: &Track, v: &mut Vec<String>) {
+    if t.kind != TrackKind::Video {
+        return;
+    }
+    let set = t.muted
+        || t.solo
+        || t.volume_db != 0.0
+        || t.voice_isolation.is_some()
+        || t.duck.is_some()
+        || t.equalizer.is_some()
+        || t.dynamics.is_some();
+    if set {
+        v.push(format!("video track {} has a sound setting", t.id));
+    }
+    for c in &t.clips {
+        if c.audio.is_some() || !c.video {
+            v.push(format!(
+                "{}: a clip on video track {} has sound or no picture",
+                c.id, t.id
+            ));
+        }
+    }
 }
 
 fn compounds(p: &Project, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
@@ -36,6 +60,9 @@ fn compounds(p: &Project, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
                 "compound {} has negative length {}",
                 k.id, k.frames
             ));
+        }
+        for t in &k.tracks {
+            sound_on_video(t, v);
         }
         for c in k.tracks.iter().flat_map(|t| &t.clips) {
             if let Some(cid) = &c.compound {
@@ -119,6 +146,7 @@ pub fn violations(p: &Project) -> Vec<String> {
         if i > 0 && t.kind == TrackKind::Video && p.tracks[i - 1].kind == TrackKind::Audio {
             v.push(format!("video track {} after audio tracks", t.id));
         }
+        sound_on_video(t, &mut v);
         if !FADER.contains(&t.volume_db) {
             v.push(format!(
                 "track {} volume {} dB outside -100..10 dB",
@@ -146,7 +174,6 @@ pub fn violations(p: &Project) -> Vec<String> {
             }
         }
         let mut prev_end: Option<i64> = None;
-        let mut prev_audio_end: Option<i64> = None;
         for c in &t.clips {
             if !ids.insert(c.id.as_str()) {
                 v.push(format!("duplicate id {}", c.id));
@@ -281,8 +308,7 @@ pub fn violations(p: &Project) -> Vec<String> {
                             ));
                         }
                         let (s, e) = c.sound_span().unwrap_or((0.0, 1.0));
-                        if s < -1e-6 || e > frames as f64 + 1e-6 || c.duration + a.tail - a.head < 1
-                        {
+                        if s < -1e-6 || e > frames as f64 + 1e-6 {
                             v.push(format!(
                                 "{}: audio source {}..{} outside media {} (0..{frames})",
                                 c.id,
@@ -291,17 +317,6 @@ pub fn violations(p: &Project) -> Vec<String> {
                                 m.id
                             ));
                         }
-                        let (as_, ae) = c.audio_range().expect("has audio");
-                        if as_ < 0 {
-                            v.push(format!("{}: audio starts before 0", c.id));
-                        }
-                        if prev_audio_end.is_some_and(|pe| as_ < pe) {
-                            v.push(format!(
-                                "{}: audio overlaps the previous clip's audio on {}",
-                                c.id, t.id
-                            ));
-                        }
-                        prev_audio_end = Some(ae);
                     }
                     if !c.video && c.audio.is_none() {
                         v.push(format!("{}: has neither video nor audio", c.id));
@@ -605,11 +620,12 @@ mod tests {
         f.append("m1", 0, 25);
         let mut p = f.editor.project().clone();
         assert!(violations(&p).is_empty());
-        p.tracks[0].clips[0].audio.as_mut().unwrap().gain_db = 1000.0;
-        p.tracks[0].volume_db = f64::NAN;
+        let a1 = p.track_mut("A1").unwrap();
+        a1.clips[0].audio.as_mut().unwrap().gain_db = 1000.0;
+        a1.volume_db = f64::NAN;
         let v = violations(&p).join("; ");
         assert!(v.contains("gain 1000 dB outside -100..30 dB"), "{v}");
-        assert!(v.contains("track V1 volume NaN dB"), "{v}");
+        assert!(v.contains("track A1 volume NaN dB"), "{v}");
     }
 
     #[test]

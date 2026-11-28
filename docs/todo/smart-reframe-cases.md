@@ -1,10 +1,25 @@
 # Smart Reframe cases
 
-**When:** Resolve batch SR4 for the freeze frame and the ramp. The script of SR4 is `fixtures/program/scripts/sr4_script.py` in the test data. The Reference Point item waits for a rule that fits its 40 boxes.
+**When:** the window steps of Resolve batch SR4 have run (below). The Reference Point item waits for a rule that fits its 40 boxes.
 
 Smart Reframe is complex behavior. Its move depends on the content and on the settings. One measurement records only what Resolve did for that input. A rule needs several files that differ in content, subject count, aspect, frame rate and resolution.
 
 The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212) rest on SR1, SR2 and SR3. These use nine files, crops made from them, and 9:16, 16:9 and 1:1 timelines. Each item below names a line that rests on one clip or on no measurement, and the cases that test it.
+
+## Batch SR4
+
+- **To do:** run the window steps W1 to W5 of SR4 in Resolve. Then compare `out/sr4/*-after.otio` with the move of vidcut on `out/sr4/*-before.otio`.
+- The script is `fixtures/program/scripts/sr4_script.py` in the test data. It makes three 9:16 timelines of four clips each. The clips are 240 frames apart.
+  - `sr4-freeze`: a freeze at frame 40 of each clip.
+  - `sr4-freeze80`: a freeze at frame 80 of each clip, also on a sports clip.
+  - `sr4-ramp50`: a speed point at frame 60, and 50 % after it.
+- **Why:** the freeze line and the ramp lines of spec §8.30 rest on SR3 only. The items below give the details.
+  - Three of the four freeze clips of SR3 are not clean results, because the freeze before each one cut its start.
+  - The keyframes for each frame at 200 % do not agree between SR2 and SR3. A ramp to 50 % shows the rule of Resolve for a slower part.
+- Compare these values:
+  - The move during the frozen frames. vidcut holds it still.
+  - The keyframes for each frame in each part of a ramp.
+  - The distance in pixels on each frame, as for SR2 and SR3.
 
 ## One clip or one file
 
@@ -28,8 +43,8 @@ The rules of [spec §8.30](../spec.md#830-smart-reframe-pp-735-771772-815-920-95
   - The 40 boxes of SR2 W5 and SR3 W3 are the cases for the next rule. Their distances are in `fixtures/program/NOTES.md`, SR2 and SR3.
 - **Freeze frame.** Now: one clean clip of SR3. Resolve holds the move still on the frozen frames, as vidcut does.
   - On three clips whose start the freeze of the clip before had cut, the move of Resolve goes on during the freeze.
-  - Test (SR4): freezes at frames 40 and 80, on clips 240 frames apart, on five files.
+  - Test: batch SR4, freezes at frames 40 and 80 on five files.
 - **Speed ramps.** Now: a ramp from 100 % to 200 % on four clips (SR3). The move follows the source frames that show, as in vidcut.
   - In the 200 % part, Resolve sets as many keyframes for each frame as in the 100 % part. vidcut sets 1.7 times as many there.
   - At a constant 200 %, Resolve sets twice the keyframes of 100 % (SR2). Thus the two results do not agree yet.
-  - Test (SR4): a ramp from 100 % to 50 %, on four files.
+  - Test: batch SR4, a ramp from 100 % to 50 % on four files.

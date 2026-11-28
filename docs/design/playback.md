@@ -269,9 +269,18 @@ The audio device:
 - The drawing:
   - It fits the picture and turns it upright.
     - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../spec.md#the-fit-to-the-timeline)).
+      - It fits the display size of the upright picture. Thus the pixel aspect ratio and the rotation of a file go into the one rule.
+      - The handles of the viewer use the same place.
     - `fs` covers a pixel at the edge of that place in part.
     - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
+      - It does not open it for a crop on any side, for a Crop Softness below 0, or for a lean. Then each bar shows at its exact width.
+    - The `outset` of a leaned level moves each edge out along its normal, as measured. `fs` and `Placing::at` add it to the distance of the edge.
+    - A Pitch or Yaw under `LEAST_LEAN` does not lean the picture, and gives no `outset`. It still stops the limit, as measured.
+    - The Inspector counts a crop and Anchor Point X in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
+    - `Placing::new` turns a picture with pixels that are not square as the measured turn of those pixels ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
+      - It takes the shape of one source pixel from the `Extent` and the fitted size. Thus the viewer and an export turn the picture in the same way.
+      - The turn moves the point at the anchor as the measured turn does. On square pixels, that point stays in its place.
     - `Placing::new` counts a crop in whole pixels of the frame that it draws (`Fit::pixels`, [spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.

@@ -13,6 +13,8 @@ A subject mask is the Magic Mask palette of the Color page. Clicks on a person o
 
 The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 
+Pages 3288–3304 tell of version 1. A rule from these pages has the mark "version 1 text". The R runs check each such rule on version 2.
+
 - **Versions:**
   - Version 2 replaces version 1 (p. 3288). Only Resolve Studio has version 2 (p. 3281).
   - Version 1 stays for older projects, under Legacy Object Mask in the options menu (pp. 3287–3288).
@@ -47,17 +49,21 @@ The pages are in the Resolve 21.1 manual. The installed Resolve is Studio 21.2.
 - **Use Fast Tracking** in the options menu tracks faster and less exactly (p. 3303, version 1 text).
 - **Alpha Output:** a key on the Alpha Output of the Node Editor makes the clip transparent (pp. 3390, 3427, 3446–3447).
 - **Fusion:** the Magic Mask node has the same tool, a disk cache, a Reference Time and a Matte tab (pp. 2534–2538).
-- **Limits:** the mask has hard edges. It does not make the soft edges of hair as a keyer does (pp. 3292, 3297).
+- **Limits:** the mask has hard edges. It does not make the soft edges of hair as a keyer does (pp. 3292, 3297, version 1 text).
 
 ## In the code
 
 - A corrector has windows, a qualifier and a key input. `key_steps` folds them on the GPU in 32-bit float (`crates/vidcut-core/src/grade.rs`).
 - The Color page has no palette that tracks. It has no Tracker palette ([motion tracking](motion-tracking.md)).
 - `motion.track` follows a box with VitTrack, in tract on the CPU. `motion.find` finds people with YOLOX-S.
-- A corrector has a Magic Mask with clicks on one frame, Invert Mask and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
-  - SAM 2.1 tiny makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set` and `grade.mask.clear`.
+- A corrector has a Magic Mask with clicks, a track of the clicks, Invert Mask, Quality and the key ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297), [design](../design/analysis.md#subject-masks)).
+  - SAM 2.1 makes the maps in vidcut's own GPU kernels. The requests are `grade.mask.click`, `grade.mask.set`, `grade.mask.track` and `grade.mask.clear`.
+  - Quality selects the model: tiny for Faster, base+ for Better. The preference `color.magic_mask_large` selects large for Better.
+  - A track carries the clicks of one frame forward and back, with the video memory of SAM 2.1.
+  - With `gpu.acceleration` off, the same kernels run on the software adapter of wgpu. A frame of a track takes about 50 s there.
   - The mask store keeps the maps in memory and in the disk cache (`disk_cache::Kind::Masks`). An export makes a missing map again.
   - The viewer shows no mask on a frame whose map is missing.
+  - `masks::RULES` and `MASK_CUT` hold the rules that the R runs measure. Until then they are vidcut's choice.
 - The catalog downloads each model on first use, after an ask, and checks its SHA-256 (`catalog.rs`, `models.rs`).
 - RetinaFace, NanoVSR, FlashVSR and SAM 2.1 run in vidcut's own GPU kernels. The other ONNX models run in tract on the CPU.
 - The Node Editor has no Alpha Output. A clip with its own alpha composites over the tracks below.
@@ -93,13 +99,15 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
   - SAM 3 and SAM 3.1: the SAM License limits uses and forbids reverse engineering.
   - SAM2Long: the code is CC BY-NC 4.0. DEVA: CC BY-NC-SA 4.0. Robust Video Matting: GPL-3.0.
   - Human parsing models for named parts: each has a non-commercial license, or no license for its weights.
-  - SAM 2.1 masks a part of a person where the user clicks. Thus it needs no parsing model.
+  - For one click, SAM 2.1 gives three masks, for example the whole person, a part and a smaller part (the SAM paper of Meta).
+  - vidcut keeps the mask with the best predicted overlap. A click on a face can thus give the face, or the whole person.
+  - M1 shows both on frames of the Resolve runs. R6 measures what Resolve gives.
 - Smaller models fit but score lower: EdgeTAM (SA-V test 71.7), EfficientTAM S (74.5), Cutie (MOSE 68.6 to 69.9).
 
 ## How vidcut builds it
 
 - The Magic Mask is a part of a corrector, as its windows and its qualifier are.
-  - Its key joins the window key and the qualifier key as an intersection (p. 3289). Run R2 measures the formula.
+  - Its key joins the window key and the qualifier key as an intersection (p. 3289, version 1 text). Run R2 measures the formula.
 - The project keeps the clicks and the settings:
   - Each click has its sign, its on or off state, its reference frame and its place on each tracked frame.
   - The settings are Quality, Invert, Smart Refine, Consistency, Matte Finesse and the paint strokes.
@@ -113,10 +121,10 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
   - Smart Refine moves the level. The mask then grows or shrinks along the edges of the subject, with no softness.
   - Run R4 compares this with Resolve.
 - A positive click outside the masks starts a new subject. A click on a mask changes that subject.
-  - The mask of the node is the union of its subjects (p. 3296).
+  - The mask of the node is the union of its subjects (p. 3296, version 1 text). Run R6 checks it.
 - A track gives the frames to the model one by one, from the reference frame forward or back.
   - The clicks are the prompts on their reference frames.
-  - A drag of a click on a tracked frame gives that click a new reference frame (p. 3304).
+  - A drag of a click on a tracked frame gives that click a new reference frame (p. 3304, version 1 text).
   - Run R5 shows how the marks of the clicks move on the tracked frames.
 - The model runs in vidcut's own GPU kernels, as FlashVSR does. `weights.rs` reads the checkpoints of Meta.
   - Why: the GPU comes first ([AGENTS.md](../../AGENTS.md), rule 9), and Meta's own link has only these checkpoints.
@@ -131,11 +139,19 @@ All three are SAM 2.1 of Meta. The code and the checkpoints are Apache 2.0. The 
 Each step is one pull request.
 
 - **Palette:** the Magic Mask palette, the click tools, the Click list, Mask Overlay and Quality.
-- **Tracking:** the video memory, the track buttons, `grade.mask.track` and the timeline of the Click list.
+  - The switch of `color.magic_mask_large` in Preferences > Color.
+  - The track buttons, Stop Tracking and the timeline of the Click list.
   - The viewer makes a missing map again, as the export does.
+- **The measured rules:** set `masks::RULES` and `MASK_CUT` to the results of runs R3–R6.
+  - R5 shows whether a track goes past a frame with clicks, and which map such a frame keeps.
+  - R5 also shows whether the clicks of more than one frame make one track. SAM 2.1 can take the clicks of more frames into its memory.
+- **A CPU path:** a frame of a track takes about 50 s on the software adapter. macOS has no software adapter.
+  - A port of the network to the CPU kernels of vidcut would make the CPU path usable.
+- **Speed:** a frame of a track takes about 0.2 s on the GPU of the test computer.
 - **A change before the node:** the name of a map is a digest of the input picture at the time of the click.
   - An export makes a missing map from the picture of now, under the old name (`editor::mask_remakes`).
   - Thus, after a change before the node and a lost map, the export can show another mask than the viewer showed.
+  - A change of `color.magic_mask_large` has the same effect on a lost map of Better.
   - Run R3 shows what Resolve does. vidcut then makes the mask again, or keeps it, as Resolve does.
 - **Alpha Output:** the Alpha Output of the Node Editor. The mask then makes the clip transparent over the tracks below.
 - **Smart Refine and Consistency.**
@@ -159,24 +175,111 @@ These are vidcut's runs:
   - The same clicks go on the first frame of each video, for each of the three models.
   - The overlap of vidcut's mask with the official mask on each frame: the mean and the worst. Higher is better. The aim is 0.99.
   - J&F of both against the true masks of DAVIS.
-  - The official J&F with one click on the first frame: tiny 68.0, base+ 68.7, large 76.7.
-  - The first frames are done for tiny. On the same input, vidcut and the official network overlap 0.9999 on average, and 0.9993 at worst.
-  - The tracked frames wait for the Tracking step.
+  - The official J&F with one click on the first frame, one run of each model: tiny 68.0, base+ 68.7, large 76.7.
+  - Done for each model: frame 0 of the 30 videos, 61 objects, one positive click on each.
+    - On the same input, vidcut and the official network overlap on average 0.9999 (tiny), 0.9999 (base+) and 1.0000 (large).
+    - The worst overlaps are 0.9993 (tiny), 0.9976 (base+) and 0.9997 (large).
+  - Done for each model on frame 0, with more kinds of clicks:
+    - Two positive clicks on 59 objects.
+    - A positive click and a negative click 10 to 14 pixels outside the object, on 61 objects.
+    - One click within 2 pixels of the edge of the frame, on 12 objects.
+    - On the same input, the overlap is 1.0000 on average and 0.9999 or more at worst, with each model and each kind.
+  - Done for each model: one frame each of the five clips of the Resolve runs, 15 subjects with the same clicks for both.
+    - The frames are 3840 × 2160, 1920 × 1080, 1280 × 534 and 720 × 480.
+    - On the same input, the overlap is 1.0000 on average and at worst, with each model.
+    - Against the official input, the overlap is 0.9964 (tiny), 0.9637 (base+) and 0.9960 (large) on average.
+      - The official input is the picture in 8 bits, scaled to the square by PIL.
+      - The worst is base+ on the stage of jiku: 0.61. There the two inputs make the model choose another output.
+  - The part that one click gives changes with the model and the picture:
+    - A click on a face gives the face and the neck, the head with the hair, or the whole person.
+    - Base+ and large give the face and the neck more often. Tiny gives the whole person on the crowd frame.
+    - A click on the hair of the actor of tos-720p-mov gives the hair alone, with each model.
+    - No frame of these runs shows shoes.
+  - Done for tracks of each model on the same input: 12 frames of blackswan, and two objects on 12 frames of bike-packing.
+    - The masks of vidcut and of the official video predictor overlap 0.9999 (tiny) and 1.0000 (base+ and large) on average.
+  - Done for each model: J&F of vidcut's tracks on all 30 videos, with one click on frame 0. The official J&F is in brackets.
+    - Tiny 70.1 (68.0), base+ 68.0 (68.7) and large 75.5 (76.7).
+    - The masks of vidcut and of the official run overlap 0.93 (tiny), 0.96 (base+) and 0.96 (large) on average. Some objects differ from a frame on.
+    - Why: vidcut keeps the input and the memories in 32-bit float. The official run rounds the input to 8 bits and keeps the memories in bfloat16.
+    - A small difference can make the tracks part on a long video. The J&F of vidcut is from 2.1 higher to 1.2 lower.
 - **M2, cost:** 10 s each of tos-720p-mov, pedestrian-area, stab-crowd-4k, stab-dashcam and stab-rally.
   - One click, a track forward, each model, GPU decoding on.
   - Seconds per minute of video, CPU time, GPU use and peak GPU memory.
   - A video of each mask over the picture, for the owner to look at.
 - The time of each run is known after the first video. I stop and ask if the total passes 2 hours.
 
-The Resolve runs are approved. They wait for a free slot on Resolve. They are in the project "vidcut measure", at 1920 × 1080 and 3840 × 2160:
+The Resolve runs are approved. They wait for a free slot on Resolve. They are in the project "vidcut measure", at 1920 × 1080 and 3840 × 2160.
+
+Two kinds of rule need different runs:
+
+- A simple fact needs one look. Examples: a menu item, a shortcut key, a range and a usual value.
+- A behavior that depends on the picture needs several measurements, on clips that differ.
+  - Examples: the subject that a click picks, the edge of the mask, tracking, and the effect of a change before the node.
+  - Each such rule gets three sources at least. They differ in content, number of subjects, subject size, motion and resolution.
+  - Each such rule also gets other values, the ends of each range, and inputs where a simple rule gives a wrong result.
+  - One measurement records only what Resolve did for that input. It is not a rule.
+
+The sources are five clips of the test data:
+
+| Source | Size | Rate | Content |
+|---|---|---|---|
+| stab-crowd-4k | 3840 × 2160 | 30 fps | a handheld walk in a crowd: many people, some small and far |
+| nasa-roman-presser-full | 3840 × 2160 | 59.94 fps | a still camera. One person close up at 600 s. Six people at a table at 610–630 s. Five people side by side at 695 s |
+| stab-rally | 1920 × 1080 | 30 fps | fast motion: cars, people at 4–6 s, one car close up at 18–19.5 s |
+| tos-720p-mov | 1280 × 534 | 24 fps | a film: one or two actors, close shots, cuts |
+| jiku-gt090912-phone3 | 720 × 480 | 29.5 fps | a phone at an event: low resolution, many people |
+
+The times in tos-720p-mov and jiku-gt090912-phone3 are chosen before the runs.
+
+The runs:
 
 - **R1, palette:** the controls of version 2 in Resolve 21.2, their ranges, their usual values and the options menu.
-- **R2, the key:** float renders of a Magic Mask with a circle window, and with a qualifier, in one node. Also the Key palette.
+  - These are simple facts. One look at each is enough, on one clip.
+  - A typed value past each end of a range shows the limit.
+- **R2, the key:** float renders of one node with a Magic Mask, a circle window and an HSL qualifier.
+  - Each key alone, each pair of keys, and all three. The manual names the pairs only (p. 3289, version 1 text).
+  - Window softness at 0, at a middle value and at the largest value.
+  - A qualifier with no soft range, and a qualifier with a wide soft range.
+  - Why: a soft window and a soft qualifier together tell a product from a minimum. A hard mask alone cannot.
+  - Invert off and on, for the Magic Mask, the window and the qualifier.
+  - The Key palette: Key Input Gain and Key Output Gain, each at its usual value and at two other values.
+  - Three sources: a person of crowd, a car of rally and an actor of tos-720p-mov. Both sizes.
 - **R3, the input:** does a change of an earlier node change the mask, and does it clear the tracking?
-  - Also on a tracked mask: the mask of the tracked frames after a change before the Magic Mask node.
+  - Node 01 gets a small gain (1.05), a large gain (2.0) and saturation 0, one at a time.
+  - Node 01 gets a value that is then set back. Why: the picture stays the same. Thus this tells a check of the picture from a check of the node.
+  - A change after the Magic Mask node is the control. It must not change the mask.
+  - Each change on the reference frame, and on tracked frames 1, 12 and 23 frames from it.
+  - Four sources: crowd, nasa, rally and tos-720p-mov.
 - **R4, the edge:** the values of the mask at its edge, for Faster and Better, and the effect of Smart Refine.
+  - Smart Refine at its low end, at 0, at its high end, and at two values between.
+  - Faster and Better with the same clicks.
+  - One edge in each source: hair close up (nasa, tos-720p-mov), a car (rally), a small far person (crowd) and a person at low resolution (jiku).
+  - Both sizes. They show whether the edge width follows the frame size.
+  - The manual says that the mask has hard edges (pp. 3292, 3297, version 1 text). Values between 0 and 1 at the edge show a soft edge.
 - **R5, the clicks:** the place of each click on tracked frames, and the mask on a frame with no tracking.
-- **R6, many subjects:** one click on each of two people, then a negative click on one of them.
+  - Tracked frames 1, 12 and 23 frames from the reference frame, forward and back.
+  - Each kind of motion: a still camera (nasa), a handheld walk (crowd), fast motion (rally), a cut (tos-720p-mov) and low resolution (jiku).
+  - Clicks in the middle of the frame, near each edge of the frame, and on a small subject.
+  - A subject that leaves the frame, and a subject that goes behind another.
+  - A drag of a click on a tracked frame and on the reference frame (p. 3304, version 1 text).
+  - A frame before the first tracked frame, after a track forward only.
+- **R6, many subjects:** the subject of each click, and the mask of the node.
+  - Shots with one subject (nasa at 600 s), two (tos-720p-mov), five or six (nasa at 610–630 s and at 695 s), and many (crowd, jiku).
+  - Two people apart, and two people that touch or overlap. Then a third subject.
+  - A positive click inside a mask, outside all masks, and on the overlap of two masks.
+  - A negative click inside one mask, inside the other mask, and outside all masks.
+  - The union of the subjects (p. 3296, version 1 text), where two masks overlap.
+  - One click each on a face, on the hair and on the shoes, on a person of three sources (p. 3281). vidcut gets the same clicks.
 - **R7, keyframes and copies:** do the values take keyframes, and does a copy of the node keep the tracking?
+  - A keyframe on each value of the palette. This is a simple fact.
+  - Copies before a track and after a track.
+  - Copies to the same clip, to another clip of the same file, to a clip of another file, and to the other frame size.
+  - A copy of the node, a still of the Gallery in an album of these runs, and Apply Grade.
+  - If a copy tracks again, its mask depends on the picture. Then two more sources check it.
 - **R8, the Alpha Output:** the transparency of a clip over V1, with the mask on the Alpha Output.
-- The runs need computer use on Resolve, because the clicks are in the viewer. They take about 2.5 hours.
+  - Invert off and on.
+  - A soft window in the same node. Key values between 0 and 1 show whether the alpha follows the key in a straight line.
+  - Over flat gray and over a picture on V1.
+  - Three sources: crowd, rally and tos-720p-mov. Both sizes.
+- The runs need computer use on Resolve, because the clicks are in the viewer. They take about 6 hours, in more than one slot.
+  - If a DRX still keeps the clicks, scripts make the variants from DRX files. Then the window block is shorter.

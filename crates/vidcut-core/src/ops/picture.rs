@@ -5,20 +5,23 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
-    CellShape, Clip, ClipScaling, CompositeMode, Composition, Crop, DynamicZoom, Effect,
+    AdaptiveMode, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
+    Border, CellShape, Clip, ClipScaling, CompositeMode, Composition, Crop, DynamicZoom, Effect,
     EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow,
     GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite,
     ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
-    ShadingElement, Sharpen, Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind,
-    Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture, PictureTool,
+    PivotType, Project, ReferenceTime, ShadingElement, Sharpen, Stabilization, Stabilizing,
+    SubPixel, TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette,
+    VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput, StabilizationSet};
 
+use crate::shared::Shared;
+
 use super::locate;
 
-pub fn checked(p: &Picture) -> Result<Option<Picture>> {
+pub fn checked(p: &Picture) -> Result<Option<Shared<Picture>>> {
     for v in PictureValue::ALL {
         if let Some(why) = crate::keyframes::value_problem(v, crate::keyframes::plain_channel(p, v))
         {
@@ -62,7 +65,7 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         stabilization,
         ..p.clone()
     };
-    Ok((!out.is_usual()).then_some(out))
+    Ok((!out.is_usual()).then(|| Shared::new(out)))
 }
 
 pub fn ungraded_usual(mut p: Picture, frame: [f64; 2]) -> Option<Picture> {
@@ -967,6 +970,8 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
     within(t.custom_time, Tracker::TIMES, why)?;
     let why = "a tracker's fade frames are from 0 to 1000000";
     within(t.fade_frames, Tracker::FADES, why)?;
+    let why = "a tracker's match tolerance is from 0 to 1";
+    within(t.match_tolerance, (0.0, 1.0), why)?;
     if t.intermediate_points
         .is_some_and(|k| k > Tracker::MOST_POINTS)
     {
@@ -998,6 +1003,8 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
         custom_time: t.custom_time.filter(|v| *v != 0.0),
         intermediate_points: t.intermediate_points.filter(|k| *k != 0),
         fade_frames: t.fade_frames.filter(|v| *v != Tracker::FADE),
+        adaptive_mode: t.adaptive_mode.filter(|a| *a != AdaptiveMode::default()),
+        match_tolerance: t.match_tolerance.filter(|v| *v != Tracker::TOLERANCE),
         ..t.clone()
     })
 }
@@ -1018,6 +1025,9 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
     let why = "a pattern's width and height are from 0.001 to 0.5";
     within(p.width, Pattern::SIDES, why)?;
     within(p.height, Pattern::SIDES, why)?;
+    let why = "a pattern's search width and height are from 0.001 to 1";
+    within(p.search_width, Pattern::SEARCHES, why)?;
+    within(p.search_height, Pattern::SEARCHES, why)?;
     let path = p.path.as_ref();
     if let Some(why) = path.and_then(|m| crate::motion::samples_problem(&m.samples)) {
         return Err(Error::invalid(format!("{name}: {why}")));
@@ -1028,6 +1038,10 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
         width: p.width.filter(|v| *v != Pattern::WIDTH),
         height: p.height.filter(|v| *v != Pattern::HEIGHT),
         offset: p.offset.filter(|o| *o != [0.0, 0.0]),
+        kind: p.kind.filter(|k| *k != PatternKind::default()),
+        search_width: p.search_width.filter(|v| *v != Pattern::SEARCH),
+        search_height: p.search_height.filter(|v| *v != Pattern::SEARCH),
+        channel: p.channel.filter(|c| *c != PatternChannel::default()),
         ..p.clone()
     })
 }
@@ -1624,7 +1638,7 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
                 ..Picture::default()
             },
         };
-        c.picture = (!kept.is_usual()).then_some(kept);
+        c.picture = (!kept.is_usual()).then(|| Shared::new(kept));
     }
     Ok(())
 }

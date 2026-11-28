@@ -151,6 +151,19 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     {
         return Err(Error::invalid(format!("{id} is an audio track")));
     }
+    let sound = props.muted.is_some()
+        || props.solo.is_some()
+        || props.volume_db.is_some()
+        || props.voice_isolation.is_some()
+        || props.voice_isolation_on.is_some()
+        || props.duck.is_some()
+        || props.dynamics.is_some()
+        || props.equalizer.is_some();
+    if sound && t.kind == TrackKind::Video {
+        return Err(Error::invalid(format!(
+            "{id} is a video track: it has no sound"
+        )));
+    }
     if let Some(l) = props.locked {
         t.locked = l;
     }

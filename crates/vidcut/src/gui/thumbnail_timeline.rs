@@ -108,13 +108,11 @@ impl Workspace {
         };
         let (p, list) = (&*strip.project, &strip.thumbs);
         let at = self.snap.timeline.position;
-        let current = (list.iter())
-            .filter(|t| t.start <= at && at < t.end)
-            .max_by_key(|t| t.track[1..].parse::<usize>().unwrap_or(0))
-            .map(|t| t.number);
+        let current = top_at(list, at);
         let label = self.export.clip_label;
         let colors = theme::colors();
-        let mut seek = None;
+        let selected = &self.snap.selection.thumbnails;
+        let mut picked = None;
         let mut action: Option<(Mark, i64, i64)> = None;
         let mut cycle = false;
         egui::ScrollArea::horizontal()
@@ -122,7 +120,7 @@ impl Workspace {
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = CELL_GAP;
-                    for t in list {
+                    for (i, t) in list.iter().enumerate() {
                         let cell = ui.vertical(|ui| {
                             ui.set_width(PICTURE.x);
                             ui.horizontal(|ui| {
@@ -146,15 +144,23 @@ impl Workspace {
                                 let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                                 painter.image(texture, shown, uv, egui::Color32::WHITE);
                             }
-                            if current == Some(t.number) {
-                                let stroke = egui::Stroke::new(2.0, colors.accent);
+                            if selected.contains(&t.clip) {
+                                let stroke = egui::Stroke::new(2.0, colors.error);
                                 painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                            }
+                            if current == Some(i) {
+                                let inset = match selected.contains(&t.clip) {
+                                    true => rect.shrink(2.0),
+                                    false => rect,
+                                };
+                                let stroke = egui::Stroke::new(2.0, colors.accent);
+                                painter.rect_stroke(inset, 2.0, stroke, egui::StrokeKind::Inside);
                             }
                             let text = match (label, &t.codec) {
                                 (ClipLabel::Codec, Some(codec)) => codec.as_str(),
                                 _ => t.name.as_str(),
                             };
-                            let shade = match current == Some(t.number) {
+                            let shade = match current == Some(i) {
                                 true => colors.text,
                                 false => colors.text_dim,
                             };
@@ -170,7 +176,7 @@ impl Workspace {
                         });
                         let picture = cell.inner;
                         if picture.clicked() {
-                            seek = Some(t.start);
+                            picked = Some((i, ui.input(|input| input.modifiers)));
                         }
                         picture.context_menu(|ui| {
                             if ui.button("Mark In").clicked() {
@@ -190,6 +196,7 @@ impl Workspace {
                     }
                 });
             });
+        let pick = picked.and_then(|(i, mods)| pick(list, selected, current, at, i, mods));
         self.export.strip = Some(strip);
         if cycle {
             self.export.clip_label = match label {
@@ -197,8 +204,11 @@ impl Workspace {
                 ClipLabel::Name => ClipLabel::Codec,
             };
         }
-        if let Some(frame) = seek {
-            self.seek(PlayerId::Timeline, frame, false);
+        if let Some(p) = pick {
+            self.send("selection.set", json!({ "thumbnails": p.clips }));
+            if let Some(frame) = p.seek {
+                self.seek(PlayerId::Timeline, frame, false);
+            }
         }
         match action {
             Some((Mark::In, a, _)) => self.mark_in_out("in", a),
@@ -244,6 +254,62 @@ impl Workspace {
         ]);
         self.send("apply", json!({ "commands": commands }));
     }
+}
+
+struct Pick {
+    clips: Vec<String>,
+    seek: Option<i64>,
+}
+
+fn top_at(list: &[Thumb], at: i64) -> Option<usize> {
+    (list.iter().enumerate())
+        .filter(|(_, t)| t.start <= at && at < t.end)
+        .max_by_key(|(_, t)| t.track[1..].parse::<usize>().unwrap_or(0))
+        .map(|(i, _)| i)
+}
+
+fn pick(
+    list: &[Thumb],
+    selected: &[String],
+    current: Option<usize>,
+    at: i64,
+    i: usize,
+    mods: egui::Modifiers,
+) -> Option<Pick> {
+    let t = &list[i];
+    let pick = match (mods.command, mods.shift) {
+        (true, true) => return None,
+        (true, false) => {
+            let clips = (list.iter())
+                .filter(|o| selected.contains(&o.clip) != (o.clip == t.clip))
+                .map(|o| o.clip.clone())
+                .collect();
+            Pick { clips, seek: None }
+        }
+        (false, true) => {
+            let marked = (list.iter().enumerate())
+                .filter(|(_, o)| selected.contains(&o.clip))
+                .map(|(k, _)| k);
+            let ends: Vec<usize> = marked.chain(current).chain([i]).collect();
+            let (lo, hi) = (ends.iter().min(), ends.iter().max());
+            let clips = (lo.zip(hi).map(|(a, b)| &list[*a..=*b]).unwrap_or_default())
+                .iter()
+                .map(|o| o.clip.clone())
+                .collect();
+            Pick { clips, seek: None }
+        }
+        _ => {
+            let inside = t.start <= at && at < t.end;
+            let land = if inside { at } else { t.start };
+            let clips = match top_at(list, land) == Some(i) {
+                true => Vec::new(),
+                false => vec![t.clip.clone()],
+            };
+            let seek = (!inside).then_some(t.start);
+            Pick { clips, seek }
+        }
+    };
+    Some(pick)
 }
 
 fn fit(aspect: f32) -> egui::Vec2 {

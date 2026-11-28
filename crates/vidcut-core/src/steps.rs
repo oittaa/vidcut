@@ -7,6 +7,7 @@ use crate::model::{
     Clip, Cue, Marks, Project, Sheet, SubtitleTrack, TimelineSettings, Track, Transition,
 };
 use crate::request::{Client, ClientKind};
+use crate::shared::SharedVec;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
@@ -344,8 +345,8 @@ pub fn category(kind: &str) -> &'static str {
 #[derive(Debug, Clone, Default)]
 pub struct StepsCache {
     pub(crate) path: std::path::PathBuf,
-    pub(crate) end: u64,
-    pub(crate) mark: Vec<u8>,
+    pub(crate) generation: u64,
+    pub(crate) last_seq: i64,
     pub(crate) steps: Steps,
 }
 
@@ -394,58 +395,60 @@ pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
         .map(|t| t.id.as_str())
         .collect();
     let mut seen = Vec::new();
-    for id in tracks {
-        if seen.contains(&id) {
-            continue;
-        }
-        seen.push(id);
-        let (ta, tb) = (before.track(id), after.track(id));
-        if ta == tb {
-            continue;
-        }
-        let ((ca, xa), (cb, xb)) = (contents(ta), contents(tb));
-        let on = |from: i64, to: i64| Span {
-            track: Some(id.to_string()),
-            from,
-            to,
-        };
-        let was: HashMap<&str, &Clip> = ca.iter().map(|c| (c.id.as_str(), c)).collect();
-        let is: HashMap<&str, &Clip> = cb.iter().map(|c| (c.id.as_str(), c)).collect();
-        for c in ca {
-            match is.get(c.id.as_str()) {
-                None => spans.push(on(c.start, c.end())),
-                Some(n) if *n == c => {}
-                Some(n) if only_moved(c, n) => {
-                    shifted.push((n.id.clone(), on(c.start, c.end())));
-                    shifted.push((n.id.clone(), on(n.start, n.end())));
-                }
-                Some(n) => {
-                    clips.push(n.id.clone());
-                    spans.push(on(c.start.min(n.start), c.end().max(n.end())));
-                }
+    if before.tracks != after.tracks {
+        for id in tracks {
+            if seen.contains(&id) {
+                continue;
             }
-        }
-        for c in cb {
-            if !was.contains_key(c.id.as_str()) {
-                clips.push(c.id.clone());
-                spans.push(on(c.start, c.end()));
+            seen.push(id);
+            let (ta, tb) = (before.track(id), after.track(id));
+            if ta == tb {
+                continue;
             }
-        }
-        let around = |clips: &[Clip], x: &Transition| {
-            cut(clips, x).map(|at| on(at - x.before, at + x.after))
-        };
-        let old: HashMap<&str, &Transition> = xa.iter().map(|x| (x.id.as_str(), x)).collect();
-        for x in xb {
-            if old.get(x.id.as_str()) != Some(&x) {
-                spans.extend(around(cb, x));
-                if let Some(o) = old.get(x.id.as_str()) {
-                    spans.extend(around(ca, o));
+            let ((ca, xa), (cb, xb)) = (contents(ta), contents(tb));
+            let on = |from: i64, to: i64| Span {
+                track: Some(id.to_string()),
+                from,
+                to,
+            };
+            let was: HashMap<&str, &Clip> = ca.iter().map(|c| (c.id.as_str(), c)).collect();
+            let is: HashMap<&str, &Clip> = cb.iter().map(|c| (c.id.as_str(), c)).collect();
+            for c in ca {
+                match is.get(c.id.as_str()) {
+                    None => spans.push(on(c.start, c.end())),
+                    Some(n) if *n == c => {}
+                    Some(n) if only_moved(c, n) => {
+                        shifted.push((n.id.clone(), on(c.start, c.end())));
+                        shifted.push((n.id.clone(), on(n.start, n.end())));
+                    }
+                    Some(n) => {
+                        clips.push(n.id.clone());
+                        spans.push(on(c.start.min(n.start), c.end().max(n.end())));
+                    }
                 }
             }
-        }
-        for x in xa {
-            if !xb.iter().any(|y| y.id == x.id) {
-                spans.extend(around(ca, x));
+            for c in cb {
+                if !was.contains_key(c.id.as_str()) {
+                    clips.push(c.id.clone());
+                    spans.push(on(c.start, c.end()));
+                }
+            }
+            let around = |clips: &[Clip], x: &Transition| {
+                cut(clips, x).map(|at| on(at - x.before, at + x.after))
+            };
+            let old: HashMap<&str, &Transition> = xa.iter().map(|x| (x.id.as_str(), x)).collect();
+            for x in xb {
+                if old.get(x.id.as_str()) != Some(&x) {
+                    spans.extend(around(cb, x));
+                    if let Some(o) = old.get(x.id.as_str()) {
+                        spans.extend(around(ca, o));
+                    }
+                }
+            }
+            for x in xa {
+                if !xb.iter().any(|y| y.id == x.id) {
+                    spans.extend(around(ca, x));
+                }
             }
         }
     }
@@ -457,51 +460,55 @@ pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
             spans.push(span);
         }
     }
-    let marked = |p: &Project| -> BTreeMap<String, (i64, i64)> {
-        p.markers
-            .iter()
-            .map(|k| (k.id.clone(), (k.at, k.at + k.duration.max(1))))
-            .collect()
-    };
-    let (ka, kb) = (marked(before), marked(after));
-    for (id, span) in ka.iter().chain(&kb) {
-        let a = ka.get(id);
-        let b = kb.get(id);
-        if a != b {
-            spans.push(Span {
-                track: None,
-                from: span.0,
-                to: span.1,
-            });
-        }
-    }
-    let (qa, qb) = (cues(before.sheet()), cues(after.sheet()));
-    let mut hits: Vec<(&str, &Cue)> = Vec::new();
-    for (id, (track, c)) in &qa {
-        match qb.get(id) {
-            Some(now) if now == &(*track, *c) => {}
-            Some((t, n)) => {
-                hits.push((track, c));
-                hits.push((t, n));
+    if before.markers != after.markers {
+        let marked = |p: &Project| -> BTreeMap<String, (i64, i64)> {
+            p.markers
+                .iter()
+                .map(|k| (k.id.clone(), (k.at, k.at + k.duration.max(1))))
+                .collect()
+        };
+        let (ka, kb) = (marked(before), marked(after));
+        for (id, span) in ka.iter().chain(&kb) {
+            let a = ka.get(id);
+            let b = kb.get(id);
+            if a != b {
+                spans.push(Span {
+                    track: None,
+                    from: span.0,
+                    to: span.1,
+                });
             }
-            None => hits.push((track, c)),
         }
     }
-    for (id, (track, c)) in &qb {
-        if !qa.contains_key(id) {
-            hits.push((track, c));
+    if before.subtitles != after.subtitles {
+        let (qa, qb) = (cues(before.sheet()), cues(after.sheet()));
+        let mut hits: Vec<(&str, &Cue)> = Vec::new();
+        for (id, (track, c)) in &qa {
+            match qb.get(id) {
+                Some(now) if now == &(*track, *c) => {}
+                Some((t, n)) => {
+                    hits.push((track, c));
+                    hits.push((t, n));
+                }
+                None => hits.push((track, c)),
+            }
         }
+        for (id, (track, c)) in &qb {
+            if !qa.contains_key(id) {
+                hits.push((track, c));
+            }
+        }
+        let mut touched: BTreeMap<&str, (i64, i64)> = BTreeMap::new();
+        for (track, c) in hits {
+            let e = touched.entry(track).or_insert((c.start, c.end()));
+            *e = (e.0.min(c.start), e.1.max(c.end()));
+        }
+        spans.extend(touched.into_iter().map(|(track, (from, to))| Span {
+            track: Some(track.to_string()),
+            from,
+            to,
+        }));
     }
-    let mut touched: BTreeMap<&str, (i64, i64)> = BTreeMap::new();
-    for (track, c) in hits {
-        let e = touched.entry(track).or_insert((c.start, c.end()));
-        *e = (e.0.min(c.start), e.1.max(c.end()));
-    }
-    spans.extend(touched.into_iter().map(|(track, (from, to))| Span {
-        track: Some(track.to_string()),
-        from,
-        to,
-    }));
     (clips, merged(spans))
 }
 
@@ -870,7 +877,7 @@ fn bare(p: Sheet<'_>) -> Vec<Track> {
     p.tracks
         .iter()
         .map(|t| Track {
-            clips: Vec::new(),
+            clips: SharedVec::new(),
             transitions: Vec::new(),
             ..t.clone()
         })
@@ -881,7 +888,7 @@ fn bare_subtitles(p: Sheet<'_>) -> Vec<SubtitleTrack> {
     p.subtitles
         .iter()
         .map(|t| SubtitleTrack {
-            cues: Vec::new(),
+            cues: SharedVec::new(),
             ..t.clone()
         })
         .collect()
@@ -890,8 +897,8 @@ fn bare_subtitles(p: Sheet<'_>) -> Vec<SubtitleTrack> {
 fn transitions(p: Sheet<'_>, sound: bool) -> impl Iterator<Item = (&'_ str, &'_ Transition)> {
     p.tracks
         .iter()
+        .filter(move |t| (t.kind == crate::model::TrackKind::Audio) == sound)
         .flat_map(|t| t.transitions.iter())
-        .filter(move |x| x.sound == sound)
         .map(|x| (x.id.as_str(), x))
 }
 
