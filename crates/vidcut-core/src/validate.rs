@@ -128,6 +128,13 @@ pub fn violations(p: &Project) -> Vec<String> {
             "the project needs 1 to {most} named node stack layers"
         ));
     }
+    if p.settings.apply_keys == crate::model::ApplyKeys::CurrentFrame {
+        v.push("apply_keys is `none`, `source_timecode` or `start_frames`".into());
+    }
+    let preserved = crate::ops::grade::PRESERVED_NODES;
+    if p.settings.preserve_nodes > preserved {
+        v.push(format!("preserve_nodes is from 0 to {preserved}"));
+    }
     let pool = p.pool();
     let mut ids = HashSet::new();
     for m in &p.media {
@@ -476,6 +483,13 @@ fn stills(p: &Project, v: &mut Vec<String>) {
                 "still id {} is not s1 to s{}",
                 s.id,
                 p.next_id.still.saturating_sub(1)
+            ));
+        }
+        let f = &s.source;
+        if !(f.first <= f.at && f.at <= f.last && f.origin.is_finite()) {
+            v.push(format!(
+                "still {}: its frame {} is not in its clip, {} to {}",
+                s.id, f.at, f.first, f.last
             ));
         }
         let named = Path::new(&s.picture).file_name() == Some(OsStr::new(&s.picture));

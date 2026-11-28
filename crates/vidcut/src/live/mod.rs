@@ -23,7 +23,9 @@ use vidcut_core::editor::{
     Env, compound_context, media_context, resolve_clip, resolve_cue, source_context,
 };
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, RenderStatus, Title};
+use vidcut_core::model::{
+    ApplyKeys, Clip, Format, Generator, GeneratorKind, Marks, RenderStatus, Title,
+};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
@@ -4326,8 +4328,9 @@ impl Live {
             Request::GalleryApply {
                 clips,
                 grade: GradeLevel::Clip,
+                keyframes,
                 ..
-            } if clips.is_none() => {
+            } if clips.is_none() && *keyframes != Some(ApplyKeys::CurrentFrame) => {
                 let p = self.project.as_ref().ok_or_else(no_project)?.project();
                 let mut targets = self.selection.thumbnails.clone();
                 if let Some(at) = vidcut_core::ops::gallery::color_clip(p, playhead)

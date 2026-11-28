@@ -5550,17 +5550,26 @@ fn mutate(
             still,
             clips,
             grade,
+            keyframes,
+            at,
         } => {
+            let keys = keyframes.unwrap_or(p.settings.apply_keys);
+            let at = match keys {
+                crate::model::ApplyKeys::CurrentFrame => {
+                    time_or_playhead(p, at.as_ref(), playhead)?
+                }
+                _ => None,
+            };
             let ids = match (clips, grade) {
                 (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead)?,
                 (None, crate::request::GradeLevel::Timeline) => Vec::new(),
                 (None, crate::request::GradeLevel::Clip) => {
-                    let t = playhead
-                        .ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+                    let t = at.or(playhead);
+                    let t = t.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
                     vec![ops::gallery::graded_clip(p, t)?]
                 }
             };
-            ops::gallery::apply(p, still, *grade, &ids)?;
+            ops::gallery::apply(p, still, (*grade, &ids), (keys, at))?;
             Value::Null
         }
         Request::GalleryAppend {
@@ -10310,6 +10319,23 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
             )));
         }
         p.settings.dynamics_profile = profile;
+    }
+    if let Some(keys) = set.apply_keys {
+        if keys == crate::model::ApplyKeys::CurrentFrame {
+            return Err(Error::invalid(
+                "apply_keys is `none`, `source_timecode` or `start_frames`",
+            ));
+        }
+        p.settings.apply_keys = keys;
+    }
+    if let Some(n) = set.preserve_nodes {
+        let most = ops::grade::PRESERVED_NODES;
+        if n > most {
+            return Err(Error::invalid(format!(
+                "preserve_nodes is from 0 to {most}"
+            )));
+        }
+        p.settings.preserve_nodes = n;
     }
     if let Some(names) = &set.node_stack_layers {
         let most = ops::grade::NODE_STACK_LAYERS;

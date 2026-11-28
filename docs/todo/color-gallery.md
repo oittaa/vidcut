@@ -4,7 +4,7 @@
 - Still albums and PowerGrade albums.
 - Memories A to H.
 - Import and export of stills.
-- Apply Grade of a still with keyframes, with Apply Grades Using.
+- The Apply Grade submenu of the viewer. A timeline grade with keyframes in Apply Grade of a still.
 - Apply Active Layer, and a drag of a still into the viewer.
 - Wipes of a still against the clip, and the split screen modes.
 - Color groups with Pre-Clip and Post-Clip grades.

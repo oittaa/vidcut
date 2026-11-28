@@ -1194,7 +1194,11 @@ The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-gra
 - `ops::gallery` holds the edits: `grab`, `remove`, `apply`, `append` and `get`.
   - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
   - `apply` puts a copy of the clip grade into each target with `put_whole`. It gives the copy the node stack layers of the project first (`Grade::counted`).
-  - `apply` refuses a grade with keyframes. Why: Apply Grades Using is not built, and a copy of the keyframes is only one of its three modes.
+  - `Still::source` (`StillSource`) holds the first, the grabbed and the last frame of the clip, and the source timecode of its frame 0. Why: the clip can change or go after the grab.
+  - `apply` places the keyframes of a copy of the clip grade for each target (`placed`). `shift` gives the frames that they move. `held` gives a node the values of its last keyframe at or before a frame.
+  - The source timecode is in seconds in the still. `shift` compares it in frames of the open timeline. Why: a distance stays the same count of frames at another frame rate.
+  - `ops::grade::apply` keeps the first nodes of each clip with `preserved`, one node stack layer at a time (`kept_nodes`). A kept node takes the inputs and the place of the node that it replaces.
+  - `apply` refuses a timeline grade with keyframes. Why: the measurements cover the clip grade only.
   - `append` adds the nodes of one layer of the still to each target with `ops::grade::append_graph`. A link from the picture that comes in moves to the output of the target. `append` refuses a grade with keyframes too.
 - The picture of a still:
   - `editor::still_looks` gives the plan of the frame: `render::flatten` of one frame, with no sound.

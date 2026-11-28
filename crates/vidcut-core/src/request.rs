@@ -4050,9 +4050,11 @@ pub enum Request {
     },
     /// Apply Grade: give clips the grade of a still. With the `clip` grade,
     /// the clip grade of the still, with each node stack layer, replaces
-    /// the whole clip grade of each clip. With the `timeline` grade, the
-    /// timeline grade of the still replaces the timeline grade of the open
-    /// timeline. A grade with keyframes is refused.
+    /// the whole clip grade of each clip. `keyframes` places its keyframes.
+    /// The project's `preserve_nodes` keeps the first nodes of each clip.
+    /// With the `timeline` grade, the timeline grade of the still replaces
+    /// the timeline grade of the open timeline. A timeline grade with
+    /// keyframes is refused.
     #[serde(rename = "gallery.apply")]
     GalleryApply {
         /// The id of the still (`s1`).
@@ -4060,12 +4062,21 @@ pub enum Request {
         /// The clips that get the clip grade. Left out: in a running GUI,
         /// the clips selected in the Thumbnail timeline and the clip at the
         /// playhead; else the topmost clip at the playhead that takes a
-        /// grade. Not with the `timeline` grade.
+        /// grade. With `current_frame`, the clip at `at`. Not with the
+        /// `timeline` grade.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clips: Option<OneOrMany<ClipRef>>,
         /// The grade that changes. Left out: `clip`.
         #[serde(default)]
         grade: GradeLevel,
+        /// How the keyframes of the clip grade go to each clip. Left out:
+        /// the project's `apply_keys`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keyframes: Option<crate::model::ApplyKeys>,
+        /// With `current_frame`: the frame of the timeline that the grabbed
+        /// frame goes on, in each clip. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
     },
     /// Append Node Graph: add the nodes of a still after the output of
     /// grades. They take the picture that the grade gave out, and give the
@@ -7664,6 +7675,14 @@ pub struct ProjectSet {
     /// target to 9 LU over it) or `ebu18` (36 LU under to 18 LU over).
     #[serde(default)]
     pub loudness_scale: Option<crate::model::LoudnessScale>,
+    /// Apply Grades Using: how Apply Grade of a still gives its keyframes:
+    /// `none` (the usual), `source_timecode` or `start_frames`.
+    #[serde(default)]
+    pub apply_keys: Option<crate::model::ApplyKeys>,
+    /// Preserve Number Of Nodes, from 0 to 10: an applied grade keeps the
+    /// nodes 1 to this number of each clip. Usual: 0.
+    #[serde(default)]
+    pub preserve_nodes: Option<u8>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]

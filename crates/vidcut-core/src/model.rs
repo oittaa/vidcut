@@ -308,6 +308,8 @@ pub struct Still {
     pub timeline: String,
     /// The frame of the timeline.
     pub frame: i64,
+    /// The frames of the clip, counted as the keyframes of its grade are.
+    pub source: StillSource,
     /// The whole grade of the clip: each node stack layer, with its
     /// keyframes. Left out at its usual value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -323,6 +325,21 @@ pub struct Still {
     /// the viewer shows it, at the size of the timeline, in 32-bit float
     /// OpenEXR.
     pub picture: String,
+}
+
+/// The frames of the clip of a still, counted as the keyframes of its grade
+/// are. Apply Grade places the keyframes from them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StillSource {
+    /// The first frame of the clip.
+    pub first: i64,
+    /// The last frame of the clip.
+    pub last: i64,
+    /// The grabbed frame.
+    pub at: i64,
+    /// The source timecode of frame 0, in seconds: the start timecode of
+    /// the media or of the compound clip, else 0.
+    pub origin: f64,
 }
 
 /// A job of the render queue: an export of a timeline that waits for a
@@ -589,6 +606,40 @@ pub struct Settings {
     /// The scale of the loudness meter. Left out at `ebu9`.
     #[serde(default, skip_serializing_if = "LoudnessScale::is_usual")]
     pub loudness_scale: LoudnessScale,
+    /// Apply Grades Using: how Apply Grade of a still gives the keyframes
+    /// of its clip grade. Left out at `none`.
+    #[serde(default, skip_serializing_if = "ApplyKeys::is_none")]
+    pub apply_keys: ApplyKeys,
+    /// Preserve Number Of Nodes, from 0 to 10: an applied grade keeps the
+    /// nodes 1 to this number of each clip. Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub preserve_nodes: u8,
+}
+
+/// How an applied grade of a still gives its keyframes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyKeys {
+    /// No Keyframes: each node takes the values of its last keyframe at or
+    /// before the grabbed frame, with no keyframes.
+    #[default]
+    None,
+    /// Keyframes Aligning Source Timecode: each keyframe keeps its source
+    /// timecode, when the two clips have source timecode in common. Else
+    /// as `start_frames`.
+    SourceTimecode,
+    /// Keyframes Aligning Start Frames: each keyframe keeps its distance
+    /// from the first frame of the clip.
+    StartFrames,
+    /// Align Keyframes to Current Frame: each keyframe keeps its distance
+    /// from the grabbed frame, which goes on `at`. Not a setting.
+    CurrentFrame,
+}
+
+impl ApplyKeys {
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
 }
 
 impl Default for Settings {
@@ -618,6 +669,8 @@ impl Default for Settings {
             node_stack_layers: Self::one_layer(),
             target_loudness: crate::loudness::TARGET,
             loudness_scale: LoudnessScale::Ebu9,
+            apply_keys: ApplyKeys::None,
+            preserve_nodes: 0,
         }
     }
 }

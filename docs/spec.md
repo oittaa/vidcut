@@ -5166,12 +5166,35 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Append Node Graph in the menu of a still adds its node graph after the end of the node tree of the current clip. The grade of the clip stays (p. 3366).
   - A drop of a still onto a link adds its nodes at that link. A Command-drag adds them as one compound node (pp. 3366–3367).
   - Apply Grades Using decides the keyframes of the added nodes (p. 3367).
+  - Apply Grades Using in the menu of the Gallery area has three choices (pp. 3340, 3363):
+    - No Keyframes: the grade on the grabbed frame goes, with no keyframes.
+    - Keyframes Aligning Source Timecode: the keyframes keep their source timecode. With no source timecode in common, the keyframes align on the start frames.
+    - Keyframes Aligning Start Frames: the first frame of the clip of the still goes on the first frame of the target clip.
+  - Apply Grade > Align Keyframes to Current Frame in the menu of the viewer puts the keyframes on the playhead (p. 3367).
+  - Preserve Number Of Nodes, from 0 to 10, in the menu of the Gallery area keeps the first nodes of the target clip (p. 3361).
+- **Keyframes of an applied still**:
+  - No Keyframes: each node takes the values of its last keyframe at or before the grabbed frame. Before its first keyframe, a node has its own values.
+  - There is no blend between two keyframes, also with Dynamic keyframes. The clip gets no keyframes.
+  - Source Timecode: when the source timecode of the two clips overlaps, each keyframe keeps its source timecode. Else the keyframes align on the start frames.
+  - Start Frames: each keyframe keeps its distance from the first frame of the clip.
+  - A distance stays the same count of frames, also on a clip at another frame rate.
+  - A keyframe outside the target clip stays when another keyframe of the node is in the clip.
+  - When no keyframe of a node lands in the clip, the node gets no keyframes. It takes the values of its last keyframe before the first frame.
+  - Align Keyframes to Current Frame: the grabbed frame goes on the playhead. Each keyframe keeps its distance from the grabbed frame.
+- **Preserve Number Of Nodes** (N):
+  - The number of nodes of the clip becomes the larger of two numbers. One is the number of nodes of the still.
+  - The other is the smaller of N and the number of nodes of the clip.
+  - Nodes 1 to N come from the clip. An empty node fills a number that the clip does not have. The nodes after N come from the still.
+  - The tree is that of the still. The mixers of the clip do not stay.
+  - A kept node keeps its keyframes.
+  - With two node stack layers and N 1, node 1 of layer 2 of the clip stays.
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
     - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
     - The still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
+    - It also holds the first, the grabbed and the last frame of the clip, and the source timecode of the clip.
     - The picture is the frame of the timeline with all grades and the output LUT, at the size of the timeline.
     - The picture has no display LUT. It is a 32-bit float OpenEXR file ([design](design/export.md#the-gallery)).
     - The ID of a still is `s1`, `s2` and so on. A new still has no label.
@@ -5183,7 +5206,21 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - In the Clip mode, the targets are the clips selected in the Thumbnail timeline and the clip at the playhead.
     - The grade of the still replaces the whole grade of each target. A still with no clip grade gives the usual grade.
     - In the Timeline mode, the timeline grade of the still replaces the timeline grade.
-    - A still whose grade has keyframes does not apply. The request gives an error.
+    - A still whose timeline grade has keyframes does not apply in the Timeline mode. The request gives an error.
+  - The keyframes of the clip grade go as the rules above say. `keyframes` selects the mode: `none`, `source_timecode`, `start_frames` or `current_frame`.
+    - Left out, the mode is the project's `apply_keys`. `project.set` with `apply_keys` sets it, and Apply Grades Using in the menu of the Gallery area does too.
+    - A new project has No Keyframes (not measured).
+    - With `current_frame`, the grabbed frame goes on `at`, or on the playhead. Each target must be at that frame. With no `clips`, the target is the clip there.
+    - The rule for a node with no keyframe in the clip also holds for Start Frames and Align Keyframes to Current Frame (not measured).
+    - Source timecode compares in frames of the open timeline. A clip with no start timecode starts at 0.
+  - `project.set` with `preserve_nodes` sets Preserve Number Of Nodes, from 0 to 10. Preserve Number Of Nodes in the menu of the Gallery area does too.
+    - A new project has 0 (not measured).
+    - It acts as the rules above say, on each node stack layer.
+    - With fewer nodes in the still, the kept nodes of the clip go after its last node, in a chain.
+    - A kept node keeps its links and place in the tree of the still. It takes all the other settings of the clip node.
+    - `grade.apply` and a paste of a whole grade keep the nodes too (p. 3361) (not measured).
+    - A mixer among nodes 1 to N, in the still or in the clip, gives an error (not measured).
+  - The Apply Grade submenu of the viewer comes later ([todo](todo/color-gallery.md)).
   - `gallery.append` adds the nodes of a still after the output of a grade. Append Node Graph in the menu of a still does it, on the clip at the playhead.
     - The nodes of the still take the picture that the grade gave out. The output of the still becomes the output of the grade.
     - Then all nodes get their numbers again, as after each new node.
@@ -5193,7 +5230,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - It is one undo step.
   - `gallery.get` gives each still, with the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
-  - Still IDs of the form Track.Shot.Version, labels, keyframe modes and the drag into the viewer come later ([todo](todo/color-gallery.md)).
+  - Still IDs of the form Track.Shot.Version, labels and the drag into the viewer come later ([todo](todo/color-gallery.md)).
 
 ### 8.32 Copying grades between clips (pp. 3361–3364, 3464)
 
