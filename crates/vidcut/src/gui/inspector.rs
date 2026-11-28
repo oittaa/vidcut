@@ -14,16 +14,16 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
-    Border, BorderLevel, CellShape, Clip, ClipRetime, ClipScaling, CompositeMode, Composition,
-    Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
-    FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
-    JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
-    Retime, ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
-    Tracker, TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    AdaptiveMode, Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping,
+    BlurFilter, Border, BorderLevel, CellShape, Clip, ClipRetime, ClipScaling, CompositeMode,
+    Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
+    FastNoise, FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha,
+    GlowFraming, GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite,
+    GrainPreset, JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges, MergeOperator,
+    MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture,
+    PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement, Sharpen, Speed,
+    SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::{crop_unit, mapped};
@@ -2933,12 +2933,16 @@ impl Workspace {
                 false,
             );
             let full = t.patterns.len() >= vidcut_core::model::Tracker::PATTERNS_KEPT;
-            if ui
-                .add_enabled(!full, egui::Button::new("Add Pattern"))
-                .clicked()
-            {
-                sends.push(set(json!({ "add_pattern": true })));
-            }
+            ui.horizontal(|ui| {
+                let adds = [("Add Pattern", "add_pattern"), ("Add Point", "add_point")];
+                for (name, put) in adds {
+                    if ui.add_enabled(!full, egui::Button::new(name)).clicked() {
+                        let mut params = json!({});
+                        params[put] = json!(true);
+                        sends.push(set(params));
+                    }
+                }
+            });
             ui.end_row();
             if let Some(pattern) = t.patterns.get(pick) {
                 label(ui, "Name", false);
@@ -2971,6 +2975,73 @@ impl Workspace {
                         let mut to = now;
                         to[axis] = v;
                         sends.push(set(json!({ "pattern": pick + 1, "pattern_offset": to })));
+                    }
+                }
+                if pattern.kind() == PatternKind::Point {
+                    let now = pattern.search();
+                    let sides = [
+                        ("Search Width", "search_width"),
+                        ("Search Height", "search_height"),
+                    ];
+                    for (axis, (name, put)) in sides.into_iter().enumerate() {
+                        let id = ui.scope_id().with((
+                            "pattern-search",
+                            &clip.id,
+                            &node.name,
+                            pick,
+                            axis,
+                        ));
+                        let usual = (now[axis], Pattern::SEARCH);
+                        if let Some(v) =
+                            number_row(ui, (id, name), usual, (Pattern::SEARCHES, 0.001))
+                        {
+                            let mut params = json!({ "pattern": pick + 1 });
+                            params[put] = json!(v);
+                            sends.push(set(params));
+                        }
+                    }
+                    let channel = pattern.channel();
+                    let changed = channel != PatternChannel::default();
+                    label(ui, "Channel", changed);
+                    let mut to = None;
+                    egui::ComboBox::from_id_salt(("pattern-channel", &clip.id, &node.name, pick))
+                        .selected_text(channel.label())
+                        .show_ui(ui, |ui| {
+                            for c in PatternChannel::ALL {
+                                if ui.selectable_label(c == channel, c.label()).clicked() {
+                                    to = Some(c).filter(|c| *c != channel);
+                                }
+                            }
+                        });
+                    if reset(ui, changed) {
+                        to = Some(PatternChannel::default());
+                    }
+                    ui.end_row();
+                    if let Some(c) = to {
+                        sends.push(set(json!({ "pattern": pick + 1, "pattern_channel": c })));
+                    }
+                    let modes = (
+                        &AdaptiveMode::ALL[..],
+                        AdaptiveMode::label as fn(AdaptiveMode) -> &'static str,
+                    );
+                    let mode = (t.adaptive(), AdaptiveMode::default());
+                    choice_row(
+                        ui,
+                        (slot, "Adaptive Mode", "adaptive_mode"),
+                        mode,
+                        modes,
+                        acts,
+                    );
+                    if t.adaptive() == AdaptiveMode::BestMatch {
+                        let id = ui
+                            .scope_id()
+                            .with(("match-tolerance", &clip.id, &node.name));
+                        let usual = (t.tolerance(), Tracker::TOLERANCE);
+                        if let Some(v) =
+                            number_row(ui, (id, "Match Tolerance"), usual, ((0.0, 1.0), 0.01))
+                        {
+                            acts.push(node_set(slot, "match_tolerance", json!(v)));
+                        }
                     }
                 }
             }
@@ -3112,13 +3183,26 @@ impl Workspace {
             self.inspector.stopping = Some(true);
         }
         if !tracks.is_empty() {
-            self.ask(tracks, None);
+            let point = |params: &Value| {
+                let k = params["pattern"].as_u64().unwrap_or(1) as usize;
+                let kind = t.patterns.get(k.saturating_sub(1)).map(Pattern::kind);
+                kind == Some(PatternKind::Point)
+            };
+            let (points, models): (Vec<_>, Vec<_>) =
+                tracks.into_iter().partition(|(_, params)| point(params));
+            for (method, params) in points {
+                self.send(method, params);
+            }
+            if !models.is_empty() {
+                self.ask(models, Wanted::Tracker);
+            }
             if let Some(at) = stepped {
                 self.page_ask(json!({ "at": at }));
             }
         }
         if let Some(found) = asked.filter(|_| extra.is_some()) {
-            self.ask(vec![found], Some((subject, model.for_subject(subject))));
+            let model = model.for_subject(subject);
+            self.ask(vec![found], Wanted::Finder(subject, model));
         }
     }
 
@@ -3426,7 +3510,14 @@ struct Chosen {
 #[derive(Debug, Clone)]
 struct Finding {
     asks: Vec<(&'static str, Value)>,
-    subject: Option<(Subject, FindModel)>,
+    wanted: Wanted,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Wanted {
+    Finder(Subject, FindModel),
+    Tracker,
+    Salience,
 }
 
 #[derive(Debug, Clone)]
@@ -3517,6 +3608,7 @@ pub struct Inspector {
     find_model: FindModel,
     find_error: bool,
     finding: Option<Finding>,
+    pub(super) reframing: super::reframe::Reframing,
     pub(super) stopping: Option<bool>,
     pub(super) pattern_picked: Option<(String, String, usize)>,
     tab: Tab,
@@ -5151,7 +5243,10 @@ fn boxed(subject: Subject) -> bool {
 }
 
 fn with_model(method: &str, params: &mut Value) {
-    if matches!(method, "motion.find" | "motion.track" | "edit.close_up") {
+    if matches!(
+        method,
+        "motion.find" | "motion.track" | "edit.close_up" | "picture.reframe"
+    ) {
         params["download"] = json!(true);
     }
 }
@@ -5221,11 +5316,12 @@ fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'stati
     Some(("apply", json!({ "commands": commands, "label": label })))
 }
 
-fn model_needs(subject: Option<(Subject, FindModel)>) -> Vec<vidcut_av::models::Need> {
+fn model_needs(wanted: Wanted) -> Vec<vidcut_av::models::Need> {
     let dir = crate::paths::models_dir();
-    match subject {
-        Some((subject, model)) => vidcut_av::subjects::needed(&dir, subject, model),
-        None => vidcut_av::tracking::needed(&dir),
+    match wanted {
+        Wanted::Finder(subject, model) => vidcut_av::subjects::needed(&dir, subject, model),
+        Wanted::Tracker => vidcut_av::tracking::needed(&dir),
+        Wanted::Salience => vidcut_av::salience::needed(&dir),
     }
 }
 
@@ -6404,17 +6500,13 @@ impl Workspace {
         }
     }
 
-    pub(super) fn ask(
-        &mut self,
-        asks: Vec<(&'static str, Value)>,
-        subject: Option<(Subject, FindModel)>,
-    ) {
-        if model_needs(subject).is_empty() {
+    pub(super) fn ask(&mut self, asks: Vec<(&'static str, Value)>, wanted: Wanted) {
+        if model_needs(wanted).is_empty() {
             for (method, params) in asks {
                 self.send(method, params);
             }
         } else {
-            self.inspector.finding = Some(Finding { asks, subject });
+            self.inspector.finding = Some(Finding { asks, wanted });
         }
     }
 
@@ -6422,7 +6514,7 @@ impl Workspace {
         let Some(finding) = self.inspector.finding.clone() else {
             return;
         };
-        let needs = model_needs(finding.subject);
+        let needs = model_needs(finding.wanted);
         let download = match needs.is_empty() {
             true => Some(false),
             false => {
@@ -7072,9 +7164,11 @@ impl Workspace {
                 }
                 if tab == Tab::Video && !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
-                    let i = &self.inspector;
                     let at = self.snap.timeline.position;
-                    transform(ui, i, p, at, &chosen, &mut acts);
+                    transform(ui, &self.inspector, p, at, &chosen, &mut acts);
+                    let ids: Vec<String> = chosen.iter().map(|c| c.id.clone()).collect();
+                    self.reframe_section(ui, p, &ids);
+                    let i = &self.inspector;
                     crop(ui, i, p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, p, at, &chosen, &mut acts);

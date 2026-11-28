@@ -151,7 +151,7 @@ The snapshot:
 | `Wait` | nothing: seeks, steps, screenshots and `jobs.wait` join the waits | `Live::tick` finds its `Until` met |
 | `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, UI answers | `Msg::TaskDone` |
 | `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
-| `Measure` | `vidcut-measure`, at job priority: measures for Ripple Delete Silence, Detect Scene Cuts, `motion.find`, Normalize Audio Levels and ducking; model downloads; `.otioz` unpacking | `Msg::Measured`; the edit runs here |
+| `Measure` | `vidcut-measure`, at job priority: measures for Ripple Delete Silence, Detect Scene Cuts, `motion.find`, Normalize Audio Levels and ducking; the picture of a still; model downloads; `.otioz` unpacking | `Msg::Measured`; the edit runs here |
 | `Encode` | a job: proxies, transcriptions, word timings, Re-time to Speech | `Msg::Measured`; the edit uses the result |
 
 Work off the core uses a copy of the project from the time that the request arrived.
@@ -167,10 +167,13 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 ## The open project
 
 - `OpenProject` keeps `Store`, `Editor`, `FileId`, and the SQLite `data_version` from the last read or write.
-- `OpenProject::reload` and `OpenProject::refresh` read again through `Store::reload_if_changed` when the file inode or `data_version` changes.
+- `OpenProject::reload` and `OpenProject::refresh` read again through `Store::reload_if_changed` when `FileId` or `data_version` changes.
+  - On Unix, `FileId` is the device and the inode of the file. Thus a file that another file replaces reads again.
+  - On Windows, `FileId` only tells that the file exists.
+  - A new connection always reads again (`Store::live_conn`). Why: the `data_version` of one connection does not compare with that of another.
 - `OpenProject::apply` runs mutations inside `Store::mutate_live`. History compaction (`Store::compact`) runs on `vidcut-history`.
 - A `notify` watcher on the folder watches the project file, `-wal`, and `-journal`, and sends `Msg::FileChanged`.
-- A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::checkpoint`.
+- A write failure keeps the change in memory until the next edit or `OpenProject::close` (`OpenProject::save_left`). `OpenProject::close` then calls `Store::close`.
 - The file is the source of truth. [requests](requests.md) tells about outside changes and undo.
 - Each timeline keeps its playhead. When another timeline opens, `Live::switch_playhead` keeps the playhead of the one before, and seeks to the playhead of the new one.
   - `playheads` holds them by timeline id, for the open project only. It loses the ids of deleted timelines at each change.
@@ -698,6 +701,15 @@ The bar and the Jobs button:
   - A dragged number keeps its value in `Drag` until the release. Thus one drag is one undo step.
   - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
   - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
+- `Workspace::reframe_section` shows the Smart Reframe section for the selected clips of video files (`ops::picture::reframable`).
+  - `Reframing` keeps the Object of Interest, the Mode, the Subject, Smooth and the box in the `Inspector`. They are not in the project.
+  - Reframe sends one `picture.reframe` for all the clips, through `Workspace::ask`. Thus a missing model is asked for first.
+  - With Reference Point and one clip, the request has the box as `reference` and the playhead as `at`. The model to ask for is then the tracker's.
+- `Workspace::reframe_controls` draws the Smart Reframe box on the viewer and moves it.
+  - It shows while `Grab.reframe` is on and no other viewer tool is on (`Workspace::reframe_shown`).
+  - The box is in fractions of the frame, as `reference` is. A drag changes only the `Reframing`, and sends no request.
+  - `Workspace::show_reframe_tool` turns it on: from the Target button, the Smart Reframe button of the Tools row (`Workspace::reframe_tool_button`) and `gui.show`.
+  - `picture.reframe` runs as a job of kind `reframe`. Reframe is grey while such a job runs.
 - `section` draws the Keyframe buttons of the Transform, Crop and Composite headers. `group_values` names the values of each section, and `group_mark` lights the buttons.
   - The button and its ease menu send a request for each value (`Workspace::key_group`). Previous and Next seek (`Workspace::step_group`).
 - With several clips, `number`, `section`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.

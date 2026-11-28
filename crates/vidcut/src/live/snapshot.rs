@@ -179,6 +179,7 @@ pub struct Selection {
     pub cues: Vec<String>,
     pub media: Vec<String>,
     pub thumbnails: Vec<String>,
+    pub stills: Vec<String>,
     pub first: Option<String>,
     #[serde(skip)]
     pub order: Vec<String>,
@@ -282,6 +283,7 @@ pub struct Snapshot {
     pub lost_proxies: Arc<HashMap<String, PathBuf>>,
     pub render_cache: Arc<Vec<vidcut_core::render_cache::Part>>,
     pub proxy_dir: Arc<Path>,
+    pub still_dir: Arc<Path>,
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,

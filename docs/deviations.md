@@ -17,7 +17,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Media that move go offline until the user relinks them (pp. 668–669).
   - Relink Selected Clips matches clips to files by file name and timecode (p. 669).
 - **vidcut:**
-  - A project is one `.vidcut` SQLite database file in WAL mode. It holds both the project and its undo history. There is no library of projects.
+  - A project is one `.vidcut` SQLite database file. It holds both the project and its undo history. There is no library of projects.
   - The project file stores the paths of media in or under the project's folder relative to that folder.
   - Relink Media finds missing files by name. It relinks only the same file ([design/model.md](design/model.md#fingerprints-and-relinking)).
 - **Why:**
@@ -1280,10 +1280,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X142. A Glow keeps the tracks below around a smaller picture
 
 - **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
+  - These are measurements in Resolve Studio 21.1.2 and 21.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
   - The output of a Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.
   - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
+  - The float renders of 21.2 on two pictures with alpha bands and rings have an alpha of 1 in each pixel. Over white they give the same picture as over black.
 - **vidcut:**
+  - The colors of the output are those of Resolve. Thus over black, vidcut gives the same picture.
   - The alpha of the output is the larger of the picture's alpha and the brightest color of the output.
   - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
 - **Why:**
@@ -1377,7 +1379,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
 - **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md)).
 
 ## X153. Every clip pans as on a stereo track
 
@@ -1512,7 +1514,9 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A vehicle is a bicycle, a car, a motorcycle, a bus, a train or a truck.
     - Find in the Inspector of a Tracker node finds each subject. The Tracker gets a pattern for each thing.
   - Each thing gets a pattern of its own, with its motion path.
-  - A found path lasts from its first sample to its last. Before and after them it has no box. Thus a mask that follows it ends where its thing is gone.
+  - A found path holds its first box for 0.2 seconds before the first frame where the model finds its thing. It holds its last box for 0.2 seconds after the last such frame.
+    - It holds no box over a shot change or outside the clip.
+    - Before and after that, it has no box. Thus a mask that follows it ends soon after its thing is gone.
   - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
   - A face has two models. `fast` is a small network on the CPU. `slow` is a larger network on the GPU.
@@ -1524,6 +1528,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The manual says about 150%. A zoom that changes for the same frame cannot be repeated.
   - Each model also finds other faces: in one wide shot, vidcut found seven small faces where Resolve framed only the left ones.
   - Text is the next thing that people hide: names, addresses, documents and screens.
+  - A face that comes into the picture shows for some frames before the model finds it. The held box blurs it there.
   - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 
 ## X175. Individual clips render at the frame rate of the timeline
@@ -1538,3 +1543,16 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
 - **Why:**
   - Not built yet ([todo](todo/export-file-tab.md)).
+
+## X176. Auto Smart Reframe follows the published UNISAL saliency model
+
+- **Resolve:**
+  - With Object of Interest Auto, the Neural Engine analyzes the clip and chooses its most representative object (pp. 735, 920).
+  - The manual does not name the model. The model is not published.
+- **vidcut:**
+  - Without `reference` and `subject`, `picture.reframe` follows a point of the map of the UNISAL saliency model, with its weights for DHF1K ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - The shots are 42 shots of nine files and of 9:16 and 4:3 clips made from them. The timelines are 1080×1920, 1920×1080 and 1080×1080.
+  - On their frames, the position of vidcut is a median of 65 pixels and a mean of 166 pixels from that of Resolve.
+  - The pixels are those of a frame 1080 pixels on its short side.
+- **Why:**
+  - The owner chose the published UNISAL model. A published model cannot give the move of the model of Resolve.

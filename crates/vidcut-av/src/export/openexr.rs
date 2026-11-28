@@ -53,6 +53,17 @@ impl Writer {
         }
     }
 
+    pub(super) fn still((width, height): (u32, u32), fps: Rational) -> Self {
+        let rate = ffmpeg_rate(fps);
+        Self {
+            half: false,
+            compression: Compression::PIZ,
+            size: (width as usize, height as usize),
+            names: &COLORS,
+            fps: (rate.numerator(), rate.denominator().unsigned_abs()),
+        }
+    }
+
     pub(super) fn write(&self, planes: &[u8], time: Option<u32>, path: &Path) -> Result<()> {
         let plane = self.size.0 * self.size.1 * 4;
         if planes.len() != plane * self.names.len() {

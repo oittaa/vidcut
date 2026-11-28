@@ -21,6 +21,8 @@ type Weighed = (Places, f64);
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_REACH: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
+const LEAN_OUTSET: f64 = 0.5;
+const LEAST_LEAN: f64 = 0.0005;
 const SAME_MAP: f64 = 1e-9;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,6 +31,7 @@ pub struct Level {
     pub sized: Option<[f64; 8]>,
     pub shown: [f64; 4],
     pub edge: [f64; 4],
+    pub outset: f64,
     pub soft: Soft,
     pub opacity: f64,
 }
@@ -436,7 +439,7 @@ pub struct GlowSpread {
 impl GlowSpread {
     const GRID: u32 = 8;
     const MOST_GRID: u32 = 1 << 16;
-    const WIDE: f64 = 600.0;
+    const WIDE: f64 = 596.25;
 
     fn grid(spreads: &[f64; 3]) -> u32 {
         let most = spreads.iter().copied().fold(0.0, f64::max);
@@ -911,6 +914,10 @@ impl Working {
             use_alpha: false,
             masks: Masks::default(),
         })
+    }
+
+    pub fn at_frame_size(&self) -> bool {
+        matches!(self.work, Work::Sharpen(_))
     }
 
     fn of_blur(b: &Blur, blend: f64, w: f64) -> Option<Self> {
@@ -1718,15 +1725,24 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     let fitted = placed.mapped_rect(fitted, frame);
     let [_, _, fw, fh] = fitted;
     let (gw, gh) = extent.grid;
-    let ((sin, cos), [across, down]) = turn_of(p.turn(), (cw * fw * gh) / (ch * fh * gw));
+    let aspect = (cw * fw * gh) / (ch * fh * gw);
+    let aspect = match aspect.is_finite() && aspect > 0.0 {
+        true => aspect,
+        false => 1.0,
+    };
+    let plain = p.turn().to_radians().sin_cos();
+    let ((sin, cos), [across, down]) = turn_of(plain, aspect);
     let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
-    let (zx, zy) = (zx * across, zy * down);
     let [ax, ay] = p.pivot();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
     let [qx, qy] = anchored(p, frame, fitted);
     let (dx, dy) = (zx * (ax - 0.5) * fw, zy * (ay - 0.5) * fh);
-    let (ox, oy) = (qx - cos * dx - sin * dy, qy + sin * dx - cos * dy);
+    let (ox, oy) = (
+        qx - plain.1 * dx - aspect * plain.0 * dy,
+        qy + plain.0 * dx / aspect - plain.1 * dy,
+    );
+    let (zx, zy) = (zx * across, zy * down);
     let (k, [u0, v0]) = placed
         .zoomed()
         .map_or((1.0, Picture::MIDDLE), |b| (b.size, flipped(p, b.center)));
@@ -1764,13 +1780,18 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
         0.0,
         0.0,
     ];
-    let back = leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw());
+    let (pitch, yaw) = (felt(p.pitch()), felt(p.yaw()));
+    let back = leaned(affine, [u0, v0], [k * sx, k * sy], pitch, yaw);
     let steadied = placed.steadied();
     Level {
         back: steadied.map_or(back, |s| chain(&back, &s)),
         sized: steadied.map(|_| back),
         shown: crop,
         edge,
+        outset: match pitch == 0.0 && yaw == 0.0 {
+            true => 0.0,
+            false => LEAN_OUTSET,
+        },
         soft,
         opacity: match gone {
             true => 0.0,
@@ -1782,15 +1803,17 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
     }
 }
 
-fn turn_of(degrees: f64, aspect: f64) -> ((f64, f64), [f64; 2]) {
-    let (sin, cos) = degrees.to_radians().sin_cos();
-    let p = match aspect.is_finite() && aspect > 0.0 {
-        true => aspect,
-        false => 1.0,
-    };
+fn turn_of((sin, cos): (f64, f64), p: f64) -> ((f64, f64), [f64; 2]) {
     let (x, y) = (cos, sin / p);
     let across = x.hypot(y);
     ((y / across, x / across), [across, cos.hypot(p * sin)])
+}
+
+fn felt(lean: f64) -> f64 {
+    match lean.abs() < LEAST_LEAN {
+        true => 0.0,
+        false => lean,
+    }
 }
 
 fn leaned(
@@ -1854,7 +1877,12 @@ pub fn frame_back((w, h): (f64, f64)) -> [f64; 8] {
     [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]
 }
 
-fn reached(m: &[f64; 8], [x, y]: [f64; 2], [u0, v0, u1, v1]: [f64; 4]) -> Option<([f64; 2], f64)> {
+fn reached(
+    m: &[f64; 8],
+    [x, y]: [f64; 2],
+    [u0, v0, u1, v1]: [f64; 4],
+    outset: f64,
+) -> Option<([f64; 2], f64)> {
     let [a, b, e, c, d, f, g, h] = *m;
     let w = g * x + h * y + 1.0;
     if !w.is_finite() || w.abs() < 1e-12 {
@@ -1870,7 +1898,7 @@ fn reached(m: &[f64; 8], [x, y]: [f64; 2], [u0, v0, u1, v1]: [f64; 4]) -> Option
     );
     let cover = [(u - u0) / du, (u1 - u) / du, (v - v0) / dv, (v1 - v) / dv]
         .into_iter()
-        .map(|e| (e + 0.5).clamp(0.0, 1.0))
+        .map(|e| (e + 0.5 + outset).clamp(0.0, 1.0))
         .product();
     Some(([u, v], cover))
 }
@@ -1940,6 +1968,7 @@ impl Level {
             sized: None,
             shown: [0.0, 0.0, 1.0, 1.0],
             edge: [0.0, 0.0, 1.0, 1.0],
+            outset: 0.0,
             soft: Soft::default(),
             opacity: 1.0,
         }
@@ -2000,7 +2029,9 @@ impl Placing {
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(own.area(), c));
         let at = p.source as f64;
         let plain = p.picture.crop_at(at).is_none()
-            && p.picture.channel_at(PictureValue::CropSoftness, at)[0] >= 0.0;
+            && p.picture.channel_at(PictureValue::CropSoftness, at)[0] >= 0.0
+            && p.picture.channel_at(PictureValue::Pitch, at)[0] == 0.0
+            && p.picture.channel_at(PictureValue::Yaw, at)[0] == 0.0;
         if plain && u0 < u1 && v0 < v1 && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
             own.soft = Soft::default();
@@ -2024,8 +2055,8 @@ impl Placing {
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {
         let l = &self.level;
-        let (uv, source) = reached(&l.back, [x, y], [0.0, 0.0, 1.0, 1.0])?;
-        let (at, area) = reached(l.area(), [x, y], l.edge)?;
+        let (uv, source) = reached(&l.back, [x, y], [0.0, 0.0, 1.0, 1.0], l.outset)?;
+        let (at, area) = reached(l.area(), [x, y], l.edge, l.outset)?;
         let inside = if l.sized.is_some() { source } else { 1.0 };
         let cover = l.soft.alpha(at) * l.opacity * area * inside;
         (cover > 0.0).then_some((uv, cover))

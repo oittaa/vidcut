@@ -78,7 +78,7 @@ vidcut -p talk.vidcut export start talk.mp4 --preset youtube-1080p
 |---|---|---|---|
 | Preferences, presets, themes, LUTs | `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` |
 | Cache and models | `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` |
-| Undo history, recent projects | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` |
+| Recent projects, last folders, window sizes | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` |
 
 `vidcut reset` sets these folders back to a fresh install.
 
@@ -101,4 +101,5 @@ Read [AGENTS.md](AGENTS.md) first. [docs/design/](docs/design/README.md) tells h
   - RetinaFace ResNet-34 ([yakhyo/retinaface-pytorch](https://github.com/yakhyo/retinaface-pytorch)): MIT.
   - PP-OCRv5 mobile detection ([PaddlePaddle/PP-OCRv5_mobile_det_onnx](https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx)): Apache-2.0.
   - YOLOX-S ([opencv/object_detection_yolox](https://huggingface.co/opencv/object_detection_yolox)): Apache-2.0.
+  - UNISAL, which finds what stands out ([rdroste/unisal](https://github.com/rdroste/unisal/blob/7f8ca1a/LICENSE)): Apache-2.0.
 - ureq, rustls and keyring are MIT or Apache-2.0.

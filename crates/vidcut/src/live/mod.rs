@@ -630,6 +630,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         lost_proxies: Arc::new(HashMap::new()),
         render_cache: Arc::default(),
         proxy_dir: Arc::from(Path::new("")),
+        still_dir: Arc::from(Path::new("")),
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
@@ -739,6 +740,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         fillers: Arc::new(crate::preferences::filler_lists()),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
+        still_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
         thumbs_wanted: HashMap::new(),
         thumbs_on: thumbs_on(),
@@ -1051,6 +1053,7 @@ struct Live {
     fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
     lost_proxies: Arc<HashMap<String, PathBuf>>,
     proxy_dir: Arc<Path>,
+    still_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
     thumbs_wanted: HashMap<String, String>,
     thumbs_on: bool,
@@ -1748,6 +1751,7 @@ impl Live {
             lost_proxies: self.lost_proxies.clone(),
             render_cache: self.render.line(),
             proxy_dir: self.proxy_dir.clone(),
+            still_dir: self.still_dir.clone(),
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
@@ -2127,6 +2131,21 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::GalleryGrab { .. } = &envelope.request {
+            let looks = vidcut_core::editor::still_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            let path = self.project.as_ref()?.store.path().to_path_buf();
+            return Some(plain(move || {
+                use vidcut_core::Env;
+                let env = AvEnv::for_project(&path);
+                for plan in &looks {
+                    env.still(plan, false)?;
+                }
+                Ok(())
+            }));
+        }
         if let Request::GradeAutoColor { .. } = &envelope.request {
             let use_legacy =
                 crate::preferences::load().is_ok_and(|p| p.color.use_legacy_auto_color);
@@ -2186,6 +2205,33 @@ impl Live {
                     AvEnv::new().shake(media, plan, *look)?;
                 }
                 Ok(())
+            }));
+        }
+        if let Request::PictureReframe { .. } = &envelope.request {
+            use vidcut_core::editor::ReframeLook;
+            let looks = vidcut_core::editor::reframe_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(Box::new(move || {
+                use vidcut_core::Env;
+                let env = AvEnv::new();
+                let mut handed = Vec::new();
+                for look in &looks {
+                    match look {
+                        ReframeLook::Subject((media, subject, span, download)) => {
+                            env.subjects(media, *subject, *span, *download)?;
+                        }
+                        ReframeLook::Salient((media, span, download)) => {
+                            env.salience(media, *span, *download)?;
+                        }
+                        ReframeLook::Track(t) => {
+                            let (media, plan, follow, download) = t.as_ref();
+                            handed.push(env.track(media, plan, *follow, *download)?);
+                        }
+                    }
+                }
+                Ok(handed.into_iter().collect())
             }));
         }
         if let Request::MotionTrack { .. } = &envelope.request {
@@ -2961,6 +3007,11 @@ impl Live {
                 let zoom = r.result["zoom"].as_f64().unwrap_or(1.0) * 100.0;
                 format!("Stabilize: {frames} frames, zoom {zoom:.0}%")
             }
+            "picture.reframe" => {
+                let clips = r.result["clips"].as_array().map_or(&[][..], Vec::as_slice);
+                let keys: i64 = clips.iter().filter_map(|c| c["keys"].as_i64()).sum();
+                format!("Smart Reframe: {keys} keyframes")
+            }
             "media.add_folder" => folder_notice(&r.result),
             "subtitles.import"
                 if r.result["placed"] == "start"
@@ -3489,6 +3540,7 @@ impl Live {
                 cues,
                 media,
                 thumbnails,
+                stills,
                 edit,
                 track,
                 side,
@@ -3546,7 +3598,7 @@ impl Live {
                     None if clear => Some(OneOrMany::Many(Vec::new())),
                     c => c,
                 };
-                if let Err(e) = self.set_selection(clips, cues, media, thumbnails) {
+                if let Err(e) = self.set_selection(clips, cues, media, (thumbnails, stills)) {
                     return Step::Now(Err(e));
                 }
                 if changes.is_empty() {
@@ -3960,6 +4012,22 @@ impl Live {
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
+            Request::GalleryGrab { .. } if !envelope.dry_run => match self.measuring(&envelope) {
+                Some(measure) => {
+                    let playhead = Some(self.player.position(TIMELINE));
+                    Step::Measure(measure, Box::new(envelope), playhead)
+                }
+                None => Step::Now(self.edit(envelope, job.origin)),
+            },
+            Request::PictureReframe { .. } if !envelope.dry_run => {
+                match self.measuring(&envelope) {
+                    Some(measure) => {
+                        let title = "Smart Reframe".into();
+                        Step::Encode(measure, Box::new(envelope), title, "reframe")
+                    }
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::GradeAutoColor { .. }
@@ -3971,6 +4039,7 @@ impl Live {
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
+            | Request::PictureReframe { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope), None),
@@ -4204,6 +4273,20 @@ impl Live {
                     return Err(Error::usage("the clipboard has no clip"));
                 }
                 *copied = Some(self.clipboard.clone());
+            }
+            Request::GalleryApply {
+                clips,
+                grade: GradeLevel::Clip,
+                ..
+            } if clips.is_none() => {
+                let p = self.project.as_ref().ok_or_else(no_project)?.project();
+                let mut targets = self.selection.thumbnails.clone();
+                if let Some(at) = vidcut_core::ops::gallery::color_clip(p, playhead)
+                    && !targets.contains(&at)
+                {
+                    targets.push(at);
+                }
+                *clips = Some(OneOrMany::Many(targets));
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
@@ -4443,6 +4526,7 @@ impl Live {
             return;
         };
         let folder = AvEnv::for_project(open.store.path()).proxy_dir();
+        self.still_dir = Arc::from(AvEnv::for_project(open.store.path()).stills_dir());
         let p = open.project();
         self.missing_watch.watch(
             p.pool_media()
@@ -4479,6 +4563,7 @@ impl Live {
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
         self.selection.thumbnails.retain(|c| p.clip(c).is_some());
+        self.selection.stills.retain(|s| p.still(s).is_some());
         self.selection.cues.retain(|c| p.cue(c).is_some());
         self.selection.keep_order();
         if self
@@ -5645,7 +5730,7 @@ impl Live {
         clips: Option<OneOrMany<String>>,
         cues: Option<OneOrMany<String>>,
         media: Option<OneOrMany<String>>,
-        thumbnails: Option<OneOrMany<String>>,
+        (thumbnails, stills): (Option<OneOrMany<String>>, Option<OneOrMany<String>>),
     ) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
@@ -5675,6 +5760,12 @@ impl Live {
                     .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             }
         }
+        if let Some(s) = &stills {
+            for id in s.to_vec() {
+                p.still(&id)
+                    .ok_or_else(|| Error::not_found(format!("no still {id}")))?;
+            }
+        }
         if let Some(mut c) = clips {
             c.dedup();
             self.selection.clips = c;
@@ -5690,6 +5781,12 @@ impl Live {
             let mut seen = HashSet::new();
             t.retain(|c| seen.insert(c.clone()));
             self.selection.thumbnails = t;
+        }
+        if let Some(s) = stills {
+            let mut seen = HashSet::new();
+            self.selection.stills = (s.to_vec().into_iter())
+                .filter(|id| seen.insert(id.clone()))
+                .collect();
         }
         self.selection.keep_order();
         Ok(())
@@ -6068,6 +6165,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::ClipNormalize { .. }
         | Request::EditDetectSceneCuts { .. }
         | Request::GradeAutoColor { .. }
+        | Request::GalleryGrab { .. }
         | Request::MotionFind { .. }
         | Request::GradeMaskClick { .. }
         | Request::GradeMaskSet { .. }
@@ -6075,6 +6173,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::GradeMaskTrack { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
+        | Request::PictureReframe { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }
         | Request::TrackSet {
             duck: Some(Some(_)),

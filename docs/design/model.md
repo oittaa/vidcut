@@ -451,6 +451,7 @@ Ranges and resolution:
 | cue | q1, q2 … | `Project::alloc_cue_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 | subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
+| still | s1, s2 … | `Project::alloc_still_id` |
 
 - The counters are in `NextIds`. Each alloc call adds one.
 - Undo restores `next_id` with the project. Thus an id of an undone edit can come again.
@@ -458,20 +459,28 @@ Ranges and resolution:
 
 ## The `.vidcut` file
 
-- `Store` reads and writes `Project` as one SQLite database file. On local drives it uses WAL mode (`synchronous = NORMAL`).
-- On a network drive (`dirs::on_network`), `Store` uses rollback `DELETE` journal mode (`synchronous = FULL`), because WAL needs shared memory on one host.
-- In WAL mode, recent writes stay in `-wal` until a checkpoint runs. Copy or move a `.vidcut` file after `Store::checkpoint` or with its `-wal`.
+- `Store` reads and writes `Project` as one SQLite database file, with `synchronous = FULL`. Why: edits come at the speed of a person, and each save must stay after a power loss.
+- On local drives, `Store` uses WAL mode. On a network drive (`dirs::on_network`), it uses the rollback `DELETE` journal mode, because WAL needs shared memory on one host.
+  - On Linux, `dirs::on_network` also counts FUSE (sshfs, gvfs, rclone, virtiofs), 9p, Ceph and AFS. WAL is not safe on them, because they do not share memory between hosts.
+- After each save, `Store` copies the WAL into the main file (`settle`, a `PASSIVE` checkpoint). Thus a copy, a backup or a sync of the `.vidcut` file alone has the saved edits.
+  - A `PASSIVE` checkpoint does not wait. It leaves in the WAL the changes that a reader in another process still needs. The next checkpoint copies them.
 - Entity tables hold rows by item: `meta`, `media`, `timelines`, `tracks`, `clips`, `subtitles`, `cues`, and `compounds`.
+  - `MetaRow`, `TimelineRow`, `CompoundRow`, `TrackRow` and `SubtitleTrackRow` borrow their fields from the model. `Store::save` compares them to find a dirty row.
+  - Each row takes all the fields of its model struct by name, with no rest pattern. Thus a new field does not compile until the store writes it.
 - `blobs` holds zlib-compressed, content-addressed arrays for `MotionPath` samples and `Stabilized` frames above the threshold.
+  - `gc_blobs` removes the blobs that no clip row names. A compaction and `Store::close` run it. A save writes a blob again when a clip needs it.
 - `Store::save` writes only dirty rows and skips unchanged subtrees with `SharedVec::ptr_eq`.
+  - When only `rev` and `edited` change, it updates those two columns of `meta`, and does not write its `data` again.
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
   - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut`, `color_viewer_lut` and `scopes_lut` of the settings.
   - `history_base` and `history_events` store those project-folder paths relative too, so undo and external diffs stay valid after moving the folder.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
+- The picture of a still is stored by its file name (`Still::picture`), and found in the stills folder (`Env::stills_dir`).
 - `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
-- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::checkpoint` checkpoints local WAL files on close.
+- `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::close` removes unreferenced `blobs` and empties the WAL (a `TRUNCATE` checkpoint).
 - A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
+  - `open_conn` verifies the header before it sets the journal mode. Thus it does not change a file that it refuses.
 - The undo history lives in the same `.vidcut` file ([requests](requests.md#undo-history)).
 
 Temporary files:
@@ -731,6 +740,9 @@ Writing:
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - `Tool::takes_from` adds one case: the effect mask of a tool takes a picture too (`Tool::takes_picture_mask`). `Node.mask_channel`, `Node.mask_range` and `Node.mask_clip` then make the mask from it.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
+    - Its `PatternKind` tells how a track follows it. A `point` pattern also has a search area and a `PatternChannel` ([analysis](analysis.md#tracks)).
+    - `Tracker::free_name` and `Tracker::free_point` name a new pattern with the first number that no pattern has.
+    - The `AdaptiveMode` and the Match Tolerance of the `Tracker` act on its `point` patterns.
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
     - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.

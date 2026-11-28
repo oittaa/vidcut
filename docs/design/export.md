@@ -234,7 +234,7 @@ Notes:
   - The audio of output 1 goes in when the container takes that codec (`Container::takes_audio`). Else the file has no audio.
   - The `quality` of output 1 goes in. The encoder of the additional output applies it.
   - With a `bitrate` on output 1, the quality and the bitrate are not set. Thus the codec gives its default quality.
-  - Why: the measurements show the audio and the quality of output 1 in each output. An output 1 with a bitrate is not measured.
+  - Why: the measurements show the audio and the quality of output 1 in each output. They show no bit rate of output 1 in another output.
 - `written_twice` finds two outputs with the same path. It compares the paths part by part, in lowercase. Why: Windows and macOS do not see the case of a name, and Windows takes both / and \ between folders.
   - `refuse_written_twice` refuses them in `render.add` and `render.update` (`queue::existing`), and in `export.start` (`session::export_media`).
   - `export.plan` gives only the note `written_twice`. Why: Add stays on, and the GUI shows the measured prompt at Add.
@@ -574,8 +574,9 @@ Voice Isolation:
   - `top_at` gives the clip of the top track at a frame. A plain click on a clip under another clip keeps that clip in `thumbnails`. Why: the outline stays on the top clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
-  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips before it filters them. Why: a number then names the same clip with and without a filter.
+  - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips that meet it, from 1, as measured.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
+  - Graded and Ungraded use `Grade::is_active`, as the render does. Why: a node or a value that changes nothing does not grade a clip, as measured.
 
 The render queue:
 
@@ -864,10 +865,15 @@ The draw:
   - `Blurred` keeps the buffers (`sharpen::Planes`) until the size changes. Each frame makes the planes again, so there is no cache to keep up to date.
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
+- A canvas with fewer pixels than the frame draws a layer with a Sharpen at the frame size (`Working::at_frame_size`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - A second `Blurred` draws that layer and runs all its effects. `Blurred::scaled` then scales the result into the layer's picture, with the layer's filter.
+  - This holds for each plain layer. An adjustment clip, a compound clip and a frame that a retime makes keep the canvas size.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
+- A Glow and a Sharpen also take the colors without their alpha with Use Alpha on (`glow_taken`, `fs_sharpen_taken`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - A Sharpen multiplies its result by the alpha again. A Glow with Use Alpha on mixes its result with those colors, and gives it the alpha of `fs_glow`.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
   - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 
@@ -1149,6 +1155,33 @@ The passes:
 - The first pass takes each pixel. A later pass takes each nth pixel.
 - The passes before it already blur the picture by more than n pixels. Thus the gaps do not show.
 - Above a sigma of 128 pixels, Black and Replicate borders thus differ a little from one pass.
+
+## The Gallery
+
+The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+
+- `Project::stills` holds each `Still` in the project file. A still holds copies of the grades, not links to them. Thus a later change of the clip does not change the still.
+- `ops::gallery` holds the edits: `grab`, `remove`, `apply` and `get`.
+  - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
+  - `apply` puts a copy of the clip grade into each target with `put_whole`. It gives the copy the node stack layers of the project first (`Grade::counted`).
+  - `apply` refuses a grade with keyframes. Why: Apply Grades Using is not built, and a copy of the keyframes is only one of its three modes.
+- The picture of a still:
+  - `editor::still_looks` gives the plan of the frame: `render::flatten` of one frame, with no sound.
+  - `Env::still` draws it, and `AvEnv` writes it with `export::still`. This path draws as the export of a frame does, with the timeline grade and the output LUT.
+  - `still::write_exr` writes the 32-bit float planes into an OpenEXR file with lossless PIZ compression.
+  - Why OpenEXR: the file keeps each value of the float picture, also outside 0..1.
+  - The name of the file is a digest of the plan. Thus the measure step and the edit agree on the file, and the same frame and grades give the same file.
+  - The file goes into the folder of `PlaybackFiles::stills_in`, beside the proxies. `Env::stills_dir` gives that folder.
+  - An undo or a delete keeps the file. Why: a redo then needs no new picture.
+- `gallery.grab` draws before the edit, as `grade.auto_color` does.
+  - In the GUI, `Live::measuring` draws the picture on `vidcut-measure`. The edit then runs with a heard-only `AvEnv`, which only finds the file.
+  - A change of the frame or of the grades in that time gives a new plan. The edit then finds no file and gives a conflict.
+  - Without a GUI, `work_first` draws on `vidcut-stills`, outside the lock of the project file.
+- The GUI:
+  - `Workspace::gallery_panel` draws the panel. `Gallery` keeps the textures of the pictures in an `Lru` of `STILLS_KEPT` entries.
+  - `still::exr_rgba` reads a picture at the height of the tile, on `vidcut-still`. It averages the pixels into the smaller size, then clamps them to 8 bits.
+  - The live `Selection` holds the selected stills in `stills`. `selection.set` changes it, and a still that leaves the project leaves it.
+  - A `gallery.apply` with no `clips` in the Clip mode gets the clips selected in the Thumbnail timeline and the clip at the playhead (`Live::edit_at`).
 
 ## Compositions
 

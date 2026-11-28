@@ -5,14 +5,15 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
-    CellShape, Clip, ClipScaling, CompositeMode, Composition, Crop, DynamicZoom, Effect,
+    AdaptiveMode, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
+    Border, CellShape, Clip, ClipScaling, CompositeMode, Composition, Crop, DynamicZoom, Effect,
     EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow,
     GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite,
     ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, PaintMode, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime,
-    ShadingElement, Sharpen, Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind,
-    Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture, PictureTool,
+    PivotType, Project, ReferenceTime, ShadingElement, Sharpen, Stabilization, Stabilizing,
+    SubPixel, TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette,
+    VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput, StabilizationSet};
 
@@ -969,6 +970,8 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
     within(t.custom_time, Tracker::TIMES, why)?;
     let why = "a tracker's fade frames are from 0 to 1000000";
     within(t.fade_frames, Tracker::FADES, why)?;
+    let why = "a tracker's match tolerance is from 0 to 1";
+    within(t.match_tolerance, (0.0, 1.0), why)?;
     if t.intermediate_points
         .is_some_and(|k| k > Tracker::MOST_POINTS)
     {
@@ -1000,6 +1003,8 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
         custom_time: t.custom_time.filter(|v| *v != 0.0),
         intermediate_points: t.intermediate_points.filter(|k| *k != 0),
         fade_frames: t.fade_frames.filter(|v| *v != Tracker::FADE),
+        adaptive_mode: t.adaptive_mode.filter(|a| *a != AdaptiveMode::default()),
+        match_tolerance: t.match_tolerance.filter(|v| *v != Tracker::TOLERANCE),
         ..t.clone()
     })
 }
@@ -1020,6 +1025,9 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
     let why = "a pattern's width and height are from 0.001 to 0.5";
     within(p.width, Pattern::SIDES, why)?;
     within(p.height, Pattern::SIDES, why)?;
+    let why = "a pattern's search width and height are from 0.001 to 1";
+    within(p.search_width, Pattern::SEARCHES, why)?;
+    within(p.search_height, Pattern::SEARCHES, why)?;
     let path = p.path.as_ref();
     if let Some(why) = path.and_then(|m| crate::motion::samples_problem(&m.samples)) {
         return Err(Error::invalid(format!("{name}: {why}")));
@@ -1030,6 +1038,10 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
         width: p.width.filter(|v| *v != Pattern::WIDTH),
         height: p.height.filter(|v| *v != Pattern::HEIGHT),
         offset: p.offset.filter(|o| *o != [0.0, 0.0]),
+        kind: p.kind.filter(|k| *k != PatternKind::default()),
+        search_width: p.search_width.filter(|v| *v != Pattern::SEARCH),
+        search_height: p.search_height.filter(|v| *v != Pattern::SEARCH),
+        channel: p.channel.filter(|c| *c != PatternChannel::default()),
         ..p.clone()
     })
 }
@@ -1332,6 +1344,39 @@ pub fn stabilized(
         "zoom": rounded(s.zoom),
         "before": shown(s.before),
         "after": shown(s.after),
+    }))
+}
+
+pub fn reframable(p: &Project, id: &str) -> Result<crate::model::Media> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    takes(p, ti, c)?;
+    let media = p
+        .media(&c.media)
+        .filter(|m| !c.is_block() && m.info.video.is_some() && !m.is_still());
+    media.cloned().ok_or_else(|| {
+        Error::invalid(format!(
+            "{} is not footage: only a clip from a video file is reframed",
+            c.id
+        ))
+    })
+}
+
+pub fn reframed(p: &mut Project, id: &str, moved: crate::reframe::Moved) -> Result<Value> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &mut p.tracks[ti].clips[ci];
+    let frames = c.duration.max(1) as f64;
+    let mut picture = c.picture.clone().unwrap_or_default();
+    picture.position_keys = moved.keys;
+    picture.position_y = moved.y;
+    c.picture = checked(&picture)?;
+    let axes = [("pan", moved.axes[0]), ("tilt", moved.axes[1])];
+    let axes: Vec<&str> = axes.iter().filter(|(_, on)| *on).map(|(a, _)| *a).collect();
+    Ok(json!({
+        "clip": id,
+        "keys": picture.position_keys.len(),
+        "axes": axes,
+        "seen": rounded(moved.seen as f64 / frames),
     }))
 }
 

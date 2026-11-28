@@ -36,6 +36,7 @@ pub struct Project {
     pub groups: Vec<SyncGroup>,
     pub speakers: Speakers,
     pub queue: Vec<RenderJob>,
+    pub stills: Vec<Still>,
 }
 
 /// A whole project: its media and its timelines.
@@ -89,6 +90,10 @@ pub struct ProjectFile {
     /// is empty. A change to it is not an undo step.
     #[serde(default)]
     pub queue: Vec<RenderJob>,
+    /// The stills of the Gallery of the Color page, the oldest first. Left
+    /// out while there are none.
+    #[serde(default)]
+    pub stills: Vec<Still>,
 }
 
 #[derive(Serialize)]
@@ -117,6 +122,8 @@ struct ProjectOut<'a> {
     speakers: &'a Speakers,
     #[serde(skip_serializing_if = "<[RenderJob]>::is_empty")]
     queue: &'a [RenderJob],
+    #[serde(skip_serializing_if = "<[Still]>::is_empty")]
+    stills: &'a [Still],
 }
 
 impl Serialize for Project {
@@ -148,6 +155,7 @@ impl Serialize for Project {
             groups: &self.groups,
             speakers: &self.speakers,
             queue: &self.queue,
+            stills: &self.stills,
         }
         .serialize(s)
     }
@@ -174,6 +182,7 @@ impl From<ProjectFile> for Project {
             groups: f.groups,
             speakers: f.speakers,
             queue: f.queue,
+            stills: f.stills,
         };
         p.check_out();
         p
@@ -280,6 +289,35 @@ impl ClipFilter {
     pub fn is_all(&self) -> bool {
         *self == Self::All
     }
+}
+
+/// A still of the Gallery: a picture of a frame of a timeline, and the
+/// grades of the clip that the Color page graded on that frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Still {
+    /// `s<N>`, never reused.
+    pub id: String,
+    /// The clip: the topmost clip on the frame that takes a grade.
+    pub clip: String,
+    /// The timeline of the clip.
+    pub timeline: String,
+    /// The frame of the timeline.
+    pub frame: i64,
+    /// The whole grade of the clip: each node stack layer, with its
+    /// keyframes. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<Grade>,
+    /// The timeline grade, with its keyframes. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_grade: Option<Grade>,
+    /// The label under the picture. A new still has none, and leaves it
+    /// out.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    /// The file name of the picture in the `stills` folder: the frame as
+    /// the viewer shows it, at the size of the timeline, in 32-bit float
+    /// OpenEXR.
+    pub picture: String,
 }
 
 /// A job of the render queue: an export of a timeline that waits for a
@@ -5878,6 +5916,67 @@ pub struct Tracker {
     /// from 0 to 1 over this many frames, from 0 to 1000000. Usual: 25.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade_frames: Option<f64>,
+    /// How a track takes the picture of a `point` pattern again. Usual:
+    /// `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_mode: Option<AdaptiveMode>,
+    /// The most that the picture of a `point` pattern can change on a frame
+    /// for `best_match` to take it again, from 0 to 1. At 0 it takes no
+    /// change, and at 1 it takes each. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_tolerance: Option<f64>,
+}
+
+/// How a track takes the picture of a `point` pattern again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveMode {
+    /// On each frame, it looks for the picture of the box on the first
+    /// frame of the track.
+    #[default]
+    None,
+    /// It takes the picture where it found the pattern on each frame, and
+    /// looks for that on the next frame. This follows slow changes, and it
+    /// can drift.
+    EveryFrame,
+    /// As `every_frame`, but it keeps the last picture when the new one
+    /// differs from the first by more than `match_tolerance`.
+    BestMatch,
+}
+
+/// The way a track follows a pattern.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternKind {
+    /// A neural network (VitTrack) on the CPU follows the box. The box
+    /// grows and shrinks with the thing. Its file (715 kB) downloads at its
+    /// first use.
+    #[default]
+    Model,
+    /// On each frame, the track looks for the pixels of the box in the
+    /// search area around its last place, in one channel. The box keeps its
+    /// size.
+    Point,
+}
+
+/// The channel of the picture in which a `point` pattern is looked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternChannel {
+    /// The channel in which the box has the most contrast on the first
+    /// frame of the track.
+    #[default]
+    Auto,
+    /// The red channel.
+    Red,
+    /// The green channel.
+    Green,
+    /// The blue channel.
+    Blue,
+    /// 0.2126 red, 0.7152 green and 0.0722 blue.
+    Luminance,
+    /// The alpha channel.
+    Alpha,
 }
 
 /// What a `tracker` does with its pictures.
@@ -5975,6 +6074,22 @@ pub struct Pattern {
     /// picture, up. Each from -10 to 10. Usual: `[0, 0]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
+    /// How a track follows it. Usual: `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<PatternKind>,
+    /// The width of the area around the box in which a track of a `point`
+    /// pattern looks on the next frame, as a fraction of the width of the
+    /// picture, from 0.001 to 1. Usual: 0.125.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_width: Option<f64>,
+    /// The height of that area, as a fraction of the height of the
+    /// picture, from 0.001 to 1. Usual: 0.125.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_height: Option<f64>,
+    /// The channel in which a track of a `point` pattern looks. Usual:
+    /// `auto`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<PatternChannel>,
 }
 
 /// The pattern of a tracker that the center of a node follows.
@@ -10246,6 +10361,7 @@ pub struct NextIds {
     pub cue: u64,
     pub group: u64,
     pub timeline: u64,
+    pub still: u64,
 }
 
 fn first_id() -> u64 {
@@ -10276,11 +10392,13 @@ impl Project {
                 cue: 1,
                 group: 1,
                 timeline: 1,
+                still: 1,
             },
             bins: Vec::new(),
             groups: Vec::new(),
             speakers: Default::default(),
             queue: Vec::new(),
+            stills: Vec::new(),
         }
     }
 
@@ -11080,6 +11198,16 @@ impl Project {
         let id = format!("q{}", self.next_id.cue);
         self.next_id.cue += 1;
         id
+    }
+
+    pub fn alloc_still_id(&mut self) -> String {
+        let id = format!("s{}", self.next_id.still);
+        self.next_id.still += 1;
+        id
+    }
+
+    pub fn still(&self, id: &str) -> Option<&Still> {
+        self.stills.iter().find(|s| s.id == id)
     }
 
     pub fn subtitle_index(&self, id: &str) -> Option<usize> {
