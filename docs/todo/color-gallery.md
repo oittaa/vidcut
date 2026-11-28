@@ -2,11 +2,12 @@
 
 ## Stills and Apply Grade
 
-- A Gallery panel with the stills of an album.
-- Grab Still from the menu, the viewer and Ctrl+Alt+G.
-- Apply Grade and Apply Active Layer from a still: its menu, a middle-click and a drag into the viewer.
-- Apply Grades Using: the keyframe modes of an applied grade.
-- Delete Selected, Change Label and the selection of stills.
+- The ID of a still from the track and the place of the clip, as Resolve gives it.
+- Change Label, and a double-click under the ID.
+- Apply Grades Using, and Apply Grade of a still whose grade has keyframes.
+- Apply Active Layer.
+- A drag of a still into the viewer.
+- A Shift-click that selects a range of stills.
 - A click on a covered clip in the Thumbnail timeline does not make it the current clip.
 - Some Thumbnail timeline selection cases: not checked against Resolve.
 

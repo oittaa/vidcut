@@ -41,6 +41,7 @@ The values in the Priority column:
 | `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | the 24 pool pictures of each video media, waveforms; tiles of the timeline and the pool | job |
 | `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media and proxy files; the OS's look | interactive |
 | `vidcut-ask` | `Ask::send` | a UI helper | interactive |
+| `vidcut-still` | `Gallery` in the GUI | reads the picture of one still for the Gallery | job |
 | `vidcut-file-dialog` | `Picked::ask` | a UI helper | interactive |
 | `vidcut-import-dialog`, `vidcut-import-drop` | `Workspace::import_media`, `Workspace::import_dropped` | UI helpers | interactive |
 | `vidcut-project-dialog` | `Workspace::pick_project` | a UI helper | interactive |
@@ -52,6 +53,7 @@ The values in the Priority column:
 | `vidcut-proxies`, `vidcut-transcribe`, `vidcut-retime`, `vidcut-sound-sync`, `vidcut-story-N` | `work_first` in `session::run_with`, `storyboard::render` | the work of a headless proxy, transcription, re-timing or sound sync before its edit; storyboard pictures | starter's (`Work::current`) |
 | `vidcut-subjects` | `work_first` in `session::run_with` | the pictures of a headless `motion.find`, `motion.track`, `edit.close_up` or `picture.reframe` before its edit | starter's (`Work::current`) |
 | `vidcut-stabilize` | `work_first` in `session::run_with` | the pictures of a headless `picture.stabilize` before its edit | starter's (`Work::current`) |
+| `vidcut-stills` | `work_first` in `session::run_with` | the picture of a headless `gallery.grab` before its edit | starter's (`Work::current`) |
 | `vidcut-upload` | `speech_api::transcribe` | the upload to a paid speech service and its reply, while the job's thread reports and cancels | inherited |
 | `vidcut-speakers` | `transcribe::speakers_of` | the run of a speaker model, while the job's thread reports the time and cancels it | inherited |
 | `vidcut-play-video`, `vidcut-play-audio`, `vidcut-play-windows` | `Player::new`; windows once followed | the decoding, mix and two-up windows of an engine | inherited |

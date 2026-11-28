@@ -20,6 +20,7 @@ mod file_manager;
 mod fillers;
 mod folders;
 pub mod frame;
+mod gallery;
 mod generator_browser;
 mod grade_keys;
 mod grade_windows;
