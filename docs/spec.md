@@ -5195,7 +5195,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - With a rotation of 90°, a 16:9 clip in a 9:16 timeline moves across and up and down.
   - The four eases of Dynamic Zoom give the same keyframes. Resolve plays each ease as a straight line ([gotchas](gotchas.md#resolves-edits)).
   - A Dynamic Zoom changes the move. The move at each frame is that of a zoom of one over the size of the box at that frame.
-  - With a speed change or a speed ramp, the move follows the source frames that show. At 200 % speed, there are about twice as many keyframes as at 100 %.
+  - A clip with a speed change gets the move of its source frames at 100 %, spread evenly over the length of the clip.
+    - With a constant speed, the move thus follows the source frames that show. At 200 % speed, there are about twice as many keyframes as at 100 %.
+    - With a Freeze Frame or a speed ramp, the move does not follow the frames that show. On a frozen frame, the picture moves.
+    - Measured on 5 clips with a Freeze Frame and 6 clips with a speed ramp, from 4 files.
   - At 50 % speed, the move does not always follow the source frames. There are a quarter to a half as many keyframes as at 100 %.
   - Shots with no face move too.
   - With Reference Point, the move follows the subject in the box, also when most of the box is background.
@@ -5223,6 +5226,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Why: the head of a person is at the top of the box.
     - The point that stands out goes to the middle of the frame too. Why: with room up and down, a higher view does not come nearer to the Tilt of Resolve.
   - A frame with no thing takes the point of the nearest frame with one, in the same shot. A shot with no thing keeps the framing of the clip.
+  - The move uses the source frames from the first frame of the clip to its last frame, spread evenly over the clip, as in Resolve.
+    - Thus with a constant speed, the move follows the frames that show. A Freeze Frame or a speed ramp does not change the move.
   - `smooth` evens out the move. At each frame, a straight line goes through the near frames, with Gaussian weights of `smooth` seconds of the source. The usual value is 0.5 s.
     - Why the source: at 200 % speed, Resolve gives about twice as many keyframes as at 100 %. At 50 %, it gives fewer.
   - Then the picture covers the frame on each axis where it is larger than the frame.
