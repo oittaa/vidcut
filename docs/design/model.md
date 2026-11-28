@@ -764,6 +764,9 @@ Writing:
     - `Tracker::next_pattern` names a new pattern with the next number of the count, and puts it in the place of that number (`Tracker::CORNERS`, `Tracker::LATER`).
     - `Tracker::push_pattern` and `Tracker::remove_pattern` keep the count. Each op that adds or removes a pattern uses them.
     - `Tracker.made` is left out while it is the number of patterns.
+    - `Pattern.select_time` is the frame of the composition where its own box was set last. `comp.set` sets it on an add, and on a move with `pattern_handle`.
+    - `Pattern::from_own` is true for a `point` pattern on its Select Time. There, `Pattern::shown_at` gives its own box, else the box of its path.
+    - Why: a track from Select Time starts from the box of the last handle drag, also where the path has a box. The viewer and the track take the same box.
     - The `AdaptiveMode` and the Match Tolerance of the `Tracker` act on its `point` patterns.
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.

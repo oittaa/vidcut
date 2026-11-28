@@ -3755,9 +3755,18 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
     - A typed value outside the slider is not measured. A typed Pattern Width of 1000000 crashes Resolve ([gotchas](gotchas.md#resolves-fusion-page)).
   - X Offset and Y Offset of a pattern have keyframes and no limit. A typed 1000000 and -1000000 stay.
     - vidcut: each offset is from -1000000 to 1000000.
+    - In one read, the values between two keys of X Offset are linear.
+  - Select Time of a pattern is the frame where Add made it. A drag of its handle sets it to the frame of the drag.
+    - The Inspector shows it as text, with Go. Go moves the playhead to Select Time.
+    - A drag of the offset point does not change it.
+    - vidcut: the Inspector shows Select Time for a Point pattern only.
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - The box of a Point pattern has a small handle at the top left. A drag of it moves the box, with a zoomed view (pp. 1783–1784).
-    - The path does not change.
+    - The path does not change. Tracked Center does not change.
+    - On the frame of the drag, the box shows at the dragged place.
+    - In one read, the box also shows at the dragged place on other frames of the path, until the next track.
+    - On a pattern with no path, Tracked Center stays at the place where Add made the pattern. Two reads show it.
+    - vidcut: a pattern with no path is where its own box is. Thus a node that follows it moves with the handle.
     - The box of the first pattern has no handle at the top left. A press there starts a selection.
   - A drag of an edge resizes the box from its middle (p. 1783).
   - The middle of the box is a point of the path. On a frame of the path, a drag of this point changes the path on that frame only.
@@ -3802,6 +3811,13 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - A track does not stop at a lost pattern or at a shot change. The user stops it (pp. 1785, 1788).
   - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
   - While a track runs, the Node Editor takes no work (p. 1784).
+  - A track of a Point pattern that starts on its Select Time starts at its box. This is also so where the path has another place on that frame.
+    - The frames before the start keep the old path. The frames after it follow the picture in the box.
+    - In one read, a track started 10 frames after Select Time. Its first frame is the box plus (0.0375, 0.0225). 0.0375 is (Search Width − Pattern Width) / 2.
+    - vidcut: a track that starts on another frame starts from the path on that frame. Where there is no path, it starts from the box.
+  - Path Center has Pattern Center (default) and Track Center (Append).
+    - In one read, a track with Track Center (Append) from Select Time continues the old path. The drag of the box does not move the path.
+    - vidcut: Path Center is not built yet.
 - The Tracker looks at the picture on its input, with the nodes before it (p. 1784). It tracks on each frame of the file.
 - The trim buttons take off the tracking data of the selected patterns (p. 2844):
   - Trim to Start takes off the data before the playhead.
@@ -3809,8 +3825,20 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Trim to End takes off the data after the playhead.
   - vidcut: the trim buttons are in the Trim row under the track buttons. They act on the picked pattern.
 - When a track ends, its path is connected to the pattern (p. 1785).
+  - In one read, a gap between two tracks is linear between the keys at its ends. vidcut gives a linear gap too.
+- The right pattern display of the Inspector is a flipbook (p. 1785). It shows the pattern on each tracked frame, with the frame number.
+  - Its buttons are Frame back, Play/Stop, Frame forward, Loop and Clear.
+  - In one read, it plays the tracked frames at about 19 frames per second. It keeps the pictures of tracks that Undo took away. After the project opens again, it is empty.
+  - In one read, the confidence bar next to it is green during the whole track.
+  - vidcut: the flipbook and the confidence bar are not built yet.
+- A click on a tracked path in the viewer selects the path. The toolbar of the viewer then shows the tools of a polyline: Insert and Modify, Modify Only, Smooth, Linear, Delete Points and others.
+  - A drag of a point of the path on a tracked frame changes that frame only. Two reads show it.
+  - In one read, Insert and Modify adds a point with no frame and no key. A drag of that point changes each frame of the gap that it is in.
+  - vidcut: the path tools of the viewer are not built yet.
 - X Offset and Y Offset move the point that other nodes follow away from the middle of the pattern (p. 1789).
   - The viewer shows a dashed line from the middle of the pattern to that point (p. 1789).
+  - The output Offset position of a pattern is Tracked Center plus the offsets.
+  - The button "Allow moving the positioner offsets" of the viewer toolbar lets a drag move that point. In one read, the drag puts a key on X Offset, which had keys, and changes the plain Y Offset, which had none.
 - A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "IntelliTrack 1: Offset position".
   - The Center then follows that point.
   - Remove (vidcut: Disconnect) leaves the Center at the point that it shows on that frame.

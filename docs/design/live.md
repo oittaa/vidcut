@@ -383,7 +383,9 @@ The bar and the Jobs button:
   - A connected Center shows the Tracker and the pattern. Follow Size is under it.
 - The viewer draws the box of each pattern of a selected Tracker, with its name (`Workspace::pattern_handles`).
   - A drag of the cross in the middle moves the box. A drag of an edge resizes it from its middle (`Boxed`, `Edge`).
-  - The release sends one `comp.set` with the box and the `frame` of the playhead.
+  - A `point` pattern has a handle at the top left of its box (`handle_of`). A drag of it moves the box, as the cross does.
+  - The release sends one `comp.set` with the box and the `frame` of the playhead. The release of the handle also sends `pattern_handle`.
+  - Each box is where `Pattern::shown_at` puts it on the frame.
   - A press on a box picks its pattern in the Inspector (`pattern_picked`).
   - A pattern with an offset has a dashed line to the point that masks follow.
 
@@ -739,7 +741,9 @@ The bar and the Jobs button:
     - Add Pattern and Add Point pick the new pattern. A delete of the picked pattern picks the row above.
     - `pattern_picked` can be one row after the last row. Thus the pick of a new pattern stays until the new pattern comes.
   - Name, X Offset and Y Offset are of the picked pattern.
-  - A Point pattern also has Pattern Width, Pattern Height, Search Width, Search Height and Channel.
+  - A Point pattern also has Pattern Width, Pattern Height, Search Width, Search Height, Select Time and Channel.
+    - Select Time is read-only. Go sends `gui.page_time` with it.
+  - Add Pattern and Add Point send the `frame` of the page. It becomes the Select Time of the new pattern.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - The Subject menu, Model, Quality and the Advanced rows change the find values of the Tracker (`FindValues`). Each change sends `comp.set` with `find`.
     - Why: the values stay in the project and have undo. A find from the CLI or MCP takes them too.

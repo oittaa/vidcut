@@ -4824,7 +4824,9 @@ pub enum Request {
     /// pattern follows the place of the pixels of the box, in the search
     /// area of the pattern, with the `adaptive_mode` of the tracker. A shot
     /// change or a thing that goes out of sight does not stop it.
-    /// `jobs.cancel` stops it, and the frames that it tracked stay.
+    /// `jobs.cancel` stops it, and the frames that it tracked stay. A
+    /// `point` pattern whose Select Time is `frame` starts with its own box,
+    /// also where its path has a box on that frame.
     ///
     /// The pattern then follows its path: before the first sample of the
     /// path and after its last, it stays where that sample puts it. When
@@ -8410,6 +8412,12 @@ pub struct NodeChange {
     /// the box in the same way as `pattern_center`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_height: Option<f64>,
+    /// On, `pattern_center`, `pattern_width` and `pattern_height` move the
+    /// own box of the pattern, as a drag of its handle does, also on a
+    /// frame of its path. The path stays. The Select Time of the pattern
+    /// becomes `frame`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pattern_handle: bool,
     /// How far the point that a node follows is from the middle of the
     /// pattern, `[x, y]` as fractions of the picture, up. Each from -1000000
     /// to 1000000.
@@ -8424,13 +8432,15 @@ pub struct NodeChange {
     /// The channel in which a track of a `point` pattern looks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_channel: Option<PatternChannel>,
-    /// On, a tracker gets a new `model` pattern at the end of its list. Its
+    /// On, a tracker gets a new `model` pattern at the end of its list, with
+    /// `frame` as its Select Time. Its
     /// name is `Pattern` and the count of the patterns that the tracker has
     /// made, also the deleted ones. Thus a deleted number does not come
     /// again. Its place follows the same count.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub add_pattern: bool,
-    /// On, a tracker gets a new `point` pattern at the end of its list. Its
+    /// On, a tracker gets a new `point` pattern at the end of its list, with
+    /// `frame` as its Select Time. Its
     /// name is `Point` and the count of the patterns that the tracker has
     /// made, also the deleted ones. Thus a deleted number does not come
     /// again. Its place follows the same count.

@@ -1041,6 +1041,12 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
     let why = "a pattern's search width and height are from 0.001 to 1";
     within(p.search_width, Pattern::SEARCHES, why)?;
     within(p.search_height, Pattern::SEARCHES, why)?;
+    let (lo, hi) = Pattern::SELECT_TIMES;
+    if p.select_time.is_some_and(|f| !(lo..=hi).contains(&f)) {
+        return Err(Error::invalid(
+            "a pattern's select time is a frame from -1000000 to 1000000",
+        ));
+    }
     let path = p.path.as_ref();
     if let Some(why) = path.and_then(|m| crate::motion::samples_problem(&m.samples)) {
         return Err(Error::invalid(format!("{name}: {why}")));
@@ -1055,6 +1061,7 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
         search_width: p.search_width.filter(|v| *v != Pattern::SEARCH),
         search_height: p.search_height.filter(|v| *v != Pattern::SEARCH),
         channel: p.channel.filter(|c| *c != PatternChannel::default()),
+        select_time: p.select_time.filter(|f| *f != 0),
         ..p.clone()
     })
 }

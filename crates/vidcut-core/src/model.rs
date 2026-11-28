@@ -6746,6 +6746,13 @@ pub struct Pattern {
     /// `luminance`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<PatternChannel>,
+    /// The frame of the composition where its box was set last: the frame
+    /// of `add_pattern` or `add_point`, or of the last move of its box with
+    /// `pattern_handle`. A track of a `point` pattern that starts on this
+    /// frame starts from its own box, also where it has a path. From
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select_time: Option<i64>,
 }
 
 /// The pattern of a tracker that the center of a node follows.

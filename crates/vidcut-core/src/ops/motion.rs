@@ -422,7 +422,7 @@ pub fn start(
     unlocked(c, tracker)?;
     let t = tracker_of(c, tracker)?;
     let pattern = &t.patterns[index(t, tracker, k)?];
-    let own = pattern.area_at(at as f64);
+    let own = pattern.shown_at(frame, at as f64);
     let own = own.unwrap_or_else(|| pattern.own());
     let point = (pattern.kind() == PatternKind::Point).then(|| crate::analysis::Pointed {
         search: pattern.search().map(|v| v as f32),

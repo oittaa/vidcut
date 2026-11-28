@@ -2640,6 +2640,7 @@ mod tests {
                                     search_width: None,
                                     search_height: None,
                                     channel: None,
+                                    select_time: None,
                                 }],
                                 operation: None,
                                 merge: None,

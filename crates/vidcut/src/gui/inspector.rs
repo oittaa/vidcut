@@ -2949,7 +2949,7 @@ impl Workspace {
                 let adds = [("Add Pattern", "add_pattern"), ("Add Point", "add_point")];
                 for (name, put) in adds {
                     if ui.add_enabled(!full, egui::Button::new(name)).clicked() {
-                        let mut params = json!({});
+                        let mut params = json!({ "frame": at });
                         params[put] = json!(true);
                         sends.push(set(params));
                         kept_pick = t.patterns.len();
@@ -3019,6 +3019,18 @@ impl Workspace {
                     }
                 }
                 if pattern.kind() == PatternKind::Point {
+                    label(ui, "Select Time", false);
+                    ui.horizontal(|ui| {
+                        let mut shown = pattern.selected();
+                        ui.add_enabled_ui(false, |ui| {
+                            let size = vec2(FIELD_WIDTH, ui.spacing().interact_size.y);
+                            ui.add(egui::DragValue::new(&mut shown).min_size(size));
+                        });
+                        if ui.button("Go").clicked() {
+                            go = Some(pattern.selected());
+                        }
+                    });
+                    ui.end_row();
                     let channel = pattern.channel();
                     let changed = channel != PatternChannel::default();
                     label(ui, "Channel", changed);
@@ -3064,7 +3076,8 @@ impl Workspace {
                     }
                 }
             }
-            go = operation_rows(ui, (slot, &clip.id, &node.name), (t, at), acts);
+            let moved = operation_rows(ui, (slot, &clip.id, &node.name), (t, at), acts);
+            go = go.or(moved);
             let multiply = (slot, "Multiply by Mask", node.multiply_by_mask, false);
             check(ui, multiply, "multiply_by_mask", acts);
             if comp.mask_picture(node).is_some() {

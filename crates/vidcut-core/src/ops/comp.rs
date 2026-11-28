@@ -509,6 +509,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 || left.search_width.is_some()
                 || left.search_height.is_some()
                 || left.pattern_channel.is_some()
+                || left.pattern_handle
                 || left.remove_pattern;
             if touched {
                 let i = (k as usize)
@@ -527,6 +528,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 given(&mut left.search_width, &mut pattern.search_width);
                 given(&mut left.search_height, &mut pattern.search_height);
                 given(&mut left.pattern_channel, &mut pattern.channel);
+                left.pattern_handle = false;
                 if left.remove_pattern {
                     t.remove_pattern(i);
                     t.pivot_tracker = match t.pivot_pattern().cmp(&k) {
@@ -808,6 +810,14 @@ pub fn set(
         return Err(locked(name));
     }
     let mut change = change.clone();
+    let boxed = change.pattern_center.is_some()
+        || change.pattern_width.is_some()
+        || change.pattern_height.is_some();
+    if change.pattern_handle && !boxed {
+        return Err(Error::usage(
+            "pattern_handle moves the box: give pattern_center, pattern_width or pattern_height",
+        ));
+    }
     trimmed(p, id, name, &mut change, frame)?;
     moved_path(p, id, name, &mut change, frame)?;
     left_point(p, id, name, &mut change, frame)?;
@@ -824,6 +834,9 @@ pub fn set(
         )));
     }
     let mut next = applied(n, change)?;
+    if let (Some(at), Tool::Tracker(t)) = (frame, &mut next.tool) {
+        selected(t, change, pattern, at);
+    }
     let (named, shaded) = named_values(n, change)?;
     keyed_into(&*n, &mut next, &named, (name, frame))?;
     if let (Tool::TextPlus(was), Tool::TextPlus(now)) = (&n.tool, &mut next.tool) {
@@ -836,6 +849,20 @@ pub fn set(
     }
     tidied(p, id)?;
     Ok(())
+}
+
+fn selected(t: &mut crate::model::Tracker, change: &NodeChange, k: u32, at: i64) {
+    let added = usize::from(change.add_pattern) + usize::from(change.add_point);
+    let from = t.patterns.len().saturating_sub(added);
+    for p in &mut t.patterns[from..] {
+        p.select_time = Some(at);
+    }
+    let held = (k as usize)
+        .checked_sub(1)
+        .filter(|_| change.pattern_handle);
+    if let Some(p) = held.and_then(|i| t.patterns.get_mut(i)) {
+        p.select_time = Some(at);
+    }
 }
 
 fn node_of<'a>(p: &'a Project, id: &str, name: &str) -> Option<&'a Node> {
@@ -997,7 +1024,7 @@ fn moved_path(
     let boxed = change.pattern_center.is_some()
         || change.pattern_width.is_some()
         || change.pattern_height.is_some();
-    let Some(frame) = frame.filter(|_| boxed) else {
+    let Some(frame) = frame.filter(|_| boxed && !change.pattern_handle) else {
         return Ok(());
     };
     let k = change.pattern.unwrap_or(1);
