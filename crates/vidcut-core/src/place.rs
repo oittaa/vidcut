@@ -1998,6 +1998,16 @@ impl Placing {
         (fitted, pixels): ([f64; 4], (f64, f64)),
         extent: Extent,
     ) -> Self {
+        Self::filled(placed, frame, (fitted, pixels), extent, true)
+    }
+
+    fn filled(
+        placed: &[Placed],
+        frame: (f64, f64),
+        (fitted, pixels): ([f64; 4], (f64, f64)),
+        extent: Extent,
+        full: bool,
+    ) -> Self {
         let p = &placed[0];
         let [zx, zy] = p.picture.scale_at(p.source as f64);
         let mut own = level(p, frame, fitted, extent);
@@ -2028,7 +2038,8 @@ impl Placing {
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(own.area(), c));
         let at = p.source as f64;
-        let plain = p.picture.crop_at(at).is_none()
+        let plain = full
+            && p.picture.crop_at(at).is_none()
             && p.picture.channel_at(PictureValue::CropSoftness, at)[0] >= 0.0
             && p.picture.channel_at(PictureValue::Pitch, at)[0] == 0.0
             && p.picture.channel_at(PictureValue::Yaw, at)[0] == 0.0;
@@ -2156,23 +2167,24 @@ impl Member<'_> {
         MixPart::Layer(self.index)
     }
 
-    fn shown(&self, frame: (f64, f64)) -> Extent {
+    fn shown(&self, frame: (f64, f64)) -> Option<Extent> {
         match self.placed.first() {
             Some(own) => kept(own, frame, self.extent.rect, self.extent),
-            None => Extent::whole(frame),
+            None => Some(Extent::whole(frame)),
         }
     }
 }
 
-fn kept(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -> Extent {
+fn kept(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -> Option<Extent> {
     let still = placed.moving.is_none() && placed.zoomed().is_none();
-    match still && level(placed, frame, fitted, extent).keeps(fitted, extent) {
-        true => extent,
-        false => Extent::whole(frame),
-    }
+    (still && level(placed, frame, fitted, extent).keeps(fitted, extent)).then_some(extent)
 }
 
-fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<(MixPart, Extent)> {
+fn parts_of(
+    members: &[Member<'_>],
+    depth: usize,
+    frame: (f64, f64),
+) -> Vec<(MixPart, Option<Extent>)> {
     let mut parts = Vec::new();
     let mut rest = members;
     while let Some(first) = rest.first() {
@@ -2186,18 +2198,21 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<(Mix
             .take_while(|m| m.around(depth) == Some(outer))
             .count();
         let (run, after) = rest.split_at(n);
-        let (inner, shown): (Vec<MixPart>, Vec<Extent>) =
+        let (inner, shown): (Vec<MixPart>, Vec<Option<Extent>>) =
             parts_of(run, depth + 1, frame).into_iter().unzip();
-        let extent = match shown.as_slice() {
+        let inside = match shown.as_slice() {
             [only] => *only,
-            _ => Extent::whole(frame),
+            _ => None,
         };
-        let mut placing = Placing::within(std::slice::from_ref(outer), frame, extent);
+        let extent = inside.unwrap_or(Extent::whole(frame));
+        let whole = [0.0, 0.0, frame.0, frame.1];
+        let full = inside.is_some();
+        let outers = std::slice::from_ref(outer);
+        let mut placing = Placing::filled(outers, frame, (whole, frame), extent, full);
         if let (CompositeMode::Normal, [only]) = (placing.mode, inner.as_slice()) {
             placing.mode = run_mode(only, run);
         }
-        let whole = [0.0, 0.0, frame.0, frame.1];
-        let out = kept(outer, frame, whole, extent);
+        let out = inside.and_then(|_| kept(outer, frame, whole, extent));
         parts.push((
             MixPart::Mix(Box::new(Mix {
                 parts: inner,
