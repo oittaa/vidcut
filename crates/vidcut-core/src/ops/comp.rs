@@ -565,6 +565,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.fade_frames, &mut t.fade_frames);
             given(&mut left.adaptive_mode, &mut t.adaptive_mode);
             given(&mut left.match_tolerance, &mut t.match_tolerance);
+            given(&mut left.find, &mut t.find);
         }
         Tool::Merge(m) => {
             if let Some(c) = left.values.center.take() {

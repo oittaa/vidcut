@@ -239,7 +239,7 @@ impl Workspace {
             Header::Mode(ViewerMode::Timeline),
             Header::Mode(ViewerMode::MultiSource),
         ];
-        let export = self.effects_page.page == Page::Export;
+        let export = matches!(self.effects_page.page, Page::Export | Page::Audio);
         let covering = self.snap.viewer_frame != ViewerFrame::Page;
         let row = Row {
             left: if export { &[] } else { &modes },

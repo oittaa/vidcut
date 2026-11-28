@@ -10,7 +10,7 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
     Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
-    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
+    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, FindValues, GeneratorKind, GlowAlpha,
     GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
     MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel, PictureTool,
@@ -4240,7 +4240,9 @@ pub enum Request {
     /// looks at each frame of the file in the clip. A thing that is not
     /// found for up to a second, and then shows near the same place, stays
     /// on its path. A shot change inside the clip ends each path, and a thing
-    /// of the next shot gets a new one.
+    /// of the next shot gets a new one. A value that the request leaves out
+    /// comes from the `find` values of the tracker, or else it is the usual
+    /// value of the subject.
     /// A face found for under half a second gets no path. A person or a
     /// vehicle gets a path when it is found for a second. Text gets a path
     /// when it is found for a second, on four of each five frames. Less time
@@ -4264,12 +4266,13 @@ pub enum Request {
         node: String,
         /// The kind of thing to find: `face`, `text`, `person` or `vehicle`.
         /// Usual: `face`.
-        #[serde(default)]
-        subject: Subject,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<Subject>,
         /// The neural network that finds the things: `fast`, or `slow` for
-        /// `face`. Usual: `fast`.
-        #[serde(default)]
-        model: FindModel,
+        /// `face`. Usual: `fast`. The `slow` model of the tracker finds only
+        /// faces, and the other subjects take `fast`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<FindModel>,
         /// Find again in a tracker that has patterns of this subject. Without
         /// it, such a tracker is an error. A thing that such a pattern
         /// follows gets no second pattern: its new samples go into the path
@@ -5282,8 +5285,10 @@ pub enum Request {
     /// topmost title at the playhead, to edit in place in the viewer),
     /// `select_tool` (a tool to add on the effects page), `equalizer` (the
     /// Equalizer window of `track`), `dynamics` (the Dynamics window of
-    /// `track`), or `pan` (the Pan window of
-    /// `track`). Answers what `gui.state` does.
+    /// `track`), `pan` (the Pan window of `track`), or `meters` (the meter
+    /// panel of the `audio` page). On the `audio` page, `mixer`, `meters`,
+    /// `media` and `inspector` are the panels of that page. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
@@ -5296,8 +5301,10 @@ pub enum Request {
     GuiClose { panel: GuiPanel },
     /// Show a page of the window: `cut`; `effects`, the node editor of
     /// the composition of the topmost clip at the playhead; `color`, the
-    /// primary correction of that clip or of the timeline; or `export`, the
-    /// render settings and the render queue. Answers what `gui.state` does.
+    /// primary correction of that clip or of the timeline; `audio`, the
+    /// audio tracks as tall rows with their meters and the Mixer; or
+    /// `export`, the render settings and the render queue. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.page")]
     GuiPage {
         page: Page,
@@ -6957,6 +6964,9 @@ pub enum Page {
     /// The render settings, the viewer and the timeline with the range to
     /// render, and the render queue.
     Export,
+    /// The audio tracks as tall rows, with a header for each track, the
+    /// meters and the viewer at the top, and the Mixer at the right.
+    Audio,
 }
 
 /// A zoom of a node editor.
@@ -7096,6 +7106,9 @@ pub enum GuiPanel {
     /// The Pan window of a track with sound: the switch and Left/Right of
     /// its pan.
     Pan,
+    /// The meter panel at the top of the Audio page: a meter for each audio
+    /// track and for the mix, and the viewer.
+    Meters,
 }
 
 /// Media tab sort orders.
@@ -7914,6 +7927,11 @@ pub struct NodeChange {
     /// for `best_match` to take it again, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_tolerance: Option<f64>,
+    /// The values of Find of a tracker, in place of those it has, as
+    /// `{"subject": "person", "start": 0.6}`. `motion.find` takes each value
+    /// that its request leaves out from them. `{}` gives the usual values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<FindValues>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern

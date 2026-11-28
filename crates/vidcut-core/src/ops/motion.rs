@@ -4,7 +4,9 @@ use serde_json::{Value, json};
 
 use crate::composition::Frames;
 use crate::error::{Error, Result};
-use crate::model::{Clip, MotionPath, PathSample, Pattern, PatternKind, Project, Subject, Tracker};
+use crate::model::{
+    Clip, FindValues, MotionPath, PathSample, Pattern, PatternKind, Project, Subject, Tracker,
+};
 use crate::motion::{self, Area};
 use crate::render::FileClock;
 
@@ -329,6 +331,11 @@ pub fn findable(
         )));
     }
     Ok(())
+}
+
+pub fn find_values(p: &Project, id: &str, tracker: &str) -> Option<FindValues> {
+    let (ti, ci) = locate(p, id).ok()?;
+    tracker_of(&p.tracks[ti].clips[ci], tracker).ok()?.find
 }
 
 pub fn file_frames(p: &Project, c: &Clip) -> ((i64, i64), f64) {

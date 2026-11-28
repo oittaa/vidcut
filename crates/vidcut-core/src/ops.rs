@@ -1,4 +1,5 @@
 pub mod attributes;
+pub mod beside;
 pub mod clip_filter;
 pub mod close_up;
 pub mod comp;

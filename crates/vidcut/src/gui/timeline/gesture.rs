@@ -1723,6 +1723,7 @@ mod tests {
             rows,
             area: Rect::from_min_max(pos2(0.0, 26.0), pos2(1000.0, 260.0)),
             bands: super::super::geometry::Bands::default(),
+            audio_page: false,
         }
     }
 

@@ -14,7 +14,8 @@ use vidcut_core::time::Rational;
 
 use super::geometry::{
     Banded, Bands, Rows, Scale, TrackRect, band, chosen_on, clips_in, covered, curve_y,
-    handle_point, key_point, sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
+    handle_point, key_point, over, sound_band, speed_keyframes, speed_labels, speed_strip,
+    volume_y,
 };
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
@@ -279,10 +280,7 @@ pub fn track(
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
     let fps = p.fps();
-    let shown: Vec<&Clip> = t.clips[clips_in(t, a - 1, b + 1)]
-        .iter()
-        .filter(|c| !bands.has(&c.id))
-        .collect();
+    let shown: Vec<&Clip> = t.clips[clips_in(t, a - 1, b + 1)].iter().collect();
     let span = |c: &Clip| (c.start, c.end());
     let picked = |c: &Clip| selected.contains(c.id.as_str());
     let banded: Vec<Banded> = band(p, t)
@@ -291,7 +289,20 @@ pub fn track(
         .collect();
     let heard: HashSet<&str> = banded.iter().map(|x| x.picture.id.as_str()).collect();
     if tr.audio_top > rect.top() {
-        sound_band_of(painter, tr, scale, p, &banded, assets, look, (a, b));
+        let mut sounds: Vec<(&Track, &Clip, Option<&Clip>)> = banded
+            .iter()
+            .map(|x| (x.track, x.sound, Some(x.picture)))
+            .collect();
+        if let Some(under) = over(p, t).and_then(|id| p.track(&id)) {
+            sounds.extend(
+                under.clips[clips_in(under, a - 1, b + 1)]
+                    .iter()
+                    .filter(|c| bands.row(&c.id) == Some(t.id.as_str()))
+                    .filter(|c| !banded.iter().any(|x| x.sound.id == c.id))
+                    .map(|c| (under, c, None)),
+            );
+        }
+        sound_band_of(painter, tr, scale, p, &sounds, assets, look, (a, b));
     }
     for (i, &c) in shown.iter().enumerate() {
         let next = shown.get(i + 1).copied();
@@ -301,11 +312,6 @@ pub fn track(
         let looks = (picked(c), heard.contains(c.id.as_str()));
         clip(painter, tr, scale, p, t, c, looks, assets, look, fps);
     }
-    let placed: Vec<(i64, usize)> = placed
-        .iter()
-        .copied()
-        .filter(|&(_, i)| !bands.joins(&t.transitions[i]))
-        .collect();
     let reach = |&(at, i): &(i64, usize)| {
         let x = &t.transitions[i];
         (at - x.before, at + x.after)
@@ -338,35 +344,31 @@ fn sound_band_of(
     tr: &TrackRect,
     scale: &Scale,
     p: &Project,
-    banded: &[Banded],
+    sounds: &[(&Track, &Clip, Option<&Clip>)],
     assets: &Assets,
     look: Look,
     (a, b): (i64, i64),
 ) {
     let fps = p.fps();
     let rect = tr.rect;
-    for x in banded
-        .iter()
-        .filter(|x| x.sound.end() >= a && x.sound.start <= b)
-    {
-        let opened = [&x.picture.id, &x.sound.id]
+    for &(track, s, picture) in sounds.iter().filter(|x| x.1.end() >= a && x.1.start <= b) {
+        let opened = picture
             .into_iter()
-            .any(|id| assets.audio_trim.contains(id));
+            .chain([s])
+            .any(|c| assets.audio_trim.contains(&c.id));
         let tr = &TrackRect {
             rect,
             audio_top: if opened { rect.top() } else { tr.audio_top },
         };
         let how = (false, opened);
-        sound(
-            painter, tr, scale, p, x.track, x.sound, assets, look, fps, how,
-        );
+        sound(painter, tr, scale, p, track, s, assets, look, fps, how);
     }
-    let ids: HashSet<&str> = banded.iter().map(|x| x.sound.id.as_str()).collect();
+    let ids: HashSet<&str> = sounds.iter().map(|x| x.1.id.as_str()).collect();
     let strip = TrackRect::new(
         Rect::from_min_max(pos2(rect.left(), tr.audio_top), rect.max),
         1.0,
     );
-    let mut tracks: Vec<&Track> = banded.iter().map(|x| x.track).collect();
+    let mut tracks: Vec<&Track> = sounds.iter().map(|x| x.0).collect();
     tracks.sort_by(|x, y| x.id.cmp(&y.id));
     tracks.dedup_by(|x, y| x.id == y.id);
     for at in tracks {

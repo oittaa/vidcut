@@ -40,6 +40,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - the Video Monitor LUT, the Color Viewer LUT and the Scopes LUT ([§13](#the-lut-tables))
 - Quick Export (§10) and the Export page (§10.1)
+- the Audio page: the rows of the audio tracks, their headers, the meters and the Mixer (§9.1)
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
@@ -823,27 +824,36 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A click on the ruler moves the playhead, and you can drag the playhead.
 
 **Track display:**
-- The combined video+audio tracks have numbers (1, 2, …). The audio-only tracks (A1, A2, …) are below them.
+- The lower timeline has one row for each video track (p. 646).
+  - The label of a video row is the track, over the lowest audio track that holds the linked sound of its clips. An example is "V1" over "A3".
+  - When V1 has no linked sound, its label is V1 over the lowest audio track.
+  - Another video track with no linked sound has the track alone as its label.
+- An audio track has its own row when these three conditions are true:
+  - It is above the audio track of the V1 label.
+  - It holds a sound clip with no linked picture.
+  - It holds no sound clip that is linked to a picture.
+- Other audio tracks have no row. The upper timeline shows the same rows.
 - A video clip shows a filmstrip. Each picture is the frame under its left edge, and the first picture is the first frame of the clip.
   - Thus a picture that starts before a cut in the source shows the shot before the cut.
 - Its audio shows as a waveform band along the bottom. The band becomes larger with the track (p. 647).
-  - The band shows the linked sound clip of each picture, at the place of the sound clip. Thus a J or L cut shows past the picture.
-  - vidcut: a picture with two or more sound clips shows the first one, on the lowest audio track.
-- An audio track that holds only the linked sound of pictures has no row of its own (p. 646). An audio track with other clips shows them in its row (p. 648).
-  - vidcut: an empty audio track has a row. A linked sound clip shows only in its band, also on an audio track that has a row.
+  - The band shows one linked sound clip of each picture: the clip on the highest audio track. It shows at its own place. Thus a J or L cut shows past the picture.
+  - The band also shows each sound clip with no linked picture on the audio track of the label. A sound clip with no linked picture on another audio track does not show.
+  - vidcut: a sound clip with no linked picture in the band takes no clicks.
 - Its duration shows as seconds:frames, at the bottom left.
 - The clips of a locked track are stippled. The clips of a disabled track are dimmed.
 - A disabled clip is dull. A muted clip shows a mute icon.
 
 **Track headers** (pp. 647, 678, 717): Enlarge (one track at a time), Lock, Mute (audio) and Video Enable icons (D43).
-- The Mute of a main track mutes each audio track that holds the linked sound of its clips. A second click turns the mute off. This is a measurement in Resolve Studio 21.2, on one timeline.
-  - vidcut: the Mute is lit when all these audio tracks are muted. A click sets them all to the other state, in one undo step.
-  - A main track with no linked sound has no Mute.
-- These are measurements in Resolve Studio 21.2:
-  - Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
-  - A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
-  - The labels of the tracks (V1, A1, ST1) are plain text in a column at the right end of the headers. A line separates the column from the icons.
-  - A Solo icon is between Lock and Mute.
+- The Mute of a video row shows the state of the audio track of its label.
+  - A click sets each audio track that holds the linked sound of its clips to the other state. Other audio tracks do not change.
+  - The tooltip is Mute Track or Unmute Track.
+  - A video track with no linked sound has a Mute too. A click changes no audio track.
+  - vidcut: the click is one undo step. A Mute with no audio track in its label is not lit.
+- The row of an audio track has its own Mute. It mutes only that track.
+- Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
+- A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
+- The labels of the tracks (V1, A1, ST1) are plain text in a column at the right end of the headers. A line separates the column from the icons.
+- A Solo icon is between Lock and Mute.
 - vidcut has no Solo icon yet. Its column stays empty, so Mute and Video Enable are in the columns of Resolve.
 - vidcut: the name of a track shows between the icons and the label, when the track has a name. A subtitle track always shows its name.
 
@@ -1219,6 +1229,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Shift+V selects one clip under the playhead (pp. 889, 900, 942).
     - It takes the lowest track that has a clip there.
     - The manual ties this key to the Source Track Selector of the Edit page. vidcut has no such control.
+  - Ctrl+Left and Ctrl+Right select the previous or the next clip. Ctrl+Up and Ctrl+Down select a clip on another track (pp. 825, 900).
+    - vidcut: these keys start from the clip that was selected last. After the key, only the new clip is selected (not measured).
+    - vidcut: Ctrl+Left and Ctrl+Right stay on the track of that clip. A gap does not count as a clip (not measured).
+    - vidcut: Ctrl+Up and Ctrl+Down go to the nearest track above or below that has a clip and is not locked (not measured).
+    - vidcut: the tracks are in the order of the screen, the highest video track first, then V1, A1 and the next audio tracks (not measured).
+    - vidcut: on that track, the key selects the clip nearest the start of the selected clip (not measured).
+    - vidcut: with no clip in that direction, the selection does not change (not measured).
+    - vidcut: with no clip selected, the key selects the clip that Shift+V selects (not measured).
 - **Edit points:**
   - The pointer at the center of an edit selects both sides (a roll).
   - The pointer just left or right of the edit selects one side (a resize).
@@ -5836,6 +5854,36 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A short message tells how many clips stopped at the volume limit or at the peak limit.
   - The defaults, the range and the measured part of a clip are in D80.
 
+### 9.1 Audio page (pp. 3748–3753, 3767–3772)
+
+The Audio page follows the Fairlight page of the manual.
+
+- **The page:**
+  - The status bar has an Audio button between Color and Export. `gui.page` with `audio` shows the page.
+  - The viewer of the page shows the timeline. Q does not switch it to a source (not measured).
+- **Layout** (pp. 3748–3749, 3767, 3771):
+  - The meter panel is at the top. It has a meter for each audio track, the meter of the mix and the loudness meter (§9). The viewer is at its right (not measured).
+  - The rows of the audio tracks are in the middle. The Mixer is at the right of the rows (not measured).
+  - The Media tab is at the left. The Inspector is at the right of the Mixer (not measured).
+  - At the start, the meters and the Mixer show. The Media tab and the Inspector do not show (not measured).
+  - The status bar has a switch for each panel: Media, Mixer, Meters and Inspector. The page keeps these switches apart from the other pages.
+  - `gui.show` and `gui.close` with `media`, `mixer`, `meters` and `inspector` show and hide the panels of the page. `gui.state` gives them.
+  - While the meter panel shows, the Mixer of the page has no loudness meter.
+- **Rows** (pp. 3749–3751):
+  - Each audio track has a row. A1 is at the top. Video tracks have no row (not measured).
+  - A clip shows its waveform at the full height of the row, its name, and its volume line with its keyframes (§9) (not measured).
+  - A sound clip that is linked to a picture shows on its own row (not measured).
+  - The rows keep their height. With more rows than room, the rows scroll (not measured).
+  - The edits of the Cut page act on the rows: select, move, trim, split, delete and the volume line.
+  - A drag on the edge of a sound clip is a trim, not an audio-only roll. Linked Selection acts on it as on the Cut page (§6) (not measured).
+  - A drag below the last row puts the clip on a new audio track.
+  - The Timeline Options, Timeline Actions and Edit Actions menus and the tools of the Cut page are at the left of the ruler.
+- **Track header** (pp. 3752–3753):
+  - It has the track number, the name, Lock, Solo, Mute, the fader value and a meter (not measured).
+  - The fader value is the fader of the Mixer, in dB. A drag up or right raises it. A typed value sets it (not measured).
+  - A click on the header makes the track the target of the edit functions (not measured).
+  - Its right-click menu has Add Audio Track and Remove Track.
+
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
 - **Flow:** File > Quick Export or the toolbar button. Then a preset from the icon row, Export, a file name and a progress dialog.
@@ -6487,6 +6535,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |
+| Ctrl+Left / Ctrl+Right / Ctrl+Up / Ctrl+Down | Select the previous / next clip, or a clip above / below (§8.1) |
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |
