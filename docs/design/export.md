@@ -330,7 +330,7 @@ One render writes all outputs:
 - A piece at another speed steps through its source by `render::Pace`. Each section of the speed is a piece of its own (`Clip::runs`).
   - Over an ease, each frame is a piece of its own (`Pace::steady`).
 
-Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)):
+Retimed frames ([deviation X21](../deviations.md#x21-slow-motion-uses-ai-by-default)):
 
 - `render::retime_of` gives each source piece its Retime Process (`Retime`): the clip's own, or the project's (`ClipRetime`, `ProjectRetime`).
   - Auto gives an SDR clip slower than 100% the AI of this computer (`Retime::ai_here`), and Nearest to the other clips.
@@ -347,7 +347,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - Only the small picture comes down. Why: the test does not need the whole frame.
   - A frame in memory gets its small picture from FFmpeg's scaler (`analysis::small_luma`).
 - With an AI upscaler, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
-  - Why: Upscale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - Why: Upscale works on the source, before the retime ([deviation X21](../deviations.md#x21-slow-motion-uses-ai-by-default)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
 - An AI upscaler takes the colors of a picture with no alpha in them. Why: its model has three channels.
   - The draw enlarges the alpha of the source frame to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
@@ -401,7 +401,7 @@ Pictures:
 
 ## Smooth Cuts
 
-A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173), [deviation X99](../deviations.md#x99-smooth-cut-has-a-process-row-in-the-place-of-speed-warp)).
+A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
 
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
@@ -579,7 +579,7 @@ Voice Isolation:
   - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
   - The default type of ProRes, DNxHR, TIFF and OpenEXR comes from `VideoCodec::fixed_profile`, not from the plan. Why: the label stays the same while a plan runs or fails. The encoders use the same default (`VideoSettings::named_profile`).
   - Before Add or Update Job, `start_render` checks the paths with `written_twice`. Two equal paths show the prompt `ask_duplicate_paths`, and nothing is sent.
-  - The page shows `export.plan` as the params change, and the export as a shell command ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
+  - The page shows `export.plan` as the params change, and the export as a shell command.
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
   - `filtered` sends `in..out` too. Its pick sets the marks at the span of the clips that meet the filter (`ops::clip_filter::span`).
   - A mark that is set while the range is `filtered` changes the range to `in_out` (`ops::set_marks`). A filter of `all` does the same.
@@ -637,7 +637,7 @@ Cancel:
 
 ## Timeline exports
 
-- An `.otio`, `.otioz` or `.otiod` output (`export::timeline_format`) writes the edit, not pictures ([deviation X9](../deviations.md#x9-opentimelineio-interchange)).
+- An `.otio`, `.otioz` or `.otiod` output (`export::timeline_format`) writes the edit, not pictures ([deviation X3](../deviations.md#x3-opentimelineio-interchange)).
 - `export::timeline` takes only a range, `overwrite` and subtitle files. It writes the document of `otio::export` through a partial path.
 - A bundle adds the media of the edit (`bundle::plan`, `bundle::write`), with byte progress and cancel.
 - In the GUI, an `.otio` runs as a task (`Live::project_task`), and a bundle runs as a job.

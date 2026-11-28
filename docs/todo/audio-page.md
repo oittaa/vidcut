@@ -14,3 +14,6 @@
 - Recording and ADR.
 - The Sound Library.
 - Dolby Atmos, Ambisonics and MPEG-H.
+- The Pitch and the Music Remixer of a clip in the Inspector.
+- The Ducker as Resolve has it: Sound level by default, its fall shapes and fall starts, and gain steps of 16 samples. Also the Source 1 of a new Ducker, and a typed value past a limit set to the limit.
+- A clip on a mono track pans by the law of a mono track. A Pan outside −100 to 100 goes to the nearest limit.

@@ -576,13 +576,13 @@ Reading:
   - its styles and regions, down to each span
   - its time base: media, or smpte with its drop mode, as appendix N.3 of TTML1 counts
   - its language (xml:lang), which the new track takes
-- A WebVTT `position` or percent `line`, and a TTML region, give `Timed::style` a position and an anchor. The `align` of WebVTT and the `multiRowAlign` or `textAlign` of TTML give its alignment ([deviation X40](../deviations.md#x40-subtitle-files-are-read-as-they-are-written)).
+- A WebVTT `position` or percent `line`, and a TTML region, give `Timed::style` a position and an anchor. The `align` of WebVTT and the `multiRowAlign` or `textAlign` of TTML give its alignment ([gotchas](../gotchas.md#resolves-imports)).
 - The markup of each format becomes the cue markup. Other tags go.
 
 Placing:
 
 - `ops::subtitles::import` turns each time into the nearest frame in the time base of the file (`SubtitleTimeBase`). The time base is real time, or timecode labels when the times sit on their grid.
-- A file in timecode then loses the start timecode of the timeline, or 01:00:00:00 ([deviation X41](../deviations.md#x41-subtitle-files-placed-by-their-timecode-or-from-the-timelines-start)).
+- A file in timecode then loses the start timecode of the timeline, or 01:00:00:00 ([deviation X10](../deviations.md#x10-subtitle-files-placed-by-their-timecode-or-from-the-timelines-start)).
 - It keeps the position, the anchor and the alignment of a cue only where they differ from the style of the track.
 - A new track takes the alignment that all the cues of the file share.
 
@@ -903,7 +903,7 @@ flowchart LR
 - `export.start` to an `.otio`, `.otioz` or `.otiod` path writes the timeline, or the range given. `otio::export` builds the document, and `export::timeline` writes it.
 - A file that vidcut wrote of a whole timeline holds the rest of the project too (`otio::holds_project`). `editor::open_otio` gives it back.
 - The file of another editor goes into the project (`timeline.import`), or into a new project (`editor::project_from_otio`).
-- [deviation X9](../deviations.md#x9-opentimelineio-interchange) tells why. [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions) has the conventions.
+- [deviation X3](../deviations.md#x3-opentimelineio-interchange) tells why. [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions) has the conventions.
 
 **Bundles** (`bundle::plan`):
 

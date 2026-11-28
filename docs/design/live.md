@@ -405,7 +405,7 @@ The bar and the Jobs button:
 - `Plan::shared` is for a drag (`Gesture::Edits`). The ripple trims on one track share the amount, and the other trims get all of it.
 - Several trims go as one `apply`. Thus one undo step takes them back.
 
-**Track rows** ([deviation X57](../deviations.md#x57-the-lower-timeline-keeps-its-height-and-its-tracks-scroll)).
+**Track rows** ([deviation X13](../deviations.md#x13-the-lower-timeline-keeps-its-height-and-its-tracks-scroll)).
 
 - `Rows::layout` lays out the rows of the lower timeline from the bottom, and shrinks them to fit, down to a minimum.
 - When they still overflow, the wheel (`scroll_rows`) and the scrollbar (`row_scrollbar`) lift them (`TimelineView::rows_lift`, `Rows::overflow`).
@@ -445,7 +445,7 @@ The bar and the Jobs button:
   - With no track in `geometry::heard_on`, a click sends nothing.
 - The row of an audio track keeps its own Mute, which sets only that track.
 
-**Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
+**Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `paint::volume_line` draws the volume line of each clip with sound. With volume keyframes, the line is the curve (`geometry::curve_y`), with a mark on each keyframe.
 - `geometry::volume_target` finds the handle, keyframe or line under the pointer (`OnVolume`).
@@ -486,7 +486,7 @@ The bar and the Jobs button:
   - `Selection::keep_order` removes each item that left the selection and adds each new item at the end. Items that come in one request count clips first.
   - Its `first` is the first item of `order`.
 
-**Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab)).
+**Titles** ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)).
 
 - The Title section (`TitleDialog`) works out the title of its fields (`title_of`). When the user leaves a field, the changes go as one `titles.set`. A change on each line of a lower third goes as one `titles.set` for each line.
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
@@ -526,7 +526,7 @@ The bar and the Jobs button:
 **Pictures.**
 
 - T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop, Dynamic Zoom and Color.
-- `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
+- `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([gotchas](../gotchas.md#resolves-edits)).
 - `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_upscale`.
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
   - `Workspace::scopes_menu` is in the View menu and in the header of the viewer. Each button sends `viewer.scopes`.
@@ -896,7 +896,7 @@ The bar and the Jobs button:
 - Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
 - All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
 
-**Imports** ([deviation X66](../deviations.md#x66-files-and-folders-dropped-on-the-window-go-into-the-open-bin)).
+**Imports** ([deviation X15](../deviations.md#x15-files-and-folders-dropped-on-the-window-go-into-the-open-bin)).
 
 - Import Media, Import Media Folder and dropped files each queue a `Pick`. `Workspace::import_window` takes the picks in order.
 - The paths of a drop gather until a frame brings no more. Why: winit sends each file as its own event, and a split run of numbered images would ask twice.

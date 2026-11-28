@@ -255,7 +255,7 @@ AI Slow (`flashvsr`):
 - After the decoder, a color fix gives each picture the low frequencies of its enlarged input picture (`fix::run`).
   - It is the wavelet color correction of FlashVSR+. That code has it as an option, which is off by default.
   - The blur is linear. Thus the shader blurs only the difference between the two pictures, and adds it to the result.
-  - Why: the network shifts the colors and the light of large areas ([X91](../deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)).
+  - Why: the network shifts the colors and the light of large areas.
 
 The scaler of macOS (`macos`):
 
@@ -273,11 +273,11 @@ The scaler of macOS (`macos`):
   - Why: a picture of 4 times the source fills the cache of the viewer.
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
 - AI Fast and AI Slow are off on macOS (`upscale::off_here`).
-  - Why: macOS has its own AI scaler. Auto takes it there, so a project moves between systems ([X91](../deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)).
+  - Why: macOS has its own AI scaler. Auto takes it there, so a project moves between systems ([X19](../deviations.md#x19-upscale-is-on-or-off-with-ai-by-default)).
 
 ## Frame interpolation
 
-`interpolate` makes the frames of Retime Process and of Smooth Cut ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+`interpolate` makes the frames of Retime Process and of Smooth Cut ([export](export.md#which-source-frame), [deviation X21](../deviations.md#x21-slow-motion-uses-ai-by-default)).
 
 - `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
 - The pictures are 16-bit RGB in the timeline color space (`Form`). The kernels read and write 16-bit values (`Ops`).
