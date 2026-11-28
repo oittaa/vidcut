@@ -14,16 +14,14 @@ use super::workspace::{BOTTOM_SHARE, Workspace, dim, escape_cancels};
 use crate::live::JobInfo;
 
 impl Workspace {
-    pub(super) fn enter_export_page(&mut self) {
+    pub(super) fn hold_timeline_viewer(&mut self) {
         if self.snap.viewer != ViewerMode::Timeline {
             self.export.viewer_before = Some(self.snap.viewer);
             self.send("viewer.set", json!({ "mode": ViewerMode::Timeline }));
         }
     }
 
-    pub(super) fn leave_export_page(&mut self) {
-        self.export.edit_wanted = None;
-        self.export.filter_asked = None;
+    pub(super) fn free_viewer(&mut self) {
         if let Some(mode) = self.export.viewer_before.take() {
             self.send("viewer.set", json!({ "mode": mode }));
         }

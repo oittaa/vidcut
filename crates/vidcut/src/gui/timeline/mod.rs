@@ -19,7 +19,7 @@ use vidcut_core::model::{
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
-use vidcut_core::request::ViewerMode;
+use vidcut_core::request::{Page, ViewerMode};
 use vidcut_core::shortcuts::Action;
 
 use crate::gui::compound::NewCompound;
@@ -546,6 +546,7 @@ const LOWER_ROWS: [f32; 3] = [130.0, 80.0, 60.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 30.0;
+const AUDIO_PAGE_ROW: f32 = 96.0;
 const TRAY_GAP: f32 = 4.0;
 const PATH_BAR: f32 = 24.0;
 const HEADER: f32 = 200.0;
@@ -828,15 +829,17 @@ impl Workspace {
             Some(t) => Rect::from_min_max(full.min, pos2(full.right(), t.top() - TRAY_GAP)),
             None => full,
         };
+        let audio_page = self.effects_page.page == Page::Audio;
         let others = upper_others(shape);
+        let (upper_h, gap) = match audio_page {
+            true => (0.0, 0.0),
+            false => (UPPER_RULER + UPPER_TRACK + UPPER_OTHER * others, 6.0),
+        };
         let upper_rect = Rect::from_min_size(
             pos2(full.left() + HEADER, full.top()),
-            vec2(
-                full.width() - HEADER,
-                UPPER_RULER + UPPER_TRACK + UPPER_OTHER * others,
-            ),
+            vec2(full.width() - HEADER, upper_h),
         );
-        let lower_rect = Rect::from_min_max(pos2(full.left(), upper_rect.bottom() + 6.0), full.max);
+        let lower_rect = Rect::from_min_max(pos2(full.left(), upper_rect.bottom() + gap), full.max);
         ui.painter().rect_filled(
             Rect::from_min_max(full.min, pos2(upper_rect.left() - 1.0, upper_rect.bottom())),
             0.0,
@@ -885,19 +888,22 @@ impl Workspace {
         };
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
-        let upper = Rows::layout(
-            shape,
-            Rect::from_min_max(
-                pos2(upper_rect.left(), upper_ruler.bottom() + 1.0),
-                upper_rect.max,
+        let upper = match audio_page {
+            true => Rows::none(upper_rect),
+            false => Rows::layout(
+                shape,
+                Rect::from_min_max(
+                    pos2(upper_rect.left(), upper_ruler.bottom() + 1.0),
+                    upper_rect.max,
+                ),
+                [UPPER_TRACK, UPPER_OTHER, UPPER_OTHER, UPPER_OTHER],
+                4.0,
+                0.0,
+                None,
+                0.0,
+                self.timeline.options.linked_selection,
             ),
-            [UPPER_TRACK, UPPER_OTHER, UPPER_OTHER, UPPER_OTHER],
-            4.0,
-            0.0,
-            None,
-            0.0,
-            self.timeline.options.linked_selection,
-        );
+        };
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
         let [v1_h, video_h, audio_h] = LOWER_ROWS;
         let subtitle_h = if self.timeline.options.minimize_subtitles {
@@ -905,19 +911,29 @@ impl Workspace {
         } else {
             LOWER_SUBTITLE
         };
-        let lower = Rows::layout(
-            shape,
-            Rect::from_min_max(
-                pos2(content.left(), lower_ruler.bottom() + 2.0),
-                content.max,
-            ),
-            [v1_h, video_h, audio_h, subtitle_h],
-            22.0,
-            NEW_TRACK_STRIP,
-            self.timeline.enlarged.as_deref(),
-            self.timeline.rows_lift,
-            self.timeline.options.linked_selection,
+        let rows_area = Rect::from_min_max(
+            pos2(content.left(), lower_ruler.bottom() + 2.0),
+            content.max,
         );
+        let lower = match audio_page {
+            true => Rows::audio_page(
+                shape,
+                rows_area,
+                AUDIO_PAGE_ROW,
+                NEW_TRACK_STRIP,
+                self.timeline.rows_lift,
+            ),
+            false => Rows::layout(
+                shape,
+                rows_area,
+                [v1_h, video_h, audio_h, subtitle_h],
+                22.0,
+                NEW_TRACK_STRIP,
+                self.timeline.enlarged.as_deref(),
+                self.timeline.rows_lift,
+                self.timeline.options.linked_selection,
+            ),
+        };
         self.timeline.rows_lift = self.timeline.rows_lift.min(lower.overflow(NEW_TRACK_STRIP));
         let rows_clip =
             Rect::from_min_max(pos2(lower_rect.left(), lower.area.top()), lower_rect.max);
@@ -1007,7 +1023,7 @@ impl Workspace {
                     .map(|d| (d.cue.as_str(), d.text.as_str())),
             )
             .collect();
-        {
+        if !audio_page {
             let painter = ui.painter_at(upper_rect);
             paint::ruler(&painter, upper_ruler, &upper_scale, drawn, smart, true);
             paint::cache_line(&painter, upper_ruler, &upper_scale, cache_line);
@@ -1183,7 +1199,10 @@ impl Workspace {
         self.tiles = tiles;
         let mut headers = ui.new_child(egui::UiBuilder::new().max_rect(lower_rect));
         headers.set_clip_rect(rows_clip.intersect(ui.clip_rect()));
-        self.track_headers(&mut headers, lower_rect, &layout.lower, &p);
+        match audio_page {
+            true => self.audio_headers(&mut headers, lower_rect, &layout.lower, &p),
+            false => self.track_headers(&mut headers, lower_rect, &layout.lower, &p),
+        }
         self.row_scrollbar(ui, &layout.lower);
         let upper_box =
             Rect::from_min_max(full.min, pos2(upper_rect.left() - 1.0, upper_rect.bottom()));
@@ -1603,9 +1622,28 @@ impl Workspace {
         rows: &Rows,
         p: &Project,
     ) {
+        if self.effects_page.page == Page::Audio {
+            let area = lower.shrink2(vec2(3.0, 0.0));
+            let split = area.left() + area.width() / 3.0;
+            let menus = Rect::from_min_max(area.min, pos2(split, area.bottom()));
+            self.timeline_menus(ui, menus, p);
+            let tools = Rect::from_min_max(pos2(split, area.top()), area.max);
+            self.timeline_tools(ui, tools, p);
+            return;
+        }
         let strip = upper.right() - geometry::HEADER_LABEL;
         label_line(ui, Rect::from_min_max(pos2(strip, upper.top()), upper.max));
         let menus = Rect::from_min_max(upper.min, pos2(strip, upper.bottom()));
+        self.timeline_menus(ui, menus, p);
+        for row in &rows.rows {
+            let r = row.rect.rect;
+            let at = Rect::from_min_max(pos2(strip, r.top()), pos2(upper.right(), r.bottom()));
+            self.track_label(ui, at, &row.track, p, true);
+        }
+        self.timeline_tools(ui, lower.shrink2(vec2(3.0, 0.0)), p);
+    }
+
+    fn timeline_menus(&mut self, ui: &mut egui::Ui, menus: Rect, p: &Project) {
         let mut slots = spread(menus, 3).into_iter();
         let named = |r: egui::Response, name: &str| {
             r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
@@ -1625,12 +1663,6 @@ impl Workspace {
         named(r.response, "Timeline Actions");
         let r = menu(ui).menu_button(glyph(icon::EDIT_ACTIONS), |ui| self.edit_actions_menu(ui));
         named(r.response, "Edit Actions");
-        for row in &rows.rows {
-            let r = row.rect.rect;
-            let at = Rect::from_min_max(pos2(strip, r.top()), pos2(upper.right(), r.bottom()));
-            self.track_label(ui, at, &row.track, p, true);
-        }
-        self.timeline_tools(ui, lower.shrink2(vec2(3.0, 0.0)), p);
     }
 
     fn take_edit_only(&mut self, ui: &egui::Ui) {
@@ -2238,6 +2270,91 @@ impl Workspace {
                     self.send(method, change);
                 }
             }
+        }
+    }
+
+    fn audio_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
+        let meters = self.timeline_levels();
+        let width = self.viewer_meter_width();
+        for row in &rows.rows {
+            let r = row.rect.rect;
+            if !r.intersects(rows.area) {
+                continue;
+            }
+            let Some(t) = p.track(&row.track) else {
+                continue;
+            };
+            let rect = Rect::from_min_max(
+                pos2(lower_rect.left() + 6.0, r.top()),
+                pos2(lower_rect.left() + HEADER - 6.0, r.bottom()),
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            child.set_clip_rect(rect.intersect(child.clip_rect()));
+            child.spacing_mut().button_padding.x = 3.0;
+            let parts = geometry::audio_header_parts(rect, width);
+            let area = child.interact(
+                rect,
+                egui::Id::unique(("audio-header", &t.id)),
+                Sense::click(),
+            );
+            if area.clicked() {
+                self.target = (t.id != MAIN).then(|| t.id.clone());
+            }
+            let pick = self.track_label(&mut child, parts.label, &t.id, p, false);
+            area.union(pick)
+                .context_menu(|ui| self.audio_header_menu(ui, t));
+            if let (Some(at), Some(n)) = (parts.name, &t.name) {
+                let mut name = child.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(at)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                name.add(
+                    egui::Label::new(RichText::new(n).small())
+                        .truncate()
+                        .selectable(false),
+                );
+            }
+            let lock = if t.locked {
+                icon::LOCKED
+            } else {
+                icon::UNLOCKED
+            };
+            let buttons = [
+                ("Lock", "Lock Track", lock, t.locked, "locked"),
+                ("Solo", "Solo", "S", t.solo, "solo"),
+                ("Mute", "Mute", "M", t.muted, "muted"),
+            ];
+            for ((what, tip, glyph, lit, key), at) in buttons.into_iter().zip(parts.buttons) {
+                let name = format!("{what} {}", t.id);
+                if header_button(&mut child, at, glyph, &name, lit)
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    self.send("track.set", json!({ "track": t.id, key: !lit }));
+                }
+            }
+            self.fader_field(&mut child, parts.fader, t);
+            self.track_meter(child.painter(), parts.meter, &t.id, &meters.of(&t.id));
+        }
+        self.keep_meters_live(ui.ctx(), &meters.mix);
+    }
+
+    fn audio_header_menu(&mut self, ui: &mut egui::Ui, t: &Track) {
+        if ui.button("Add Audio Track").clicked() {
+            self.send("track.add", json!({ "kind": "audio" }));
+            ui.close();
+        }
+        let text = match t.clips.len() {
+            0 => "Remove Track".to_string(),
+            n => format!("Remove Track and Its {n} Clip(s)"),
+        };
+        if ui.button(text).clicked() {
+            self.send("track.remove", json!({ "track": t.id, "force": true }));
+            if self.target.as_deref() == Some(t.id.as_str()) {
+                self.target = None;
+            }
+            ui.close();
         }
     }
 

@@ -1,5 +1,6 @@
 mod app;
 mod attributes;
+mod audio_page;
 mod bar;
 mod cache_manager;
 mod cells;

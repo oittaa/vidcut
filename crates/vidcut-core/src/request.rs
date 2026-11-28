@@ -5275,8 +5275,10 @@ pub enum Request {
     /// topmost title at the playhead, to edit in place in the viewer),
     /// `select_tool` (a tool to add on the effects page), `equalizer` (the
     /// Equalizer window of `track`), `dynamics` (the Dynamics window of
-    /// `track`), or `pan` (the Pan window of
-    /// `track`). Answers what `gui.state` does.
+    /// `track`), `pan` (the Pan window of `track`), or `meters` (the meter
+    /// panel of the `audio` page). On the `audio` page, `mixer`, `meters`,
+    /// `media` and `inspector` are the panels of that page. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
@@ -5289,8 +5291,10 @@ pub enum Request {
     GuiClose { panel: GuiPanel },
     /// Show a page of the window: `cut`; `effects`, the node editor of
     /// the composition of the topmost clip at the playhead; `color`, the
-    /// primary correction of that clip or of the timeline; or `export`, the
-    /// render settings and the render queue. Answers what `gui.state` does.
+    /// primary correction of that clip or of the timeline; `audio`, the
+    /// audio tracks as tall rows with their meters and the Mixer; or
+    /// `export`, the render settings and the render queue. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.page")]
     GuiPage {
         page: Page,
@@ -6950,6 +6954,9 @@ pub enum Page {
     /// The render settings, the viewer and the timeline with the range to
     /// render, and the render queue.
     Export,
+    /// The audio tracks as tall rows, with a header for each track, the
+    /// meters and the viewer at the top, and the Mixer at the right.
+    Audio,
 }
 
 /// A zoom of a node editor.
@@ -7089,6 +7096,9 @@ pub enum GuiPanel {
     /// The Pan window of a track with sound: the switch and Left/Right of
     /// its pan.
     Pan,
+    /// The meter panel at the top of the Audio page: a meter for each audio
+    /// track and for the mix, and the viewer.
+    Meters,
 }
 
 /// Media tab sort orders.
