@@ -327,6 +327,7 @@ impl Workspace {
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::ColorTool => self.show_color_tool(),
+            GuiPanel::SmartReframe => self.show_reframe_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
             GuiPanel::TitleText => {
                 if let Err(e) = self.type_title_text() {
@@ -461,6 +462,7 @@ impl Workspace {
                 }
             }
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
+            GuiPanel::SmartReframe => self.timeline.picture_grab.reframe = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
             GuiPanel::TitleText => self.stop_title_text(),
             GuiPanel::SelectTool => self.close_select_tool(),
@@ -512,6 +514,7 @@ impl Workspace {
                 GuiPanel::ColorTool,
                 tool.is_none() && self.timeline.picture_grab.color,
             ),
+            (GuiPanel::SmartReframe, self.reframe_shown()),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
             (GuiPanel::TitleText, self.typing_title_text()),
             (GuiPanel::SelectTool, self.select_tool_open()),
@@ -839,7 +842,10 @@ impl Workspace {
             !vidcut_core::editor::close_up_looks(p, &request, Some(at)).is_empty()
         });
         match faces {
-            true => self.ask(vec![ask], Some((Subject::Face, FindModel::Fast))),
+            true => {
+                let wanted = super::inspector::Wanted::Finder(Subject::Face, FindModel::Fast);
+                self.ask(vec![ask], wanted)
+            }
             false => self.send(ask.0, ask.1),
         }
     }

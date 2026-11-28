@@ -2188,6 +2188,33 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::PictureReframe { .. } = &envelope.request {
+            use vidcut_core::editor::ReframeLook;
+            let looks = vidcut_core::editor::reframe_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(Box::new(move || {
+                use vidcut_core::Env;
+                let env = AvEnv::new();
+                let mut handed = Vec::new();
+                for look in &looks {
+                    match look {
+                        ReframeLook::Subject((media, subject, span, download)) => {
+                            env.subjects(media, *subject, *span, *download)?;
+                        }
+                        ReframeLook::Salient((media, span, download)) => {
+                            env.salience(media, *span, *download)?;
+                        }
+                        ReframeLook::Track(t) => {
+                            let (media, plan, follow, download) = t.as_ref();
+                            handed.push(env.track(media, plan, *follow, *download)?);
+                        }
+                    }
+                }
+                Ok(handed.into_iter().collect())
+            }));
+        }
         if let Request::MotionTrack { .. } = &envelope.request {
             let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
             return Some(Box::new(move || {
@@ -2960,6 +2987,11 @@ impl Live {
                 let frames = r.result["frames"].as_i64().unwrap_or(0);
                 let zoom = r.result["zoom"].as_f64().unwrap_or(1.0) * 100.0;
                 format!("Stabilize: {frames} frames, zoom {zoom:.0}%")
+            }
+            "picture.reframe" => {
+                let clips = r.result["clips"].as_array().map_or(&[][..], Vec::as_slice);
+                let keys: i64 = clips.iter().filter_map(|c| c["keys"].as_i64()).sum();
+                format!("Smart Reframe: {keys} keyframes")
             }
             "media.add_folder" => folder_notice(&r.result),
             "subtitles.import"
@@ -3960,6 +3992,15 @@ impl Live {
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
+            Request::PictureReframe { .. } if !envelope.dry_run => {
+                match self.measuring(&envelope) {
+                    Some(measure) => {
+                        let title = "Smart Reframe".into();
+                        Step::Encode(measure, Box::new(envelope), title, "reframe")
+                    }
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::GradeAutoColor { .. }
@@ -3971,6 +4012,7 @@ impl Live {
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::PictureStabilize { .. }
+            | Request::PictureReframe { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope), None),
@@ -6075,6 +6117,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::GradeMaskTrack { .. }
         | Request::MotionTrack { .. }
         | Request::PictureStabilize { .. }
+        | Request::PictureReframe { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }
         | Request::TrackSet {
             duck: Some(Some(_)),
