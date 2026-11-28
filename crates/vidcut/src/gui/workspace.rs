@@ -156,6 +156,7 @@ pub struct Workspace {
     pub(super) key_editor: super::keyframe_editor::Editor,
     pub(super) sync_bin: super::sync_bin::SyncBin,
     pub(super) sync_clips: super::sync_clips::SyncClips,
+    pub(super) gallery: super::gallery::Gallery,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -268,6 +269,7 @@ impl Workspace {
             key_editor: Default::default(),
             sync_bin: Default::default(),
             sync_clips: Default::default(),
+            gallery: Default::default(),
         }
     }
 
@@ -327,6 +329,7 @@ impl Workspace {
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::ColorTool => self.show_color_tool(),
+            GuiPanel::SmartReframe => self.show_reframe_tool(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
             GuiPanel::TitleText => {
                 if let Err(e) = self.type_title_text() {
@@ -461,6 +464,7 @@ impl Workspace {
                 }
             }
             GuiPanel::ColorTool => self.timeline.picture_grab.color = false,
+            GuiPanel::SmartReframe => self.timeline.picture_grab.reframe = false,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
             GuiPanel::TitleText => self.stop_title_text(),
             GuiPanel::SelectTool => self.close_select_tool(),
@@ -512,6 +516,7 @@ impl Workspace {
                 GuiPanel::ColorTool,
                 tool.is_none() && self.timeline.picture_grab.color,
             ),
+            (GuiPanel::SmartReframe, self.reframe_shown()),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
             (GuiPanel::TitleText, self.typing_title_text()),
             (GuiPanel::SelectTool, self.select_tool_open()),
@@ -839,7 +844,10 @@ impl Workspace {
             !vidcut_core::editor::close_up_looks(p, &request, Some(at)).is_empty()
         });
         match faces {
-            true => self.ask(vec![ask], Some((Subject::Face, FindModel::Fast))),
+            true => {
+                let wanted = super::inspector::Wanted::Finder(Subject::Face, FindModel::Fast);
+                self.ask(vec![ask], wanted)
+            }
             false => self.send(ask.0, ask.1),
         }
     }
@@ -2453,6 +2461,16 @@ impl Workspace {
                 .response
                 .rect
         });
+        if color {
+            egui::Panel::left("color-gallery")
+                .resizable(true)
+                .default_size(260.0)
+                .min_size(140.0)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.gallery_panel(ui))
+                });
+        }
         if left.is_none() {
             egui::Panel::top("left-tabs")
                 .resizable(false)
