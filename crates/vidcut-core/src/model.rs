@@ -2496,6 +2496,13 @@ pub struct Clip {
     /// Left out when the clip has no link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<u32>,
+    /// The frame where its source started on the timeline (`start` minus
+    /// `source_in`) when `clip.link` linked it. The sync offset to the
+    /// other clips of the group counts from it. Left out when `clip.link`
+    /// did not make the group: then only clips of the same media have an
+    /// offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_at: Option<i64>,
 }
 
 /// The motion path of a pattern of a tracker: where its thing is on the
@@ -10479,6 +10486,7 @@ impl Cue {
             color: None,
             render_cache: ClipCache::Auto,
             link: None,
+            linked_at: None,
         }
     }
 

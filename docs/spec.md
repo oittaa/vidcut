@@ -891,23 +891,40 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - An edit of one clip of a group acts on each clip of the group (p. 3875): move, trim, roll, slip, slide, split, join, delete, speed and paste.
   - Each clip of a group moves and trims by the same amount. Thus a J/L cut stays (§8.7).
   - The Cut page shows a picture clip and its linked sound as one item. The sound is the band along the bottom of the item (§5; pp. 646–647).
-  - **Link** (pp. 916, 3875): the selected clips become one link group. Any number of picture and sound clips can be in one group.
-  - **Unlink** (p. 916): each selected clip leaves its group. Link and Unlink are in the clip menu, and on Ctrl+Alt+L.
-    - vidcut: a group with one clip left ends. The clip menu shows Link Clips or Unlink Clips, as the selection is.
+  - **Link Clips** (pp. 916, 3875): one item in the clip menu, and Ctrl+Alt+L. Any number of picture and sound clips can be in one group.
+    - The item needs two or more selected clips. With one clip, it is off, and the context menu does not show it.
+    - When the selection is one whole group, the item has a check mark. A click unlinks each clip of the group.
+    - Else a click makes the selected clips one new group. Each selected clip leaves its old group.
+    - The rest of an old group stays one group when it has two or more clips. A clip that is left alone has no link.
+    - vidcut: `clip.unlink` also takes single clips out of their groups.
   - **Linked Selection** (pp. 913–914): a switch on the timeline toolbar, and Ctrl+Shift+L. It is on at first.
     - On, a click on a clip also selects its linked clips, and an edit acts on them all.
     - Off, a clip is selected and edited alone. The clips stay in their group.
+    - The switch is the same for each timeline. It is not an undo step.
+    - A split with the switch off cuts the clip alone. The part before the cut stays in the group. The part after the cut has no link.
     - vidcut: the switch is in the timeline options. Off, the picture and the sound of an item show apart, each on its own track, as on the Edit page.
     - vidcut: each edit request that acts on clips by id takes `alone`, the same switch for one request.
     - vidcut: the selection holds the clicked clip. With the switch on, the timeline draws its linked clips as selected too.
     - vidcut: off, the linked clips of an edited clip stay where they are. They do not follow Track 1 (D21).
-  - **Out of sync** (p. 915): a clip that moves or slips apart from its linked clips shows a red indicator at the left of its name bar. The indicator gives the offset.
-    - The menu of the indicator has Slip into place, Move into place, Slip others into place and Move others into place.
-    - Slip into place slips the content of the clip. Move into place moves the clip. The two others do this to the other clips of the group.
-    - vidcut: the indicator gives the offset in frames. The clip menu of a clip with an offset has the four commands. A clip with a speed change shows no offset.
-  - **Resync Clip** (p. 646, Edit Actions on the Cut page): the manual says that it brings a clip that slipped sync back.
-    - It changes nothing on a clip whose sound was moved or slipped out of sync.
-    - vidcut does not have it. The menu of the out-of-sync indicator brings the clips back.
+  - **Out of sync** (p. 915): a linked clip that is out of sync shows a red box at the left of its name bar.
+    - The box gives a sign, then seconds:frames. 30 frames at 25 fps are 01:05.
+    - The picture has the opposite sign of the sound. A later sound gives the picture "-" and the sound "+".
+    - A slip gives the same offset as a move of the same frames.
+    - The offset counts from the moment of the link. Clips that are apart when a Link joins them are in sync. Linked clips of other media can be out of sync.
+    - A sound clip in sync with the picture has no box, also when another sound clip of the group is out of sync. The picture has a box when one of its sound clips is out of sync.
+    - vidcut: clips that no Link joined are in sync when their sources play at the same time. An example is a picture and its sound from one edit.
+    - vidcut: the picture shows the offset to its first sound clip that is out of sync. A clip with a speed change shows no offset.
+  - **The four fixes**: Slip into place, Move into place, Slip others into place and Move others into place, in the menu of the box.
+    - "Into place" changes only the clip of the box. "Others into place" changes each other clip of the group that is out of sync with it, each by its own offset.
+    - Slip changes the source start and keeps the place. Move changes the place and keeps the source start.
+    - A move writes over a clip in the way. That clip keeps its link and stays in sync.
+    - On a sound clip, the four fixes are on.
+    - On a picture with two or more sound clips, Slip into place and Move into place are off.
+    - On a picture with one sound clip, the fix that moves a clip later is off. A later sound turns off Move into place. An earlier sound turns off Move others into place.
+    - vidcut: the clip menu of a clip with an offset has the four fixes. `edit.resync` refuses a fix that is off.
+  - **Resync Clip** (p. 646, Edit Actions on the Cut page) puts a clip that slipped from the rest of the program back in sync.
+    - It does not change a linked clip that has an offset to its group. The four fixes change it.
+    - vidcut has no Resync Clip.
 
 ## 7. Edit functions (pp. 696–701)
 

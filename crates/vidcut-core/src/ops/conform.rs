@@ -89,6 +89,7 @@ pub fn clip(p: &Project, c: &mut Clip, r: Rates) {
     let conv = |f: i64| r.frame(f);
     let (was_start, was_end) = (c.start, c.end());
     let (start, end) = (conv(was_start), conv(was_end));
+    let drift = c.linked_at.map(|at| was_start - c.source_in - at);
     if let Some(a) = c.audio.as_mut() {
         a.gain_keys = crate::keyframes::scaled(&a.gain_keys, conv, ratio);
         a.pan_keys = crate::keyframes::scaled(&a.pan_keys, conv, ratio);
@@ -142,6 +143,7 @@ pub fn clip(p: &Project, c: &mut Clip, r: Rates) {
         s.sections = sections.into();
     }
     (c.start, c.duration) = (start, end - start);
+    c.linked_at = drift.map(|d| c.start - c.source_in - conv(d));
     if let Some(k) = p.clip_compound(c) {
         fit_compound(c, rescale(k.frames, k.fps, r.to));
     }

@@ -1166,6 +1166,11 @@ pub enum Request {
         /// Only split these clips.
         #[serde(default)]
         clips: Vec<ClipRef>,
+        /// Split these clips alone, not the clips linked to them (Linked
+        /// Selection off). The part before the split stays in the link
+        /// group. The part after it has no link.
+        #[serde(default)]
+        alone: bool,
     },
     /// Join Match Edit Clips: clips that a split left join back into one.
     /// Two or more `clips` join where they meet. Otherwise the clips that
@@ -1542,9 +1547,14 @@ pub enum Request {
         by: TimeSpec,
     },
     /// Bring a clip and the clips linked to it back into sync. A clip is out
-    /// of sync when its media plays at another time than in a linked clip of
-    /// the same media and the other kind (picture or sound). Clips with a
-    /// speed change have no sync offset. One undo step.
+    /// of sync when it plays at another time against a linked clip of the
+    /// other kind (picture or sound) than when `clip.link` linked them.
+    /// Clips that `clip.link` did not link are out of sync only against
+    /// clips of the same media. A picture is out of sync when one of its
+    /// sound clips is. Clips with a speed change have no sync offset. A
+    /// picture with two or more sound clips takes only the `others` fixes.
+    /// A picture with one sound clip takes no fix that moves a clip later.
+    /// One undo step.
     #[serde(rename = "edit.resync")]
     EditResync { clip: ClipRef, how: Resync },
     /// Move clips' head or tail to `at` (Trim Start/End to Playhead).
@@ -6981,11 +6991,11 @@ pub enum Resync {
     Slip,
     /// Move into Place: move the clip, over what is there.
     Move,
-    /// Slip Others into Place: slip the content of each other clip of the
-    /// same media in its group.
+    /// Slip Others into Place: slip the content of each other clip of its
+    /// group that is out of sync with it, each by its own offset.
     SlipOthers,
-    /// Move Others into Place: move each other clip of the same media in its
-    /// group.
+    /// Move Others into Place: move each other clip of its group that is
+    /// out of sync with it, each by its own offset, over what is there.
     MoveOthers,
 }
 

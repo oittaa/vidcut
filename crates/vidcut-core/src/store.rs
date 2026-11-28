@@ -2668,6 +2668,7 @@ mod tests {
             color: None,
             render_cache: ClipCache::Auto,
             link: None,
+            linked_at: None,
         }
     }
 

@@ -160,6 +160,7 @@ fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     let mut right = left.clone();
     right.id = new_id.clone();
     right.link = link;
+    right.linked_at = link.and(right.linked_at);
     right.move_head(offset);
     left.duration = offset;
     if let (Some(la), Some(ra)) = (left.audio.as_mut(), right.audio.as_mut()) {
@@ -281,6 +282,7 @@ pub(crate) fn block_clip(
         color: None,
         render_cache: crate::model::ClipCache::Auto,
         link: None,
+        linked_at: None,
     }
 }
 
@@ -374,6 +376,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         color: None,
         render_cache: crate::model::ClipCache::Auto,
         link: None,
+        linked_at: None,
     })
 }
 
@@ -913,6 +916,7 @@ fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
     rest.move_head(a.duration);
     rest.id.clone_from(&b.id);
     rest.link = b.link;
+    rest.linked_at = b.linked_at;
     rest.effects.clone_from(&b.effects);
     if let (Some(r), Some(y)) = (rest.audio.as_mut(), &b.audio) {
         r.effects.clone_from(&y.effects);
