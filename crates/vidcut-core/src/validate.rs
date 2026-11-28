@@ -509,6 +509,12 @@ fn color_groups(p: &Project, v: &mut Vec<String>) {
         if let Some(g) = c.color_group.as_deref().filter(|g| !ids.contains(g)) {
             v.push(format!("{} is in unknown color group {g}", c.id));
         }
+        if c.picture
+            .as_ref()
+            .is_some_and(|x| x.pre_clip_grade.is_some())
+        {
+            v.push(format!("{} has a Pre-Clip grade of its own", c.id));
+        }
     }
 }
 

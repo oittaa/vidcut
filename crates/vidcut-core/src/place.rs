@@ -4,7 +4,7 @@ use crate::keyframes::PictureValue;
 use crate::model::{
     ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
-    FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
+    FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, Grade, GradientRepeat, GradientStop,
     GradientType, JoinStyle, Mask, MaskChannel, Media, Merge, MergeEdges, MergeOperator,
     MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, Picture, PivotType, ReferenceTime,
     Scaling, ShadingElement, Sharpen, TextPlus, Tool, Tracker, TrackerMerge, TrackerOperation,
@@ -2048,20 +2048,18 @@ impl Placing {
             canvas: [frame.0, frame.1],
             back: own.back,
         };
-        let mut effects: Vec<Working> = p
-            .picture
-            .effects
-            .iter()
-            .filter_map(|e| {
+        let windows = window_back(&own.back, fitted, frame);
+        let graded =
+            |g: Option<&Grade>| g.and_then(|g| Working::graded(&g.at(p.source as f64), windows));
+        let mut effects: Vec<Working> = graded(p.picture.pre_clip_grade.as_ref())
+            .into_iter()
+            .chain(p.picture.effects.iter().filter_map(|e| {
                 let held =
                     (e.freeze_key(p.source)).map_or(0, |k| (p.frame - (p.source - k)).max(0));
                 Working::of(&e.sampled(p.source as f64), &OnFrame { held, ..on })
-            })
+            }))
             .collect();
-        let windows = window_back(&own.back, fitted, frame);
-        let graded = (p.picture.grade.as_ref())
-            .and_then(|g| Working::graded(&g.at(p.source as f64), windows));
-        effects.extend(graded);
+        effects.extend(graded(p.picture.grade.as_ref()));
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(own.area(), c));
         let at = p.source as f64;

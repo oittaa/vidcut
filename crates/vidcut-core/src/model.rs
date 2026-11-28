@@ -4363,6 +4363,11 @@ pub struct Picture {
     /// values with no correction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stabilization: Option<Stabilization>,
+    /// The Pre-Clip grade of the color group of the clip, before its
+    /// effects. Only a render plan has it, from the group: a clip leaves it
+    /// out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_clip_grade: Option<Grade>,
 }
 
 /// The stabilization of a clip's picture.

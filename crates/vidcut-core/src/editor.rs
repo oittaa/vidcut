@@ -9217,16 +9217,19 @@ fn solo_plan(
     let own = ops::grade::whole(p, id)?.map(|w| at(&w));
     let group = ops::color_groups::of_clip(p, id).ok();
     let pre = group.and_then(|k| k.pre.as_ref()).map(at);
-    let g = match of {
+    let (pre, g) = match of {
         GradeOf::Clip(_, layer) => {
             let clip = (own.unwrap_or_else(|| Grade::usual(size))).below(*layer, g, size);
-            ops::color_groups::around(pre.as_ref(), Some(&clip), None, size)
+            (pre, Some(clip))
         }
-        GradeOf::Group(_, GroupGrade::Pre) | GradeOf::Timeline => Some(g),
-        GradeOf::Group(_, GroupGrade::Post) => {
-            ops::color_groups::around(pre.as_ref(), own.as_ref(), Some(&g), size)
-        }
+        GradeOf::Group(_, GroupGrade::Pre) => (Some(g), None),
+        GradeOf::Timeline => (None, Some(g)),
+        GradeOf::Group(_, GroupGrade::Post) => (
+            pre,
+            ops::color_groups::around(None, own.as_ref(), Some(&g), size),
+        ),
     };
+    let first = matches!(of, GradeOf::Group(_, GroupGrade::Pre));
     let mut solo = p.clone();
     solo.subtitles.clear();
     for track in &mut solo.tracks {
@@ -9248,7 +9251,11 @@ fn solo_plan(
     picture.opacity = None;
     picture.opacity_keys.clear();
     picture.composite_mode = None;
+    picture.pre_clip_grade = pre;
     picture.grade = g;
+    if first {
+        picture.effects.clear();
+    }
     let mut plan = crate::render::flatten(&solo, t0, t1)?;
     plan.timeline_grade = None;
     Ok(plan)

@@ -63,10 +63,11 @@ pub fn acting<'a>(p: &'a Project, c: &Clip) -> Option<&'a ColorGroup> {
         .filter(|g| g.acts())
 }
 
-pub fn graded(p: &Project, c: &Clip) -> Option<Option<Grade>> {
+pub fn graded(p: &Project, c: &Clip) -> Option<(Option<Grade>, Option<Grade>)> {
     let g = acting(p, c)?;
     let own = c.picture.as_ref().and_then(|pic| pic.grade.as_ref());
-    Some(around(g.pre.as_ref(), own, g.post.as_ref(), p.frame_size()))
+    let after = around(None, own, g.post.as_ref(), p.frame_size());
+    Some((g.pre.clone(), after))
 }
 
 fn named(name: &str) -> Result<String> {

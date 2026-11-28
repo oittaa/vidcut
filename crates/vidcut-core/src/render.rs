@@ -849,6 +849,7 @@ impl Placed {
             picture: Picture {
                 effects: self.picture.effects.clone(),
                 grade: self.picture.grade.clone(),
+                pre_clip_grade: self.picture.pre_clip_grade.clone(),
                 ..Picture::default()
             },
             mapped: None,
@@ -1786,10 +1787,9 @@ impl RenderPlan {
                             input_lut: Some(_),
                             ..
                         }
-                    ) || p
-                        .placed()
-                        .iter()
-                        .any(|placed| graded(&placed.picture.grade))
+                    ) || p.placed().iter().any(|placed| {
+                        graded(&placed.picture.grade) || graded(&placed.picture.pre_clip_grade)
+                    })
                 })
     }
 
@@ -2654,11 +2654,12 @@ fn grouped(p: &Project) -> Option<Project> {
 
 fn joined(p: &Project, clips: &mut [Clip]) {
     for c in clips {
-        let Some(grade) = crate::ops::color_groups::graded(p, c) else {
+        let Some((pre, grade)) = crate::ops::color_groups::graded(p, c) else {
             continue;
         };
         c.color_group = None;
         let mut picture = c.picture.take().map(Shared::into_inner).unwrap_or_default();
+        picture.pre_clip_grade = pre;
         picture.grade = grade;
         c.picture = Some(picture.into());
     }

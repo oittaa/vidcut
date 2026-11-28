@@ -41,6 +41,11 @@ pub fn checked(p: &Picture) -> Result<Option<Shared<Picture>>> {
     if let Some(g) = &p.grade {
         super::grade::checked(g)?;
     }
+    if p.pre_clip_grade.is_some() {
+        return Err(Error::invalid(
+            "a clip has no Pre-Clip grade of its own: it is the grade of its color group",
+        ));
+    }
     let effects = p
         .effects
         .iter()

@@ -5352,8 +5352,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The grade requests take `group`, `pre` or `post`. They then change that grade of the group of the clip.
     - A group grade has one layer. It takes no Magic Mask.
     - Its keyframes count in the frames of each clip, as the keyframes of a clip grade do (not measured).
-  - The picture of a clip in a group gets the Pre-Clip grade, the clip grade with each layer, then the Post-Clip grade.
-    - vidcut runs them as one grade, after the effects of the clip ([§13](#13-order-of-operations-pp-287296-3407)).
+  - A clip in a group gets the Pre-Clip grade, its effects, the clip grade with each layer, then the Post-Clip grade ([§13](#13-order-of-operations-pp-287296-3407)).
   - The Node Editor of a clip in a group has the modes Group Pre Clip and Group Post Clip.
     - The switch, the dots and Switch to Node Layer have them.
     - `gui.page` with `grade` `pre_clip` or `post_clip` shows that grade. On a clip in no group, the page shows the clip grade.
@@ -8662,8 +8661,6 @@ Then the compositing of the Fusion page.
 6. The output of the Deliver page.
 
 The display LUT of the Color page is on a branch after Data Burn-In. The output of the Deliver page does not get it.
-
-vidcut runs the Pre-Clip grade, the clip grade and the Post-Clip grade of a clip as one grade, after its effects ([§8.33](#833-color-groups-pp-33763381-3400)).
 
 vidcut runs the timeline grade, then the burned-in subtitles, then the output LUT. The viewer of the Color page then runs the display LUT on its own branch ([the display LUTs](#the-lut-tables)). [§8.20](#820-primaries-palette-pp-118-31413159) gives the facts of the timeline grade.
 

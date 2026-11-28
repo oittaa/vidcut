@@ -1899,7 +1899,8 @@ impl Workspace {
             GradeOf::Timeline => return None,
         }
         let own = picture.grade.take();
-        picture.grade = color_groups::around(pre.as_ref(), own.as_ref(), post.as_ref(), frame);
+        picture.grade = color_groups::around(None, own.as_ref(), post.as_ref(), frame);
+        picture.pre_clip_grade = pre;
         Some((id.to_string(), picture))
     }
 
@@ -1907,8 +1908,9 @@ impl Workspace {
         let p = self.project();
         if let Some((p, g)) = p.and_then(|p| Some((p, color_groups::acting(p, p.clip(&id)?)?))) {
             let own = picture.grade.take();
-            let (pre, post) = (g.pre.as_ref(), g.post.as_ref());
-            picture.grade = color_groups::around(pre, own.as_ref(), post, p.frame_size());
+            let post = g.post.as_ref();
+            picture.grade = color_groups::around(None, own.as_ref(), post, p.frame_size());
+            picture.pre_clip_grade = g.pre.clone();
         }
         (id, picture)
     }

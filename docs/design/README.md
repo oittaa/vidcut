@@ -134,7 +134,7 @@ A clip skips each step that it does not use. The steps run in this order:
   - A title is a layer of the same draw, as a generator is ([export](export.md#titles)). Burned subtitles are draws in that same pass (`fs_title`).
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
   - The grade of a clip works on that picture after its effects (`fs_grade`, [export](export.md#the-grade)).
-  - For a clip in a color group, that grade is the Pre-Clip grade, the clip grade and the Post-Clip grade in one ([export](export.md#color-groups)).
+  - For a clip in a color group, the Pre-Clip grade works before its effects. The Post-Clip grade is the last part of its grade ([export](export.md#color-groups)).
   - An adjustment clip (`VideoPiece::Adjustment`, `Blurred::adjust`) copies the composited canvas below, runs its composition, placement, effects and grade in order, and mixes back over the canvas.
     - Its placement moves the canvas. Its effects and grade then work on a picture that fills the frame with no placement (`Placed::for_effects`). Why: the picture that they get is the moved canvas, not the clip.
     - The outline of a grade window in the viewer uses `Placed::for_effects` too. Thus it is where the window grades.

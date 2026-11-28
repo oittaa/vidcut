@@ -1257,15 +1257,20 @@ Clips that share a Pre-Clip and a Post-Clip grade ([spec §8.33](../spec.md#833-
   - Thus `ops::grade::stored` and `store` give and take a group grade as they do a clip grade. The keyframes count in the frames of the clip.
   - `grades_of` gives each group once, also when the request names several clips of it.
 - The render:
-  - `around` joins the Pre-Clip grade, the clip grade and the Post-Clip grade into one `Grade`. The Pre-Clip grade is its base, and the others are its layers.
-  - Why: `Grade::stacked` then joins them in order, and the passes, the thumbnails and the render cache need no case for groups.
-  - `render::grouped` gives each clip of a group that has a grade the joined grade, before the plan (`graded`).
-  - The joined grade works after the effects of the clip, as a clip grade does ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
-  - The plans of Auto Color and of the Magic Mask join the grades up to the node that they measure (`solo_plan`).
+  - `around` joins grades into one `Grade`, in order. The first grade is its base, and the others are its layers. `Grade::stacked` then runs them in order.
+  - `render::grouped` changes each clip of a group that has a grade, before the plan (`graded`):
+    - `Picture::pre_clip_grade` gets the Pre-Clip grade.
+    - `Picture::grade` gets the clip grade and the Post-Clip grade, joined.
+  - `Placing` runs `pre_clip_grade` before the effects of the clip, and `grade` after them ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
+  - Why a field of `Picture`: each path that places a picture carries it, with no case for groups. These are the plan, the transitions, the compound clips and the preview of the player.
+  - The render cache keys each piece by its picture. Thus a change of a group grade makes the pieces of its clips again.
+  - `validate` and `ops::picture::checked` refuse `pre_clip_grade` on a clip.
+  - The pictures of the nodes join the two grades (`clip_shot`). Thus a node has the number that the Node Editor gives it.
+  - The plans of Auto Color and of the Magic Mask stop the grades at the node that they measure (`solo_plan`). For a node of the Pre-Clip grade, the plan has no effects.
 - OTIO keeps `ProjectMeta::color_groups` and the group of each clip in the metadata of vidcut.
 - The GUI:
   - `GradeLevel::PreClip` and `GradeLevel::PostClip` are the two modes of a group. `Workspace::shown_level` gives the Clip mode on a clip in no group.
-  - `Workspace::graded_wanted` and `Workspace::with_group` join the grades for the live preview. Thus a dragged value of a group grade shows at once.
+  - `Workspace::graded_wanted` and `Workspace::with_group` set the two grades of the picture for the live preview, as `render::grouped` does. Thus a dragged value of a group grade shows at once.
   - `ColorGroups` holds the current group, the Group Name dialog and the Delete prompt (`color_group_windows`).
   - `Workspace::keep_color_group` makes the group of a new clip at the playhead current. `gui.page` with `group` sets it, as Load does.
   - `group_items` draws the group items in the menu of the thumbnail at the playhead. `Workspace::group_act` sends their requests.
