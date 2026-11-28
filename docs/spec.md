@@ -8633,6 +8633,12 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - A Pitch or Yaw under 0.0005 does not lean the picture. The measured change is between 0.0003 and 0.0005.
   - It draws each edge of a leaned picture 0.5 px farther out than the projective lean gives, along its normal. The picture inside follows the lean.
   - This includes a cut edge and the edges of a turned picture, as measured.
-  - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
+  - A clip in a compound clip uses the rule for its own bars.
+  - The level of a compound clip uses the rule only when the one picture in it keeps its place there.
+    - The picture keeps its place when it has no transform, no crop, no Dynamic Zoom and no motion of a transition.
+    - Thus a Zoom X other than 1 inside makes each bar of the compound clip show at its exact width, as measured.
+    - With two or more tracks inside, each bar of the compound clip also shows at its exact width.
+    - So does a compound clip that holds a compound clip that does not use the rule.
+    - Only Zoom X inside was measured ([todo](todo/picture-fit.md)).
   - It does not use the limit in the fit for an encoder.
   - On pixels that are not square, a Rotation leaves the gaps of the turn of those pixels. Thus the limit acts at W / 2 × θ / p under 0.2, as measured.

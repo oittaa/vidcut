@@ -1,9 +1,7 @@
-# Compound clips as measured
+# The limit for a thin bar on a compound clip, to measure
 
 **When:** next.
 
-**What:** the measurements in Resolve Studio 21.2 show these differences in the placement stage. Each difference is a fault in that stage (AGENTS.md rule 1).
+**What:** the level of a compound clip uses the limit only when the one picture in it keeps its place ([spec](../spec.md#the-limit-for-a-thin-bar)). Only Zoom X inside was measured (9 cases, section M10 of `fixtures/program/NOTES.md` in the test data).
 
-- **A compound clip:** the outer level keeps the limit only when the clip inside has Zoom X 1. This is from 9 cases. Measure more cases for a general rule before a change.
-
-The records are section M10 of `fixtures/program/NOTES.md` in the test data.
+- Measure a Position, a Rotation and a crop inside, two tracks inside, and a compound clip in a compound clip. Each case has bars under 0.2 on the compound clip.
