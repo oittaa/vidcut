@@ -47,14 +47,6 @@ purpose = "short HEVC 1080p clip: quick HEVC decode and preview tests"
 sha256 = "054fda19ab2c9f24d4524ffc33bfba9620b11e488ab813004dbe952fff26868d"
 
 [[clip]]
-name = "hdr10-bear-hevc"
-file = "bear-1280x720-hevc-10bit-hdr10.mp4"
-url = "https://raw.githubusercontent.com/chromium/chromium/b8b053081e8e43f0206130dc6c70d996343cffa2/media/test/data/bear-1280x720-hevc-10bit-hdr10.mp4"
-license = "BSD-3-Clause, (c) The Chromium Authors, https://chromium.googlesource.com/chromium/src/+/main/LICENSE"
-purpose = "HEVC 10-bit PQ with a mastering display (1000 cd/m²) and MaxCLL/MaxFALL 1000/400 (SDR footage tagged HDR10)"
-sha256 = "49b960ac28ae13153ba8e62e3fceb50408564c21f25fc38936e7c8a06b61f2db"
-
-[[clip]]
 name = "hlg-croatia-av1"
 file = "D_3.mp4"
 url = "https://s3.amazonaws.com/download.opencontent.netflix.com/AV1/DVB-DASH/D_3.mp4"

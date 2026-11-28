@@ -14,8 +14,8 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sen
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
-    TrackKind, USUAL_X_LEVEL, USUAL_X_POINT,
+    ADAPTIVE_MOST, Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project,
+    Speed, Track, TrackFormat, TrackKind, USUAL_X_LEVEL, USUAL_X_POINT,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -623,6 +623,18 @@ pub(super) fn label_line(ui: &egui::Ui, label: Rect) {
     );
 }
 
+fn format_label(ui: &egui::Ui, at: Rect, t: &Track) {
+    ui.painter()
+        .with_clip_rect(at.intersect(ui.clip_rect()))
+        .text(
+            at.right_center() - vec2(2.0, 0.0),
+            Align2::RIGHT_CENTER,
+            t.format.label(),
+            egui::TextStyle::Small.resolve(ui.style()),
+            theme::colors().text_dim,
+        );
+}
+
 fn header_button(ui: &mut egui::Ui, at: Rect, icon: &str, name: &str, lit: bool) -> egui::Response {
     let r = ui.put(
         at,
@@ -709,6 +721,7 @@ impl Workspace {
             waveforms: o.waveforms,
             target: false,
             fades: self.effects_page.page == Page::Audio,
+            lanes: self.effects_page.page == Page::Audio,
         }
     }
 
@@ -1057,6 +1070,7 @@ impl Workspace {
                     waveforms: false,
                     durations: false,
                     fades: false,
+                    lanes: false,
                     names: look.names && row.track == MAIN,
                     target: self.is_target(&row.track),
                     ..look
@@ -2156,6 +2170,9 @@ impl Workspace {
             if area.clicked() {
                 self.target = (t.id != MAIN).then(|| t.id.clone());
             }
+            if t.has_sound() {
+                format_label(&child, parts.name, t);
+            }
             let pick = self.track_label(&mut child, parts.label, &t.id, p, false);
             area.union(pick).context_menu(|ui| {
                 if ui.button("Add Video Track").clicked() {
@@ -2184,6 +2201,9 @@ impl Workspace {
                         }
                         ui.close();
                     }
+                }
+                if t.has_sound() {
+                    self.track_type_menu(ui, t);
                 }
                 if t.kind == vidcut_core::model::TrackKind::Video {
                     ui.separator();
@@ -2324,6 +2344,9 @@ impl Workspace {
             let pick = self.track_label(&mut child, parts.label, &t.id, p, false);
             area.union(pick)
                 .context_menu(|ui| self.audio_header_menu(ui, t));
+            if let Some(at) = parts.name {
+                format_label(&child, at, t);
+            }
             if let (Some(at), Some(n)) = (parts.name, &t.name) {
                 let mut name = child.new_child(
                     egui::UiBuilder::new()
@@ -2371,11 +2394,93 @@ impl Workspace {
         self.keep_meters_live(ui.ctx(), &meters.mix);
     }
 
+    fn track_type_menu(&mut self, ui: &mut egui::Ui, t: &Track) {
+        let mut chosen = None;
+        ui.menu_button("Change Track Type to", |ui| {
+            let mut pick = |ui: &mut egui::Ui, f: TrackFormat, text: String| {
+                if ui.selectable_label(t.format == f, text).clicked() {
+                    chosen = Some(f);
+                    ui.close();
+                }
+            };
+            for f in [TrackFormat::Mono, TrackFormat::Stereo] {
+                pick(ui, f, f.title());
+            }
+            let groups: [(&str, &[TrackFormat]); 4] = [
+                ("3.0", &[TrackFormat::Lrc, TrackFormat::Lcr]),
+                (
+                    "4.0",
+                    &[TrackFormat::Lrcs, TrackFormat::Lcrs, TrackFormat::Quad],
+                ),
+                (
+                    "5.x",
+                    &[
+                        TrackFormat::Five,
+                        TrackFormat::FiveFilm,
+                        TrackFormat::FiveOne,
+                        TrackFormat::FiveOneFilm,
+                    ],
+                ),
+                (
+                    "7.x",
+                    &[
+                        TrackFormat::Seven,
+                        TrackFormat::SevenFilm,
+                        TrackFormat::SevenOne,
+                        TrackFormat::SevenOneFilm,
+                    ],
+                ),
+            ];
+            for (group, formats) in groups {
+                ui.menu_button(group, |ui| {
+                    for &f in formats {
+                        pick(ui, f, f.title());
+                    }
+                });
+            }
+            ui.menu_button("Adaptive", |ui| {
+                for n in 1..=ADAPTIVE_MOST {
+                    pick(ui, TrackFormat::Adaptive(n), n.to_string());
+                }
+            });
+        });
+        if let Some(f) = chosen.filter(|&f| f != t.format) {
+            self.send("track.set", json!({ "track": t.id, "format": f }));
+        }
+    }
+
+    fn audio_channel_menu(&mut self, ui: &mut egui::Ui, c: &Clip) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let (Some(a), Some(m)) = (c.audio.as_ref(), p.media(&c.media)) else {
+            return;
+        };
+        let [ch] = m.info.heard(a)[..] else {
+            return;
+        };
+        let current = m.info.embedded(a.stream, ch);
+        let mut chosen = None;
+        ui.menu_button("Audio Channel", |ui| {
+            for n in 1..=m.info.embedded_count() {
+                let text = format!("Embedded Channel {n}");
+                if ui.selectable_label(n == current, text).clicked() {
+                    chosen = Some(n);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(n) = chosen.filter(|&n| n != current) {
+            self.send("clip.set", json!({ "clips": [c.id], "channel": n }));
+        }
+    }
+
     fn audio_header_menu(&mut self, ui: &mut egui::Ui, t: &Track) {
         if ui.button("Add Audio Track").clicked() {
             self.send("track.add", json!({ "kind": "audio" }));
             ui.close();
         }
+        self.track_type_menu(ui, t);
         let text = match t.clips.len() {
             0 => "Remove Track".to_string(),
             n => format!("Remove Track and Its {n} Clip(s)"),
@@ -3592,6 +3697,7 @@ impl Workspace {
         self.alpha_mode_menu(ui, &media);
         self.render_cache_menu(ui, &clips);
         self.cached_effects_menu(ui, c);
+        self.audio_channel_menu(ui, c);
     }
 
     fn render_cache_menu(&mut self, ui: &mut egui::Ui, clips: &[String]) {

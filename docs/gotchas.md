@@ -215,6 +215,11 @@ This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut
 
 ## GPU drivers
 
+- **A GPU can cut a float toward zero when it writes a half float** (NVIDIA GeForce RTX 4080 SUPER, Windows, driver 32.0.16.2140).
+  - The render cache in Uncompressed 16-bit Float writes each 32-bit value into an `R16Float` target (`fs_encode_float`).
+  - In a test of 196,608 random values, each value that a half float cannot hold came out closer to zero.
+  - OpenEXR rounds to the nearest half float.
+  - Thus the shader rounds each value to the nearest half float first (`half_rounded`). The GPU then writes that value exactly.
 - **NVIDIA's exit handlers break a close during the exit** (Linux, driver 580).
   - The handler of libnvcuvid runs from `_dl_fini`. If a decoder still lives, the handler joins a thread of the library.
   - A decoder that closes on another thread also joins that thread. Both wait forever.
@@ -700,11 +705,14 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
     - Grab Still, Delete Selected of a still, Add Still Album, and a drag of a still onto an album;
     - Add into a New Group, Assign to Group, Remove from Group, Delete of a group and Collapse Group Grades.
   - Ctrl+Z took back the grade edit before the item, where there was one.
-  - vidcut: each of these edits is an undo step, and Undo takes it back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405), [spec §8.33](spec.md#833-color-groups-pp-33763381-3400)).
+  - vidcut: each of these edits is an undo step, and Undo takes it back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405), [spec §8.33](spec.md#833-color-groups-pp-33763381-3400)).
 - **The scripting API does not apply a grade to node stack layer 2.**
   - `ApplyGradeFromDRX` on the graph of `GetNodeGraph(2)` gave True, and layer 2 stayed one empty node.
   - `ApplyGradeFromDRX` on the graph of `GetPostClipNodeGraph()` of a group gave False.
-  - vidcut: `gallery.apply` and `grade.apply` give each layer of a grade ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
+  - vidcut: `gallery.apply` and `grade.apply` give each layer of a grade ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
+- **Ctrl+Z does not take back Change Label of a still.**
+  - Change Label set the label of a still to "lbl1". Ctrl+Z after it kept "lbl1".
+  - vidcut: `gallery.label` is one undo step, and Undo takes it back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
 - **A typed Soft of the HSL qualifier shows 0.1 more.**
   - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
   - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
@@ -843,6 +851,22 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
   - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
   - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132)).
+- **Individual clips adds frames to a clip at another frame rate.**
+  - The file of such a clip has source frames from outside the clip. Their number follows no rule.
+  - A clip at the rate of the timeline gives its own frames and no more. The render has no frame handles.
+  - On a 30 fps timeline, source frames 0 to 47 of a 24 fps file give frames 0 to 50. Source frames 0 to 119 of a 60 fps file give 0 to 122.
+  - On a 24 fps timeline, frames 0 to 119 of the 60 fps file give 0 to 122. On a 60 fps timeline, frames 0 to 47 of the 24 fps file give 0 to 50.
+  - On a 30 fps timeline, frames 10 to 57 of the 24 fps file give 4 to 59. Frames 10 to 129 of the 60 fps file give 6 to 132.
+  - The frame count in the name and the file timecode then give the first frame in the file: `…00086404` and 01:00:00:04.
+  - vidcut does not copy this fault. The file holds the frames that the clip shows, and no others ([spec §10.1](spec.md#101-export-page-pp-41034132)).
+- **Individual clips doubles the rows of each field of an interlaced clip.**
+  - The clip is `interlaced-tff.mov`: 1080i 25, top field first, 2 s, with Enable Deinterlacing on, as at import.
+  - The project has field processing off and deinterlace quality Normal. The timeline is 24 fps, 1920x1080.
+  - The render is Individual clips, EXR RGB float ZIP. It gives 100 files at 50 fps, one for each field.
+  - In each file, row 2k and row 2k + 1 are the same. Thus Resolve does not deinterlace the field.
+  - Each horizontal edge then moves by one row in every second file.
+  - vidcut does not copy this fault. It makes the missing rows with `bwdif` ([D34](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The largest differences between the two renders are in those rows at horizontal edges, up to 153 of 255.
 - **A title with only the family name Bahnschrift draws a narrow face of the font.**
   - Bahnschrift is a variable font. At weight 300, 350 and 400, the title draws Bahnschrift SemiLight SemiCondensed. At weight 200, it draws Bahnschrift Light SemiCondensed.
   - The Inspector does the same. The family Bahnschrift with the face Normal draws SemiLight SemiCondensed, the same in every pixel.

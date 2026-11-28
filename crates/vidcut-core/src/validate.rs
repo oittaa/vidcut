@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::Path;
 
-use crate::model::{Generator, Media, Project, Track, TrackKind};
+use crate::model::{Generator, Grade, Media, Project, StillSource, Track, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
@@ -327,6 +327,13 @@ pub fn violations(p: &Project) -> Vec<String> {
                                 c.id, a.stream, m.id
                             ));
                         }
+                        let held = u32::from(m.info.stream_channels(a.stream));
+                        if let Some(ch) = a.channels.iter().find(|&&ch| ch >= held) {
+                            v.push(format!(
+                                "{}: no channel {ch} in audio stream {} of {}",
+                                c.id, a.stream, m.id
+                            ));
+                        }
                         let (s, e) = c.sound_span().unwrap_or((0.0, 1.0));
                         if s < -1e-6 || e > frames as f64 + 1e-6 {
                             v.push(format!(
@@ -566,33 +573,62 @@ fn stills(p: &Project, v: &mut Vec<String>) {
                 p.next_id.still.saturating_sub(1)
             ));
         }
-        let f = &s.source;
-        if !(f.first <= f.at && f.at <= f.last && f.origin.is_finite()) {
-            v.push(format!(
-                "still {}: its frame {} is not in its clip, {} to {}",
-                s.id, f.at, f.first, f.last
-            ));
+        if s.track == 0 || s.shot == 0 {
+            v.push(format!("still {} has a track or a shot of 0", s.id));
         }
-        let named = Path::new(&s.picture).file_name() == Some(OsStr::new(&s.picture));
-        if s.picture.is_empty() || !named {
-            v.push(format!("still {} has no file name: {:?}", s.id, s.picture));
+        let name = format!("still {}", s.id);
+        held(
+            v,
+            &name,
+            (&s.picture, s.layers, &s.source),
+            (&s.grade, &s.timeline_grade),
+        );
+    }
+    let mut slots = HashSet::new();
+    for m in &p.memories {
+        if !m.slot.is_ascii_uppercase() || !slots.insert(m.slot) {
+            v.push(format!("memory {} is not one slot from A to Z", m.slot));
         }
-        for (which, g) in [("clip", &s.grade), ("timeline", &s.timeline_grade)] {
-            if let Some(Err(e)) = g.as_ref().map(crate::ops::grade::checked) {
-                v.push(format!(
-                    "the {which} grade of still {}: {}",
-                    s.id, e.message
-                ));
-            }
+        let name = format!("memory {}", m.slot);
+        held(
+            v,
+            &name,
+            (&m.picture, m.layers, &m.source),
+            (&m.grade, &m.timeline_grade),
+        );
+    }
+}
+
+fn held(
+    v: &mut Vec<String>,
+    name: &str,
+    (picture, layers, f): (&str, usize, &StillSource),
+    (grade, timeline_grade): (&Option<Grade>, &Option<Grade>),
+) {
+    let named = Path::new(picture).file_name() == Some(OsStr::new(picture));
+    if picture.is_empty() || !named {
+        v.push(format!("{name} has no file name: {picture:?}"));
+    }
+    if layers == 0 {
+        v.push(format!("{name} has 0 node stack layers"));
+    }
+    if !(f.first <= f.at && f.at <= f.last && f.origin.is_finite()) {
+        v.push(format!(
+            "{name}: its frame {} is not in its clip, {} to {}",
+            f.at, f.first, f.last
+        ));
+    }
+    for (which, g) in [("clip", grade), ("timeline", timeline_grade)] {
+        if let Some(Err(e)) = g.as_ref().map(crate::ops::grade::checked) {
+            v.push(format!("the {which} grade of {name}: {}", e.message));
         }
-        if (s.timeline_grade.as_ref())
-            .is_some_and(|g| g.is_masked() || !g.layers.is_empty() || !g.kept_layers.is_empty())
-        {
-            v.push(format!(
-                "the timeline grade of still {} has layers or a Magic Mask",
-                s.id
-            ));
-        }
+    }
+    if (timeline_grade.as_ref())
+        .is_some_and(|g| g.is_masked() || !g.layers.is_empty() || !g.kept_layers.is_empty())
+    {
+        v.push(format!(
+            "the timeline grade of {name} has layers or a Magic Mask"
+        ));
     }
 }
 

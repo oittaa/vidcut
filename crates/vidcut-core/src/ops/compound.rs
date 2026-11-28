@@ -54,6 +54,7 @@ fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> 
         let track = &mut p.tracks[i];
         let id = format!("{}{}", tracks::prefix(kind), n + 1);
         let mut inner = Track::new(id, kind);
+        inner.format = track.format;
         let (moved, kept): (Vec<Clip>, Vec<Clip>) = std::mem::take(&mut track.clips)
             .into_iter()
             .partition(|c| ids.contains(&c.id));
@@ -467,14 +468,22 @@ fn slot(id: &str) -> usize {
     id[1..].parse::<usize>().map_or(0, |n| n.saturating_sub(1))
 }
 
-fn target(p: &mut Project, kind: TrackKind, n: usize, span: (i64, i64), lay: Lay) -> Result<usize> {
-    let ti = tracks::nth(p, kind, n);
-    match lay {
-        Lay::OnEdit => unlocked(p, ti)?,
-        Lay::InPlace if !free(&p.tracks[ti], span) => {
-            tracks::insert_at(p, kind, ti);
+fn target(p: &mut Project, inner: &Track, n: usize, span: (i64, i64), lay: Lay) -> Result<usize> {
+    let had = p.tracks_of(inner.kind).len();
+    let ti = tracks::nth(p, inner.kind, n);
+    let made = match lay {
+        Lay::OnEdit => {
+            unlocked(p, ti)?;
+            false
         }
-        Lay::InPlace => {}
+        Lay::InPlace if !free(&p.tracks[ti], span) => {
+            tracks::insert_at(p, inner.kind, ti);
+            true
+        }
+        Lay::InPlace => false,
+    };
+    if made || p.tracks[ti].number() > had {
+        p.tracks[ti].format = inner.format;
     }
     Ok(ti)
 }
@@ -623,7 +632,7 @@ fn spread(
                 n + 1
             )));
         }
-        let ti = target(p, inner.kind, n, (host.start, host.end()), lay)?;
+        let ti = target(p, inner, n, (host.start, host.end()), lay)?;
         put_back(p, (ti, lay), inner, parts, &mut made);
     }
     for id in &made {

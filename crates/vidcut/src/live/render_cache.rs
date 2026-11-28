@@ -768,6 +768,7 @@ mod tests {
         RenderPlan {
             output_lut: None,
             timeline_grade: None,
+            fields: false,
             fps: Rational::new(25, 1).unwrap(),
             width: 16,
             height: 16,

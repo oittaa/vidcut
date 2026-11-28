@@ -15,7 +15,8 @@ use vidcut_core::export::{
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
-use vidcut_core::model::{Clip, Generator, padded_frame};
+use vidcut_core::model::{Clip, Cue, Generator, padded_frame};
+use vidcut_core::ops::conform::Rates;
 use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
@@ -424,7 +425,7 @@ pub fn subtitles_beside(
         all.extend(vidcut_core::subtitles::beside(
             p,
             &o.path,
-            o.plan.range,
+            o.range,
             params.subtitles.as_deref(),
             params.subtitle_format,
             false,
@@ -467,6 +468,7 @@ fn default_preset(output: &Path) -> &'static str {
 
 pub struct Output {
     pub plan: RenderPlan,
+    pub range: (i64, i64),
     pub path: PathBuf,
     pub numbering: Numbering,
     pub settings: ExportSettings,
@@ -524,8 +526,20 @@ fn subtitle_tracks(p: &Project, params: &ExportParams, how: SubtitlesAs) -> Resu
     Ok(chosen)
 }
 
-fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitles::Track {
+fn subtitle_track(
+    p: &Project,
+    ti: usize,
+    (a, b): (i64, i64),
+    rates: Option<Rates>,
+) -> engine::subtitles::Track {
     let t = &p.subtitles[ti];
+    let at_rate = |c: &Cue| {
+        let mut c = c.clone();
+        if let Some(r) = rates {
+            vidcut_core::ops::conform::cue(&mut c, r);
+        }
+        c
+    };
     engine::subtitles::Track {
         id: t.id.clone(),
         name: t.display_name(),
@@ -535,6 +549,7 @@ fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitl
         cues: t
             .cues
             .iter()
+            .map(at_rate)
             .filter(|c| c.start < b && c.end() > a && !c.text.trim().is_empty())
             .map(|c| {
                 let cut = c.start.max(a) - c.start;
@@ -547,7 +562,7 @@ fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitl
                     place: c.place,
                     words: c.times().into_iter().map(|w| (w - cut).max(0)).collect(),
                     word_styles: c.words.iter().map(|w| w.style.clone()).collect(),
-                    color: p.speakers.color_of(c),
+                    color: p.speakers.color_of(&c),
                     style: c.style.clone(),
                     picture: keyed.picture.as_deref().cloned(),
                 }
@@ -594,9 +609,10 @@ fn add_subtitles(
     }
     for o in outputs {
         let range = o.plan.range;
+        let rates = Rates::new(p.fps(), o.plan.fps);
         let made: Vec<engine::subtitles::Track> = tracks
             .iter()
-            .map(|&ti| subtitle_track(p, ti, range))
+            .map(|&ti| subtitle_track(p, ti, range, rates))
             .collect();
         o.subtitles = match how {
             SubtitlesAs::Burn => engine::subtitles::Subtitles {
@@ -1088,6 +1104,9 @@ pub fn prepare(
         offline = p.offline_in(clips.iter().filter_map(|(_, id, _, _)| p.clip(id)));
         for (i, (start, id, place, folder)) in clips.into_iter().enumerate() {
             let plan = render::flatten_clip(&proj, &id)?;
+            let range = proj
+                .clip(&id)
+                .map_or((start, start), |c| (c.start, c.end()));
             let clip = p
                 .clip(&id)
                 .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
@@ -1108,12 +1127,16 @@ pub fn prepare(
                 count,
             };
             let path = clip_path(params, &settings, &name)?;
-            let mut numbering = settings.numbering(p.start_tc() + start, drop_frame);
+            let record = p.start_tc() + start;
+            let record = Rates::new(p.fps(), plan.fps).map_or(record, |r| r.frame(record));
+            let drop = drop_frame && plan.fps.has_drop_frame();
+            let mut numbering = settings.numbering(record, drop);
             numbering.first = settings.first_number(count);
             outputs.push(Output {
                 path,
                 numbering,
                 plan,
+                range,
                 settings: settings.clone(),
                 color: None,
                 metadata: None,
@@ -1127,8 +1150,10 @@ pub fn prepare(
     } else {
         let heard = |c: &&Clip| c.start < b && c.end() > a;
         offline = p.offline_in(p.tracks.iter().flat_map(|t| &t.clips).filter(heard));
+        let plan = render::flatten(&proj, a, b)?;
         outputs.push(Output {
-            plan: render::flatten(&proj, a, b)?,
+            range: plan.range,
+            plan,
             path: params.output.clone(),
             numbering: settings.numbering(p.start_tc() + a, drop_frame),
             settings: settings.clone(),

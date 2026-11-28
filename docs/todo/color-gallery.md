@@ -1,8 +1,8 @@
 # Gallery, stills and groups
 
-- Still IDs from the track and the place of the clip, in place of s1, s2. Change Label of a still.
+- The .T end of the ID of a still grabbed in the Timeline mode.
 - PowerGrade albums, and the sort menu of the Albums list.
-- Memories A to H.
+- Memories: Ctrl+1 to Ctrl+8 for Load Memory, Preview Memory, and a drag of a memory into the Gallery.
 - Import and export of stills.
 - The Apply Grade submenu of the viewer. A timeline grade with keyframes in Apply Grade of a still.
 - Align Keyframes to Current Frame gave no change with the still m_2N of the color fixture notes. Find the rule.

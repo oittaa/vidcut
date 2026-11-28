@@ -92,7 +92,10 @@ impl Encoders {
         });
         let uints = FORMATS.iter().map(|&f| (f, "fs_encode"));
         let unorms = FORMATS.iter().map(|&f| (unorm(f), "fs_encode_unorm"));
-        let floats = [(wgpu::TextureFormat::R32Float, "fs_encode_float")];
+        let floats = [
+            (wgpu::TextureFormat::R32Float, "fs_encode_float"),
+            (wgpu::TextureFormat::R16Float, "fs_encode_float"),
+        ];
         let pipelines = uints
             .chain(unorms)
             .chain(floats)
@@ -211,15 +214,19 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             alpha: 0,
         }
     };
-    let floats = |alpha: bool| {
+    let floats = |depth: u32, alpha: bool| {
         let kinds = [FLOAT_GREEN, FLOAT_BLUE, FLOAT_RED, FLOAT_ALPHA];
         let count = if alpha { 4 } else { 3 };
+        let (format, texel) = match depth {
+            16 => (T::R16Float, 2),
+            _ => (T::R32Float, 4),
+        };
         Layout {
-            depth: 32,
+            depth,
             shift: 0,
             planes: kinds[..count]
                 .iter()
-                .map(|&kind| plane(kind, T::R32Float, 4, (0, 0)))
+                .map(|&kind| plane(kind, format, texel, (0, 0)))
                 .collect(),
             alpha: 0,
         }
@@ -257,8 +264,10 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             planes: vec![plane(RGBA, T::Rgba16Uint, 8, (0, 0))],
             alpha: 0,
         },
-        P::GBRPF32LE => floats(false),
-        P::GBRAPF32LE => floats(true),
+        P::GBRPF16LE => floats(16, false),
+        P::GBRAPF16LE => floats(16, true),
+        P::GBRPF32LE => floats(32, false),
+        P::GBRAPF32LE => floats(32, true),
         P::AYUV64LE => Layout {
             depth: 16,
             shift: 0,

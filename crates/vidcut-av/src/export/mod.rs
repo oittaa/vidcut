@@ -4,7 +4,7 @@ pub mod bypass;
 pub mod encode;
 pub(crate) mod make;
 pub(crate) mod normalize;
-mod openexr;
+pub(crate) mod openexr;
 pub mod renderer;
 pub mod still;
 pub mod subtitles;
@@ -418,6 +418,7 @@ fn frames_of(
         .with_timeline(plan.colors)?
         .with_output_lut(plan.output_lut.as_deref())?
         .with_timeline_grade(plan.timeline_grade.as_ref())
+        .with_fields(plan.fields)
         .grading_from(plan.range.0)
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1, plan.height);

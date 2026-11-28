@@ -4677,7 +4677,7 @@ fn params_of(
         range,
         [colors.kr, colors.kb, kg, colors.linear_scale],
         colors.tone,
-        [g[0][0], g[0][1], g[0][2], 0.0],
+        [g[0][0], g[0][1], g[0][2], max / code],
         [g[1][0], g[1][1], g[1][2], 0.0],
         [g[2][0], g[2][1], g[2][2], 0.0],
     ];
@@ -4723,9 +4723,11 @@ fn params_of(
     };
     floats.extend([site[0], site[1], alpha_mode, alpha_use]);
     let woven = picture.woven().map_or([0.0, 0.0], |w| {
+        let kept = if w.top_first != w.second { 1.0 } else { 2.0 };
+        let far = if w.second { &w.after } else { &w.before };
         [
-            if w.top_first { 1.0 } else { 2.0 },
-            f64::from(u8::from(w.before.is_some())),
+            kept + if w.second { 2.0 } else { 0.0 },
+            f64::from(u8::from(far.is_some())),
         ]
     });
     let frame = (f64::from(size.0), f64::from(size.1));

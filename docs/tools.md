@@ -17,6 +17,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `g=GOP` sets the keyframe spacing. `b=BFRAMES` sets the B-frames.
 - H.264 with B-frames has open GOPs.
 - `busy` adds new noise around the barcode in each frame. Thus the stream is heavy to decode.
+- `tff` or `bff` makes an interlaced stream, top field first or bottom field first. Each field shows the barcode block at a new place.
+- `media/interlaced-tff.mov` of the measurements is `make_fixture h264 mov 1920x1080 25 50 tff`, copied there.
 
 **GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in four common exports and in the viewer.
 
@@ -204,6 +206,12 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - The workers and the job yield to players, at the lowest priority.
   - One worker at a time decodes beside the player, as timeline tiles do.
   - It prints the presents that showed the previous picture, the tiles and job frames each second, the maximum thread count and the peak memory.
+- `field_check SOURCE|REFERENCE FOLDER`: compares the frames in `FOLDER` with a reference, frame by frame in name order.
+  - With `SOURCE`, the reference is FFmpeg's `bwdif` in field mode on that interlaced file. With a folder, it is the frames in that folder.
+  - It prints the largest and the mean difference in each frame, with the place of the largest.
+  - It compares float values with no clip, and prints the range of the values on each side. FFmpeg's conversion to RGB clips the `SOURCE` reference to 0 to 1.
+  - It gives them in three parts: the top and bottom 4 rows, moving areas and still areas.
+  - A pixel moves when its luma in `FOLDER` differs by more than 2 levels from the frame before or after.
 - `decode_speed FILE [FRAMES] [START_S]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
   - It starts at `START_S` seconds into the file. On Windows, it also prints the GPU memory that the decoding takes.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build):

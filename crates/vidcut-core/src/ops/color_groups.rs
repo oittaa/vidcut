@@ -86,9 +86,10 @@ pub fn proposed_name(p: &Project) -> String {
     let free = |name: &str| p.color_groups.iter().all(|g| g.name != name);
     let newest = p.color_groups.last().map(|g| g.name.as_str()).unwrap_or("");
     let lead = newest.trim_end_matches(|c: char| c.is_ascii_digit());
-    let (lead, from) = match newest[lead.len()..].parse::<u64>() {
-        Ok(n) => (lead.to_string(), n + 1),
-        Err(_) => ("Group ".to_string(), 1),
+    let next = (newest[lead.len()..].parse::<u64>().ok()).and_then(|n| n.checked_add(1));
+    let (lead, from) = match next {
+        Some(n) => (lead.to_string(), n),
+        None => ("Group ".to_string(), 1),
     };
     (from..)
         .map(|n| format!("{lead}{n}"))
@@ -112,6 +113,9 @@ fn joined(p: &mut Project, clips: &[String], group: &str) -> Result<()> {
 }
 
 pub fn add(p: &mut Project, clips: &[String], name: Option<&str>) -> Result<String> {
+    if clips.is_empty() {
+        return Err(Error::usage("give the clips"));
+    }
     let name = match name {
         Some(n) => named(n)?,
         None => proposed_name(p),
@@ -183,18 +187,25 @@ pub fn collapse(p: &mut Project, clips: &[String]) -> Result<()> {
     if clips.is_empty() {
         return Err(Error::usage("give the clips"));
     }
+    let mut seen = HashSet::new();
+    let clips: Vec<&String> = clips.iter().filter(|id| seen.insert(id.as_str())).collect();
     let frame = p.frame_size();
-    for id in clips {
-        let g = of_clip(p, id)?.clone();
-        let own = grade::stored(p, &GradeOf::Clip(id.clone(), 1))?;
-        let usual = Grade::usual(frame);
+    let usual = Grade::usual(frame);
+    let mut flats = Vec::new();
+    for id in &clips {
+        let g = of_clip(p, id)?;
+        let own = grade::stored(p, &GradeOf::Clip((*id).clone(), 1))?;
         let mut flat = g.pre.clone().unwrap_or_else(|| usual.clone());
         grade::appended(&mut flat, &own);
         grade::appended(&mut flat, g.post.as_ref().unwrap_or(&usual));
-        grade::store(p, &GradeOf::Clip(id.clone(), 1), &flat)?;
+        grade::checked(&flat)?;
+        flats.push(flat);
+    }
+    for (id, flat) in clips.iter().zip(&flats) {
+        grade::store(p, &GradeOf::Clip((*id).clone(), 1), flat)?;
     }
     for t in p.tracks.iter_mut() {
-        for c in t.clips.iter_mut().filter(|c| clips.contains(&c.id)) {
+        for c in t.clips.iter_mut().filter(|c| seen.contains(c.id.as_str())) {
             c.color_group = None;
         }
     }

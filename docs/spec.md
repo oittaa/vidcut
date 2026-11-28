@@ -878,11 +878,55 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Clips on these tracks sit freely, with gaps.
 - **Audio tracks:**
   - A1, A2, … are below the video tracks. They hold all the sound. A clip on a video track has picture only (pp. 646–647).
-  - The sound of a picture on Vn goes on An. A second sound stream goes on the next audio track (D24).
+  - The sound of a picture on Vn goes on An. Each next sound track of the file goes on the next audio track (D24).
   - Media without video go there by default (D26).
+- **Track types** (pp. 1099–1100, 3804–3805, 3807):
+  - An audio track has a type:
+    - Mono, Stereo, LRC, LCR, LRCS, LCRS and Quad.
+    - 5.0, 5.0 Film, 5.1, 5.1 Film, 7.0, 7.0 Film, 7.1 and 7.1 Film.
+    - Adaptive 1 to 36.
+    - The manual gives Adaptive 1 to 24 (pp. 1100, 3805). The menu has 1 to 36.
+  - The type gives the channels of the track and their order (pp. 3804–3805):
+    - 5.0 and 5.1 put L, R and C first. 5.0 Film and 5.1 Film put L, C and R first. Then come the surrounds, with the LFE fourth in 5.1 and last in 5.1 Film.
+    - 7.0, 7.0 Film, 7.1 and 7.1 Film are in the same order, with the back surrounds after the side surrounds.
+    - vidcut: the S of LRCS and LCRS is a back center. Quad has two back surrounds. Adaptive n has the usual layout of n channels (not measured).
+  - The menu of the track header has Change Track Type to (p. 3807).
+    - Its submenu has Mono, Stereo, 3.0, 4.0, 5.x, 7.x and Adaptive.
+    - 3.0 opens LRC and LCR. 4.0 opens LRCS, LCRS and Quad. 5.x and 7.x open their four types. Adaptive opens 1 to 36.
+  - A change of type keeps the clips with their lengths, links and channels.
+  - The track header shows the type: 1.0 for Mono, 2.0 for Stereo, 5.1, 7.1, and (4) for Adaptive 4.
+    - vidcut: the other types show 3.0, 4.0, 5.0, 7.0 and (n) (not measured).
+  - vidcut: `track.set` with `format` changes the type. `track.add` makes Stereo tracks.
+- **What a track plays** (p. 1099):
+  - A track plays the first channels of each clip, as many as the track has. The other channels of the clip are not heard.
+  - A Stereo track plays channels 1 and 2 of a 5.1, 7.1 or four-channel clip, one to each side.
+  - vidcut: a clip of one channel plays at its full level on each side, on a track of each type (§9, Clip pan).
+  - vidcut: a channel of the track that the clip does not fill is silent (not measured).
+  - vidcut: a track of three channels or more mixes into the channels of the project as a file with its channels does (not measured).
+  - vidcut: an Adaptive track of more than 24 channels mixes its first 24 channels. FFmpeg has no layout of more channels (not measured).
+- **Sound tracks of a file:**
+  - A file has a sound track for each audio stream of one to four channels.
+    - The sound track is Mono for one channel, Stereo for two, and Adaptive 3 or 4 for more.
+  - A stream of five channels or more has a Mono sound track for each channel.
+    - vidcut: so does a stream of seven channels or of more than eight (not measured).
+  - An edit makes one sound clip for each sound track of the file, all linked with the picture. Each clip goes on the next audio track (D24).
+  - A new audio track gets the type of its sound track. An audio track that is there keeps its type. Thus A1 stays Stereo with a Mono clip.
+    - vidcut: a new timeline has no A1. The edit that makes A1 makes it Stereo, as the A1 of a new timeline in Resolve is.
+  - A clip of a stream of three or four channels holds them all, on one track.
+  - An OTIO export writes `Audio Type` on each audio track: `Mono` or `Stereo`.
+    - vidcut: the other types write their names, as `5.1` and `Adaptive 4` (not measured).
+  - The `Channels` of a clip name each channel by its sound track of the file (`Source Track ID`) and its channel in that track.
+  - vidcut: its metadata keeps `stream` and `channels`. An import reads them first, and else the `Channels`.
+- **Audio Channel** (clip menu):
+  - The menu of a sound clip of one channel has Audio Channel at the bottom. A clip of more channels has none.
+  - It lists Embedded Channel 1 to n. The channels of the file count from 1, over all its audio streams in order. The channel of the clip has a check mark.
+  - A choice gives the clip and each linked sound clip of one channel that channel. Their lengths and links do not change.
+  - One undo gives each clip its channel back.
+  - vidcut: `clip.set` with `channel` chooses it.
+  - vidcut: a linked clip of another file keeps its channel (not measured).
 - **Track header** (p. 647):
   - A click makes the track the target (D3).
-  - A right-click adds a video or audio track, or removes one (D27).
+  - A right-click adds a video or audio track, or removes one (D27). On an audio track it also has Change Track Type to.
 - **Overlapping video:**
   - The highest enabled track is visible (p. 647).
   - A disabled clip, or a track with its video off, shows what is under it.
@@ -952,7 +996,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Append** (Shift+F12; p. 697): it ignores the playhead, and puts the clip after the last clip.
   - Sound alone goes to the audio track after the tracks with the sound of V1. When V1 has no sound, A1 is the track of V1. Thus on an empty timeline, the clip goes to A2.
     - Append makes this track if necessary. The new track has the channels of the clip: a mono clip makes a mono track.
-    - vidcut: a track has no channel type ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
     - The clip starts at the end of the timeline. A second Append of sound alone goes on the same track, after the first clip.
   - The sound of a picture does not write over a clip on its audio track:
     - A clip at the first frame of the sound moves the start of the sound to the end of that clip. The sound stops at the next clip. It stays in sync.
@@ -2797,6 +2840,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - Thus V2 and V3 become V1 and V2. V1 and V3 become V1, an empty V2 and V3.
   - They have default names.
   - They are enabled, also when the outer track is disabled.
+  - vidcut: an inner audio track has the type of the track that its clips come from (not measured).
 - **Where it goes:**
   - The picture goes on the lowest selected video track.
   - A clip on that track in the span that is not selected puts the picture on a new track directly above. Higher tracks move up.
@@ -2940,6 +2984,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - Cuts stay. A clip that was cut at In comes back as two pieces.
   - A free track is used as it is, and no track is added.
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
+  - vidcut: a new audio track has the type of its inner track (not measured).
   - This is the same on video tracks and on audio tracks.
   - The settings of the compound clip itself are dropped:
     - Transform, Crop, Opacity, Composite, Dynamic Zoom and their keyframes.
@@ -5194,7 +5239,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An OpenTimelineIO export writes the keyframes as the Pan and Tilt keyframes of the Transform, as for other Position keyframes.
   - [design](design/analysis.md#smart-reframe) gives the method.
 
-### 8.31 Gallery and Apply Grade (pp. 3050, 3332–3341, 3361–3366, 3400, 3405)
+### 8.31 Gallery and Apply Grade (pp. 3050, 3332–3348, 3361–3366, 3400, 3405)
 
 - The manual:
   - The Gallery is at the left of the viewer on the Color page (p. 3050).
@@ -5223,6 +5268,43 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A click on an album opens it. A double-click on an album renames it.
     - A drag of a still onto an album moves the still into that album.
     - Remove Current Album in the menu of an album deletes the album and its stills, after a Delete prompt.
+  - Still IDs and labels (pp. 3337–3338):
+    - A still ID has three numbers, Track.Shot.Version: the video track of the clip, its place in the timeline and the version of the grade.
+    - Change Label in the menu of a still opens a Change Still Label dialog. The label shows under the still ID.
+    - A double-click under the still ID labels the still too.
+  - Memories (pp. 3347–3348, 3364–3365):
+    - A memory holds the same as a still. Its name is a letter from A to Z.
+    - The Memories button at the right of the Albums button shows or hides the memories.
+    - A drag of a still onto a memory copies the still into it. A drag of a memory into the Gallery copies it into the album.
+    - Color > Memories > Save Memory A to H (Option-1 to Option-8) saves the grade of the current clip. It replaces what the memory held.
+    - Color > Memories > Load Memory A to H (Command-1 to Command-8) gives the grade of a memory to the selected clips.
+    - Apply Grade in the menu of a memory, or a middle-click on it, gives its grade to the current clip.
+    - Clear in the menu of a memory clears it.
+    - Color > Preview Memory (Option-Shift-P) shows a memory on the current clip before the clip takes it.
+- **Still IDs and labels**:
+  - The first number is the video track of the clip at the grab. The second is the place of the clip on that track, from 1.
+  - A generator does not count in the place. A clip put before the clip later does not change the ID of an older still.
+  - The third number is not the version of the grade. Four stills of one version had 1.1.1 to 1.1.4.
+  - The third number is the place of the still among the stills with the same album, timeline and first two numbers.
+  - These stills are in the order of their timeline frames. At the same frame, the older still is first.
+  - Thus a grab, a delete or a move of a still can change the third number of other stills.
+  - Two timelines can give the same ID in one album.
+  - Change Label opens no dialog. A text field opens under the still, with the label selected. Enter keeps the text.
+  - A double-click under the still ID turns on the wipe. It does not label the still.
+  - Ctrl+Z does not take back a label ([gotchas](gotchas.md#resolves-edits)).
+- **Memories** (two node stack layers, where the rule names one):
+  - A save into a full memory asks nothing. The new grade replaces the memory.
+  - A memory holds each node stack layer of the clip, also when L2 is shown at the save.
+  - Load Memory in the Clip mode:
+    - With L1 shown, L1 of each target takes L1 of the memory. L2 of each target was 1 empty node, before and after.
+    - With L2 shown, L2 takes L2 of the memory. L1 stays.
+    - A memory saved in a project with one layer goes into the shown layer.
+  - Load Memory in the Timeline mode replaces the timeline grade, with its node labels. The clips do not change.
+  - Project Memories in the Gallery view has 26 memories, A to Z. The Color > Memories menu has only A to H.
+  - A memory shows its picture. An empty memory is black, with its letter in the corner.
+  - A drag of a still onto a memory copies the still there. The still stays in its album.
+  - Apply Grade in the menu of a memory gives the grade of the memory to the current clip.
+- **Apply Grade of a still**: with two node stack layers, a still of one layer sets L2 of each target to 1 empty node.
 - **Keyframes of an applied still**:
   - No Keyframes: each node takes the values of its last keyframe at or before the grabbed frame. Before its first keyframe, a node has its own values.
   - There is no blend between two keyframes, also with Dynamic keyframes. The clip gets no keyframes.
@@ -5247,6 +5329,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows the stills of the open album, the oldest first.
+  - Under each still, it shows the still ID, and the label under the ID.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
     - The still goes into `album`. Left out, it goes into the open album of a running GUI. Without a GUI, it goes into the first album (not measured).
     - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
@@ -5255,7 +5338,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - In the mode Group Pre Clip or Group Post Clip, the still holds only that grade of the group ([§8.33](#833-color-groups-pp-33763381-3400)).
     - The picture is the frame of the timeline with all grades and the output LUT, at the size of the timeline.
     - The picture has no display LUT. It is a 32-bit float OpenEXR file ([design](design/export.md#the-gallery)).
-    - The ID of a still is `s1`, `s2` and so on. A new still has no label.
+    - The `id` of a still is `s1`, `s2` and so on. Requests name a still by it. A new still has no label.
     - An open compound clip stops a grab.
   - A click selects one still. A Ctrl-click adds a still to the selection or takes it out. `selection.set` with `stills` does the same.
   - `gallery.remove` deletes stills. Delete Selected in the menu of a still does it, with no prompt.
@@ -5288,8 +5371,36 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The keyframes of a clip grade keep their frames.
     - A timeline grade with keyframes does not append. The request gives an error.
     - It is one undo step.
-  - `gallery.get` gives each still, with its album and the path of its picture.
+  - `gallery.get` gives each still, with its album, its still ID (`number`) and the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
+  - Still IDs and labels:
+    - The still ID follows the rules above. The still keeps the track and the place of its clip from the grab.
+    - `gallery.label` sets the label of a still. Change Label in the menu of a still does it, in a field under the still.
+    - Enter keeps the text. A click outside the field or Esc keeps the old label (not measured).
+    - An empty label takes the label away (not measured).
+    - A double-click under the still ID does nothing. The wipe comes later ([todo](todo/color-gallery.md)).
+    - Each label is one undo step ([gotchas](gotchas.md#resolves-edits)).
+  - Memories:
+    - `gallery.grab` with `memory`, a letter from A to Z, saves a memory. A save replaces what the memory held, with no prompt.
+    - Color > Memories > Save Memory A to H, and Alt+1 to Alt+8, save at the playhead.
+    - A memory holds what a still holds.
+    - The Memories button, at the right of the Albums button, shows or hides the memories above the stills.
+    - `gui.gallery` with `memories` shows or hides them too, and `gui.state` gives `memories`.
+    - The 26 memories, A to Z, show as boxes. Each box shows its picture, or black, and its letter in the corner.
+    - `gallery.memory.copy` copies a still into a memory. A drag of a still onto a memory does it.
+    - With more than one still in the drag, the first still goes into the memory (not measured).
+    - `gallery.memory.load` gives the grade of a memory. Color > Memories > Load Memory A to H does it. An empty memory is grey there.
+    - In the Clip mode, the shown node stack layer of each target takes the same layer of the memory.
+    - A memory of one layer gives that layer. The other layers of the target stay (not measured).
+    - The targets are those of `gallery.apply`.
+    - In the Timeline mode, the timeline grade of the memory replaces the timeline grade of the open timeline.
+    - A grade with keyframes does not load. The request gives an error.
+    - `gallery.memory.apply` gives the grade of a memory, as `gallery.apply` does with a still.
+    - Apply Grade in the menu of a memory, or a middle-click on it, sends `gallery.memory.apply`.
+    - `gallery.memory.clear` empties a memory. Clear in the menu of a memory does it.
+    - `gallery.memory.list` gives each memory, with its slot and the path of its picture.
+    - Each save, copy, load, apply and clear is one undo step.
+    - Ctrl+1 to Ctrl+8 for Load Memory, Preview Memory and a drag of a memory into the Gallery come later ([todo](todo/color-gallery.md)).
   - Albums:
     - A new project has one album, Stills 1, with the ID `a1`.
     - The Albums button at the top left of the Gallery shows or hides the Albums list. `gui.gallery` with `albums` does the same.
@@ -5305,7 +5416,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The last album stays. Its removal gives an error (not measured).
     - `gallery.album.list` gives each album, with its count of stills.
     - Each add, rename, move and removal is one undo step.
-  - Still IDs of the form Track.Shot.Version, labels and the drag into the viewer come later ([todo](todo/color-gallery.md)).
+  - The .T end of the ID of a still grabbed in the Timeline mode, and the drag into the viewer, come later ([todo](todo/color-gallery.md)).
   - PowerGrade albums and the sort menu of the Albums list come later ([todo](todo/color-gallery.md)).
 
 ### 8.32 Copying grades between clips (pp. 3361–3364, 3464)
@@ -5321,7 +5432,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the first clip, the commands give no change.
 - vidcut:
   - `grade.apply` gives clips the whole clip grade of another clip, with each node stack layer. It is one undo step.
-    - The grade replaces the whole grade of each target, as with `gallery.apply` ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
+    - The grade replaces the whole grade of each target, as with `gallery.apply` ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)).
     - The grade comes from `from` (a clip), from `prior` (1 or 2), or from `grade` (a grade that `grade.copy` gave).
     - With no `clips`, the target is the clip at the playhead.
   - Each keyframe stays on its source frame. Thus on another clip of the same media, it is on the same source timecode.
@@ -5388,6 +5499,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `color_group.rename` renames a group. `color_group.remove` deletes a group after the "Delete Clip Group?" prompt. The clips keep their clip grades.
   - `color_group.collapse` makes layer 1 of each clip: the Pre-Clip nodes, the nodes of layer 1, then the Post-Clip nodes. Each clip leaves its group.
   - `color_group.get` gives each group with its clips.
+  - A pasted clip keeps its color group. When the project has no such group, the clip comes in with no group (not measured).
   - The grade requests take `group`, `pre` or `post`. They then change that grade of the group of the clip.
     - A group grade has one layer. It takes no Magic Mask.
     - Its keyframes count in the frames of each clip, as the keyframes of a clip grade do (not measured).
@@ -5957,7 +6069,12 @@ The Audio page follows the Fairlight page of the manual.
   - While the meter panel shows, the Mixer of the page has no loudness meter.
 - **Rows** (pp. 3749–3751):
   - Each audio track has a row. A1 is at the top. Video tracks have no row (not measured).
-  - A clip shows its waveform at the full height of the row, its name, and its volume line with its keyframes (§9) (not measured).
+  - A clip shows its waveform, its name, and its volume line with its keyframes (§9) (not measured).
+  - A clip shows a lane for each channel of its track, not of the clip. The lanes divide the height of the row. They have no label.
+    - Thus a 5.1 clip on a Stereo track shows two lanes, and a clip on a Mono track shows one.
+    - Each lane shows the waveform of its channel. A silent channel shows a flat line.
+    - vidcut: a clip of one channel shows its waveform in each lane. A lane past the channels of the clip is empty (not measured).
+  - A click in one lane selects the clip. A trim in one lane trims all its lanes.
   - A sound clip that is linked to a picture shows on its own row (not measured).
   - The rows keep their height. With more rows than room, the rows scroll (not measured).
   - The edits of the Cut page act on the rows: select, move, trim, split, delete and the volume line.
@@ -5966,10 +6083,11 @@ The Audio page follows the Fairlight page of the manual.
   - The Timeline Options, Timeline Actions and Edit Actions menus and the tools of the Cut page are at the left of the ruler.
 - **Track header** (pp. 3752–3753):
   - It has the track number, the name, Lock, Solo, Mute, the fader value and a meter (not measured).
+  - It shows the type of the track, as on the Edit page (§6).
   - Its Solo button acts as the Solo button of the Mixer, with Solo Safe and Exclusive Solo (§9).
   - The fader value is the fader of the Mixer, in dB. A drag up or right raises it. A typed value sets it (not measured).
   - A click on the header makes the track the target of the edit functions (not measured).
-  - Its right-click menu has Add Audio Track and Remove Track.
+  - Its right-click menu has Add Audio Track, Remove Track and Change Track Type to (§6).
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
@@ -6394,7 +6512,11 @@ The Audio page follows the Fairlight page of the manual.
   - A source at a rate that is not the rate of the timeline gets the count of its first frame too.
   - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
-  - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
+  - Each clip renders at the frame rate of its media (p. 4114). Its file has that frame rate.
+    - A still, a title, a generator and a compound clip render at the frame rate of the timeline.
+    - The file holds the source frames that the clip shows, and no others ([gotchas](gotchas.md#resolves-renders)).
+    - The record timecode of the file and the times of its subtitles count at that frame rate.
+    - An interlaced source renders at its field rate, one frame for each field (D34).
   - The parts of a name go in this order: unique prefix, name, frame count, File Suffix, unique suffix.
   - Separate Folders puts each file in a folder of its own. An audio track counts by its own number: A2 and V2 both give `0002`.
   - The folders go in this order: the Source Folder Levels, the folder of Separate Folders, then the File Subfolder.
@@ -6601,7 +6723,8 @@ The Audio page follows the Fairlight page of the manual.
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129)) |
-| Ctrl+Alt+G | Color page: Grab Still ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)) |
+| Ctrl+Alt+G | Color page: Grab Still ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)) |
+| Alt+1 to Alt+8 | Color page: Save Memory A to H ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)) |
 | = / − | Color page: Apply Grade From One Clip Prior / Two Clips Prior ([§8.32](#832-copying-grades-between-clips-pp-33613364-3464)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
@@ -6746,7 +6869,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D24. Where Place On Top goes** (pp. 699–700).
   - It goes onto the video track above the highest track with clips in the incoming span. It makes that track if necessary.
   - It goes onto Track 1 only if no track has clips there (D10 applies).
-  - The sound of a picture on Vn goes on An, linked to it (p. 646). A second sound stream goes on the next audio track. Each sound clip writes over what is there.
+  - The sound of a picture on Vn goes on An, linked to it (p. 646). Each next sound track of the file goes on the next audio track (§6). Each sound clip writes over what is there.
   - Sound alone goes to a new audio track after the last one. A track with room does not take it.
 - **D25. Moving clips between tracks.**
   - A move gives positions as they are before the move.
@@ -6866,11 +6989,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Mirrored matrices count only as rotations.
 - **D34. Interlaced sources** (p. 741).
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
-  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame.
+  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`. Each frame gives one frame, except in the field render below.
   - The deinterlacer keeps the first field.
+  - The rows that the deinterlacer makes stay in the code range of the source, as in `bwdif`.
   - An interlaced clip comes in with deinterlacing on.
   - Resolve's Clip Attributes has no switch that turns it off.
-  - Output is never interlaced, and never at the field rate.
+  - Output is never interlaced.
+  - An Individual clips render of an interlaced clip is at its field rate (§10.1). Each field is a frame of the file.
+    - Resolve doubles the rows of each field there. vidcut makes the missing rows with the deinterlacer ([gotchas](gotchas.md#resolves-renders)).
+    - The first frame of each pair keeps the first field. The second frame keeps the second field, as `bwdif` does in its field mode.
+  - Other output is at the frame rate of the timeline, not at the field rate.
 - **D35. HDR and color** (pp. 230–239).
   - A clip is HDR when its transfer is PQ or HLG.
   - SDR output tone-maps it to BT.709.
@@ -8579,9 +8707,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Upscale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
+    - Media with an alpha channel is at the clip level only with Uncompressed 16-bit Float, ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
       - With an Alpha Mode of None, it counts as media with no alpha channel.
-      - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color above its alpha.
+      - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color at an alpha of 0. An integer file also cannot hold a color above its alpha.
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
@@ -8606,9 +8734,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
     - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).
     - The other choices:
+      - Uncompressed 16-bit Float
       - ProRes 422 Proxy, LT, 422 and HQ, and ProRes 4444 and 4444 XQ
       - DNxHR LB, SQ, HQ, HQX and 444
       - HEVC and AV1
+    - Uncompressed 16-bit Float keeps each value of the picture, also below 0 and above 1, as half floats (pp. 201, 203). It also keeps the alpha channel (p. 201).
     - A chosen codec goes to the encoder as it is. No other codec takes its place.
     - When no encoder on this computer makes it, the cache stays empty. Preferences then says so under Codec, and `cache.status` gives the error.
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.

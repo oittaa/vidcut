@@ -15,10 +15,10 @@ use crate::error::{Error, Result};
 use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
 use crate::lru::Lru;
 use crate::model::{
-    Album, Clip, ClipFilter, ColorGroup, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds,
-    OpenCompound, PathSample, Project, RenderJob, RenderRange, Settings, SharedNode, Speakers,
-    Still, SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool,
-    Track, TrackKind, Transition, VoiceIsolation,
+    Album, Clip, ClipFilter, ColorGroup, Compound, Cue, Grade, Kept, Marker, Marks, Media, Memory,
+    NextIds, OpenCompound, PathSample, Project, RenderJob, RenderRange, Settings, SharedNode,
+    Speakers, Still, SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline,
+    TimelineSettings, Tool, Track, TrackKind, Transition, VoiceIsolation,
 };
 use crate::shared::SharedVec;
 
@@ -228,6 +228,7 @@ struct MetaRow<'a> {
     shared_nodes: Cow<'a, [SharedNode]>,
     albums: Cow<'a, [Album]>,
     color_groups: Cow<'a, [ColorGroup]>,
+    memories: Cow<'a, [Memory]>,
 }
 
 impl<'a> MetaRow<'a> {
@@ -255,6 +256,7 @@ impl<'a> MetaRow<'a> {
             shared_nodes,
             albums,
             color_groups,
+            memories,
         } = p;
         Self {
             settings: Cow::Borrowed(settings),
@@ -270,6 +272,7 @@ impl<'a> MetaRow<'a> {
             shared_nodes: Cow::Borrowed(shared_nodes.as_slice()),
             albums: Cow::Borrowed(albums.as_slice()),
             color_groups: Cow::Borrowed(color_groups.as_slice()),
+            memories: Cow::Borrowed(memories.as_slice()),
         }
     }
 }
@@ -387,6 +390,7 @@ struct TrackRow<'a> {
     pan: f64,
     pan_on: bool,
     video_enabled: bool,
+    format: crate::model::TrackFormat,
     name: Cow<'a, Option<String>>,
     transitions: Cow<'a, [Transition]>,
     render_cache: bool,
@@ -410,6 +414,7 @@ impl<'a> TrackRow<'a> {
             pan,
             pan_on,
             video_enabled,
+            format,
             name,
             transitions,
             render_cache,
@@ -429,6 +434,7 @@ impl<'a> TrackRow<'a> {
             pan: *pan,
             pan_on: *pan_on,
             video_enabled: *video_enabled,
+            format: *format,
             name: Cow::Borrowed(name),
             transitions: Cow::Borrowed(transitions.as_slice()),
             render_cache: *render_cache,
@@ -1117,6 +1123,7 @@ fn load_project_from_conn(
                 pan: tr.pan,
                 pan_on: tr.pan_on,
                 video_enabled: tr.video_enabled,
+                format: tr.format,
                 name: tr.name.into_owned(),
                 transitions: tr.transitions.into_owned(),
                 render_cache: tr.render_cache,
@@ -1260,6 +1267,7 @@ fn load_project_from_conn(
         shared_nodes: meta.shared_nodes.into_owned(),
         albums: meta.albums.into_owned(),
         color_groups: meta.color_groups.into_owned(),
+        memories: meta.memories.into_owned(),
     };
     project.check_out();
     resolve_paths(&mut project, dir);

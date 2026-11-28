@@ -12,7 +12,7 @@ use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ClipScaling, ColorSpace, CompositeMode,
     Compound, DuckDetect, Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Node,
     Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
-    SmoothMode, TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
+    SmoothMode, TimelineColors, Title, Tool, Track, TrackFormat, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
 use crate::shared::{Shared, SharedVec};
@@ -54,6 +54,11 @@ pub struct RenderPlan {
     /// there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeline_grade: Option<Grade>,
+    /// Each field of an interlaced source is a frame of its own: an
+    /// interlaced picture shows its second field in the later half of its
+    /// frame. Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fields: bool,
 }
 
 pub fn timeline_colors(p: &Project) -> Option<Hdr> {
@@ -1187,6 +1192,26 @@ pub struct Numbered {
     pub rate: Rational,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Heard {
+    /// The channels of the stream that its track plays, from 0, in the
+    /// order of the track's channels. One channel plays on each side.
+    pub channels: Vec<u32>,
+    /// The channels of its track. Left out when stereo.
+    #[serde(default, skip_serializing_if = "TrackFormat::is_stereo")]
+    pub format: TrackFormat,
+}
+
+impl Heard {
+    pub fn every(channels: u16) -> Self {
+        let most = u16::from(crate::model::ADAPTIVE_MOST);
+        Self {
+            channels: (0..u32::from(channels)).collect(),
+            format: TrackFormat::Adaptive(channels.clamp(1, most) as u8),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum AudioPiece {
@@ -1195,6 +1220,10 @@ pub enum AudioPiece {
         path: PathBuf,
         /// Which of the media's audio streams.
         stream: u32,
+        /// The channels of the stream that its track plays. Left out, all of
+        /// them play as the stream's own layout.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        heard: Option<Box<Heard>>,
         /// Raw timestamp (s) that source position 0 refers to (`o`).
         origin: f64,
         /// First source sample, counted at the plan's sample rate from `origin`.
@@ -2061,6 +2090,16 @@ impl VideoPiece {
         }
     }
 
+    pub fn late_half(&self, k: i64) -> bool {
+        match self {
+            VideoPiece::Source { per_frame, .. } => {
+                let at = self.exact(k) * per_frame.as_f64() + grid_slack(*per_frame);
+                at - at.floor() >= 0.5
+            }
+            _ => false,
+        }
+    }
+
     pub fn exact(&self, k: i64) -> f64 {
         match self {
             VideoPiece::Source {
@@ -2100,6 +2139,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             Some(AudioPiece::Source {
                 media,
                 stream,
+                heard,
                 source_sample,
                 samples,
                 gain_db,
@@ -2119,6 +2159,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             AudioPiece::Source {
                 media: m2,
                 stream: st2,
+                heard: h2,
                 source_sample: s2,
                 samples: n2,
                 gain_db: g2,
@@ -2137,6 +2178,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             },
         ) if media == m2
             && stream == st2
+            && heard == h2
             && gain_db == g2
             && isolation == i2
             && pan == p2
@@ -3486,6 +3528,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         colors: None,
         output_lut: s.output_lut.clone(),
         timeline_grade: p.timeline_grade().cloned(),
+        fields: false,
     };
     Ok((plan, lanes))
 }
@@ -4092,7 +4135,8 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                 } else {
                     let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
                     for (x, y) in split_at_fades(c.runs(x, y), around) {
-                        let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
+                        let mut piece =
+                            source_audio(p, c, m, track.format, x, sample(y) - sample(x));
                         if let AudioPiece::Source {
                             silent,
                             joined,
@@ -4199,8 +4243,24 @@ fn bus_for(
     buses.len() - 1
 }
 
-fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
+fn played(m: &Media, audio: &crate::model::ClipAudio, format: TrackFormat) -> Option<Box<Heard>> {
+    let mut channels = m.info.heard(audio);
+    channels.truncate(format.channels());
+    let all = u32::from(m.info.stream_channels(audio.stream).max(1));
+    let whole = channels.len() <= 2 && channels == (0..all).collect::<Vec<_>>();
+    (!whole || format.channels() > 2).then(|| Box::new(Heard { channels, format }))
+}
+
+fn source_audio(
+    p: &Project,
+    c: &Clip,
+    m: &Media,
+    format: TrackFormat,
+    x: i64,
+    samples: i64,
+) -> AudioPiece {
     let audio = c.audio.as_ref().expect("has audio");
+    let heard = played(m, audio, format);
     let (path, origin) = origin_of(m);
     let (fps, rate) = (p.fps(), p.settings.sample_rate);
     let speed = c.speed_at(x);
@@ -4237,6 +4297,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         media: c.media.clone(),
         path,
         stream: audio.stream,
+        heard,
         origin,
         source_sample,
         samples,
@@ -4407,14 +4468,50 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.clips.retain(|x| parts.contains(&x.id));
         t.transitions.clear();
     }
-    let mut plan = flatten(&alone, c.start, c.end())?;
+    let (rates, fields) = own_rates(p, &c).unwrap_or_default();
+    if let Some(r) = rates {
+        at_own_rate(p, &mut alone, &c, r);
+    }
+    let (a, b) = alone
+        .clip(&c.id)
+        .map_or((c.start, c.end()), |x| (x.start, x.end()));
+    let mut plan = flatten(&alone, a, b)?;
+    if let (Some(r), Some(g)) = (rates, plan.timeline_grade.as_mut()) {
+        g.map_key_frames(|f| r.frame(f));
+    }
     plan.colors = timeline_colors(p);
+    plan.fields = fields;
     plan.name = c
         .name
         .clone()
         .or_else(|| p.media(&c.media).map(|m| stem(&m.name)))
         .unwrap_or_else(|| c.id.clone());
     Ok(plan)
+}
+
+fn own_rates(p: &Project, c: &Clip) -> Option<(Option<crate::ops::conform::Rates>, bool)> {
+    let m = p.media(&c.media).filter(|m| !m.is_still())?;
+    let fields = m.info.video.as_ref()?.fields.is_some();
+    let rate = m.rate(p.settings.fps);
+    let rate = match fields {
+        true => Rational::new(rate.num() * 2, rate.den()).ok()?,
+        false => rate,
+    };
+    Some((crate::ops::conform::Rates::new(p.fps(), rate), fields))
+}
+
+fn at_own_rate(p: &Project, alone: &mut Project, c: &Clip, r: crate::ops::conform::Rates) {
+    let per = r.to.over(r.from);
+    let x = c.source_in as f64 + c.phase;
+    let lead = x - shown_frame(per, x) as f64 / per.as_f64();
+    alone.set_open_fps(r.to);
+    for t in &mut alone.tracks {
+        for q in &mut t.clips {
+            let at = (q.source_in as f64 + q.phase - lead).max(0.0);
+            (q.source_in, q.phase) = (at.floor() as i64, at - at.floor());
+        }
+        crate::ops::conform::track(p, t, r);
+    }
 }
 
 pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Result<RenderPlan> {
@@ -4693,6 +4790,7 @@ fn tape_plan(
         colors: None,
         output_lut: None,
         timeline_grade: None,
+        fields: false,
     }
 }
 
@@ -4746,6 +4844,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
         colors: None,
         output_lut: None,
         timeline_grade: None,
+        fields: false,
     })
 }
 
@@ -4760,6 +4859,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, fps: Rational, samples: i64) -> A
         media: m.id.clone(),
         path,
         stream: 0,
+        heard: None,
         origin,
         source_sample: fps.frame_to_sample(head, p.settings.sample_rate),
         samples,

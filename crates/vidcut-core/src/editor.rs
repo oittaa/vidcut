@@ -2804,6 +2804,37 @@ fn group_of((timeline, layer, group): GradeTarget) -> Result<Option<crate::reque
     }
 }
 
+fn gallery_targets(
+    p: &Project,
+    clips: Option<&OneOrMany<ClipRef>>,
+    grade: crate::request::GradeLevel,
+    (at, playhead): (Option<i64>, Option<i64>),
+) -> Result<Vec<String>> {
+    match (clips, grade) {
+        (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead),
+        (None, crate::request::GradeLevel::Timeline) => Ok(Vec::new()),
+        (None, _) => {
+            let t = at.or(playhead);
+            let t = t.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+            Ok(vec![ops::gallery::graded_clip(p, t)?])
+        }
+    }
+}
+
+fn gallery_keys(
+    p: &Project,
+    keyframes: Option<crate::model::ApplyKeys>,
+    at: Option<&TimeSpec>,
+    playhead: Option<i64>,
+) -> Result<(crate::model::ApplyKeys, Option<i64>)> {
+    let keys = keyframes.unwrap_or(p.settings.apply_keys);
+    let at = match keys {
+        crate::model::ApplyKeys::CurrentFrame => time_or_playhead(p, at, playhead)?,
+        _ => None,
+    };
+    Ok((keys, at))
+}
+
 fn grades_of(
     p: &mut Project,
     clips: &Option<OneOrMany<ClipRef>>,
@@ -4643,6 +4674,7 @@ fn mutate(
             voice_isolation_on,
             retime,
             render_cache,
+            channel,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -4675,6 +4707,7 @@ fn mutate(
                 voice_isolation_on: *voice_isolation_on,
                 retime: *retime,
                 render_cache: *render_cache,
+                channel: *channel,
             };
             ops::set_clips(p, &ids, &props)?;
             if retime.is_some() && *download && !dry_run {
@@ -5092,6 +5125,7 @@ fn mutate(
             equalizer: None,
             pan: None,
             pan_on: None,
+            format: None,
             video_enabled: None,
             render_cache: None,
             ..
@@ -5151,6 +5185,7 @@ fn mutate(
             equalizer,
             pan,
             pan_on,
+            format,
             download,
             video_enabled,
             render_cache,
@@ -5186,6 +5221,7 @@ fn mutate(
                 equalizer: equalizer.clone(),
                 pan: *pan,
                 pan_on: *pan_on,
+                format: *format,
                 video_enabled: *video_enabled,
                 render_cache: *render_cache,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
@@ -5580,21 +5616,68 @@ fn mutate(
             let of = grade_of(p, clip, (*timeline, *layer, *group), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
-        Request::GalleryGrab { at, album, grade } => {
+        Request::GalleryGrab {
+            at,
+            album,
+            memory,
+            grade,
+        } => {
+            use ops::gallery::Holder;
             let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
                 Error::usage("gallery.grab needs `at` (--at): there is no playhead")
             })?;
             need_timeline(p)?;
             ops::gallery::open_timeline(p)?;
-            let album = ops::gallery::album_of(p, album.as_deref())?;
+            let to = match (album, memory) {
+                (Some(_), Some(_)) => {
+                    return Err(Error::usage("give `album` or `memory`, not both"));
+                }
+                (_, Some(m)) => Holder::Memory(ops::gallery::memory_slot(*m)?),
+                (a, None) => Holder::Album(ops::gallery::album_of(p, a.as_deref())?),
+            };
             let clip = ops::gallery::graded_clip(p, t)?;
             if grade.group().is_some() {
                 ops::color_groups::of_clip(p, &clip)?;
             }
             let plan = still_plan(p, t)?;
             let picture = env.still(&plan, dry_run)?;
-            let still = ops::gallery::grab(p, (&clip, t, *grade), (&album, picture))?;
-            json!({ "still": still })
+            ops::gallery::grab(p, (&clip, t, *grade), (to, picture))?
+        }
+        Request::GalleryLabel { still, label } => {
+            ops::gallery::label(p, still, label)?;
+            Value::Null
+        }
+        Request::GalleryMemoryCopy { still, memory } => {
+            ops::gallery::copy_to_memory(p, still, *memory)?;
+            Value::Null
+        }
+        Request::GalleryMemoryClear { memory } => {
+            ops::gallery::clear_memory(p, *memory)?;
+            Value::Null
+        }
+        Request::GalleryMemoryLoad {
+            memory,
+            clips,
+            layer,
+            grade,
+        } => {
+            let timeline = matches!(grade, crate::request::GradeLevel::Timeline);
+            let layer = layer_of(timeline, *layer)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, (None, playhead))?;
+            ops::gallery::load_memory(p, *memory, (*grade, layer), &ids)?;
+            Value::Null
+        }
+        Request::GalleryMemoryApply {
+            memory,
+            clips,
+            grade,
+            keyframes,
+            at,
+        } => {
+            let (keys, at) = gallery_keys(p, *keyframes, at.as_ref(), playhead)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, (at, playhead))?;
+            ops::gallery::apply_memory(p, *memory, (*grade, &ids), (keys, at))?;
+            Value::Null
         }
         Request::GalleryRemove { stills } => {
             ops::gallery::remove(p, &stills.to_vec())?;
@@ -5649,22 +5732,8 @@ fn mutate(
             keyframes,
             at,
         } => {
-            let keys = keyframes.unwrap_or(p.settings.apply_keys);
-            let at = match keys {
-                crate::model::ApplyKeys::CurrentFrame => {
-                    time_or_playhead(p, at.as_ref(), playhead)?
-                }
-                _ => None,
-            };
-            let ids = match (clips, grade) {
-                (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead)?,
-                (None, crate::request::GradeLevel::Timeline) => Vec::new(),
-                (None, _) => {
-                    let t = at.or(playhead);
-                    let t = t.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
-                    vec![ops::gallery::graded_clip(p, t)?]
-                }
-            };
+            let (keys, at) = gallery_keys(p, *keyframes, at.as_ref(), playhead)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, (at, playhead))?;
             ops::gallery::apply(p, still, (*grade, &ids), (keys, at))?;
             Value::Null
         }
@@ -7784,6 +7853,33 @@ struct PlaceOpts<'a> {
     compounds: &'a mut HashMap<String, String>,
 }
 
+fn imported_sound(info: &MediaInfo, c: &otio::ImportedClip) -> (u32, Vec<u32>) {
+    let streams = info.audio.len() as u32;
+    let fits = |stream: u32, ch: &u32| *ch < u32::from(info.stream_channels(stream));
+    if let Some(stream) = c.stream.filter(|&s| s < streams) {
+        let channels = c.channels.iter().copied().filter(|ch| fits(stream, ch));
+        return (stream, channels.collect());
+    }
+    let found: Vec<(u32, u32)> = c
+        .sources
+        .iter()
+        .filter_map(|&(track, ch)| info.of_sound_track(track as usize, ch))
+        .collect();
+    let Some(&(stream, _)) = found.first() else {
+        return (0, Vec::new());
+    };
+    let channels: Vec<u32> = found
+        .iter()
+        .filter(|&&(s, _)| s == stream)
+        .map(|&(_, ch)| ch)
+        .collect();
+    let all = (0..u32::from(info.stream_channels(stream))).collect::<Vec<_>>();
+    match channels == all {
+        true => (stream, Vec::new()),
+        false => (stream, channels),
+    }
+}
+
 fn place_imported(
     p: &mut Project,
     t: &otio::Imported,
@@ -7957,12 +8053,10 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
+        let (stream, channels) = imported_sound(&m.info, c);
         let audio = (c.audio && !m.info.audio.is_empty()).then(|| ClipAudio {
-            stream: if (c.stream as usize) < m.info.audio.len() {
-                c.stream
-            } else {
-                0
-            },
+            stream,
+            channels: channels.clone(),
             gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
             gain_keys: c
                 .gain_keys
@@ -8826,6 +8920,7 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.muted = s.muted;
                 track.solo = s.solo;
                 track.solo_safe = s.solo_safe;
+                track.format = s.format;
                 track.volume_db = s.volume_db.clamp(
                     *crate::validate::FADER.start(),
                     *crate::validate::FADER.end(),
@@ -10892,6 +10987,7 @@ pub fn query(
                         v["render_cache"] = json!(t.render_cache);
                     } else {
                         v["solo_safe"] = json!(t.solo_safe);
+                        v["format"] = json!(t.format);
                         v["pan"] = json!(t.pan);
                         v["pan_on"] = json!(t.pan_on);
                     }
@@ -10966,6 +11062,7 @@ pub fn query(
         Request::GalleryGet {} => ops::gallery::get(p, &env.stills_dir()),
         Request::GalleryAlbumList {} => ops::gallery::albums(p),
         Request::ColorGroupGet {} => ops::color_groups::get(p),
+        Request::GalleryMemoryList {} => ops::gallery::memories(p, &env.stills_dir()),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?
@@ -12582,6 +12679,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if let Some(a) = &c.audio {
         v["audio"] = json!({ "stream": a.stream, "gain_db": a.gain_db, "muted": a.muted });
+        if !a.channels.is_empty() {
+            v["audio"]["channels"] = json!(a.channels);
+        }
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
         }
@@ -12637,6 +12737,9 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
             }
             if t.solo_safe {
                 v["solo_safe"] = json!(true);
+            }
+            if t.kind == crate::model::TrackKind::Audio && !t.format.is_stereo() {
+                v["format"] = json!(t.format);
             }
             if t.volume_db != 0.0 {
                 v["volume_db"] = json!(t.volume_db);

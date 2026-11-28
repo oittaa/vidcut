@@ -53,6 +53,7 @@ impl ProxyEncoder {
             "prores" if !self.chroma_422 => "ProRes Proxy from 4:2:0",
             "prores" => "ProRes Proxy",
             "dnxhr" => "DNxHR LB",
+            "float" => "Uncompressed 16-bit Float",
             _ => "H.264",
         };
         let what = match (self.kind, self.name.as_str()) {
@@ -70,6 +71,7 @@ impl ProxyEncoder {
             (_, "libx264") => "software (x264)".to_string(),
             (_, "libopenh264") => "software (OpenH264)".to_string(),
             (_, "prores_ks" | "dnxhd") => "software (FFmpeg's)".to_string(),
+            (_, "rawvideo") => "software (OpenEXR)".to_string(),
             (_, other) => format!("software ({other})"),
         };
         format!("{codec}, {what}")
@@ -95,9 +97,12 @@ impl ProxyEncoder {
     }
 
     fn grade_pixel(&self, grade: CacheCodec) -> format::Pixel {
-        use CacheCodec::{Dnxhr444, DnxhrHq, DnxhrHqx, DnxhrLb, DnxhrSq, Prores4444, Prores4444Xq};
-        use format::Pixel::{P416LE, YUV422P, YUV422P10LE, YUV444P10LE};
+        use CacheCodec::{
+            Dnxhr444, DnxhrHq, DnxhrHqx, DnxhrLb, DnxhrSq, Float16, Prores4444, Prores4444Xq,
+        };
+        use format::Pixel::{GBRPF16LE, P416LE, YUV422P, YUV422P10LE, YUV444P10LE};
         match (grade, self.kind) {
+            (Float16, _) => GBRPF16LE,
             (Prores4444 | Prores4444Xq, EncoderChoice::VideoToolbox) => P416LE,
             (Prores4444 | Prores4444Xq | Dnxhr444, _) => YUV444P10LE,
             (DnxhrLb | DnxhrSq | DnxhrHq, _) => YUV422P,
@@ -125,6 +130,7 @@ impl ProxyEncoder {
             return None;
         }
         Some(match (self.name.as_str(), grade) {
+            ("rawvideo", Float16) => Vec::new(),
             ("prores_videotoolbox", _) => {
                 let named = ["proxy", "lt", "standard", "hq", "4444"].get(prores?)?;
                 vec![("profile", named.to_string()), ("allow_sw", "0".into())]
@@ -191,6 +197,7 @@ impl ProxyEncoder {
         let pixel = match (alpha, self.name.as_str(), pixel) {
             (false, ..) => pixel,
             (true, "prores_ks", format::Pixel::YUV444P10LE) => format::Pixel::YUVA444P10LE,
+            (true, "rawvideo", format::Pixel::GBRPF16LE) => format::Pixel::GBRAPF16LE,
             (true, ..) => return None,
         };
         if hdr.is_some() && !deep(pixel) {
@@ -367,6 +374,12 @@ pub fn cache_encoders(
     available: &Availability,
     plays: &[(&str, crate::hw::Kind)],
 ) -> Vec<(ProxyEncoder, Option<CacheCodec>)> {
+    if chosen == CacheCodec::Float16 {
+        return match crate::parts::has_encoder("rawvideo") {
+            true => vec![(ProxyEncoder::software("rawvideo", "float"), Some(chosen))],
+            false => Vec::new(),
+        };
+    }
     let mut all: Vec<(ProxyEncoder, CacheCodec)> = match (family(chosen), proxies) {
         (Some((codec, name)), _) => own(codec, available)
             .into_iter()
@@ -408,7 +421,7 @@ pub fn cache_encoders(
 fn family(codec: CacheCodec) -> Option<(ProxyCodec, &'static str)> {
     use CacheCodec::*;
     Some(match codec {
-        Auto => return None,
+        Auto | Float16 => return None,
         ProresProxy | ProresLt | Prores422 | ProresHq | Prores4444 | Prores4444Xq => {
             (ProxyCodec::Prores, "prores")
         }
@@ -777,6 +790,7 @@ struct Encoding {
     enc_tb: ffmpeg::Rational,
     durations: HashMap<i64, i64>,
     hdr: Option<(ffmpeg::codec::Id, crate::hdr::Static)>,
+    exr: Option<(usize, usize)>,
 }
 
 impl Encoding {
@@ -815,6 +829,7 @@ impl Encoding {
             self.enc_tb,
             &mut self.durations,
             self.hdr.as_ref(),
+            self.exr,
         )
     }
 }
@@ -829,6 +844,7 @@ impl<'a> Writer<'a> {
         shown: &'a Shown<'a>,
     ) -> std::result::Result<(Self, Option<Handoff>), Failed> {
         let enc_tb = encode_time_base(src_tb);
+        let exr = (video.name == "rawvideo").then_some((width as usize, height as usize));
         let mut octx = format::output_as(tmp, "matroska")
             .ctx(|| format!("creating {}", tmp.display()))
             .map_err(Failed::Encoding)?;
@@ -892,6 +908,16 @@ impl<'a> Writer<'a> {
                 .add_stream(encoder::find_by_name(&video.name))
                 .ctx(|| "adding the proxy stream".into())?;
             ost.set_parameters(&encoder);
+            if exr.is_some() {
+                // SAFETY: the parameters of the stream added above, before the header.
+                unsafe {
+                    let par = (*ost.as_mut_ptr()).codecpar;
+                    (*par).codec_id = ffi::AVCodecID::AV_CODEC_ID_EXR;
+                    (*par).codec_tag = 0;
+                    (*par).color_range = ffi::AVColorRange::AVCOL_RANGE_JPEG;
+                    (*par).color_space = ffi::AVColorSpace::AVCOL_SPC_RGB;
+                }
+            }
             ost.set_time_base(enc_tb);
             octx.write_header()
                 .ctx(|| "writing the proxy header".into())?;
@@ -906,6 +932,7 @@ impl<'a> Writer<'a> {
             enc_tb,
             durations: HashMap::new(),
             hdr,
+            exr,
         };
         let writing = Worker::spawn(worker::AHEAD, move |pictures| encoding.run(pictures))
             .map_err(Failed::Encoding)?;
@@ -1067,10 +1094,22 @@ fn drain(
     enc_tb: ffmpeg::Rational,
     durations: &mut HashMap<i64, i64>,
     hdr: Option<&(ffmpeg::codec::Id, crate::hdr::Static)>,
+    exr: Option<(usize, usize)>,
 ) -> Result<()> {
     let stream_tb = octx.stream(0).expect("proxy stream").time_base();
     let mut packet = ffmpeg::Packet::empty();
     while enc.receive_packet(&mut packet).is_ok() {
+        if let Some(size) = exr {
+            use ffmpeg::packet::{Mut, Ref};
+            let planes = packet.data().unwrap_or_default();
+            let file = crate::export::openexr::halves(planes, size)?;
+            let mut new = ffmpeg::Packet::copy(&file);
+            // SAFETY: two packets of their own; FFmpeg copies the properties, not the data.
+            if unsafe { ffi::av_packet_copy_props(new.as_mut_ptr(), packet.as_ptr()) } < 0 {
+                return Err(Error::Invalid("out of memory for an OpenEXR frame".into()));
+            }
+            packet = new;
+        }
         if let Some(d) = packet.pts().and_then(|pts| durations.remove(&pts)) {
             packet.set_duration(d);
         }

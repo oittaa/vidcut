@@ -1769,9 +1769,9 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
-    /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
-    /// volume in dB, Voice Isolation, ducking, Dynamics, equalizer, pan). Only an audio track takes the
-    /// sound settings. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// Track header toggles (lock, mute, video on or off, render cache), the track type and the mixer
+    /// (solo, volume in dB, Voice Isolation, ducking, Dynamics, equalizer, pan). Only an audio track
+    /// takes the sound settings and a type. A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -1847,6 +1847,11 @@ pub enum Request {
         /// at 0.
         #[serde(default)]
         pan_on: Option<bool>,
+        /// Change Track Type: the channels of an audio track. Its clips keep
+        /// their channels. The track plays the first ones of each clip, as
+        /// many as it has.
+        #[serde(default)]
+        format: Option<crate::model::TrackFormat>,
         /// Download what this computer doesn't have yet: Voice Isolation's
         /// model, or the speech detector of ducking by speech, each checked
         /// against its SHA-256. Without it, a missing file is an error that
@@ -2010,6 +2015,12 @@ pub enum Request {
         /// AI Upscale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
+        /// Audio Channel: the channel of the file, counted from 1 over all
+        /// its audio streams, that a sound clip of one channel plays. It also
+        /// sets each sound clip of one channel of the same file that is
+        /// linked with it.
+        #[serde(default)]
+        channel: Option<u32>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -4186,9 +4197,9 @@ pub enum Request {
         download: bool,
     },
     /// The stills of the Gallery of the Color page, the oldest first. Each
-    /// has its id, album, clip, timeline, frame, label and the path of its
-    /// picture. `keyframes` tells if its clip grade has keyframes, and
-    /// `timeline_keyframes` if its timeline grade has them.
+    /// has its id, album, clip, timeline, frame, still ID (`number`), label
+    /// and the path of its picture. `keyframes` tells if its clip grade has
+    /// keyframes, and `timeline_keyframes` if its timeline grade has them.
     #[serde(rename = "gallery.get")]
     GalleryGet {},
     /// Grab Still: save a still of the frame `at` in the Gallery. Its
@@ -4198,6 +4209,9 @@ pub enum Request {
     /// clip grade, and the timeline grade, with their keyframes. The
     /// picture is a 32-bit float OpenEXR file in the `stills` folder, and
     /// stays there after an undo. Returns the id of the still as `still`.
+    /// With `memory`, Save Memory: the still goes into that memory in place
+    /// of an album, and replaces what the memory held. Then it returns the
+    /// slot as `memory`.
     #[serde(rename = "gallery.grab")]
     GalleryGrab {
         /// The frame of the timeline. Left out: the playhead.
@@ -4212,6 +4226,10 @@ pub enum Request {
         /// no timeline grade. Left out: `clip`.
         #[serde(default)]
         grade: GradeLevel,
+        /// The slot of the memory that gets the still, from A to Z. Not
+        /// with `album`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        memory: Option<char>,
     },
     /// Delete stills from the Gallery. Their pictures stay in the `stills`
     /// folder. Thus an undo gives the stills back whole.
@@ -4359,6 +4377,84 @@ pub enum Request {
     /// the Post-Clip grade after them. Each clip then leaves its group.
     #[serde(rename = "color_group.collapse")]
     ColorGroupCollapse { clips: OneOrMany<ClipRef> },
+    /// Change Label: give a still a label. The label shows under its still
+    /// ID. An empty label takes the label away.
+    #[serde(rename = "gallery.label")]
+    GalleryLabel {
+        /// The id of the still (`s1`).
+        still: String,
+        label: String,
+    },
+    /// The memories of the Gallery, in the order of their slots. Each has
+    /// its slot, clip, timeline, frame and the path of its picture.
+    /// `keyframes` tells if its clip grade has keyframes, and
+    /// `timeline_keyframes` if its timeline grade has them.
+    #[serde(rename = "gallery.memory.list")]
+    GalleryMemoryList {},
+    /// Load Memory: give clips the grade of a memory. With the `clip` grade,
+    /// the node stack layer `layer` of the memory replaces that layer of
+    /// each clip, and the other layers stay. A memory of a project with one
+    /// layer gives that layer. With the `timeline` grade, the timeline grade
+    /// of the memory replaces the timeline grade of the open timeline. A
+    /// grade with keyframes is refused.
+    #[serde(rename = "gallery.memory.load")]
+    GalleryMemoryLoad {
+        /// The slot of the memory, from A to Z.
+        memory: char,
+        /// The clips that get the clip grade. Left out: in a running GUI,
+        /// the clips selected in the Thumbnail timeline and the clip at the
+        /// playhead; else the topmost clip at the playhead that takes a
+        /// grade. Not with the `timeline` grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The node stack layer, from 1 to the project's `node_stack_layers`
+        /// count. Not with the `timeline` grade. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        /// The grade that changes. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
+    },
+    /// Apply Grade of a memory: as `gallery.apply`, with the grades of a
+    /// memory.
+    #[serde(rename = "gallery.memory.apply")]
+    GalleryMemoryApply {
+        /// The slot of the memory, from A to Z.
+        memory: char,
+        /// The clips that get the clip grade. Left out: in a running GUI,
+        /// the clips selected in the Thumbnail timeline and the clip at the
+        /// playhead; else the topmost clip at the playhead that takes a
+        /// grade. With `current_frame`, the clip at `at`. Not with the
+        /// `timeline` grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The grade that changes. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
+        /// How the keyframes of the clip grade go to each clip. Left out:
+        /// the project's `apply_keys`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keyframes: Option<crate::model::ApplyKeys>,
+        /// With `current_frame`: the frame of the timeline that the grabbed
+        /// frame goes on, in each clip. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
+    /// Copy a still into a memory. It replaces what the memory held. The
+    /// still stays in its album.
+    #[serde(rename = "gallery.memory.copy")]
+    GalleryMemoryCopy {
+        /// The id of the still (`s1`).
+        still: String,
+        /// The slot of the memory, from A to Z.
+        memory: char,
+    },
+    /// Clear: empty a memory. Its picture stays in the `stills` folder.
+    #[serde(rename = "gallery.memory.clear")]
+    GalleryMemoryClear {
+        /// The slot of the memory, from A to Z.
+        memory: char,
+    },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences, compound clips and adjustment clips.
     /// A generator takes no effects. The effects work in their order, on the
@@ -5785,15 +5881,18 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wide: Option<bool>,
     },
-    /// The Gallery of the Color page. `album` shows that album (`a1`), and
-    /// `albums` shows or hides the list of albums. Each value left out
-    /// stays. Answers what `gui.state` does.
+    /// The Gallery of the Color page. `album` shows that album (`a1`),
+    /// `albums` shows or hides the list of albums, and `memories` shows or
+    /// hides the memories. Each value left out stays. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.gallery")]
     GuiGallery {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         album: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         albums: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        memories: Option<bool>,
     },
     /// The two viewers of the effects page. `left` and `right` name the
     /// node that each viewer shows. An empty name empties the viewer.
@@ -9643,6 +9742,7 @@ impl Request {
                     | Self::GalleryGet {}
                     | Self::GalleryAlbumList {}
                     | Self::ColorGroupGet {}
+                    | Self::GalleryMemoryList {}
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

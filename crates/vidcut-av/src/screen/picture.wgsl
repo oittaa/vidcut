@@ -262,22 +262,50 @@ fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
     return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4));
 }
 
-fn rgb(s: vec3<f32>) -> vec3<f32> {
-    var c = s;
+fn coded(s: vec3<f32>) -> vec3<f32> {
     if p.flags.z == 4u {
-        c = s.zxy;
-    } else if p.flags.z != 3u {
-        let y = (s.x - p.range.x) * p.range.y;
-        let cb = (s.y - p.range.z) * p.range.w;
-        let cr = (s.z - p.range.z) * p.range.w;
-        let kr = p.matrix.x;
-        let kb = p.matrix.y;
-        let kg = p.matrix.z;
-        let r = y + (2.0 - 2.0 * kr) * cr;
-        let b = y + (2.0 - 2.0 * kb) * cb;
-        let g = (y - kr * r - kb * b) / kg;
-        c = vec3<f32>(r, g, b);
+        return s.zxy;
     }
+    if p.flags.z == 3u {
+        return s;
+    }
+    let y = (s.x - p.range.x) * p.range.y;
+    let cb = (s.y - p.range.z) * p.range.w;
+    let cr = (s.z - p.range.z) * p.range.w;
+    let kr = p.matrix.x;
+    let kb = p.matrix.y;
+    let kg = p.matrix.z;
+    let r = y + (2.0 - 2.0 * kr) * cr;
+    let b = y + (2.0 - 2.0 * kb) * cb;
+    let g = (y - kr * r - kb * b) / kg;
+    return vec3<f32>(r, g, b);
+}
+
+fn uncoded(c: vec3<f32>) -> vec3<f32> {
+    if p.flags.z == 4u {
+        return c.yzx;
+    }
+    if p.flags.z == 3u {
+        return c;
+    }
+    let kr = p.matrix.x;
+    let kb = p.matrix.y;
+    let y = kr * c.x + p.matrix.z * c.y + kb * c.z;
+    let cb = (c.z - y) / (2.0 - 2.0 * kb);
+    let cr = (c.x - y) / (2.0 - 2.0 * kr);
+    return vec3<f32>(y / p.range.y + p.range.x, vec2<f32>(cb, cr) / p.range.w + p.range.z);
+}
+
+fn top_code() -> f32 {
+    return p.gamut0.w;
+}
+
+fn in_codes(c: vec3<f32>) -> vec3<f32> {
+    return coded(clamp(uncoded(c), vec3<f32>(0.0), vec3<f32>(top_code())));
+}
+
+fn rgb(s: vec3<f32>) -> vec3<f32> {
+    var c = coded(s);
     if p.per.z != 0u {
         if p.flags.x != 0u {
             c = to_linear(c);
@@ -586,8 +614,9 @@ fn line_of(t: texture_2d<f32>, x: i32, y: i32) -> vec3<f32> {
     return textureLoad(t, vec2<i32>(x, clamp(y, 0, h - 1)), 0).rgb;
 }
 
-fn both(x: i32, y: i32) -> vec3<f32> {
-    return line_of(before, x, y) + line_of(middle, x, y);
+fn both(x: i32, y: i32, second: bool) -> vec3<f32> {
+    let pair = select(line_of(before, x, y), line_of(after, x, y), second);
+    return pair + line_of(middle, x, y);
 }
 
 @fragment
@@ -595,7 +624,9 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
     let x = i32(in.position.x);
     let y = i32(in.position.y);
     let h = i32(textureDimensions(middle).y);
-    let kept = select(1, 0, p.shrunk.y < 1.5);
+    let field = i32(p.shrunk.y + 0.5);
+    let kept = select(1, 0, (field & 1) == 1);
+    let second = field > 2;
     if (y & 1) == kept {
         return vec4<f32>(line_of(middle, x, y), 1.0);
     }
@@ -607,10 +638,10 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
         let up3 = select(1, -3, y > 2);
         let down3 = select(-1, 3, y + 3 < h);
         let far = line_of(middle, x, y + up3) + line_of(middle, x, y + down3);
-        return vec4<f32>(ALONE.x * (c + e) - ALONE.y * far, 1.0);
+        return vec4<f32>(in_codes(ALONE.x * (c + e) - ALONE.y * far), 1.0);
     }
-    let p0 = line_of(before, x, y);
-    let n0 = line_of(middle, x, y);
+    let p0 = select(line_of(before, x, y), line_of(middle, x, y), second);
+    let n0 = select(line_of(middle, x, y), line_of(after, x, y), second);
     let d = (p0 + n0) * 0.5;
     let t0 = abs(p0 - n0);
     let t1 = (abs(line_of(before, x, y + up) - c) + abs(line_of(before, x, y + down) - e)) * 0.5;
@@ -618,8 +649,8 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
     var diff = max(max(t0 * 0.5, t1), t2);
     let edge = y < 4 || y + 5 > h;
     if !edge || !(y < 2 || y + 3 > h) {
-        let b = both(x, y - 2) * 0.5 - c;
-        let f = both(x, y + 2) * 0.5 - e;
+        let b = both(x, y - 2, second) * 0.5 - c;
+        let f = both(x, y + 2, second) * 0.5 - e;
         let hi = max(max(d - e, d - c), min(b, f));
         let lo = min(min(d - e, d - c), max(b, f));
         diff = max(max(diff, lo), -hi);
@@ -627,14 +658,14 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
     var made = (c + e) * 0.5;
     if !edge {
         let far = line_of(middle, x, y - 3) + line_of(middle, x, y + 3);
-        let high = HIGH.x * (p0 + n0) - HIGH.y * (both(x, y - 2) + both(x, y + 2))
-            + HIGH.z * (both(x, y - 4) + both(x, y + 4));
+        let high = HIGH.x * (p0 + n0) - HIGH.y * (both(x, y - 2, second) + both(x, y + 2, second))
+            + HIGH.z * (both(x, y - 4, second) + both(x, y + 4, second));
         let moving = high * 0.25 + LOW.x * (c + e) - LOW.y * far;
         let still = ALONE.x * (c + e) - ALONE.y * far;
         made = select(still, moving, abs(c - e) > t0);
     }
     let held = clamp(made, d - diff, d + diff);
-    return vec4<f32>(select(held, d, diff == vec3<f32>(0.0)), 1.0);
+    return vec4<f32>(in_codes(select(held, d, diff == vec3<f32>(0.0))), 1.0);
 }
 
 @fragment
@@ -1139,7 +1170,7 @@ struct Encoding {
 fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
     let coded = encoding.how.x;
     let wanted = encoding.how.y;
-    if coded == wanted && encoding.how.z == 32u {
+    if coded == wanted && encoding.plane.x >= 7u {
         return code;
     }
     if coded == wanted {
@@ -1251,15 +1282,26 @@ fn fs_encode_unorm(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(encoded_at(vec2<i32>(in.position.xy))) / f32(encoding.plane.w);
 }
 
+fn half_rounded(v: f32) -> f32 {
+    if encoding.how.z != 16u || !(abs(v) < 65504.0) {
+        return v;
+    }
+    if abs(v) < 6.103515625e-5 {
+        return round(v * 16777216.0) / 16777216.0;
+    }
+    let bits = bitcast<u32>(v);
+    return bitcast<f32>((bits + 0xfffu + ((bits >> 13u) & 1u)) & 0xffffe000u);
+}
+
 @fragment
 fn fs_encode_float(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let kind = encoding.plane.x;
     if kind == 10u {
-        return vec4<f32>(kept_alpha(px), 0.0, 0.0, 1.0);
+        return vec4<f32>(half_rounded(kept_alpha(px)), 0.0, 0.0, 1.0);
     }
     let c = pixel_at(px.x, px.y);
-    return vec4<f32>(c[kind - 7u], 0.0, 0.0, 1.0);
+    return vec4<f32>(half_rounded(c[kind - 7u]), 0.0, 0.0, 1.0);
 }
 
 struct Blur {

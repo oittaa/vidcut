@@ -43,6 +43,10 @@ flowchart TD
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
+  - `render::flatten_clip` keeps the clip and its linked clips. A clip of a moving picture goes to the frame rate of its media: `Project::set_open_fps`, then `ops::conform::track`.
+  - An interlaced clip goes to twice its frame rate, and the plan gets `RenderPlan.fields`. Thus each field is a frame ([gpu](gpu.md#deinterlacing-and-hdr)).
+  - Before the conversion, the clips move back by the part of a frame before the first source frame. Thus the file starts on that frame, and the sound stays in sync.
+  - `add_subtitles` converts the cues with `ops::conform::cue`. `subtitles_beside` takes the range of the clip on the timeline (`Output.range`), at the frame rate of the timeline. The record timecode of the file counts at the new frame rate.
   - `clip_path` makes the path of each clip file from the File tab fields of `ExportParams`. `kept_levels` gives the folders of `source_levels`. `Track::number` gives the track in the folder of `separate_folders`.
   - The frame count is the source timecode of the clip's first frame: `Media::timecode_at` plus the source frame (`render::per_frame` and `render::shown_frame`). An image sequence numbers its frames from it.
   - `check_clip_names` refuses these fields without `per_clip`, and a `subfolder` that leaves the output folder.
@@ -482,6 +486,15 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
   - A source of one channel goes to each side of a mix of two channels at its full level (`swr_set_matrix`).
+- A piece holds the channels of its stream that its track plays, and the `TrackFormat` of the track (`render::Heard`).
+  - `render::played` gives them: the channels of the clip, cut to the channels of the track.
+  - The piece leaves `render::Heard` out for a whole stream of one or two channels on a Mono or Stereo track. Then `Resampler::new` converts the stream as above.
+  - Else `Resampler::heard` sets a matrix (`heard_matrix`). Channel k of the piece goes to speaker k of the track type (`speakers`, in the order of [spec §6](../spec.md#6-track-model-pp-647-649-716-721-727), Track types).
+  - `swr_build_matrix2` gives the mix of all the speakers of the type into the layout of the mix (`downmix`). The piece uses the columns of its channels. A piece of one channel goes to each side, as above.
+  - Why all the speakers: FFmpeg refuses a layout with one speaker of a pair. A stereo clip on an LCR track has the left and the center only.
+  - An Adaptive type of more than 24 channels has the 24 speakers of 22.2 (`channel_layout`). Its other channels have no column.
+  - The source that `AudioMix` opens ahead is known by its file, stream, start and `render::Heard`.
+  - Why a matrix: the stream's own layout does not tell which channels the track plays, or in which order.
 - A piece has the Pan of its clip (`pan` of an `AudioPiece`), or its pan keyframes (`pan_keyed`). `render::clip_pan_gains` gives the gain of each side.
   - The pan of a clip adds to the pan of its track ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), Track pan). `render::pan_gains` gives the law of the sum.
   - The bus of the track applies the gains of the track pan. Thus each lane applies the gains of the sum, divided by the gains of the track pan.
@@ -1201,13 +1214,21 @@ The passes:
 
 ## The Gallery
 
-The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323348-33613366-3400-3405)):
 
 - `Project::stills` holds each `Still` in the project file. A still holds copies of the grades, not links to them. Thus a later change of the clip does not change the still.
 - `Project::albums` holds each `Album`, in the order in which they were made. `Still::album` names the album of a still.
   - `NextIds::album` gives the next ID and the number of the next default name. Thus an ID is not used again, and a stale ID gives an error.
   - `validate` refuses a project with no album, an album with no name, and a still whose album is not in the project.
-- `ops::gallery` holds the edits: `grab`, `remove`, `apply`, `append` and `get`.
+- `Still::track` and `Still::shot` keep the place of the clip at the grab. `ops::gallery::number` gives the still ID from them at each read.
+  - Why: a grab, a delete or a move of a still can change the third number of other stills.
+- `Project::memories` holds each `Memory`, in the order of its slot. A memory holds what a still holds, with a `slot` in place of an album and a label.
+  - `validate` refuses two memories in one slot, and a slot that is not a letter from A to Z.
+- `ops::gallery` holds the edits: `grab`, `remove`, `apply`, `append`, `label` and `get`.
+  - `grab` takes a `Holder`: an album, or the slot of a memory. Thus Save Memory draws its picture as a grab does.
+  - `copy_to_memory`, `clear_memory`, `load_memory` and `apply_memory` change the memories. A copy shares the picture file of the still.
+  - `load_memory` stores one node stack layer with `ops::grade::store`. `apply_memory` and `apply` share `given`.
+  - `load_memory` refuses a grade with keyframes. Why: Load Memory of keyframes is not measured.
   - `add_album`, `rename_album`, `remove_album` and `move_stills` change the albums. `remove_album` takes out the stills of the album with it.
   - `album_of` gives the album of a grab: the album of the request, else the first album.
   - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
@@ -1237,7 +1258,11 @@ The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-gra
   - `still::exr_rgba` reads a picture at the height of the tile, on `vidcut-still`. It averages the pixels into the smaller size, then clamps them to 8 bits.
   - The live `Selection` holds the selected stills in `stills`. `selection.set` changes it, and a still that leaves the project leaves it.
   - A `gallery.apply` with no `clips` in the Clip mode gets the clips selected in the Thumbnail timeline and the clip at the playhead (`Live::edit_at`).
-  - `Gallery` holds the open album and the switch of the Albums list. `gui.gallery` sets them (`Workspace::set_gallery`), and `gui.state` gives them.
+  - `Gallery` holds the open album and the switches of the Albums list and the memories. `gui.gallery` sets them (`Workspace::set_gallery`), and `gui.state` gives them.
+  - `Workspace::memory_bank` draws the memories. A drop of `Dragged` on a memory sends `gallery.memory.copy`.
+  - `Workspace::save_memory` and `Workspace::load_memory` send the requests of the Color > Memories menu.
+  - A `gallery.memory.load` or `gallery.memory.apply` with no `clips` gets the targets of `gallery.apply` (`Live::color_targets`).
+  - Change Label edits the label in place, in `label_field`.
   - `Workspace::shown_album` gives the open album. An album that left the project gives the first album.
   - A `gallery.grab` with no `album` gets the open album (`Live::edit_at`). Thus a script grab and a GUI grab go into the same album.
   - `Workspace::album_list` draws the Albums list. A drag of a still carries `Dragged`, and a drop on an album sends `gallery.move`.

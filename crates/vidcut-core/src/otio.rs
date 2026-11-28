@@ -868,7 +868,6 @@ fn export_with(
     for t in &p.tracks {
         let (mut video, mut audio) = (Vec::new(), Vec::new());
         let (mut tv, mut ta) = (a, a);
-        let mut channels: Vec<u16> = Vec::new();
         let edits = transitions::Edits::of(p, t);
         for c in &t.clips {
             let m = media.get(c.media.as_str()).copied();
@@ -966,7 +965,6 @@ fn export_with(
                 }
                 let mut editor = json!({});
                 if let Some(kept) = c.generator.as_ref().and_then(generators::kept_channels) {
-                    channels.push(kept.len() as u16);
                     editor["Channels"] = json!(kept);
                 }
                 if let Some(g) = group {
@@ -1009,6 +1007,9 @@ fn export_with(
                     "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
                     "gain_db": au.gain_db,
                 });
+                if !au.channels.is_empty() {
+                    meta["channels"] = json!(au.channels);
+                }
                 write_sound_meta(&mut meta, au, c.content_at(s));
                 if let Some(eq) = &au.equalizer {
                     meta["equalizer"] = json!(eq);
@@ -1029,13 +1030,16 @@ fn export_with(
                 if let Some(x) = c.linked_at {
                     meta["linked_at"] = json!(x);
                 }
-                let n = m
-                    .and_then(|m| m.info.audio.get(au.stream as usize))
-                    .map_or(2, |x| x.channels);
-                channels.push(n);
+                let held = m.map_or_else(|| vec![0, 1], |m| m.info.heard(au));
                 let mut editor = json!({
-                    "Channels": (0..n)
-                        .map(|ch| json!({ "Source Channel ID": ch, "Source Track ID": au.stream }))
+                    "Channels": held
+                        .iter()
+                        .map(|&ch| {
+                            let (track, ch) = m
+                                .and_then(|m| m.info.sound_track_of(au.stream, ch))
+                                .unwrap_or((au.stream as usize, ch));
+                            json!({ "Source Channel ID": ch, "Source Track ID": track })
+                        })
                         .collect::<Vec<_>>(),
                 });
                 if let Some(g) = group {
@@ -1134,15 +1138,8 @@ fn export_with(
             meta["render_cache"] = json!(false);
         }
         let mut sound = json!({ "Locked": t.locked, "SoloOn": t.solo });
-        if let Some(&n) = channels.first()
-            && channels.iter().all(|&x| x == n)
-            && let Some(kind) = match n {
-                1 => Some("Mono"),
-                2 => Some("Stereo"),
-                _ => None,
-            }
-        {
-            sound["Audio Type"] = json!(kind);
+        if t.kind == TrackKind::Audio {
+            sound["Audio Type"] = json!(t.format.title());
         }
         let sound = json!({ VIDCUT: meta, EDITOR: sound });
         let named = |kind: &str, n: usize| t.name.clone().unwrap_or(format!("{kind} {n}"));
@@ -1592,7 +1589,9 @@ pub struct ImportedClip {
     pub video: bool,
     pub enabled: bool,
     pub audio: bool,
-    pub stream: u32,
+    pub stream: Option<u32>,
+    pub channels: Vec<u32>,
+    pub sources: Vec<(u32, u32)>,
     pub gain_db: f64,
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
@@ -1692,7 +1691,9 @@ impl ImportedClip {
             video: true,
             enabled: item["enabled"].as_bool().unwrap_or(true),
             audio: false,
-            stream: 0,
+            stream: None,
+            channels: Vec::new(),
+            sources: Vec::new(),
             gain_db: 0.0,
             gain_keys: Vec::new(),
             muted: false,
@@ -1752,6 +1753,7 @@ pub struct ImportedTrack {
     pub pan_on: bool,
     pub video_enabled: bool,
     pub render_cache: bool,
+    pub format: crate::model::TrackFormat,
     pub name: Option<String>,
 }
 
@@ -1793,6 +1795,11 @@ impl ImportedTrack {
             pan_on: !audio || meta["pan_on"].as_bool().unwrap_or(true),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             render_cache: meta["render_cache"].as_bool().unwrap_or(true),
+            format: editor["Audio Type"]
+                .as_str()
+                .and_then(crate::model::TrackFormat::parse)
+                .filter(|_| audio)
+                .unwrap_or_default(),
             name: match meta.get("name") {
                 Some(name) => name.as_str().map(String::from),
                 None => otio["name"]
@@ -2172,10 +2179,17 @@ fn link_group(item: &Value) -> Option<i64> {
     item["metadata"][EDITOR]["Link Group ID"].as_i64()
 }
 
-fn editor_stream(item: &Value) -> Option<u32> {
-    let channels = item["metadata"][EDITOR]["Channels"].as_array()?;
-    let track = channels.first()?["Source Track ID"].as_u64()?;
-    u32::try_from(track).ok()
+fn editor_sources(item: &Value) -> Vec<(u32, u32)> {
+    item["metadata"][EDITOR]["Channels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let track = u32::try_from(c["Source Track ID"].as_u64()?).ok()?;
+            let ch = u32::try_from(c["Source Channel ID"].as_u64()?).ok()?;
+            Some((track, ch))
+        })
+        .collect()
 }
 
 struct Between<'a> {
@@ -2565,11 +2579,14 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 video: false,
                 enabled: true,
                 audio: true,
-                stream: meta["stream"]
-                    .as_u64()
-                    .map(|s| s as u32)
-                    .or_else(|| editor_stream(item))
-                    .unwrap_or(0),
+                stream: meta["stream"].as_u64().map(|s| s as u32),
+                channels: meta["channels"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_u64().map(|v| v as u32))
+                    .collect(),
+                sources: editor_sources(item),
                 gain_db: meta["gain_db"]
                     .as_f64()
                     .or_else(|| effects::gain(item))

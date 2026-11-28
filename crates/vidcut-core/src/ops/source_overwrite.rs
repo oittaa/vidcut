@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Media, Project, SyncGroup, TrackKind, uncovered};
 
 use super::titles::default_length;
-use super::{Source, make_clip, put, track_above, tracks, unlocked};
+use super::{Source, make_clip, new_sound_track, put, track_above, unlocked};
 
 pub struct Placed {
     pub clip: String,
@@ -385,8 +385,7 @@ pub fn source_overwrite(
     let ti = if clips[0].video {
         track_above(p, start, end)
     } else {
-        let audio = p.tracks_of(TrackKind::Audio).len();
-        tracks::nth(p, TrackKind::Audio, audio)
+        new_sound_track(p, &clips[0])
     };
     unlocked(p, ti)?;
     let stops_at_end = clips[0].video && p.tracks.len() > tracks_before;
