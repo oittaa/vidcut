@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
+use vidcut_core::fades::{X_LEVEL, X_POINT};
 use vidcut_core::model::{
-    Clip, EffectType, GeneratorKind, Handle, Keyframe, Marks, PictureTransition, Project, Track,
-    TrackKind,
+    Clip, EffectType, GeneratorKind, Handle, Keyframe, Marks, PictureTransition, Project,
+    SoundFade, Track, TrackKind,
 };
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::request::GeneratorSettings;
@@ -14,9 +15,9 @@ use vidcut_core::validate::GAIN;
 use super::EditSel;
 use super::edits::{Plan, Trim, applied};
 use super::geometry::{
-    Hit, Rows, SNAP_PX, Scale, Snap, clip_edge_near, clips_in, edit_near, hit_rows, is_subtitle,
-    level_at, sound_band, transition_over, transition_span, volume_gain, volume_level, volume_span,
-    volume_y,
+    Hit, Rows, SNAP_PX, Scale, Snap, clip_edge_near, clips_in, edit_near, fade_gain, fade_span,
+    hit_rows, is_subtitle, level_at, sound_band, transition_over, transition_span, volume_gain,
+    volume_level, volume_span, volume_y,
 };
 
 pub const HOVER: Duration = Duration::from_millis(800);
@@ -163,6 +164,14 @@ pub enum Gesture {
         frame: i64,
         out: bool,
     },
+    FadeLength {
+        clip: String,
+        falling: bool,
+    },
+    FadeCurve {
+        clip: String,
+        falling: bool,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -192,6 +201,14 @@ pub struct Preview {
     pub gains: Option<Gains>,
     pub trims: Vec<Trim>,
     pub alone: bool,
+    pub fades: Option<Fades>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fades {
+    pub clip: String,
+    pub fade_in: Option<SoundFade>,
+    pub fade_out: Option<SoundFade>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -208,7 +225,11 @@ impl Preview {
         if !self.trims.is_empty() {
             return applied(p, &self.trims, self.alone).ok();
         }
-        if self.marks.is_none() && self.marker.is_none() && self.gains.is_none() {
+        if self.marks.is_none()
+            && self.marker.is_none()
+            && self.gains.is_none()
+            && self.fades.is_none()
+        {
             return None;
         }
         let mut moved = p.clone();
@@ -233,6 +254,13 @@ impl Preview {
             {
                 a.gain_keys.clone_from(keys);
             }
+        }
+        if let Some(f) = &self.fades
+            && let Some((ti, ci)) = moved.find_clip(&f.clip)
+            && let Some(a) = moved.tracks[ti].clips[ci].audio.as_mut()
+        {
+            a.fade_in = f.fade_in;
+            a.fade_out = f.fade_out;
         }
         Some(moved)
     }
@@ -344,6 +372,12 @@ impl Drag {
             Gesture::KeyHandle { clip, frame, out } => {
                 return handle_preview(ctx, pos, clip, *frame, *out);
             }
+            Gesture::FadeLength { clip, falling } => {
+                return fade_length_preview(ctx, pos, clip, *falling);
+            }
+            Gesture::FadeCurve { clip, falling } => {
+                return fade_curve_preview(ctx, pos, clip, *falling);
+            }
             _ => {}
         }
         let under = match hit_rows(ctx.project, ctx.rows, &ctx.scale, pos).1 {
@@ -403,7 +437,9 @@ impl Drag {
             Gesture::Bin { .. }
             | Gesture::Volume { .. }
             | Gesture::Key { .. }
-            | Gesture::KeyHandle { .. } => Preview::default(),
+            | Gesture::KeyHandle { .. }
+            | Gesture::FadeLength { .. }
+            | Gesture::FadeCurve { .. } => Preview::default(),
 
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { template, len } => {
@@ -1292,6 +1328,79 @@ fn key_preview(
     }
 }
 
+fn fade_set(c: &Clip, falling: bool, fade: Option<SoundFade>, set: Value) -> Preview {
+    let Some(a) = c.audio.as_ref() else {
+        return Preview::default();
+    };
+    let key = if falling { "fade_out" } else { "fade_in" };
+    let (mut fade_in, mut fade_out) = (a.fade_in, a.fade_out);
+    let (old, slot) = if falling {
+        (a.fade_out, &mut fade_out)
+    } else {
+        (a.fade_in, &mut fade_in)
+    };
+    *slot = fade;
+    Preview {
+        request: (fade != old).then(|| command("clip.set", json!({ "clips": [c.id], key: set }))),
+        fades: Some(Fades {
+            clip: c.id.clone(),
+            fade_in,
+            fade_out,
+        }),
+        ..Preview::default()
+    }
+}
+
+fn fade_length_preview(ctx: &Ctx, pos: Pos2, clip: &str, falling: bool) -> Preview {
+    let Some(c) = ctx.clip(clip) else {
+        return Preview::default();
+    };
+    let Some(a) = c.audio.as_ref() else {
+        return Preview::default();
+    };
+    let at = ctx.scale.frame(pos.x);
+    let (to, other) = if falling {
+        (c.end() as f64 - at, a.fade_in)
+    } else {
+        (at - c.start as f64, a.fade_out)
+    };
+    let room = c.duration as f64 - other.map_or(0.0, |f| f.frames);
+    let frames = to.round().clamp(0.0, room.max(0.0));
+    let old = if falling { a.fade_out } else { a.fade_in };
+    if frames <= 0.0 {
+        return fade_set(c, falling, None, Value::Null);
+    }
+    let fade = old.map_or(SoundFade::linear(frames), |f| SoundFade { frames, ..f });
+    fade_set(c, falling, Some(fade), json!({ "frames": frames }))
+}
+
+fn fade_curve_preview(ctx: &Ctx, pos: Pos2, clip: &str, falling: bool) -> Preview {
+    let (Some(c), Some(band)) = (ctx.clip(clip), band_of(ctx, clip)) else {
+        return Preview::default();
+    };
+    let Some(old) = c
+        .audio
+        .as_ref()
+        .and_then(|a| if falling { a.fade_out } else { a.fade_in })
+    else {
+        return Preview::default();
+    };
+    let (x0, x1) = fade_span(&ctx.scale, c, falling);
+    let along = (f64::from(pos.x) - x0) / (x1 - x0).max(1.0);
+    let (lo, hi) = (*X_POINT.start(), *X_POINT.end());
+    let x_point = (along * 100.0).round().clamp(lo, hi);
+    let gain = fade_gain(band, pos.y).max(1e-6);
+    let (lo, hi) = (*X_LEVEL.start(), *X_LEVEL.end());
+    let x_level = (60.0 * gain.log2()).round().clamp(lo, hi);
+    let fade = SoundFade {
+        x_level,
+        x_point,
+        ..old
+    };
+    let set = json!({ "x_level": x_level, "x_point": x_point });
+    fade_set(c, falling, Some(fade), set)
+}
+
 fn handle_preview(ctx: &Ctx, pos: Pos2, clip: &str, frame: i64, out: bool) -> Preview {
     let (Some(c), Some(band)) = (ctx.clip(clip), band_of(ctx, clip)) else {
         return Preview::default();
@@ -1722,6 +1831,7 @@ mod tests {
             rows,
             area: Rect::from_min_max(pos2(0.0, 26.0), pos2(1000.0, 260.0)),
             bands: super::super::geometry::Bands::default(),
+            audio_page: false,
         }
     }
 

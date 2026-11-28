@@ -2582,6 +2582,24 @@ impl Workspace {
             ui.close();
         }
         ui.separator();
+        for (action, text) in [
+            (
+                Action::ApplyGradeOneClipPrior,
+                "Apply Grade From One Clip Prior",
+            ),
+            (
+                Action::ApplyGradeTwoClipsPrior,
+                "Apply Grade From Two Clips Prior",
+            ),
+        ] {
+            let key = self.snap.bindings.first(action).unwrap_or_default();
+            let button = egui::Button::new(text).shortcut_text(key);
+            if ui.add_enabled(page, button).clicked() {
+                self.grade_keys_struck(&[action]);
+                ui.close();
+            }
+        }
+        ui.separator();
         for (menu, size) in [
             ("Full Printer Light", 1.0),
             ("Half Printer Light", 0.5),
@@ -2849,6 +2867,23 @@ impl Workspace {
         if struck(Action::GrabStill) {
             self.grab_still();
         }
+        for (action, prior) in [
+            (Action::ApplyGradeOneClipPrior, 1),
+            (Action::ApplyGradeTwoClipsPrior, 2),
+        ] {
+            if struck(action) {
+                self.send("grade.apply", json!({ "prior": prior }));
+            }
+        }
+        let whole = self.strip_grades();
+        if let Some((clip, clips)) = &whole {
+            if struck(Action::Copy) {
+                self.send("grade.copy", json!({ "clip": clip }));
+            }
+            if struck(Action::Paste) && self.snap.grade_clipboard {
+                self.send("grade.apply", json!({ "clips": clips }));
+            }
+        }
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
@@ -2871,7 +2906,7 @@ impl Workspace {
         {
             self.auto_color(&of, n);
         }
-        if let Some(n) = corrector {
+        if let Some(n) = corrector.filter(|_| whole.is_none()) {
             if struck(Action::Copy) {
                 self.send("grade.copy", params(&of, "clip", json!({ "node": n })));
             }

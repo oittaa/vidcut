@@ -227,7 +227,7 @@ Notes:
 
 ## Additional outputs
 
-[Spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
+[Spec §10.1](../spec.md#101-export-page-pp-41034132) gives the behavior. `ExportParams::more_outputs` holds a `MoreOutput` for each additional output.
 
 - `MoreOutput::path` gives the file: the name of `output` with the extension of its container, in the folder of `output` or in its `folder`.
 - `MoreOutput::settings` makes the `ExportSettings` of an additional output from those of output 1. It is the one place that decides them.
@@ -560,7 +560,7 @@ Voice Isolation:
 - GUI media exports are `background`.
 - Quick Export lists the presets marked `quick_export`. It sends one with `overwrite` and no range.
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
-- The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)) draws its panels in `export_page_ui`.
+- The Export page ([spec §10.1](../spec.md#101-export-page-pp-41034132)) draws its panels in `export_page_ui`.
   - The render settings (`Render`) start from a preset. They send the changes as `set` overrides, with per-clip names and `overwrite`.
   - `Render::more` holds the additional outputs, and `Render::output_tab` the open tab. `more_tab` draws the rows of an additional output.
   - The plan on the page counts and lists the files of all outputs, with the additional outputs after their output.
@@ -581,6 +581,9 @@ Voice Isolation:
   - `pick` gives the `thumbnails` of a click. A plain click gives an empty list and seeks the timeline player when the playhead is not in the clip.
   - `top_at` gives the clip of the top track at a frame. A plain click on a clip under another clip keeps that clip in `thumbnails`. Why: the outline stays on the top clip.
   - `Strip` keeps the list of clips for one project snapshot. Why: the digests and the pieces are made once for each change of the project, not for each frame.
+  - `ops::clip_filter::prior` finds the clip one or two places before the clip at the playhead, with `ops::clip_filter::top_at`. Why: `grade.apply` with `prior` needs the order of the strip in the core.
+  - `ExportUi::strip_focus` is on after a press in the strip and off after a press in another place. `Workspace::strip_grades` then gives the clip at the playhead and the clips that take a grade.
+    - Why: Ctrl+C and Ctrl+V copy the whole grade when the strip has the focus, and one node when it does not.
   - The Color page draws the same Thumbnail timeline. `Timeline.clip_filter` holds the filter of each timeline (`ClipFilter`).
   - `ops::clip_filter::admits` decides if a clip meets the filter. The strip numbers the clips that meet it, from 1, as measured.
   - `gui::clip_filter::menu` draws the filters. It greys the filters that wait for data or for a measurement.
@@ -759,7 +762,7 @@ A compound clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions))
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
-A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):
+A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compound-clips-pp-10521054-1126)):
 
 - `render::expanded` keeps the compound clip on its track as a clip with no tracks (`hollow`). Thus `transitions::playing` still finds the transition, and the other side plays as usual.
 - `edges_on` gives the compound clip its edges. A dissolve gives its frames, and a dip to color the half of its side.
@@ -774,6 +777,8 @@ A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compoun
 - The sides of such a `place::Mix` take no composite mode (`MixDraw::lay`).
 - `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`Project::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
+- `clip_fades` gives the fades of a clip ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)). Their curve is `Curve::Power`. They go in `edges` too. Thus the player and the export play the same fades.
+- A clip fade gives the gain 0 outside its clip, for example in the handle of a cross fade.
 
 Dynamic Zoom and keyframes (D75):
 
@@ -824,8 +829,9 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
   - `place::GlowSpread` holds the sigma of each color across and down, for one glow, and its grid. The sigma comes from the area of the picture on the frame (`Glow::SIGMA`).
   - `place::GlowNoise` holds the Atmosphere noise at this frame. `Placed.frame` gives the frame of the clip.
-  - `Effect::moves_by_itself` is true for a Glow with Atmosphere and for a Film Grain without Freeze. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
+  - `Effect::moves_by_itself` is true for a Glow with Atmosphere, and for a Film Grain without Freeze or with Freeze keyframes. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
 - `place::Graining` holds what `fs_grain` needs for a Film Grain. `place::GrainTile` holds what makes its picture of noise.
+  - With Freeze, the grain is that of `OnFrame.held`: the clip frame of the latest Freeze keyframe. In a composition, `first_reaching` finds the first clip frame whose composition frame reaches that keyframe.
 - `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 - `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
@@ -881,9 +887,13 @@ The draw:
   - `Blurred` keeps the buffers (`sharpen::Planes`) until the size changes. Each frame makes the planes again, so there is no cache to keep up to date.
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
-- A canvas with fewer pixels than the frame draws a layer with a Sharpen at the frame size (`Working::at_frame_size`), as measured ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
-  - A second `Blurred` draws that layer and runs all its effects. `Blurred::scaled` then scales the result into the layer's picture, with the layer's filter.
-  - This holds for each plain layer. An adjustment clip, a compound clip and a frame that a retime makes keep the canvas size.
+- A canvas with fewer pixels than the frame draws a frame with a Sharpen whole, at the frame size (`place::whole_frame`, `Working::at_frame_size`).
+  - A second `Screen` draws the layers, the compound clips, the adjustment clips and the timeline grade at the frame size (`Screen::draw_whole`).
+  - `Blurred::scaled` then scales that picture onto the canvas once. The subtitles and the output LUT come after it.
+  - Why the whole frame: the Sharpen of an adjustment clip or a compound clip works on the layers below it or inside it.
+  - A frame with a side larger than the largest texture of the GPU keeps the canvas size. The second `Screen` never draws a whole frame itself.
+  - An export keeps that second `Screen` until it ends. The viewer frees it at the next frame with no such Sharpen.
+  - In such a frame, `VideoFrames` makes its pictures at the frame size (`VideoFrames::made_size`). These are the titles, the generators and the retimed, upscaled and Smooth Cut frames.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
@@ -918,6 +928,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
+  - `grade.apply` puts a whole clip grade in other clips (`ops::grade::apply`). The keyframes keep their source frames, because a clip grade keeps its keyframes on source frames.
   - `grade.ripple` (`ops::ripple::ripple`) compares the JSON of two `CopiedNode` values, part by part. Why: one comparison covers each setting of a corrector, also a new one.
     - A part that only one side has goes whole. Why: a part at its usual value is left out of the JSON, and a part of it could be incomplete.
     - Each target then takes the changed parts on a copy of its own settings, and `grade.paste` stores it.
@@ -961,7 +972,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
   - A `Qualify` pass makes the key of a qualifier with `fs_key_qualify`, from the picture that comes into the node (`Qualifying`).
     - A node with only a qualifier, with its three parts on and the Qualifier row at its usual values, keeps its one `Qualify` pass. It applies the Key Output.
-    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436-measured-in-resolve-studio-212)).
+    - Why: this key goes out with no remap, as measured. Each other qualifier key folds, and the fold gives the remap ([spec §8.28](../spec.md#828-qualifier-pp-32383256-3263-3436)).
   - A `Mask` pass makes the key of a Magic Mask with `fs_mask_key`, from the maps of the frame (`Masking`). A `KeyFold` always follows it ([analysis](analysis.md#subject-masks)).
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
@@ -1011,7 +1022,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
+- `grade.auto_color` runs the neural or legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129):
   - `editor::auto_color_looks` makes the `RenderPlan` of one frame and pairs it with the legacy flag (`false` with `tool`, else `ColorPrefs::use_legacy_auto_color`).
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
   - In neural mode, the corrector is at its usual values in that frame. In legacy mode, only its Lift and Gain reset.

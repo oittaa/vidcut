@@ -291,6 +291,20 @@ The bar and the Jobs button:
 - The keys that a separate window does not use go to the main window in the next frame (`dialog::take_forwarded_keys`). Thus the shortcuts work there too.
   - Held keys do not go. Thus K with J or L works only in the main window.
 
+**The Audio page** ([spec §9.1](../spec.md#91-audio-page-pp-37483753-37673772)).
+
+- `audio_page_ui` draws the panels of the page. `AudioPage` holds the switches of its Mixer, meters, Media tab and Inspector.
+  - While the page shows, `gui.show` and `gui.close` set these switches (`AudioPage::panel`). On the other pages, they act on the panels of those pages.
+- The rows are the lower timeline of the Cut page, with no upper timeline (`timeline_panel`). Thus the clicks, the drags and the keys of the Cut page work on them.
+  - `Rows::audio_page` gives a row to each audio track, from the top. Each sound clip is on its own row, with no band (`Bands`).
+  - On these rows, a drag on the edge of a linked sound clip is a trim, not a J/L roll (`hit_clips`).
+- `audio_headers` draws the headers. The fader value (`fader_field`) sends what the fader of the Mixer sends.
+- `meter_row` draws the meters of the meter panel, and the loudness meter (`loudness_meter`) at their right.
+  - While the meter panel shows, `mixer_panel` leaves out the loudness meter. Thus the page shows it once.
+  - The headers, the meter panel and the Mixer read their levels from `timeline_levels`.
+  - They share one peak hold for each track.
+- The Export page and the Audio page hold the viewer on the timeline (`hold_timeline_viewer`). A switch to another page sets the earlier mode again (`free_viewer`).
+
 **The Effects page** ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
 
 - `EffectsPage` holds the page that shows, the selected nodes and the nodes of the two viewers of each clip (`viewed`). It also holds the state of the Node Editor and of a mask drag.
@@ -386,9 +400,15 @@ The bar and the Jobs button:
 
 **Sound bands** ([spec §5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718)).
 
-- `geometry::Bands` holds each sound clip that is linked to a picture clip, with the video track of that picture. `Rows::layout` makes it.
-- `Rows::layout` leaves out an audio track whose clips are all in bands. Why: the row of the picture shows them.
-- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the first linked sound clip of each picture, at its own place. Thus a J/L cut shows.
+- With Linked Selection on, `Rows::layout` gives a row to each video track.
+  - It gives a row to an audio track only when the track is above the label track of the main track (`own_rows`).
+  - That track also holds a clip with no linked picture, and no clip linked to a picture.
+- `geometry::over` gives the audio track of the label of a video row: the lowest track in `geometry::heard_on`. `track_label` writes it under the name of the track.
+  - When `geometry::heard_on` of the main track is empty, `geometry::over` gives the lowest audio track.
+- `geometry::Bands` holds each sound clip that a band shows, with the video track of its row. `Rows::layout` makes it.
+- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the linked sound clip on the highest audio track of each picture, at its own place. Thus a J/L cut shows.
+  - `audio_edge` takes the same sound clip.
+- The band also draws each clip with no linked picture on the track that `geometry::over` gives. These clips take no clicks.
 - The band draws the sound transitions between its sound clips. It draws no volume line.
 - A sound block is a compound clip or a generator without picture. It fills its place in the band (`paint::clip_fill`).
 - The row draws the band first and the picture clips over it. Thus the frame of a selected item is on top of the band.
@@ -396,18 +416,20 @@ The bar and the Jobs button:
 - `geometry::band_hit` finds the edge of a band sound under the pointer. It gives `Hit::AudioEdit` with the picture clip.
   - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
   - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
-- An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
 - `Assets::sync` holds `linked::offsets` for each frame that is drawn. A clip that is out of sync shows its offset in a red badge before its name.
 - The clip menu gives Link Clips or Unlink Clips (`link_action`). With Linked Selection on, it takes the linked clips of the selection too.
   - It gives the four commands of the offset when the clip has an offset.
 - `Options::linked_selection` is the Linked Selection switch.
   - On, the timeline draws the linked clips of each selected clip as selected (`linked::with_ties`). The selection itself holds the clicked clip.
-  - Off, `Rows::layout` makes no `Bands`, and a video row has no band. Thus each sound clip shows on its audio row.
+  - Off, `Rows::layout` makes no `Bands`, each audio track has a row, and a video row has no band. Thus each sound clip shows on its audio row.
   - `Workspace::send` and `Workspace::send_drag` then add `alone` to the clip edits in `ALONE`, also inside an `apply`.
   - The previews then act alone too: `Ctx::alone` and `Preview::alone` for the drags, `Cut::apply` and `edits::applied` for the selected edits, and `dynamic_preview` for Dynamic Trim.
   - Then `edits::Plan::new` keeps the edits of linked clips, and the slip drag and `dynamic_target` keep each selected clip.
   - The header of a main track then has no Mute.
-- The Mute of a main track header sets `muted` on each audio track that holds the linked sound of its clips (`geometry::heard_on`). One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+- The Mute of a main track header shows `muted` of the track that `geometry::over` gives. With no such track, it is not lit.
+  - A click sets `muted` on each track in `geometry::heard_on` to the other state. One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+  - With no track in `geometry::heard_on`, a click sends nothing.
+- The row of an audio track keeps its own Mute, which sets only that track.
 
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
@@ -415,6 +437,17 @@ The bar and the Jobs button:
 - `geometry::volume_target` finds the handle, keyframe or line under the pointer (`OnVolume`).
 - The drags are `Gesture::Volume`, `Gesture::Key` and `Gesture::KeyHandle`. They send `keyframes.set` and `keyframes.move`, in one `apply`.
 - `Preview::gains` draws the dragged gains. On release, `Workspace::trim_sent` shows them until the project has them.
+
+**Clip fades** ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+
+- On the Audio page, `paint::fade_ramps` shades each fade and draws its curve (`SoundFade::along`). `paint::fade_handles` draws the handles.
+- `Look::fades` and `Rows::audio_page` turn them on. The Cut page shows no fades.
+- `geometry::fade_target` finds the length handle or the curve handle under the pointer (`OnFade`). It comes before `geometry::volume_target`.
+- The drags are `Gesture::FadeLength` and `Gesture::FadeCurve`. Each sends one `clip.set` with `fade_in` or `fade_out`.
+- `Preview::fades` draws the dragged fades. On release, `Workspace::trim_sent` shows them until the project has them.
+- A double-click on a handle sends `clip.set`: null for a length handle, and the linear point for a curve handle.
+- The Batch Fades window is `batch_fades::BatchDialog`. `TimelineView::batch_last` keeps its last `Settings` for the next window.
+- `shape_button` draws each shape of `fades::SHAPES`. Apply sends `clip.batch_fades` and waits for the result (`Ask`).
 
 **Speed keyframes** ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
@@ -572,6 +605,7 @@ The bar and the Jobs button:
   - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
+  - Ctrl+C with the Thumbnail timeline in focus sends `grade.copy` without a node. The live core keeps the whole grade (`grade_clipboard`) for `grade.apply`.
   - `EffectsPage::ripple_base` keeps the settings of the current corrector from when it became current (`Workspace::keep_ripple_base`). Ripple Node Changes to Selected Clips sends them as `before`, then clears them.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
@@ -909,7 +943,7 @@ The bar and the Jobs button:
 - `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media tab.
 - `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
-**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710)).
 
 - `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
 - `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time. `frame` counts the frames of the file.
@@ -920,7 +954,7 @@ The bar and the Jobs button:
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
-**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
+**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708)).
 
 - `SyncClips` holds the rows in the GUI, as `GroupRow` values. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
 - Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window. `SyncClips` keeps `files`, all files at open, so a file that a drag dropped comes back.
@@ -981,6 +1015,7 @@ Keys:
 From an event to an action (`crates/vidcut/src/gui/shortcuts.rs`):
 
 - `owner` gives the action of one event. `Fired` holds the actions of the events of one frame, and `Workspace::keys` reads it.
+- For Ctrl+Left, Ctrl+Right, Ctrl+Up and Ctrl+Down, `ops::beside::clip_beside` finds the clip. `Workspace::keys` sends it in a `selection.set`.
 - The modifiers must be equal to the modifiers of the `Combo`.
 - A modifier that a sign needs on the layout does not count. Why: Shift+0 makes the equals sign on a Nordic layout, and the binding is that sign.
 - The two brackets, the comma, the period, the backslash, the semicolon and the quote also match by the place of the key. Why: on a Nordic layout these places make other signs, and the keys stay at the same place.

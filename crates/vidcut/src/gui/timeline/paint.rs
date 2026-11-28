@@ -13,8 +13,9 @@ use vidcut_core::render_cache::Part;
 use vidcut_core::time::Rational;
 
 use super::geometry::{
-    Banded, Bands, Rows, Scale, TrackRect, band, chosen_on, clips_in, covered, curve_y,
-    handle_point, key_point, sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
+    Banded, Bands, FADE_HANDLE, Rows, Scale, TrackRect, VOLUME_BAND, band, chosen_on, clips_in,
+    covered, curve_y, fade_handle, fade_point, fade_span, fade_y, handle_point, key_point, over,
+    sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
 };
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
@@ -29,6 +30,7 @@ pub struct Look {
     pub filmstrips: bool,
     pub waveforms: bool,
     pub target: bool,
+    pub fades: bool,
 }
 
 pub struct Assets<'a> {
@@ -279,10 +281,7 @@ pub fn track(
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
     let fps = p.fps();
-    let shown: Vec<&Clip> = t.clips[clips_in(t, a - 1, b + 1)]
-        .iter()
-        .filter(|c| !bands.has(&c.id))
-        .collect();
+    let shown: Vec<&Clip> = t.clips[clips_in(t, a - 1, b + 1)].iter().collect();
     let span = |c: &Clip| (c.start, c.end());
     let picked = |c: &Clip| selected.contains(c.id.as_str());
     let banded: Vec<Banded> = band(p, t)
@@ -291,7 +290,20 @@ pub fn track(
         .collect();
     let heard: HashSet<&str> = banded.iter().map(|x| x.picture.id.as_str()).collect();
     if tr.audio_top > rect.top() {
-        sound_band_of(painter, tr, scale, p, &banded, assets, look, (a, b));
+        let mut sounds: Vec<(&Track, &Clip, Option<&Clip>)> = banded
+            .iter()
+            .map(|x| (x.track, x.sound, Some(x.picture)))
+            .collect();
+        if let Some(under) = over(p, t).and_then(|id| p.track(&id)) {
+            sounds.extend(
+                under.clips[clips_in(under, a - 1, b + 1)]
+                    .iter()
+                    .filter(|c| bands.row(&c.id) == Some(t.id.as_str()))
+                    .filter(|c| !banded.iter().any(|x| x.sound.id == c.id))
+                    .map(|c| (under, c, None)),
+            );
+        }
+        sound_band_of(painter, tr, scale, p, &sounds, assets, look, (a, b));
     }
     for (i, &c) in shown.iter().enumerate() {
         let next = shown.get(i + 1).copied();
@@ -301,11 +313,6 @@ pub fn track(
         let looks = (picked(c), heard.contains(c.id.as_str()));
         clip(painter, tr, scale, p, t, c, looks, assets, look, fps);
     }
-    let placed: Vec<(i64, usize)> = placed
-        .iter()
-        .copied()
-        .filter(|&(_, i)| !bands.joins(&t.transitions[i]))
-        .collect();
     let reach = |&(at, i): &(i64, usize)| {
         let x = &t.transitions[i];
         (at - x.before, at + x.after)
@@ -338,35 +345,31 @@ fn sound_band_of(
     tr: &TrackRect,
     scale: &Scale,
     p: &Project,
-    banded: &[Banded],
+    sounds: &[(&Track, &Clip, Option<&Clip>)],
     assets: &Assets,
     look: Look,
     (a, b): (i64, i64),
 ) {
     let fps = p.fps();
     let rect = tr.rect;
-    for x in banded
-        .iter()
-        .filter(|x| x.sound.end() >= a && x.sound.start <= b)
-    {
-        let opened = [&x.picture.id, &x.sound.id]
+    for &(track, s, picture) in sounds.iter().filter(|x| x.1.end() >= a && x.1.start <= b) {
+        let opened = picture
             .into_iter()
-            .any(|id| assets.audio_trim.contains(id));
+            .chain([s])
+            .any(|c| assets.audio_trim.contains(&c.id));
         let tr = &TrackRect {
             rect,
             audio_top: if opened { rect.top() } else { tr.audio_top },
         };
         let how = (false, opened);
-        sound(
-            painter, tr, scale, p, x.track, x.sound, assets, look, fps, how,
-        );
+        sound(painter, tr, scale, p, track, s, assets, look, fps, how);
     }
-    let ids: HashSet<&str> = banded.iter().map(|x| x.sound.id.as_str()).collect();
+    let ids: HashSet<&str> = sounds.iter().map(|x| x.1.id.as_str()).collect();
     let strip = TrackRect::new(
         Rect::from_min_max(pos2(rect.left(), tr.audio_top), rect.max),
         1.0,
     );
-    let mut tracks: Vec<&Track> = banded.iter().map(|x| x.track).collect();
+    let mut tracks: Vec<&Track> = sounds.iter().map(|x| x.0).collect();
     tracks.sort_by(|x, y| x.id.cmp(&y.id));
     tracks.dedup_by(|x, y| x.id == y.id);
     for at in tracks {
@@ -435,8 +438,14 @@ fn sound(
     if (look.waveforms || sound_only) && !muted && !offline && audio.height() >= 8.0 {
         waveform(&ap, audio, scale, p, c, assets, fps);
     }
+    if look.fades {
+        fade_ramps(&ap, audio, scale, c);
+    }
     if line {
         volume_line(&ap, audio, scale, c, assets.keys);
+    }
+    if look.fades && !t.locked && audio.height() >= VOLUME_BAND {
+        fade_handles(&ap, audio, scale, c);
     }
     if muted && look.status {
         ap.text(
@@ -766,6 +775,59 @@ fn volume_line(painter: &Painter, band: Rect, scale: &Scale, c: &Clip, chosen: &
             fill,
             Stroke::new(1.0, Color32::from_black_alpha(180)),
         ));
+    }
+}
+
+fn fade_ramps(painter: &Painter, band: Rect, scale: &Scale, c: &Clip) {
+    let Some(a) = c.audio.as_ref() else {
+        return;
+    };
+    for (falling, fade) in [(false, a.fade_in), (true, a.fade_out)] {
+        let Some(f) = fade else {
+            continue;
+        };
+        let (x0, x1) = fade_span(scale, c, falling);
+        if x1 - x0 < 1.0 {
+            continue;
+        }
+        let steps = ((x1 - x0) / 2.0).ceil().clamp(2.0, 400.0) as usize;
+        let curve: Vec<Pos2> = (0..=steps)
+            .map(|i| {
+                let u = i as f64 / steps as f64;
+                let x = (x0 + (x1 - x0) * u) as f32;
+                pos2(x, fade_y(band, f.along(u, falling)))
+            })
+            .collect();
+        let shade = Color32::from_black_alpha(110);
+        for w in curve.windows(2) {
+            let r = Rect::from_x_y_ranges(w[0].x..=w[1].x, band.top()..=w[0].y.min(w[1].y));
+            painter.rect_filled(r, CornerRadius::ZERO, shade);
+        }
+        let lowered: Vec<Pos2> = curve.iter().map(|p| *p + vec2(0.0, 1.0)).collect();
+        painter.add(egui::Shape::line(
+            lowered,
+            Stroke::new(1.0, Color32::from_black_alpha(140)),
+        ));
+        painter.add(egui::Shape::line(
+            curve,
+            Stroke::new(1.0, Color32::from_white_alpha(230)),
+        ));
+    }
+}
+
+fn fade_handles(painter: &Painter, band: Rect, scale: &Scale, c: &Clip) {
+    if band.width() < 4.0 * FADE_HANDLE {
+        return;
+    }
+    let edge = Stroke::new(1.0, Color32::from_black_alpha(180));
+    for falling in [false, true] {
+        let at = fade_handle(band, scale, c, falling);
+        let r = Rect::from_center_size(at, vec2(FADE_HANDLE * 1.5, FADE_HANDLE * 1.5));
+        painter.rect_filled(r, CornerRadius::same(1), Color32::WHITE);
+        painter.rect_stroke(r, CornerRadius::same(1), edge, StrokeKind::Outside);
+        if let Some(q) = fade_point(band, scale, c, falling) {
+            painter.circle(q, 3.0, theme::colors().accent, edge);
+        }
     }
 }
 
