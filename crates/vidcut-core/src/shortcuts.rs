@@ -187,6 +187,8 @@ actions! {
     TrimSecondRight "trim_second_right",
     SelectSentence "select_sentence",
     DynamicTrim "dynamic_trim",
+    FadeInToPlayhead "fade_in_to_playhead",
+    FadeOutToPlayhead "fade_out_to_playhead",
     Snapping "snapping",
     LinkedSelection "linked_selection",
     LinkClips "link_clips",
@@ -223,6 +225,8 @@ actions! {
     AddStaticKeyframe "add_static_keyframe",
     AutoColor "auto_color",
     GrabStill "grab_still",
+    ApplyGradeOneClipPrior "apply_grade_one_clip_prior",
+    ApplyGradeTwoClipsPrior "apply_grade_two_clips_prior",
     SourceStart "source_start",
     SourceEnd "source_end",
     ClipIn "clip_in",
@@ -277,7 +281,9 @@ impl Action {
             | Action::ResetAllGrades
             | Action::AddStaticKeyframe
             | Action::AutoColor
-            | Action::GrabStill => Panel::Color,
+            | Action::GrabStill
+            | Action::ApplyGradeOneClipPrior
+            | Action::ApplyGradeTwoClipsPrior => Panel::Color,
             _ => Panel::App,
         }
     }
@@ -1565,6 +1571,20 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     own(
         Trim,
+        Action::FadeInToPlayhead,
+        &["Alt+Shift+D"],
+        "Fade In to Playhead",
+        Some("The sound of the selected clips fades in from their start to the playhead."),
+    ),
+    own(
+        Trim,
+        Action::FadeOutToPlayhead,
+        &["Alt+Shift+G"],
+        "Fade Out to Playhead",
+        Some("The sound of the selected clips fades out from the playhead to their end."),
+    ),
+    own(
+        Trim,
         Action::DynamicTrim,
         &["W"],
         "Dynamic Trim",
@@ -1926,6 +1946,20 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl+Alt+G"],
         "Grab a still",
         Some("The Gallery keeps the frame at the playhead and its grades."),
+    ),
+    own(
+        Color,
+        Action::ApplyGradeOneClipPrior,
+        &["="],
+        "Apply grade from one clip prior",
+        Some("The clip at the playhead takes the grade of the clip before it."),
+    ),
+    own(
+        Color,
+        Action::ApplyGradeTwoClipsPrior,
+        &["-"],
+        "Apply grade from two clips prior",
+        Some("The clip at the playhead takes the grade of the clip two places before it."),
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

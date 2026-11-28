@@ -440,6 +440,17 @@ The bar and the Jobs button:
 - The drags are `Gesture::Volume`, `Gesture::Key` and `Gesture::KeyHandle`. They send `keyframes.set` and `keyframes.move`, in one `apply`.
 - `Preview::gains` draws the dragged gains. On release, `Workspace::trim_sent` shows them until the project has them.
 
+**Clip fades** ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+
+- On the Audio page, `paint::fade_ramps` shades each fade and draws its curve (`SoundFade::along`). `paint::fade_handles` draws the handles.
+- `Look::fades` and `Rows::audio_page` turn them on. The Cut page shows no fades.
+- `geometry::fade_target` finds the length handle or the curve handle under the pointer (`OnFade`). It comes before `geometry::volume_target`.
+- The drags are `Gesture::FadeLength` and `Gesture::FadeCurve`. Each sends one `clip.set` with `fade_in` or `fade_out`.
+- `Preview::fades` draws the dragged fades. On release, `Workspace::trim_sent` shows them until the project has them.
+- A double-click on a handle sends `clip.set`: null for a length handle, and the linear point for a curve handle.
+- The Batch Fades window is `batch_fades::BatchDialog`. `TimelineView::batch_last` keeps its last `Settings` for the next window.
+- `shape_button` draws each shape of `fades::SHAPES`. Apply sends `clip.batch_fades` and waits for the result (`Ask`).
+
 **Speed keyframes** ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `paint::speed_marks` draws the strip of a clip with speed keyframes (`geometry::speed_strip`): a line at each speed keyframe and the speed of each section.
@@ -596,6 +607,7 @@ The bar and the Jobs button:
   - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
+  - Ctrl+C with the Thumbnail timeline in focus sends `grade.copy` without a node. The live core keeps the whole grade (`grade_clipboard`) for `grade.apply`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
   - The Nodes submenu of the Color menu (`Workspace::nodes_menu`) runs the same actions (`Workspace::grade_keys_struck`). Its Delete Current Node and Label Selected Node act on the current node.
@@ -932,7 +944,7 @@ The bar and the Jobs button:
 - `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media tab.
 - `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
-**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710)).
 
 - `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
 - `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time. `frame` counts the frames of the file.
@@ -943,7 +955,7 @@ The bar and the Jobs button:
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
-**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
+**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708)).
 
 - `SyncClips` holds the rows in the GUI, as `GroupRow` values. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
 - Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window. `SyncClips` keeps `files`, all files at open, so a file that a drag dropped comes back.

@@ -1594,6 +1594,8 @@ pub struct ImportedClip {
     pub compressor: Option<crate::model::ClipCompressor>,
     pub noise_reduction: Option<crate::model::NoiseReduction>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
+    pub fade_in: Option<crate::model::SoundFade>,
+    pub fade_out: Option<crate::model::SoundFade>,
     pub link: Option<i64>,
     pub linked_at: Option<i64>,
     pub effects: Vec<Value>,
@@ -1691,6 +1693,8 @@ impl ImportedClip {
             compressor: None,
             noise_reduction: None,
             voice_isolation: None,
+            fade_in: None,
+            fade_out: None,
             link: link_group(item),
             linked_at: item["metadata"][VIDCUT]["linked_at"].as_i64(),
             effects: Vec::new(),
@@ -2568,9 +2572,12 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
                 noise_reduction: serde_json::from_value(meta["noise_reduction"].clone()).ok(),
                 voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
+                fade_in: effects::sound_fade(item, true),
+                fade_out: effects::sound_fade(item, false),
                 speed,
                 ..ImportedClip::block(clips.len(), &id, item, (start, len), fps)
             };
+            effects::drop_fades(&mut effects);
             effects::drop_pan(&mut effects);
             effects::drop_equalizer(&mut effects, equalizer.is_some());
             keys[i] = Some(clips.len());

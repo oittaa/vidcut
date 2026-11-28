@@ -848,6 +848,12 @@ impl Words<'_> {
         s.put("noise_reduction", "Noise Reduction", &raw, |c| {
             audio(c, |a| json!(a.noise_reduction))
         });
+        s.put("fade_in", "Fade In", &raw, |c| {
+            audio(c, |a| json!(a.fade_in))
+        });
+        s.put("fade_out", "Fade Out", &raw, |c| {
+            audio(c, |a| json!(a.fade_out))
+        });
         if s.put("name", "Name", &text, |c| json!(c.name)) && named {
             s.f.naming();
         }

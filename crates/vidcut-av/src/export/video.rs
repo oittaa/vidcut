@@ -1927,9 +1927,9 @@ pub struct VideoFrames {
     black: Option<frame::Video>,
     clear: Option<frame::Video>,
     colored: Option<([u8; 3], frame::Video)>,
-    generated: Lru<Pattern, frame::Video, GENERATED_KEPT>,
+    generated: Lru<(Pattern, (u32, u32)), frame::Video, GENERATED_KEPT>,
     color_sides: ColorSides,
-    flats: Lru<usize, FlatSide, FLATS_KEPT>,
+    flats: Lru<(usize, (u32, u32)), FlatSide, FLATS_KEPT>,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
     gpu_made: i64,
@@ -1962,6 +1962,7 @@ pub struct VideoFrames {
     timeline_grade: Option<Grade>,
     graded_from: i64,
     frame_size: Option<(u32, u32)>,
+    whole: Option<(u32, u32)>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
     kept: crate::hdr::Dynamic,
     more: Vec<MoreOut>,
@@ -2393,6 +2394,7 @@ impl VideoFrames {
             timeline_grade: None,
             graded_from: 0,
             frame_size: None,
+            whole: None,
             input_luts: Default::default(),
             kept: Default::default(),
             more: Vec::new(),
@@ -2466,6 +2468,25 @@ impl VideoFrames {
     pub fn in_frame(mut self, size: (u32, u32)) -> Self {
         self.frame_size = Some(size);
         self
+    }
+
+    fn whole_of(&self, placed: &[Vec<Placed>]) -> Option<(u32, u32)> {
+        let (w, h, _) = self.maker.out();
+        let most = self.drawer.as_ref()?.on.gpu.device.limits();
+        let most = most.max_texture_dimension_2d;
+        self.frame_size.filter(|&(fw, fh)| {
+            let sized = (f64::from(fw), f64::from(fh));
+            let fits = fw <= most && fh <= most;
+            (w < fw || h < fh)
+                && fits
+                && !self.colors
+                && vidcut_core::place::whole_frame(placed, sized)
+        })
+    }
+
+    fn made_size(&self) -> (u32, u32) {
+        let (w, h, _) = self.maker.out();
+        self.whole.unwrap_or((w, h))
     }
 
     pub fn drawing_in(mut self, colors: Option<Hdr>) -> Self {
@@ -2821,6 +2842,7 @@ impl VideoFrames {
                 self.open_next();
             }
             let placed = crate::player::placed_of(&piece, k, &[]);
+            self.whole = self.whole_of(&placed);
             let smooths = piece.smooths();
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
@@ -3081,12 +3103,12 @@ impl VideoFrames {
         let mut out = match (pattern, colors) {
             (Pattern::SolidColor(color), None) => frame_ref(self.colored(color))?,
             _ => {
-                if !self.generated.contains(&pattern) {
-                    let (w, h, _) = self.maker.out();
-                    let made = filled_generator(pattern, (w, h), colors);
-                    self.generated.insert(pattern, made);
+                let key = (pattern, self.made_size());
+                if !self.generated.contains(&key) {
+                    let made = filled_generator(pattern, key.1, colors);
+                    self.generated.insert(key, made);
                 }
-                frame_ref(self.generated.get(&pattern).expect("just set"))?
+                frame_ref(self.generated.get(&key).expect("just set"))?
             }
         };
         self.black_metadata(&mut out)?;
@@ -3094,7 +3116,7 @@ impl VideoFrames {
     }
 
     fn title_frame(&mut self, shown: &ShownTitle) -> Result<(frame::Video, Placed)> {
-        let (w, h, _) = self.maker.out();
+        let (w, h) = self.made_size();
         let (placing, moved) =
             crate::player::titles::laid(shown, (w, h), self.timeline_height, self.drawn_in);
         if !self.titled.contains(&placing) {
@@ -3643,7 +3665,7 @@ impl VideoFrames {
                 false => self.shown(i, s, layer, changed),
             };
         };
-        let (w, h, _) = self.maker.out();
+        let (w, h) = self.made_size();
         let reading = self.open[s].pictures.reading(self.maker.reading());
         let scaled = self.scaled_pair(s, layer, reading)?;
         let kernel = crate::screen::kernel((!upscale.is_off()).then_some(upscale.sharpness));
@@ -3909,12 +3931,12 @@ impl VideoFrames {
         pieces: &std::sync::Arc<[VideoPiece]>,
         at: i64,
     ) -> Result<frame::Video> {
-        let key = std::sync::Arc::as_ptr(pieces).cast::<()>() as usize;
+        let (w, h) = self.made_size();
+        let key = (std::sync::Arc::as_ptr(pieces).cast::<()>() as usize, (w, h));
         if self.flats.peek(&key).is_some_and(|f| !f.on_offscreen()) {
             self.flats.remove(&key);
         }
         if !self.flats.contains(&key) {
-            let (w, h, _) = self.maker.out();
             let pixel = format::Pixel::GBRAPF32LE;
             let mut reader = VideoFrames::new(pieces, self.fps, w, h, pixel, self.timeline)
                 .writing_alpha(Some(AlphaOut::Premultiplied));
@@ -3970,7 +3992,7 @@ impl VideoFrames {
         if self.smoother.as_ref().is_none_or(|(r, _)| *r != retime) {
             self.smoother = crate::interpolate::User::of(retime).map(|u| (retime, u));
         }
-        let (w, h, _) = self.maker.out();
+        let (w, h) = self.made_size();
         let size = (w, h);
         let look = Look::fitted(size, crate::screen::kernel(None), (true, self.timeline));
         let frames = retime == Retime::Macos;
@@ -4179,7 +4201,7 @@ impl VideoFrames {
     }
 
     fn aim(&self, s: usize, placed: &[Placed], upscale: Upscale) -> (u32, u32) {
-        let (w, h, _) = self.maker.out();
+        let (w, h) = self.made_size();
         let src = &self.open[s];
         match (placed.is_empty(), &src.current) {
             (false, Some((frame, _))) => {
