@@ -1979,6 +1979,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Cue(&'a str, &'a crate::model::Cue),
         Group(&'a crate::model::SyncGroup),
         Still(&'a crate::model::Still),
+        Album(&'a crate::model::Album),
         Timeline(
             &'a str,
             &'a str,
@@ -2012,6 +2013,9 @@ fn diff(before: &Project, after: &Project) -> Changes {
         if !skip.stills {
             for s in &p.stills {
                 m.insert(s.id.as_str(), Named::Still(s));
+            }
+            for a in &p.albums {
+                m.insert(a.id.as_str(), Named::Album(a));
             }
         }
         if !skip.timelines {
@@ -2089,7 +2093,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         sheet: same,
         media: SharedVec::ptr_eq(&before.media, &after.media),
         groups: before.groups == after.groups,
-        stills: before.stills == after.stills,
+        stills: before.stills == after.stills && before.albums == after.albums,
         timelines: SharedVec::ptr_eq(&before.timelines, &after.timelines),
         markers: before.markers == after.markers,
         tracks: skip_tracks,
@@ -5531,19 +5535,35 @@ fn mutate(
             let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
-        Request::GalleryGrab { at } => {
+        Request::GalleryGrab { at, album } => {
             let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
                 Error::usage("gallery.grab needs `at` (--at): there is no playhead")
             })?;
             need_timeline(p)?;
             ops::gallery::open_timeline(p)?;
+            let album = ops::gallery::album_of(p, album.as_deref())?;
             let clip = ops::gallery::graded_clip(p, t)?;
             let plan = still_plan(p, t)?;
             let picture = env.still(&plan, dry_run)?;
-            json!({ "still": ops::gallery::grab(p, (&clip, t), picture)? })
+            json!({ "still": ops::gallery::grab(p, (&clip, t), (&album, picture))? })
         }
         Request::GalleryRemove { stills } => {
             ops::gallery::remove(p, &stills.to_vec())?;
+            Value::Null
+        }
+        Request::GalleryMove { stills, album } => {
+            ops::gallery::move_stills(p, &stills.to_vec(), album)?;
+            Value::Null
+        }
+        Request::GalleryAlbumAdd { name } => {
+            json!({ "album": ops::gallery::add_album(p, name.as_deref())? })
+        }
+        Request::GalleryAlbumRename { album, name } => {
+            ops::gallery::rename_album(p, album, name)?;
+            Value::Null
+        }
+        Request::GalleryAlbumRemove { album } => {
+            ops::gallery::remove_album(p, album)?;
             Value::Null
         }
         Request::GalleryApply {
@@ -8967,7 +8987,7 @@ fn track_start(
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
 pub fn still_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
-    let Request::GalleryGrab { at } = request else {
+    let Request::GalleryGrab { at, .. } = request else {
         return Vec::new();
     };
     let t = time_or_playhead(p, at.as_ref(), playhead).ok().flatten();
@@ -10773,6 +10793,7 @@ pub fn query(
             ops::grade::get(p, &of, at)?
         }
         Request::GalleryGet {} => ops::gallery::get(p, &env.stills_dir()),
+        Request::GalleryAlbumList {} => ops::gallery::albums(p),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?

@@ -4172,10 +4172,20 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - The changes go to the node of the same number. A clip with no node of that number takes no change (p. 3372).
   - Camera Raw, Sizing and Data Burn are not settings of a node. They do not ripple (p. 3373).
   - Ripple Node Changes to Current Group gives the changes to the other clips of the group of the current clip (p. 3373).
-  - Only the changed settings go. The other settings of the target node stay (not measured).
+  - Only the changed settings go. Each target takes the new value of a changed setting, not the difference. The other settings of the target node stay.
+  - A setting changed and then changed back to its first value gives no change.
+  - A clip with no node of that number gets no new node.
+  - A target node with keyframes keeps them. Its values before the first keyframe and the values on each keyframe take the new value.
+  - A change made before the other clips are selected goes too. A second Ripple Node Changes gives the same result.
+  - With two node stack layers, a change on layer 2 goes to layer 2 of the targets. An empty layer 2 takes it on its node 1. Layer 1 stays.
+  - A new curve point and a new window go to the targets. A later move of the window goes too.
   - vidcut: `grade.ripple` gives the changes of a corrector to the corrector of the same number in the grades of other clips. It is one undo step.
     - A change is a setting that differs from `before`, the settings that `grade.copy` gave before the change.
-    - A part at its usual value before or after the change goes whole (not measured). Such parts are the qualifier, the key output and the key input.
+    - A part at its usual value before or after the change goes whole, as a new window does.
+    - The qualifier, the key output and the key input go the same way (not measured).
+    - The values on each keyframe of a target take the changes too.
+    - The key output, the key input, the qualifier and the windows on each keyframe do the same (not measured).
+    - With no change, no clip takes anything.
     - Changed keyframes go whole, each on its frame from the start of the clip (not measured).
     - The label and the on state of the node do not go (not measured).
     - A clip whose corrector of that number is locked takes no change (not measured).
@@ -5172,6 +5182,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Keyframes Aligning Start Frames: the first frame of the clip of the still goes on the first frame of the target clip.
   - Apply Grade > Align Keyframes to Current Frame in the menu of the viewer puts the keyframes on the playhead (p. 3367).
   - Preserve Number Of Nodes, from 0 to 10, in the menu of the Gallery area keeps the first nodes of the target clip (p. 3361).
+  - Albums (p. 3341):
+    - A grab puts the still into the open album. A new project has one album, Stills 1.
+    - The Album button at the top left of the Gallery shows or hides the Albums list.
+    - Add Still Album in the menu of the Albums list adds an album. Its name has the next number.
+    - A click on an album opens it. A double-click on an album renames it.
+    - A drag of a still onto an album moves the still into that album.
+    - Remove Current Album in the menu of an album deletes the album and its stills, after a Delete prompt.
 - **Keyframes of an applied still**:
   - No Keyframes: each node takes the values of its last keyframe at or before the grabbed frame. Before its first keyframe, a node has its own values.
   - There is no blend between two keyframes, also with Dynamic keyframes. The clip gets no keyframes.
@@ -5188,10 +5205,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The tree is that of the still. The mixers of the clip do not stay.
   - A kept node keeps its keyframes.
   - With two node stack layers and N 1, node 1 of layer 2 of the clip stays.
+- **The Albums list**:
+  - Add Still Album opens the new album. The second album of a project is Stills 2 (p. 3341).
+  - With the sort Date Created and Ascending, the Albums list keeps the order in which the albums were made. A rename does not change it.
+  - With one album left, Remove Current Album is not greyed.
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
-  - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
+  - The Gallery panel is at the left of the viewer on the Color page. It shows the stills of the open album, the oldest first.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
+    - The still goes into `album`. Left out, it goes into the open album of a running GUI. Without a GUI, it goes into the first album (not measured).
     - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
     - The still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
     - It also holds the first, the grabbed and the last frame of the clip, and the source timecode of the clip.
@@ -5228,9 +5250,25 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - In the Timeline mode, the timeline grade takes the nodes of the timeline grade of the still (not measured).
     - A still whose grade has keyframes does not append. The request gives an error.
     - It is one undo step.
-  - `gallery.get` gives each still, with the path of its picture.
+  - `gallery.get` gives each still, with its album and the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
+  - Albums:
+    - A new project has one album, Stills 1, with the ID `a1`.
+    - The Albums button at the top left of the Gallery shows or hides the Albums list. `gui.gallery` with `albums` does the same.
+    - The list shows the albums in the order in which they were made.
+    - A click on an album opens it. A right-click opens it and shows its menu (not measured). `gui.gallery` with `album` opens an album.
+    - `gui.state` gives the open `album` and whether the list shows (`albums`).
+    - `gallery.album.add` adds an album after the others. Add Still Album in the menu of the Albums list does it and opens the new album.
+    - Left out, the name is Stills and the next number. The number goes up by one with each album and is not used again (not measured).
+    - `gallery.album.rename` renames an album. A double-click on an album does it: type the name, then press Enter. An empty name gives an error.
+    - `gallery.move` moves stills into an album. A drag of a still onto an album does it.
+    - A drag of a selected still moves all the selected stills of the open album (not measured).
+    - `gallery.album.remove` deletes an album and each still in it. Remove Current Album does it, after a Delete prompt.
+    - The last album stays. Its removal gives an error (not measured).
+    - `gallery.album.list` gives each album, with its count of stills.
+    - Each add, rename, move and removal is one undo step.
   - Still IDs of the form Track.Shot.Version, labels and the drag into the viewer come later ([todo](todo/color-gallery.md)).
+  - PowerGrade albums and the sort menu of the Albums list come later ([todo](todo/color-gallery.md)).
 
 ### 8.32 Copying grades between clips (pp. 3361–3364, 3464)
 

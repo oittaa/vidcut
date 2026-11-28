@@ -1,7 +1,7 @@
 # Gallery, stills and groups
 
 - Still IDs from the track and the place of the clip, in place of s1, s2. Change Label of a still.
-- Still albums and PowerGrade albums.
+- PowerGrade albums, and the sort menu of the Albums list.
 - Memories A to H.
 - Import and export of stills.
 - The Apply Grade submenu of the viewer. A timeline grade with keyframes in Apply Grade of a still.

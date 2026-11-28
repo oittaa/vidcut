@@ -123,6 +123,10 @@ pub enum GuiChange {
         right: Option<String>,
         shown: Option<vidcut_core::request::Viewers>,
     },
+    Gallery {
+        album: Option<String>,
+        albums: Option<bool>,
+    },
     PageTime(PageTime),
 }
 
@@ -197,6 +201,8 @@ pub struct GuiState {
     pub node_zoom: f64,
     pub node_list: bool,
     pub node_wide: bool,
+    pub album: Option<String>,
+    pub albums: bool,
     pub viewers: ViewerState,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
@@ -3796,6 +3802,10 @@ impl Live {
                 let change = GuiChange::Viewers { left, right, shown };
                 self.gui_change(vec![change], |s| json!(s))
             }
+            Request::GuiGallery { album, albums } => {
+                let change = GuiChange::Gallery { album, albums };
+                self.gui_change(vec![change], |s| json!(s))
+            }
             Request::GuiPageTime { at, fast, speed } => {
                 if speed.is_some_and(|s| !s.is_finite() || s.abs() > MAX_SPEED) {
                     return Step::Now(Err(Error::usage(format!(
@@ -4345,6 +4355,9 @@ impl Live {
                     return Err(Error::usage("the clipboard has no keyframes"));
                 }
                 *keyframes = Some(self.key_clipboard.clone());
+            }
+            Request::GalleryGrab { album, .. } if album.is_none() => {
+                *album = self.renderer.gui_state().and_then(|s| s.album);
             }
             Request::GradePaste { settings, .. } if settings.is_none() => {
                 if self.node_clipboard.is_none() {

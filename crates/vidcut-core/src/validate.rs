@@ -471,11 +471,38 @@ pub fn violations(p: &Project) -> Vec<String> {
     v
 }
 
+fn albums(p: &Project, v: &mut Vec<String>) {
+    if p.albums.is_empty() {
+        v.push("the Gallery has no album".into());
+    }
+    let mut ids = HashSet::new();
+    for a in &p.albums {
+        if !ids.insert(a.id.as_str()) {
+            v.push(format!("duplicate album {}", a.id));
+        }
+        let n = a.id.strip_prefix('a').and_then(|n| n.parse::<u64>().ok());
+        if n.is_none_or(|n| n == 0 || n >= p.next_id.album) {
+            v.push(format!(
+                "album id {} is not a1 to a{}",
+                a.id,
+                p.next_id.album.saturating_sub(1)
+            ));
+        }
+        if a.name.trim().is_empty() {
+            v.push(format!("album {} has no name", a.id));
+        }
+    }
+}
+
 fn stills(p: &Project, v: &mut Vec<String>) {
+    albums(p, v);
     let mut ids = HashSet::new();
     for s in &p.stills {
         if !ids.insert(s.id.as_str()) {
             v.push(format!("duplicate still {}", s.id));
+        }
+        if p.album(&s.album).is_none() {
+            v.push(format!("still {} is in unknown album {}", s.id, s.album));
         }
         let n = s.id.strip_prefix('s').and_then(|n| n.parse::<u64>().ok());
         if n.is_none_or(|n| n == 0 || n >= p.next_id.still) {

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    ApplyKeys, Clip, Grade, GradeNode, GradeTool, Project, Still, StillSource, TrackKind,
+    Album, ApplyKeys, Clip, Grade, GradeNode, GradeTool, Project, Still, StillSource, TrackKind,
 };
 use crate::request::GradeLevel;
 
@@ -62,14 +62,98 @@ fn source_of(p: &Project, clip: &str, frame: Option<i64>) -> Result<StillSource>
     })
 }
 
-pub fn grab(p: &mut Project, (clip, frame): (&str, i64), picture: String) -> Result<String> {
+fn album_found<'a>(p: &'a Project, id: &str) -> Result<&'a Album> {
+    p.album(id)
+        .ok_or_else(|| Error::not_found(format!("no album {id}")))
+}
+
+pub fn album_of(p: &Project, album: Option<&str>) -> Result<String> {
+    match album {
+        Some(id) => Ok(album_found(p, id)?.id.clone()),
+        None => (p.albums.first())
+            .map(|a| a.id.clone())
+            .ok_or_else(|| Error::internal("the Gallery has no album")),
+    }
+}
+
+fn named(name: &str) -> Result<String> {
+    match name.trim() {
+        "" => Err(Error::usage("give the album a name")),
+        name => Ok(name.to_string()),
+    }
+}
+
+pub fn add_album(p: &mut Project, name: Option<&str>) -> Result<String> {
+    let number = p.next_id.album;
+    let name = match name {
+        Some(n) => named(n)?,
+        None => format!("Stills {number}"),
+    };
+    let id = p.alloc_album_id();
+    p.albums.push(Album {
+        id: id.clone(),
+        name,
+    });
+    Ok(id)
+}
+
+pub fn rename_album(p: &mut Project, id: &str, name: &str) -> Result<()> {
+    let name = named(name)?;
+    album_found(p, id)?;
+    if let Some(a) = p.albums.iter_mut().find(|a| a.id == id) {
+        a.name = name;
+    }
+    Ok(())
+}
+
+pub fn remove_album(p: &mut Project, id: &str) -> Result<()> {
+    album_found(p, id)?;
+    if p.albums.len() == 1 {
+        return Err(Error::invalid("the Gallery keeps one album at least"));
+    }
+    p.albums.retain(|a| a.id != id);
+    p.stills.retain(|s| s.album != id);
+    Ok(())
+}
+
+pub fn move_stills(p: &mut Project, ids: &[String], album: &str) -> Result<()> {
+    if ids.is_empty() {
+        return Err(Error::usage("give the stills to move"));
+    }
+    album_found(p, album)?;
+    for id in ids {
+        found(p, id)?;
+    }
+    for s in p.stills.iter_mut().filter(|s| ids.contains(&s.id)) {
+        s.album = album.to_string();
+    }
+    Ok(())
+}
+
+pub fn albums(p: &Project) -> Value {
+    let albums: Vec<Value> = (p.albums.iter())
+        .map(|a| {
+            let stills = p.stills.iter().filter(|s| s.album == a.id).count();
+            json!({ "id": a.id, "name": a.name, "stills": stills })
+        })
+        .collect();
+    json!(albums)
+}
+
+pub fn grab(
+    p: &mut Project,
+    (clip, frame): (&str, i64),
+    (album, picture): (&str, String),
+) -> Result<String> {
     let timeline = open_timeline(p)?;
+    let album = album_found(p, album)?.id.clone();
     let grade = grade::whole(p, clip)?;
     let source = source_of(p, clip, Some(frame))?;
     let timeline_grade = p.timeline_grade().cloned();
     let id = p.alloc_still_id();
     p.stills.push(Still {
         id: id.clone(),
+        album,
         clip: clip.to_string(),
         timeline,
         frame,
@@ -249,6 +333,7 @@ pub fn get(p: &Project, dir: &Path) -> Value {
         .map(|s| {
             json!({
                 "id": s.id,
+                "album": s.album,
                 "clip": s.clip,
                 "timeline": s.timeline,
                 "frame": s.frame,
