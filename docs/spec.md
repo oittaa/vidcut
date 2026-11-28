@@ -4458,7 +4458,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: at one layer, the switch has Clip and Timeline. At more, it is a menu with the measured items.
   - vidcut: the dots, Switch to Node Layer and the Keyframes panel are as measured. `gui.page` with `layer` shows a layer, and `gui.state` gives it.
   - vidcut: `grade.clear` with `all_layers` resets each layer. Undo gives the grades back ([gotchas](gotchas.md#resolves-edits)).
-  - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still need groups and a Gallery ([gaps](todo/gaps.md)).
+  - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still are not built yet ([todo](todo/color-gallery.md)).
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
@@ -4477,7 +4477,7 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
   - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
-  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([gaps](todo/gaps.md)).
+  - vidcut: the panel has no Sizing mode and no Sizing track. vidcut has no Sizing palette ([todo](todo/color-page.md)).
   - The header of a node track has an Enable/Disable button, a Lock button and an Auto-Keyframe button (p. 3454).
   - Enable/Disable turns the node off or on. A locked node takes no changes, and the Node Editor shows a lock on it (p. 3454).
   - With Auto-Keyframe on, each change to a value of the node adds a Dynamic keyframe (pp. 3454, 3461).
@@ -5130,7 +5130,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Each frame that the track reaches gets a map of each subject.
     - A track is a job with progress. A cancel stops it, and the clip keeps no map of it.
   - The model reads the picture that comes into the corrector, on the frame of the click and on each tracked frame.
-  - The rules with the mark "vidcut's choice" are not measured yet. Runs R3–R6 measure them ([todo](todo/subject-masks.md)).
+  - The rules with the mark "vidcut's choice" are not measured yet.
   - A positive click outside the mask starts a new subject. A click on the mask of a subject goes to that subject (vidcut's choice).
   - A negative click outside the mask goes to the last subject of its frame.
   - For each subject on each frame, the model gives 256 by 256 values over the frame. The values scale to the frame size, bilinear.
@@ -5177,7 +5177,6 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The files have one person or many people. Their frame rates are from 24 to 59.94 fps, and their sizes from 1280×534 to 3840×2160.
     - The timelines are 1080×1920, 1920×1080 and 1080×1080, and each of them at twice that size.
     - A line that names one clip or one file records only that measurement.
-    - [todo](todo/smart-reframe-cases.md) lists the cases that need more files.
   - Reframe sets Position keyframes. The zoom stays, with no keyframes.
   - The picture moves only on an axis where it is larger than the frame. It always covers the frame on that axis.
     - 16:9 and 2.39:1 clips in 9:16 and 1:1 timelines move across only (34 shots).
@@ -5287,7 +5286,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Apply Grade in the menu of a still, or a middle-click on it, gives the grade to the selected clips (pp. 3364–3365).
   - The mode of the Node Editor selects the grade that changes: Clip or Timeline (pp. 3362, 3405).
   - The grade replaces the grade of each target clip (p. 3365).
-- [The todo](todo/color-gallery.md) has the other items of the Gallery and the measured results.
+- [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
