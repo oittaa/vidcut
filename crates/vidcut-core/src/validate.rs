@@ -303,6 +303,11 @@ pub fn violations(p: &Project) -> Vec<String> {
                         if let Some(why) = crate::keyframes::pan_problem(&a.pan_keys) {
                             v.push(format!("{}: {why}", c.id));
                         }
+                        for f in a.fade_in.iter().chain(&a.fade_out) {
+                            if let Some(why) = crate::fades::problem(f) {
+                                v.push(format!("{}: {why}", c.id));
+                            }
+                        }
                         if a.stream as usize >= m.info.audio.len() {
                             v.push(format!(
                                 "{}: no audio stream {} in {}",

@@ -1863,8 +1863,8 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, Noise Reduction, name,
-    /// Clip Color, Voice Isolation, Retime Process and Render Cache. The sound settings of a picture clip go to
+    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, Noise Reduction,
+    /// fades, name, Clip Color, Voice Isolation, Retime Process and Render Cache. The sound settings of a picture clip go to
     /// its linked sound clips.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1920,6 +1920,22 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         noise_reduction: Option<Option<NoiseReductionSet>>,
+        /// The fade in at the start of the sound: each field given replaces
+        /// its own, and null takes it off. The fade in and the fade out
+        /// together are not longer than the clip.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        fade_in: Option<Option<SoundFadeSet>>,
+        /// The fade out at the end of the sound, as `fade_in`.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        fade_out: Option<Option<SoundFadeSet>>,
         /// Where `gain_db` or `pan` goes as a keyframe on clips with volume or
         /// pan keyframes: the playhead by default.
         #[serde(default)]
@@ -2013,6 +2029,37 @@ pub enum Request {
     /// group with one clip left ends. One undo step.
     #[serde(rename = "clip.unlink")]
     ClipUnlink { clips: OneOrMany<ClipRef> },
+    /// Fade In to Playhead and Fade Out to Playhead: the fade in of each
+    /// sound clip that `at` (default: the playhead) is inside ends at `at`,
+    /// or its fade out starts there. A picture clip gives its linked sound
+    /// clips, and the other clips are left out. A fade keeps its curve, and
+    /// a new one is a straight line. One undo step.
+    #[serde(rename = "clip.fade_to_playhead")]
+    ClipFadeToPlayhead {
+        clips: OneOrMany<ClipRef>,
+        /// `in` or `out`.
+        fade: FadeEnd,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
+    /// Batch Fades: fades and cross fades on the sound of `clips`. A picture
+    /// clip gives its linked sound clips. An edit between two of the clips
+    /// gets the `cross_fade`, centered on it, where both sides have the
+    /// frames. Each other end of a clip gets the `fade_in` or `fade_out` that
+    /// fits in the clip. Each part left out does nothing. One undo step.
+    /// Returns the clips that got a fade (`faded`), the new transitions
+    /// (`cross_faded`), and the ends and edits left as they were (`skipped`),
+    /// with the reason.
+    #[serde(rename = "clip.batch_fades")]
+    ClipBatchFades {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        fade_in: Option<BatchFade>,
+        #[serde(default)]
+        fade_out: Option<BatchFade>,
+        #[serde(default)]
+        cross_fade: Option<BatchCrossFade>,
+    },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
     /// that their level reaches `target`. A picture clip gives its linked
     /// sound clips. Each clip is measured over the
@@ -8613,6 +8660,75 @@ pub struct NoiseReductionSet {
 /// 19000 Hz, both off. Band 2 is a `lo_shelf` at 117 Hz, bands 3 and 4 are
 /// `bell` filters at 239 and 1200 Hz, and band 5 is a `hi_shelf` at
 /// 6000 Hz.
+/// A fade of a clip's sound: each field given replaces its own. A new fade
+/// needs `frames`, and its curve starts as a straight line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SoundFadeSet {
+    /// The length in frames from the edge of the clip, more than 0.
+    #[serde(default)]
+    pub frames: Option<f64>,
+    /// X-Level, from -120 to -10. -60 at an X-Point of 50 is a straight
+    /// line.
+    #[serde(default)]
+    pub x_level: Option<f64>,
+    /// X-Point, in percent of the fade from its left end, from 1 to 99.
+    #[serde(default)]
+    pub x_point: Option<f64>,
+}
+
+/// Which end of a clip's sound fades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FadeEnd {
+    /// The fade in at the start.
+    In,
+    /// The fade out at the end.
+    Out,
+}
+
+/// The Fade In or Fade Out of Batch Fades.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchFade {
+    /// The length in frames, 1 or more.
+    pub frames: i64,
+    /// The curve: X-Level and X-Point as in `clip.set`. Left out, a
+    /// straight line.
+    #[serde(default)]
+    pub x_level: Option<f64>,
+    #[serde(default)]
+    pub x_point: Option<f64>,
+    /// Replace a fade that a clip has. Without it, that fade stays.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+/// The Crossfade of Batch Fades.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchCrossFade {
+    /// The length in frames, 1 or more, centered on the edit.
+    pub frames: i64,
+    /// `equal_power` keeps the power of the sound (a Cross Fade +3 dB).
+    /// `equal_gain` keeps its gain (a Cross Fade 0 dB).
+    #[serde(default)]
+    pub kind: CrossFadeKind,
+    /// Replace a transition that an edit has. Without it, that transition
+    /// stays.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+/// How a cross fade of Batch Fades keeps the level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CrossFadeKind {
+    #[default]
+    EqualPower,
+    EqualGain,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EqualizerSet {

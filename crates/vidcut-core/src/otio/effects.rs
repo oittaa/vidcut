@@ -1,7 +1,10 @@
 use serde_json::{Value, json};
 
 use super::{EDITOR, schema};
-use crate::model::{ClipAudio, Effects, EqKind, Equalizer, Handle, Kept, Keyframe};
+use crate::model::{
+    ClipAudio, Effects, EqKind, Equalizer, Handle, Kept, Keyframe, SoundFade, USUAL_X_LEVEL,
+    USUAL_X_POINT,
+};
 use crate::validate::GAIN;
 
 const VOLUME: &str = "Fairlight Clip Volume and Fades";
@@ -14,6 +17,11 @@ const FADES: [(&str, bool); 4] = [
     ("videoFaderOut", false),
     ("faderIn", true),
     ("faderOut", false),
+];
+
+const SOUND_FADES: [(&str, &str); 2] = [
+    ("faderIn", "fadeInCurvePoint"),
+    ("faderOut", "fadeOutCurvePoint"),
 ];
 
 pub(crate) fn rounded(v: f64) -> f64 {
@@ -306,6 +314,78 @@ fn read_keys(param: Option<&Value>, range: std::ops::RangeInclusive<f64>) -> Vec
         .collect();
     out.sort_by_key(|k| k.frame);
     out.dedup_by_key(|k| k.frame);
+    out
+}
+
+pub(super) fn sound_fade(item: &Value, head: bool) -> Option<SoundFade> {
+    let (length, curve) = SOUND_FADES[usize::from(!head)];
+    let all: Vec<&Value> = item["effects"]
+        .as_array()?
+        .iter()
+        .filter(|e| e["metadata"][EDITOR]["Enabled"] != false)
+        .flat_map(params)
+        .collect();
+    let find = |id: &str| all.iter().find(|p| p["Parameter ID"] == id);
+    let frames = find(length)?["Parameter Value"]
+        .as_f64()
+        .filter(|v| *v > 0.0)?;
+    let point = find(curve).and_then(|p| {
+        let v = p["Parameter Value"].as_array()?;
+        Some((v.first()?.as_f64()?, v.get(1)?.as_f64()?))
+    });
+    let shaped = point.map(|(x, y)| SoundFade {
+        frames,
+        x_level: y,
+        x_point: x,
+    });
+    let plain = SoundFade::linear(frames);
+    match shaped.filter(|f| crate::fades::problem(f).is_none()) {
+        Some(f) => Some(f),
+        None => crate::fades::problem(&plain).is_none().then_some(plain),
+    }
+}
+
+pub(super) fn drop_fades(list: &mut Vec<Value>) {
+    let ids: Vec<&str> = SOUND_FADES.iter().flat_map(|&(a, b)| [a, b]).collect();
+    let is_fade = |p: &Value| ids.iter().any(|id| p["Parameter ID"] == *id);
+    let mut faded = Vec::new();
+    for e in list.iter_mut() {
+        let had = params(e).any(is_fade);
+        if had && let Some(ps) = params_of(e) {
+            ps.retain(|p| !is_fade(p));
+        }
+        faded.push(had);
+    }
+    let mut faded = faded.into_iter();
+    list.retain(|e| !faded.next().unwrap_or(false) || in_use(e));
+}
+
+fn fade_params(au: &ClipAudio, (head, tail): (bool, bool)) -> Vec<Value> {
+    let mut out = Vec::new();
+    for ((length, curve), fade, cut) in SOUND_FADES
+        .into_iter()
+        .zip([au.fade_in, au.fade_out])
+        .zip([head, tail])
+        .map(|((ids, f), cut)| (ids, f, cut))
+    {
+        let Some(f) = fade.filter(|_| !cut) else {
+            continue;
+        };
+        out.push(plain(
+            length,
+            json!(rounded(f.frames)),
+            json!(0.0),
+            "Double",
+        ));
+        if !f.is_linear() {
+            out.push(plain(
+                curve,
+                json!([f.x_point, f.x_level]),
+                json!([USUAL_X_POINT, USUAL_X_LEVEL]),
+                "POINT",
+            ));
+        }
+    }
     out
 }
 
@@ -606,6 +686,7 @@ pub(super) fn sound(
         .as_ref()
         .map_or_else(Vec::new, |e| e.written(source, head, tail));
     let db = au.gain_keys.first().map_or(au.gain_db, |k| k.value);
+    let fades = fade_params(au, (head, tail));
     let mut level = volume(db)["metadata"][EDITOR]["Parameters"][0].clone();
     if au.is_keyed() {
         level["Key Frames"] = key_frames(&au.gain_keys, origin);
@@ -621,12 +702,15 @@ pub(super) fn sound(
             }
             None => ps.push(level),
         },
-        None if db != 0.0 || au.is_keyed() => {
+        None if db != 0.0 || au.is_keyed() || !fades.is_empty() => {
             let mut v = volume(db);
             v["metadata"][EDITOR]["Parameters"][0] = level;
             list.insert(0, v);
         }
         None => {}
+    }
+    if let Some(ps) = list.iter_mut().find(|e| is_volume(e)).and_then(params_of) {
+        ps.extend(fades);
     }
     if au.pan != 0.0 || au.is_pan_keyed() || !au.pan_on {
         list.push(pan_effect(au, origin));

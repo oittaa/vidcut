@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
     Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
-    TrackKind,
+    TrackKind, USUAL_X_LEVEL, USUAL_X_POINT,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -298,6 +298,9 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub normalize: Option<super::normalize::NormalizeDialog>,
     pub normalize_last: Option<super::normalize::Choice>,
+    pub batch_fades: Option<super::batch_fades::BatchDialog>,
+    pub batch_last: Option<super::batch_fades::Settings>,
+    pub fade_handles: bool,
     pub equalizer: Option<super::equalizer::Draft>,
     pub track_naming: Option<(String, String)>,
     pub leveler: Option<super::leveler::GainDrag>,
@@ -374,6 +377,9 @@ impl Default for TimelineView {
             attributes: None,
             paste_last: None,
             normalize_last: None,
+            batch_fades: None,
+            batch_last: None,
+            fade_handles: false,
             boring_dialog: None,
             dynamic: None,
             strip_drag: None,
@@ -409,6 +415,8 @@ impl TimelineView {
             snap_flipped: self.snap_flipped,
             fade_in_frames: self.fade_in_frames,
             normalize_last: self.normalize_last.take(),
+            batch_last: self.batch_last.take(),
+            fade_handles: self.fade_handles,
             heard: self.heard,
             project,
             ..Self::default()
@@ -693,6 +701,7 @@ impl Workspace {
             filmstrips: o.filmstrips,
             waveforms: o.waveforms,
             target: false,
+            fades: self.timeline.fade_handles,
         }
     }
 
@@ -1025,6 +1034,7 @@ impl Workspace {
                     filmstrips: false,
                     waveforms: false,
                     durations: false,
+                    fades: false,
                     names: look.names && row.track == MAIN,
                     target: self.is_target(&row.track),
                     ..look
@@ -1222,8 +1232,12 @@ impl Workspace {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                     None
                 }
-                Gesture::Key { .. } | Gesture::KeyHandle { .. } => {
+                Gesture::Key { .. } | Gesture::KeyHandle { .. } | Gesture::FadeCurve { .. } => {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    None
+                }
+                Gesture::FadeLength { .. } => {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     None
                 }
                 _ => None,
@@ -1269,6 +1283,13 @@ impl Workspace {
                 }
                 if let Some(row) = rows.at(pos.y).filter(|r| geometry::is_subtitle(&r.track)) {
                     self.cue_hover(ui, &p, row, scale, pos);
+                    continue;
+                }
+                if let Some((_, on)) = self.fade_on(&p, rows, scale, pos, false) {
+                    ui.ctx().set_cursor_icon(match on {
+                        geometry::OnFade::Length(_) => egui::CursorIcon::ResizeHorizontal,
+                        geometry::OnFade::Curve(_) => egui::CursorIcon::Grab,
+                    });
                     continue;
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
@@ -1424,6 +1445,7 @@ impl Workspace {
         self.section_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.normalize_window(ui.ctx());
+        self.batch_fades_window(ui.ctx());
         self.compressor_window(ui.ctx());
         self.noise_window(ui.ctx());
         self.boring_window(ui.ctx());
@@ -2287,6 +2309,11 @@ impl Workspace {
                 after: x.after,
                 sound,
             }
+        } else if let Some((clip, on)) = self.fade_on(p, rows, &scale, press, upper) {
+            match on {
+                geometry::OnFade::Length(falling) => Gesture::FadeLength { clip, falling },
+                geometry::OnFade::Curve(falling) => Gesture::FadeCurve { clip, falling },
+            }
         } else if let Some((clip, band, on)) = rows.at(press.y).and_then(|r| {
             let t = rows.bands.apart(p.track(&r.track)?);
             geometry::volume_target(&t, &scale, &r.rect, press, &self.timeline.keys)
@@ -2434,6 +2461,22 @@ impl Workspace {
         }
     }
 
+    fn fade_on(
+        &self,
+        p: &Project,
+        rows: &Rows,
+        scale: &Scale,
+        pos: Pos2,
+        upper: bool,
+    ) -> Option<(String, geometry::OnFade)> {
+        if upper || !self.timeline.fade_handles {
+            return None;
+        }
+        let r = rows.at(pos.y)?;
+        let t = rows.bands.apart(p.track(&r.track)?);
+        geometry::fade_target(&t, scale, &r.rect, pos)
+    }
+
     fn edits_gesture(&mut self, p: &Project, what: &Hit) -> Option<Gesture> {
         let hit = hit_edit(p, what)?;
         let edits = self.timeline.selected_edits();
@@ -2574,7 +2617,9 @@ impl Workspace {
                     ("edit.transition", true) => self.send_asking("edit.transition", params),
                     _ => self.send_drag(&method, params),
                 }
-                if (d.preview.gains.is_some() || !d.preview.trims.is_empty())
+                if (d.preview.gains.is_some()
+                    || d.preview.fades.is_some()
+                    || !d.preview.trims.is_empty())
                     && let Some(q) = d.preview.moved(p)
                 {
                     self.trim_sent(q);
@@ -2818,7 +2863,32 @@ impl Workspace {
                 Some((TrackRef::of(&r.track)?, at))
             });
         if resp.double_clicked() || resp.triple_clicked() {
-            if on_ruler {
+            let fade = self
+                .fade_on(p, rows, &scale, pos, upper)
+                .filter(|_| !on_ruler);
+            if let Some((clip, on)) = fade {
+                let (falling, set) = match on {
+                    geometry::OnFade::Length(falling) => (falling, Value::Null),
+                    geometry::OnFade::Curve(falling) => (
+                        falling,
+                        json!({ "x_level": USUAL_X_LEVEL, "x_point": USUAL_X_POINT }),
+                    ),
+                };
+                let key = if falling { "fade_out" } else { "fade_in" };
+                let faded = p
+                    .clip(&clip)
+                    .and_then(|c| c.audio.as_ref())
+                    .is_some_and(|a| {
+                        if falling {
+                            a.fade_out.is_some()
+                        } else {
+                            a.fade_in.is_some()
+                        }
+                    });
+                if faded {
+                    self.send("clip.set", json!({ "clips": [clip], key: set }));
+                }
+            } else if on_ruler {
                 if let Some(k) = p
                     .markers
                     .iter()
@@ -3347,6 +3417,23 @@ impl Workspace {
                 }
                 if ui.button("Normalize Audio Levels…").clicked() {
                     self.open_normalize(sounding.clone());
+                    ui.close();
+                }
+                ui.separator();
+                for (label, action, fade) in [
+                    ("Fade In to Playhead", Action::FadeInToPlayhead, "in"),
+                    ("Fade Out to Playhead", Action::FadeOutToPlayhead, "out"),
+                ] {
+                    if ui.button(bindings.named(label, action)).clicked() {
+                        self.send(
+                            "clip.fade_to_playhead",
+                            json!({ "clips": sounding, "fade": fade }),
+                        );
+                        ui.close();
+                    }
+                }
+                if ui.button("Batch Fades…").clicked() {
+                    self.open_batch_fades(sounding.clone());
                     ui.close();
                 }
             });

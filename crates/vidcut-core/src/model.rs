@@ -9200,6 +9200,51 @@ pub struct ClipAudio {
     /// when its track has it on. Left out, the clip follows its track's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_isolation: Option<VoiceIsolation>,
+    /// The fade in at its start. Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_in: Option<SoundFade>,
+    /// The fade out at its end. Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_out: Option<SoundFade>,
+}
+
+/// A fade at one end of a clip's sound: from silence at the edge of the
+/// clip to the whole sound, along a curve. It is part of the clip, not a
+/// transition. At an X-Point of 50, the gain at `t` of the way from the
+/// silent end is `t` to the power of -X-Level/60.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SoundFade {
+    /// The length in frames from the edge of the clip, more than 0. It can
+    /// have a part of a frame.
+    pub frames: f64,
+    /// X-Level: how high the curve goes at its X-Point, from -120 to -10.
+    /// Left out at -60: with the X-Point at 50, a straight line.
+    #[serde(default = "usual_x_level", skip_serializing_if = "is_usual_x_level")]
+    pub x_level: f64,
+    /// X-Point: where the curve has its X-Level, in percent of the fade
+    /// from its left end, from 1 to 99. Left out at 50.
+    #[serde(default = "usual_x_point", skip_serializing_if = "is_usual_x_point")]
+    pub x_point: f64,
+}
+
+pub const USUAL_X_LEVEL: f64 = -60.0;
+
+pub const USUAL_X_POINT: f64 = 50.0;
+
+fn usual_x_level() -> f64 {
+    USUAL_X_LEVEL
+}
+
+fn is_usual_x_level(v: &f64) -> bool {
+    *v == USUAL_X_LEVEL
+}
+
+fn usual_x_point() -> f64 {
+    USUAL_X_POINT
+}
+
+fn is_usual_x_point(v: &f64) -> bool {
+    *v == USUAL_X_POINT
 }
 
 /// An equalizer: six bands, one after the other.
@@ -9443,6 +9488,8 @@ impl ClipAudio {
             noise_reduction: None,
             effects: None,
             voice_isolation: None,
+            fade_in: None,
+            fade_out: None,
         }
     }
 }

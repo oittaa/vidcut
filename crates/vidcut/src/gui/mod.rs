@@ -1,6 +1,7 @@
 mod app;
 mod attributes;
 mod bar;
+mod batch_fades;
 mod cache_manager;
 mod cells;
 mod clip_filter;

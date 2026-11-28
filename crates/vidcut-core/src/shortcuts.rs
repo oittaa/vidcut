@@ -183,6 +183,8 @@ actions! {
     TrimSecondRight "trim_second_right",
     SelectSentence "select_sentence",
     DynamicTrim "dynamic_trim",
+    FadeInToPlayhead "fade_in_to_playhead",
+    FadeOutToPlayhead "fade_out_to_playhead",
     Snapping "snapping",
     LinkedSelection "linked_selection",
     LinkClips "link_clips",
@@ -1530,6 +1532,20 @@ pub const SHORTCUTS: &[Shortcut] = &[
              dissolve to see it between the filmstrips and drag its ends to change its \
              length. {play_or_stop} plays as usual; Esc closes it.",
         ),
+    ),
+    own(
+        Trim,
+        Action::FadeInToPlayhead,
+        &["Alt+Shift+D"],
+        "Fade In to Playhead",
+        Some("The sound of the selected clips fades in from their start to the playhead."),
+    ),
+    own(
+        Trim,
+        Action::FadeOutToPlayhead,
+        &["Alt+Shift+G"],
+        "Fade Out to Playhead",
+        Some("The sound of the selected clips fades out from the playhead to their end."),
     ),
     own(
         Trim,

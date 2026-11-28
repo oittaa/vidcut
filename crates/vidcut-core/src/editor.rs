@@ -4590,6 +4590,8 @@ fn mutate(
             dialogue_leveler,
             compressor,
             noise_reduction,
+            fade_in,
+            fade_out,
             at,
             name,
             color,
@@ -4620,6 +4622,8 @@ fn mutate(
                 dialogue_leveler: dialogue_leveler.clone(),
                 compressor: compressor.clone(),
                 noise_reduction: noise_reduction.clone(),
+                fade_in: *fade_in,
+                fade_out: *fade_out,
                 at,
                 name: or_none(name),
                 color: or_none(color),
@@ -4633,6 +4637,29 @@ fn mutate(
                 ready_retimes(env, p, &ids)?;
             }
             Value::Null
+        }
+        Request::ClipFadeToPlayhead { clips, fade, at } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => playhead.ok_or_else(|| Error::usage("clip.fade_to_playhead needs `at`"))?,
+            };
+            json!({ "clips": ops::fades::to_playhead(p, &ids, *fade, at)? })
+        }
+        Request::ClipBatchFades {
+            clips,
+            fade_in,
+            fade_out,
+            cross_fade,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            json!(ops::fades::batch(
+                p,
+                &ids,
+                *fade_in,
+                *fade_out,
+                *cross_fade
+            )?)
         }
         Request::ClipPasteAttributes {
             clips,
@@ -7717,6 +7744,8 @@ fn place_imported(
             voice_isolation: c
                 .voice_isolation
                 .filter(|v| ops::ISOLATION.contains(&v.amount)),
+            fade_in: c.fade_in.filter(|f| crate::fades::problem(f).is_none()),
+            fade_out: c.fade_out.filter(|f| crate::fades::problem(f).is_none()),
         });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(

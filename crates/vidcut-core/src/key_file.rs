@@ -78,6 +78,8 @@ const COMMANDS: &[(&str, Action)] = &[
         Action::TrimSecondRight,
     ),
     ("editToggleDynamicTrimMode", Action::DynamicTrim),
+    ("trimFadeInToPlayhead", Action::FadeInToPlayhead),
+    ("trimFadeOutToPlayhead", Action::FadeOutToPlayhead),
     ("editSnapping", Action::Snapping),
     ("editUndo", Action::Undo),
     ("editRedo", Action::Redo),
