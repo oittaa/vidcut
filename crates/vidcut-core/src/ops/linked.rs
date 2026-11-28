@@ -4,7 +4,7 @@ use super::{
     Source, clear_range, ensure_track, locate, main_index, place, split_at, tracks, unlocked,
 };
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, TrackKind};
+use crate::model::{Clip, ClipAudio, ClipCache, ClipRetime, Compound, Project, Track, TrackKind};
 
 #[derive(Debug, Default)]
 pub(super) struct Parts {
@@ -258,7 +258,40 @@ fn sound_parts(p: &Project, c: &Clip, src: &Source) -> Vec<Clip> {
         .collect()
 }
 
+fn fit_around(t: &Track, s: &mut Clip) -> Result<()> {
+    let (at, end) = (s.start, s.end());
+    let from = t.clip_at(at).map_or(at, |i| t.clips[i].end());
+    let next = t.clips.iter().map(|c| c.start).find(|&x| x >= from);
+    let to = next.unwrap_or(end).min(end);
+    if to <= from || (from == at && to < end) {
+        return Err(Error::invalid(format!(
+            "{} has no room for the sound from frame {at} to {end}",
+            t.id
+        )));
+    }
+    s.move_head(from - at);
+    s.duration = to - s.start;
+    Ok(())
+}
+
 pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
+    place_sounds(p, ids, src, false)
+}
+
+pub(crate) fn with_sound_around(
+    p: &mut Project,
+    ids: Vec<String>,
+    src: &Source,
+) -> Result<Vec<String>> {
+    place_sounds(p, ids, src, true)
+}
+
+fn place_sounds(
+    p: &mut Project,
+    ids: Vec<String>,
+    src: &Source,
+    around: bool,
+) -> Result<Vec<String>> {
     let mut out = ids.clone();
     for id in &ids {
         let (mut ti, ci) = locate(p, id)?;
@@ -287,7 +320,11 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
             unlocked(p, ai)?;
             s.id = p.alloc_clip_id();
             s.link = Some(link);
-            clear_range(p, ai, s.start, s.end());
+            if around {
+                fit_around(&p.tracks[ai], &mut s)?;
+            } else {
+                clear_range(p, ai, s.start, s.end());
+            }
             out.push(s.id.clone());
             place(p, ai, s);
         }

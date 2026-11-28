@@ -1031,7 +1031,14 @@ pub enum Request {
         start_tc: Option<TimeSpec>,
     },
 
-    /// Append after the last clip (Shift+F12).
+    /// Append (Shift+F12): after the last clip of the target track. Sound
+    /// alone with no `track` goes at the end of the timeline, on the audio
+    /// track after the last one with sound linked to V1 (A2 when there is
+    /// none), made if needed. The sound of a picture does not write over a
+    /// clip: with a clip at its first frame, it starts at the end of that
+    /// clip, in sync, and stops at the next clip. The append fails and
+    /// changes nothing when a clip starts inside a sound whose first frame
+    /// is free, or when no frame of the sound is left.
     #[serde(rename = "edit.append")]
     EditAppend(SourceParams),
     /// Insert at the edit point nearest `playhead` (Smart Insert, F9).
@@ -1073,8 +1080,9 @@ pub enum Request {
     },
 
     /// Place On Top (F12): on the first track above every clip in its span
-    /// (made if needed), never rippling. Lines up with the timeline In, a lone
-    /// Out, the edit nearest `at` (within 5 frames), or `at`. Returns the clip
+    /// (made if needed), never rippling. Sound alone goes on a new audio
+    /// track after the last one. Lines up with the timeline In, a lone Out,
+    /// the edit nearest `at` (within 5 frames), or `at`. Returns the clip
     /// and its track.
     #[serde(rename = "edit.place_on_top")]
     EditPlaceOnTop {
@@ -7296,7 +7304,8 @@ pub struct SourceParams {
     /// Leave the video out (Audio Only).
     #[serde(default)]
     pub audio_only: bool,
-    /// The target track. Default: V1, or A1 for audio-only clips. The next new
+    /// The target track. Default: V1, or A1 for audio-only clips
+    /// (`edit.append` picks its own audio track for them). The next new
     /// track (`V3` when there are two) is made. The sound of a picture on `Vn`
     /// goes on `An`, linked, and each next sound stream on the next audio
     /// track. On an audio track only the

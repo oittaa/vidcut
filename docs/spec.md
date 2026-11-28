@@ -894,7 +894,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The menu of the indicator has Slip into place, Move into place, Slip others into place and Move others into place.
     - Slip into place slips the content of the clip. Move into place moves the clip. The two others do this to the other clips of the group.
     - vidcut: the indicator gives the offset in frames. The clip menu of a clip with an offset has the four commands. A clip with a speed change shows no offset.
-  - **Resync Clip** (p. 646, Edit Actions on the Cut page) brings a clip that slipped sync back. What it changes is not measured yet: batch 1 saw no change in one case.
+  - **Resync Clip** (p. 646, Edit Actions on the Cut page): the manual says that it brings a clip that slipped sync back.
+    - It changes nothing on a clip whose sound was moved or slipped out of sync.
+    - vidcut does not have it. The menu of the out-of-sync indicator brings the clips back.
 
 ## 7. Edit functions (pp. 696–701)
 
@@ -920,6 +922,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It inserts at the edit point of the Smart Indicator on the target track, never at any other frame.
   - On Track 1, everything after it moves right by the incoming duration.
 - **Append** (Shift+F12; p. 697): it ignores the playhead, and puts the clip after the last clip.
+  - Sound alone goes to the audio track after the tracks with the sound of V1. When V1 has no sound, A1 is the track of V1. Thus on an empty timeline, the clip goes to A2.
+    - Append makes this track if necessary. The new track has the channels of the clip: a mono clip makes a mono track.
+    - vidcut: a track has no channel type ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+    - The clip starts at the end of the timeline. A second Append of sound alone goes on the same track, after the first clip.
+  - The sound of a picture does not write over a clip on its audio track:
+    - A clip at the first frame of the sound moves the start of the sound to the end of that clip. The sound stops at the next clip. It stays in sync.
+    - The append fails, and changes nothing, when the first frame is free and a clip starts inside the sound.
+    - The append also fails when no frame of the sound is left.
+    - The picture always keeps its full length.
 - **Ripple Overwrite** (Shift+F10; p. 698):
   - With no timeline marks, it replaces the whole clip under the playhead.
   - With a timeline In/Out, it replaces exactly that range, possibly across clips.
@@ -931,6 +942,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Place On Top** (F12; pp. 699–700):
   - It goes to the first track above all clips at that position, whatever the target track.
   - It makes this track if necessary (D24).
+  - Sound alone goes to a new audio track after the last audio track. An empty track does not take it.
   - It never ripples.
   - It aligns by the first of these rules that applies:
     1. a timeline In with the source In;
@@ -6509,7 +6521,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D3. Target track.**
   - Smart Insert, Ripple Overwrite and Overwrite use the target track.
   - The target track is V1 by default, and A1 for sound alone (D26).
-  - The manual does not say which track Append uses. Append always uses Track 1.
+  - The manual does not say which track Append uses. Append uses Track 1, and its own audio track for sound alone ([§7.2](#72-edit-functions)).
   - Place On Top selects its own track (D24).
   - Source Overwrite selects its own track ([§7.2](#72-edit-functions)).
 - **D4. Trim Start/End to Playhead.**
@@ -6549,7 +6561,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With a gap on one side, the sound clip on the other side moves its edge alone. It stops at the nearest sound on the track.
   - Reason: the clips on a track do not overlap.
 - **D15. Playhead after an edit function.**
-  - After Smart Insert, Append, Overwrite, Ripple Overwrite, Close Up or Paste, the playhead moves to the frame after the new clips.
+  - After Smart Insert, Append, Overwrite, Ripple Overwrite, Place On Top, Close Up or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).
   - A drop does not move the playhead.
   - This is the behavior of the Edit page.
@@ -6609,7 +6621,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It goes onto the video track above the highest track with clips in the incoming span. It makes that track if necessary.
   - It goes onto Track 1 only if no track has clips there (D10 applies).
   - The sound of a picture on Vn goes on An, linked to it (p. 646). A second sound stream goes on the next audio track. Each sound clip writes over what is there.
-  - Sound alone goes to the first audio track with room.
+  - Sound alone goes to a new audio track after the last one. A track with room does not take it.
 - **D25. Moving clips between tracks.**
   - A move gives positions as they are before the move.
   - A Track 1 clip moved to another track lifts out. With Ripple On, Track 1 closes up.
@@ -6617,7 +6629,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Video cannot go onto an audio track.
   - A selection across tracks moves only along them.
 - **D26. Sound alone.**
-  - An edit without picture goes to A1, unless a target track is given.
+  - An edit without picture goes to A1, unless a target track is given. Append and Place On Top select their own audio track ([§7.2](#72-edit-functions)).
   - An edit without picture is media without video, or Audio Only (p. 694).
   - If you drag it onto a video track, it goes onto the first audio track.
   - A clip on an audio track keeps only its audio.
