@@ -5,5 +5,7 @@
 - Step In, Step Out, Loop, Ping Pong, and smooth points on the motion path.
 - The Shape Box, track lock, handles, Hand Mode and a Shift-click range select.
 - Position X and Y, and Zoom X and Y, keyed apart.
-- Display Speed Keyframes, one group button for Volume and Pan, and Film Grain Freeze keyframes.
+- Display Speed Keyframes, and one group button for Volume and Pan.
+- Film Grain Freeze: the Keyframe button on the Cut page.
+- Film Grain Freeze: the grain before the first Freeze keyframe.
 - Dynamic Zoom keys at times other than the ends of the clip.

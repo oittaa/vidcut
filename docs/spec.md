@@ -2578,7 +2578,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - After the last keyframe, a value holds. Before the first one, it holds too.
   - Each number of a color is a value of its own.
   - Position and Center are each one point. One keyframe holds X and Y (`EffectKeys`).
-  - Film Grain Freeze has no keyframes ([X152](deviations.md#x152-film-grain-freeze-has-no-keyframes)).
+  - Film Grain Freeze takes keyframes from 0 to 1. Freeze is on where its curve is 0.5 or more.
+    - A frozen frame has the grain of the latest Freeze keyframe at or before it.
+    - Before the first Freeze keyframe, a frozen frame has the grain of the first frame of the clip (not measured).
+    - With Freeze keyframes, the switch puts a keyframe of 0 or 1.
+    - The Keyframe button of the effect also keys Freeze.
+    - A Film Grain node of a composition does the same.
   - The header of each effect section has the Keyframe button between Previous and Next.
     - The button is orange on a keyframe.
     - On a frame with a keyframe of the effect, it removes each keyframe of the effect on that frame.
