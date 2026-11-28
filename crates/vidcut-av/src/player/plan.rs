@@ -496,6 +496,7 @@ mod tests {
             colors: None,
             output_lut: None,
             timeline_grade: None,
+            fields: false,
         }
     }
 

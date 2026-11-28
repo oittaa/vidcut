@@ -4613,8 +4613,9 @@ fn params_of(
     };
     floats.extend([site[0], site[1], alpha_mode, alpha_use]);
     let woven = picture.woven().map_or([0.0, 0.0], |w| {
+        let kept = if w.top_first != w.second { 1.0 } else { 2.0 };
         [
-            if w.top_first { 1.0 } else { 2.0 },
+            kept + if w.second { 2.0 } else { 0.0 },
             f64::from(u8::from(w.before.is_some())),
         ]
     });

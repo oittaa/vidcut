@@ -54,6 +54,11 @@ pub struct RenderPlan {
     /// there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeline_grade: Option<Grade>,
+    /// Each field of an interlaced source is a frame of its own: an
+    /// interlaced picture shows its second field in the later half of its
+    /// frame. Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fields: bool,
 }
 
 pub fn timeline_colors(p: &Project) -> Option<Hdr> {
@@ -2031,6 +2036,16 @@ impl VideoPiece {
         }
     }
 
+    pub fn late_half(&self, k: i64) -> bool {
+        match self {
+            VideoPiece::Source { per_frame, .. } => {
+                let at = self.exact(k) * per_frame.as_f64() + grid_slack(*per_frame);
+                at - at.floor() >= 0.5
+            }
+            _ => false,
+        }
+    }
+
     pub fn exact(&self, k: i64) -> f64 {
         match self {
             VideoPiece::Source {
@@ -3418,6 +3433,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         colors: None,
         output_lut: s.output_lut.clone(),
         timeline_grade: p.timeline_grade().cloned(),
+        fields: false,
     };
     Ok((plan, lanes))
 }
@@ -4332,7 +4348,7 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.clips.retain(|x| parts.contains(&x.id));
         t.transitions.clear();
     }
-    let rates = own_rates(p, &c);
+    let (rates, fields) = own_rates(p, &c).unwrap_or_default();
     if let Some(r) = rates {
         at_own_rate(p, &mut alone, &c, r);
     }
@@ -4344,6 +4360,7 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         g.map_key_frames(|f| r.frame(f));
     }
     plan.colors = timeline_colors(p);
+    plan.fields = fields;
     plan.name = c
         .name
         .clone()
@@ -4352,10 +4369,15 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
-fn own_rates(p: &Project, c: &Clip) -> Option<crate::ops::conform::Rates> {
+fn own_rates(p: &Project, c: &Clip) -> Option<(Option<crate::ops::conform::Rates>, bool)> {
     let m = p.media(&c.media).filter(|m| !m.is_still())?;
-    m.info.video.as_ref()?;
-    crate::ops::conform::Rates::new(p.fps(), m.rate(p.settings.fps))
+    let fields = m.info.video.as_ref()?.fields.is_some();
+    let rate = m.rate(p.settings.fps);
+    let rate = match fields {
+        true => Rational::new(rate.num() * 2, rate.den()).ok()?,
+        false => rate,
+    };
+    Some((crate::ops::conform::Rates::new(p.fps(), rate), fields))
 }
 
 fn at_own_rate(p: &Project, alone: &mut Project, c: &Clip, r: crate::ops::conform::Rates) {
@@ -4647,6 +4669,7 @@ fn tape_plan(
         colors: None,
         output_lut: None,
         timeline_grade: None,
+        fields: false,
     }
 }
 
@@ -4700,6 +4723,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
         colors: None,
         output_lut: None,
         timeline_grade: None,
+        fields: false,
     })
 }
 

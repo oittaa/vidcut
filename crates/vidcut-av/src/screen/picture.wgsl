@@ -595,7 +595,9 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
     let x = i32(in.position.x);
     let y = i32(in.position.y);
     let h = i32(textureDimensions(middle).y);
-    let kept = select(1, 0, p.shrunk.y < 1.5);
+    let field = i32(p.shrunk.y + 0.5);
+    let kept = select(1, 0, (field & 1) == 1);
+    let second = field > 2;
     if (y & 1) == kept {
         return vec4<f32>(line_of(middle, x, y), 1.0);
     }
@@ -609,8 +611,8 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
         let far = line_of(middle, x, y + up3) + line_of(middle, x, y + down3);
         return vec4<f32>(ALONE.x * (c + e) - ALONE.y * far, 1.0);
     }
-    let p0 = line_of(before, x, y);
-    let n0 = line_of(middle, x, y);
+    let p0 = select(line_of(before, x, y), line_of(middle, x, y), second);
+    let n0 = select(line_of(middle, x, y), line_of(after, x, y), second);
     let d = (p0 + n0) * 0.5;
     let t0 = abs(p0 - n0);
     let t1 = (abs(line_of(before, x, y + up) - c) + abs(line_of(before, x, y + down) - e)) * 0.5;

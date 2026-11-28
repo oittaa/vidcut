@@ -1042,6 +1042,7 @@ fn clip_plan(plan: &RenderPlan, layer: VideoPiece, (width, height): (u32, u32)) 
         colors: plan.colors,
         output_lut: None,
         timeline_grade: None,
+        fields: plan.fields,
     }
 }
 
@@ -1072,6 +1073,7 @@ pub fn segment(plan: &RenderPlan, look: &Look, start: i64, frames: i64) -> Rende
         colors: plan.colors,
         output_lut: None,
         timeline_grade: None,
+        fields: plan.fields,
     }
 }
 
@@ -1360,6 +1362,7 @@ mod tests {
             colors: None,
             output_lut: None,
             timeline_grade: None,
+            fields: false,
         };
         let project = Project::new(Settings::default());
         let prefs = RenderCachePrefs::default();

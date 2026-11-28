@@ -904,6 +904,7 @@ pub(crate) struct Layer {
     pub(crate) went: Option<crate::route::Went>,
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
+    pub(crate) second: bool,
     pub(crate) origin: Option<Origin>,
     pub(crate) alpha_mode: AlphaMode,
     pub(crate) alpha_use: AlphaUse,
@@ -1961,6 +1962,7 @@ pub struct VideoFrames {
     output_lut: Option<crate::screen::Lut>,
     timeline_grade: Option<Grade>,
     graded_from: i64,
+    fields: bool,
     frame_size: Option<(u32, u32)>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
     kept: crate::hdr::Dynamic,
@@ -2240,6 +2242,7 @@ impl Single {
                 let made = self.maker.make(&mut self.fitting, f, path)?;
                 let alone = crate::player::Woven {
                     top_first,
+                    second: false,
                     before: None,
                     after: None,
                 };
@@ -2255,6 +2258,7 @@ impl Single {
         };
         let woven = crate::player::Woven {
             top_first,
+            second: false,
             before: field(before)?,
             after: field(after)?,
         };
@@ -2392,6 +2396,7 @@ impl VideoFrames {
             output_lut: None,
             timeline_grade: None,
             graded_from: 0,
+            fields: false,
             frame_size: None,
             input_luts: Default::default(),
             kept: Default::default(),
@@ -2444,6 +2449,11 @@ impl VideoFrames {
     pub fn with_output_lut(mut self, path: Option<&Path>) -> Result<Self> {
         self.output_lut = path.map(crate::screen::load_lut).transpose()?;
         Ok(self)
+    }
+
+    pub fn with_fields(mut self, fields: bool) -> Self {
+        self.fields = fields;
+        self
     }
 
     pub fn with_timeline_grade(mut self, grade: Option<&Grade>) -> Self {
@@ -2878,6 +2888,7 @@ impl VideoFrames {
                             went: None,
                             share: 1.0,
                             woven: None,
+                            second: false,
                             lut: None,
                             origin: Some(Origin {
                                 made: how,
@@ -2977,6 +2988,7 @@ impl VideoFrames {
                     went: self.open[s].fitting.went(),
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
+                    second: self.fields && !backward && layer.late_half(k),
                     lut: match self.open[s].lut_in {
                         true => None,
                         false => self.open[s].lut.clone(),

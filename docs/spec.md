@@ -6264,7 +6264,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A still, a title, a generator and a compound clip render at the frame rate of the timeline.
     - The first frame of the file is the first source frame that the clip shows.
     - The record timecode of the file and the times of its subtitles count at that frame rate.
-    - An interlaced source renders at its frame rate, not at its field rate (D34).
+    - An interlaced source renders at its field rate, one frame for each field (D34).
   - The parts of a name go in the measured order: unique prefix, name, frame count, File Suffix, unique suffix.
   - Separate Folders puts each file in a folder of its own, as measured. An audio track counts by its own number: A2 and V2 both give `0002`.
   - The folders go in the measured order: the Source Folder Levels, the folder of Separate Folders, then the File Subfolder.
@@ -6742,11 +6742,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Mirrored matrices count only as rotations.
 - **D34. Interlaced sources** (p. 741).
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
-  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame.
+  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`. Each frame gives one frame, except in the field render below.
   - The deinterlacer keeps the first field.
   - Measured in Resolve Studio 21.2: an interlaced clip comes in with deinterlacing on, and the picture keeps the first field.
   - Clip Attributes in Resolve Studio 21.2 has no switch that turns it off.
-  - Output is never interlaced, and never at the field rate.
+  - Output is never interlaced.
+  - An Individual clips render of an interlaced clip is at its field rate (§10.1). Each field is a frame of the file.
+    - The first frame of each pair keeps the first field. The second frame keeps the second field, as `bwdif` does in its field mode.
+  - Other output is at the frame rate of the timeline, not at the field rate.
 - **D35. HDR and color** (pp. 230–239).
   - A clip is HDR when its transfer is PQ or HLG.
   - SDR output tone-maps it to BT.709.

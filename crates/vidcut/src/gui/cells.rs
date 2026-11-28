@@ -172,6 +172,7 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
             RenderPlan {
                 output_lut: None,
                 timeline_grade: None,
+                fields: false,
                 fps: s.fps,
                 width: s.width,
                 height: s.height,

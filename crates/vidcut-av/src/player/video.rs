@@ -889,6 +889,7 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
                     f.map(|f| {
                         let alone = Woven {
                             top_first,
+                            second: false,
                             before: None,
                             after: None,
                         };
@@ -900,6 +901,7 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
                 };
                 picture.with_woven(Woven {
                     top_first,
+                    second: l.second,
                     before: field(before),
                     after: field(after),
                 })

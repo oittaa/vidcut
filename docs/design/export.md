@@ -44,6 +44,7 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - `render::flatten_clip` keeps the clip and its linked clips. A clip of a moving picture goes to the frame rate of its media: `Project::set_open_fps`, then `ops::conform::track`.
+  - An interlaced clip goes to twice its frame rate, and the plan gets `RenderPlan.fields`. Thus each field is a frame ([gpu](gpu.md#deinterlacing-and-hdr)).
   - Before the conversion, the clips move back by the part of a frame before the first source frame. Thus the file starts on that frame, and the sound stays in sync.
   - `add_subtitles` converts the cues with `ops::conform::cue`. `subtitles_beside` takes the range at the frame rate of the timeline. The record timecode of the file counts at the new frame rate.
   - `clip_path` makes the path of each clip file from the File tab fields of `ExportParams`. `kept_levels` gives the folders of `source_levels`. `Track::number` gives the track in the folder of `separate_folders`.
