@@ -475,10 +475,10 @@ The two levels (spec D98):
 - `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Effect`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::Upscale` go to the clip level. The other reasons go to the timeline level.
 - A reason of a layer goes to the clip level only when all these are true. Otherwise it goes to the timeline level.
   - It is a video file or a still (`lone`).
-  - Its media has no alpha channel, or its Alpha Mode is None (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer keeps no placement in its job (`Setup::keeps_alpha`).
+  - Its media has no alpha channel, or its Alpha Mode is None (`Setup::opaque`). Or the codec is Uncompressed 16-bit Float, ProRes 4444 or 4444 XQ, and the layer keeps no placement in its job (`Setup::keeps_alpha`).
     - Why: only the files of these codecs keep the alpha channel. Without it, the tracks below would not show through the clip.
     - A placed layer keeps no alpha in its file. Its file holds only the colors (`Look::whole`).
-    - A Premultiplied layer stays out too. Why: the file keeps straight alpha, which cannot hold a color above its alpha.
+    - A Premultiplied layer stays out too. Why: the file keeps straight alpha, which cannot hold a color at an alpha of 0. An integer file also cannot hold a color above its alpha.
     - The file holds the alpha that the mode reads. Thus `from_file` reads it back as Straight.
   - Its clip is not set to `ClipCache::Off`. This rule does not apply to `Reason::Effect` (spec D98).
 - A Retime Process works only on a video file that plays forward (`retimed`), as in the export ([export](export.md#which-source-frame)). Thus a still or a clip that plays backward keeps its placement in a job of the clip level only with a checked effect.
@@ -541,6 +541,13 @@ The format on disk:
 - The `.mkv` file is Matroska with one video stream and no sound. Its `VIDCUT_ORIGIN` tag is "render cache".
   - It holds at most 2 s of frames in a row (`Cache::next`). Each frame of the timeline has one picture, at the frame rate of the timeline.
   - `cache_encoders` gives the codec. The size is that of the `Look`, or that of the clip level.
+  - With Uncompressed 16-bit Float, each frame of the stream is one OpenEXR file (`openexr::halves`). It holds the planes in half floats, in scan lines, with no compression.
+    - Matroska keeps it as a QuickTime codec with the tag exr. FFmpeg's OpenEXR decoder reads it.
+    - The stream has the color tags of the timeline, with full range and the RGB matrix. Why: the reader takes the transfer of an HDR timeline from the tags (`hdr_of_transfer`).
+    - The colors are straight, as in each cache file. An OpenEXR file usually holds premultiplied colors. Why straight: `from_file` reads each cache file in the same way.
+    - Why OpenEXR and not raw half floats: Matroska does not take raw RGB. NUT takes it, but NUT keeps no color tags. Thus an HDR cache in NUT loses its transfer.
+    - Why vidcut writes the OpenEXR file: FFmpeg's `exr` encoder cuts half floats toward zero ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
+    - Why no compression: the codec is uncompressed (spec D98). ZIP and PIZ make smaller files, but their decode uses more cores.
 - The `.keys` file holds the name of each frame of the video, in order (`write_keys`).
   - Each name is 16 bytes: a SHA-256, cut to 16 bytes. The file has no header.
   - One name can come more than once, for example in a freeze frame.
@@ -581,10 +588,14 @@ The jobs:
   - With a Retime Process or a checked effect, the plan has the size of the `Look`. The layer keeps its `retime`, its `upscale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - The job of a layer with an alpha channel keeps the alpha (`Job::alpha`, `VideoFrames::keeping_alpha`).
-    - Only the CPU encoder of ProRes 4444 and 4444 XQ takes it, in `YUVA444P10LE` (`cache_encoder`). Another encoder refuses the job. Then the next encoder takes it.
+    - Only these encoders take it (`cache_encoder`). Another encoder refuses the job. Then the next encoder takes it.
+      - The CPU encoder of ProRes 4444 and 4444 XQ, in `YUVA444P10LE`.
+      - The encoder of Uncompressed 16-bit Float, in `GBRAPF16LE`.
     - Why not Apple's encoder: vidcut gives it P416, which has no alpha plane.
     - The draw clears the frame to transparent and writes the alpha of the layer (`Screen::keep_alpha`).
-    - The encoder writes that alpha in the alpha plane. It writes the colors without the alpha in them, as the straight alpha of ProRes.
+    - The encoder writes that alpha in the alpha plane. It writes the colors without the alpha in them, as straight alpha.
+  - Uncompressed 16-bit Float takes the planes from the GPU in `R16Float` textures (`fs_encode_float`). `encoded_rgb` does not clamp them. Thus the values below 0 and above 1 stay in the file.
+    - The shader rounds each value to the nearest half float first (`half_rounded`). Why: a GPU can cut a float toward zero when it writes a half float ([gotchas](../gotchas.md#gpu-drivers)).
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
 - The background render starts at the frames that playback made before the playhead (`Kept::played_from`).
   - It goes back from the playhead while the store keeps the picture of each frame.
@@ -626,6 +637,7 @@ The jobs:
     - ProRes 4444 XQ: the CPU. Why: no check shows that Apple's encoder takes this grade.
     - Why Vulkan makes no ProRes 4444: the test of the encoders tries it with 4:2:2 only (`probes`).
     - DNxHR: the CPU. HEVC and AV1: the GPU, and the CPU.
+    - Uncompressed 16-bit Float: FFmpeg's `rawvideo` encoder gives the planes, and vidcut writes each frame as OpenEXR. It uses the CPU.
     - No encoder of another codec takes its place. With no encoder, `render_cache::write` fails, and the background render stops with the error.
   - With Automatic and proxies on: the encoders of the proxy codec.
   - With Automatic and proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU.
