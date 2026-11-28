@@ -668,6 +668,7 @@ pub fn voice_activity(
         media: media.id.clone(),
         path: media.path.clone(),
         stream,
+        heard: None,
         origin: a.first_pts,
         source_sample: 0,
         samples: total,

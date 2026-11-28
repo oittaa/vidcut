@@ -207,9 +207,17 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
         let Some(w) = waveforms.get(&c.media) else {
             continue;
         };
-        let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
-        let s = (c.source_at(at) as f64 + c.phase) / fps + origin;
-        let gained = map_channels(&source_peaks(w, s, s + 1.0 / fps), n);
+        let (Some(m), Some(src)) = (p.media(&c.media), w.sources.get(audio.stream as usize)) else {
+            continue;
+        };
+        let s = (c.source_at(at) as f64 + c.phase) / fps + m.origin();
+        let mut played = m.info.heard(audio);
+        played.truncate(t.format.channels());
+        let peaks: Vec<f32> = played
+            .iter()
+            .map(|&ch| src.channel_peak(ch as usize, s, s + 1.0 / fps))
+            .collect();
+        let gained = map_channels(&peaks, n);
         let gain = c.gain_at(at as f64).unwrap_or(audio.gain_db);
         let g = linear(gain + t.volume_db) * share as f32;
         for (dst, src) in level.iter_mut().zip(gained) {

@@ -878,11 +878,53 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Clips on these tracks sit freely, with gaps.
 - **Audio tracks:**
   - A1, A2, … are below the video tracks. They hold all the sound. A clip on a video track has picture only (pp. 646–647).
-  - The sound of a picture on Vn goes on An. A second sound stream goes on the next audio track (D24).
+  - The sound of a picture on Vn goes on An. Each next sound track of the file goes on the next audio track (D24).
   - Media without video go there by default (D26).
+- **Track types** (pp. 1099–1100, 3804–3805, 3807):
+  - An audio track has a type:
+    - Mono, Stereo, LRC, LCR, LRCS, LCRS and Quad.
+    - 5.0, 5.0 Film, 5.1, 5.1 Film, 7.0, 7.0 Film, 7.1 and 7.1 Film.
+    - Adaptive 1 to 36.
+  - The type gives the channels of the track and their order (pp. 3804–3805):
+    - 5.0 and 5.1 put L, R and C first. 5.0 Film and 5.1 Film put L, C and R first. Then come the surrounds, with the LFE fourth in 5.1 and last in 5.1 Film.
+    - 7.0, 7.0 Film, 7.1 and 7.1 Film are in the same order, with the back surrounds after the side surrounds.
+    - vidcut: the S of LRCS and LCRS is a back center. Quad has two back surrounds. Adaptive n has the usual layout of n channels (not measured).
+  - The menu of the track header has Change Track Type to (p. 3807).
+    - Its submenu has Mono, Stereo, 3.0, 4.0, 5.x, 7.x and Adaptive.
+    - 3.0 opens LRC and LCR. 4.0 opens LRCS, LCRS and Quad. 5.x and 7.x open their four types. Adaptive opens 1 to 36.
+  - A change of type keeps the clips with their lengths, links and channels.
+  - The track header shows the type: 1.0 for Mono, 2.0 for Stereo, 5.1, 7.1, and (4) for Adaptive 4.
+    - vidcut: the other types show 3.0, 4.0, 5.0, 7.0 and (n) (not measured).
+  - vidcut: `track.set` with `format` changes the type. `track.add` makes Stereo tracks.
+- **What a track plays** (p. 1099):
+  - A track plays the first channels of each clip, as many as the track has. The other channels of the clip are not heard.
+  - A Stereo track plays channels 1 and 2 of a 5.1, 7.1 or four-channel clip, one to each side.
+  - vidcut: a clip of one channel plays at its full level on each side, on a track of each type (§9, Clip pan).
+  - vidcut: a channel of the track that the clip does not fill is silent (not measured).
+  - vidcut: a track of three channels or more mixes into the channels of the project as a file with its channels does (not measured).
+- **Sound tracks of a file:**
+  - A file has a sound track for each audio stream of one to four channels.
+    - The sound track is Mono for one channel, Stereo for two, and Adaptive 3 or 4 for more.
+  - A stream of five channels or more has a Mono sound track for each channel.
+    - vidcut: so does a stream of seven channels or of more than eight (not measured).
+  - An edit makes one sound clip for each sound track of the file, all linked with the picture. Each clip goes on the next audio track (D24).
+  - A new audio track gets the type of its sound track. An audio track that is there keeps its type. Thus A1 stays Stereo with a Mono clip.
+    - vidcut: a new timeline has no A1. The edit that makes A1 makes it Stereo, as the A1 of a new timeline in Resolve is.
+  - A clip of a stream of three or four channels holds them all, on one track.
+  - An OTIO export writes `Audio Type` on each audio track: `Mono` or `Stereo`.
+    - vidcut: the other types write their names, as `5.1` and `Adaptive 4` (not measured).
+  - The `Channels` of a clip name each channel by its sound track of the file (`Source Track ID`) and its channel in that track.
+  - vidcut: its metadata keeps `stream` and `channels`. An import reads them first, and else the `Channels`.
+- **Audio Channel** (clip menu):
+  - The menu of a sound clip of one channel has Audio Channel at the bottom. A clip of more channels has none.
+  - It lists Embedded Channel 1 to n. The channels of the file count from 1, over all its audio streams in order. The channel of the clip has a check mark.
+  - A choice gives the clip and each linked sound clip of one channel that channel. Their lengths and links do not change.
+  - One undo gives each clip its channel back.
+  - vidcut: `clip.set` with `channel` chooses it.
+  - vidcut: a linked clip of another file keeps its channel (not measured).
 - **Track header** (p. 647):
   - A click makes the track the target (D3).
-  - A right-click adds a video or audio track, or removes one (D27).
+  - A right-click adds a video or audio track, or removes one (D27). On an audio track it also has Change Track Type to.
 - **Overlapping video:**
   - The highest enabled track is visible (p. 647).
   - A disabled clip, or a track with its video off, shows what is under it.
@@ -952,7 +994,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Append** (Shift+F12; p. 697): it ignores the playhead, and puts the clip after the last clip.
   - Sound alone goes to the audio track after the tracks with the sound of V1. When V1 has no sound, A1 is the track of V1. Thus on an empty timeline, the clip goes to A2.
     - Append makes this track if necessary. The new track has the channels of the clip: a mono clip makes a mono track.
-    - vidcut: a track has no channel type ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
     - The clip starts at the end of the timeline. A second Append of sound alone goes on the same track, after the first clip.
   - The sound of a picture does not write over a clip on its audio track:
     - A clip at the first frame of the sound moves the start of the sound to the end of that clip. The sound stops at the next clip. It stays in sync.
@@ -5888,7 +5929,12 @@ The Audio page follows the Fairlight page of the manual.
   - While the meter panel shows, the Mixer of the page has no loudness meter.
 - **Rows** (pp. 3749–3751):
   - Each audio track has a row. A1 is at the top. Video tracks have no row (not measured).
-  - A clip shows its waveform at the full height of the row, its name, and its volume line with its keyframes (§9) (not measured).
+  - A clip shows its waveform, its name, and its volume line with its keyframes (§9) (not measured).
+  - A clip shows a lane for each channel of its track, not of the clip. The lanes divide the height of the row. They have no label.
+    - Thus a 5.1 clip on a Stereo track shows two lanes, and a clip on a Mono track shows one.
+    - Each lane shows the waveform of its channel. A silent channel shows a flat line.
+    - vidcut: a clip of one channel shows its waveform in each lane. A lane past the channels of the clip is empty (not measured).
+  - A click in one lane selects the clip. A trim in one lane trims all its lanes.
   - A sound clip that is linked to a picture shows on its own row (not measured).
   - The rows keep their height. With more rows than room, the rows scroll (not measured).
   - The edits of the Cut page act on the rows: select, move, trim, split, delete and the volume line.
@@ -5897,10 +5943,11 @@ The Audio page follows the Fairlight page of the manual.
   - The Timeline Options, Timeline Actions and Edit Actions menus and the tools of the Cut page are at the left of the ruler.
 - **Track header** (pp. 3752–3753):
   - It has the track number, the name, Lock, Solo, Mute, the fader value and a meter (not measured).
+  - It shows the type of the track, as on the Edit page (§6).
   - Its Solo button acts as the Solo button of the Mixer, with Solo Safe and Exclusive Solo (§9).
   - The fader value is the fader of the Mixer, in dB. A drag up or right raises it. A typed value sets it (not measured).
   - A click on the header makes the track the target of the edit functions (not measured).
-  - Its right-click menu has Add Audio Track and Remove Track.
+  - Its right-click menu has Add Audio Track, Remove Track and Change Track Type to (§6).
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
@@ -6681,7 +6728,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D24. Where Place On Top goes** (pp. 699–700).
   - It goes onto the video track above the highest track with clips in the incoming span. It makes that track if necessary.
   - It goes onto Track 1 only if no track has clips there (D10 applies).
-  - The sound of a picture on Vn goes on An, linked to it (p. 646). A second sound stream goes on the next audio track. Each sound clip writes over what is there.
+  - The sound of a picture on Vn goes on An, linked to it (p. 646). Each next sound track of the file goes on the next audio track (§6). Each sound clip writes over what is there.
   - Sound alone goes to a new audio track after the last one. A track with room does not take it.
 - **D25. Moving clips between tracks.**
   - A move gives positions as they are before the move.

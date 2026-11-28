@@ -1,6 +1,7 @@
 # Audio page
 
-- A lane and a sound clip for each channel of a multichannel track.
+- Display Individual Audio Channels in the clip menu of the timeline.
+- Convert to Linked Group for a stereo track.
 - Audio track layers, Range mode and sample editing.
 - Elastic Wave.
 - The Mixer strip of a track: arm, inserts and the Dialogue Leveler.

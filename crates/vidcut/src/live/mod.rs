@@ -4784,6 +4784,7 @@ impl Live {
                     self.waveforms = Arc::new(map);
                 }
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
+                let streams = m.info.audio.len();
                 let wanted = sound;
                 let origin = paths::media_origin(&m);
                 let cache = Kind::Waveforms.file(&origin, &format!("peaks-{channels}ch"));
@@ -4793,6 +4794,11 @@ impl Live {
                     let result = match cached {
                         Some(w) => Ok(w),
                         None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE, channels)
+                            .and_then(|mut w| {
+                                w.sources =
+                                    vidcut_av::waveform::sources(&path, streams, WAVEFORM_RATE)?;
+                                Ok(w)
+                            })
                             .map_err(|e| e.to_string())
                             .inspect(|w| {
                                 let _ = disk_cache::write(&cache, &origin.stamp(&w.to_bytes()));

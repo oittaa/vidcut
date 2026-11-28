@@ -1382,7 +1382,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
   - The scripting API takes a Pan outside −100 to 100, and sets the nearest limit.
 - **vidcut:**
-  - A track has no channel type. Each clip uses the law of a stereo track.
+  - Each clip uses the law of a stereo track, also on a track of another type.
   - A mix of one channel has no sides. The Pan does not change it.
   - A mix of three channels or more applies the Pan to its first two channels.
   - `clip.set` refuses a Pan outside −100 to 100.

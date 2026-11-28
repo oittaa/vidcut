@@ -12,7 +12,7 @@ use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ClipScaling, ColorSpace, CompositeMode,
     Compound, DuckDetect, Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Node,
     Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
-    SmoothMode, TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
+    SmoothMode, TimelineColors, Title, Tool, Track, TrackFormat, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
 use crate::shared::{Shared, SharedVec};
@@ -1191,6 +1191,26 @@ pub struct Numbered {
     pub rate: Rational,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Heard {
+    /// The channels of the stream that its track plays, from 0, in the
+    /// order of the track's channels. One channel plays on each side.
+    pub channels: Vec<u32>,
+    /// The channels of its track. Left out when stereo.
+    #[serde(default, skip_serializing_if = "TrackFormat::is_stereo")]
+    pub format: TrackFormat,
+}
+
+impl Heard {
+    pub fn every(channels: u16) -> Self {
+        let most = u16::from(crate::model::ADAPTIVE_MOST);
+        Self {
+            channels: (0..u32::from(channels)).collect(),
+            format: TrackFormat::Adaptive(channels.clamp(1, most) as u8),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum AudioPiece {
@@ -1199,6 +1219,10 @@ pub enum AudioPiece {
         path: PathBuf,
         /// Which of the media's audio streams.
         stream: u32,
+        /// The channels of the stream that its track plays. Left out, all of
+        /// them play as the stream's own layout.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        heard: Option<Box<Heard>>,
         /// Raw timestamp (s) that source position 0 refers to (`o`).
         origin: f64,
         /// First source sample, counted at the plan's sample rate from `origin`.
@@ -2115,6 +2139,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             Some(AudioPiece::Source {
                 media,
                 stream,
+                heard,
                 source_sample,
                 samples,
                 gain_db,
@@ -2134,6 +2159,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             AudioPiece::Source {
                 media: m2,
                 stream: st2,
+                heard: h2,
                 source_sample: s2,
                 samples: n2,
                 gain_db: g2,
@@ -2152,6 +2178,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             },
         ) if media == m2
             && stream == st2
+            && heard == h2
             && gain_db == g2
             && isolation == i2
             && pan == p2
@@ -4071,7 +4098,8 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                 } else {
                     let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
                     for (x, y) in split_at_fades(c.runs(x, y), around) {
-                        let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
+                        let mut piece =
+                            source_audio(p, c, m, track.format, x, sample(y) - sample(x));
                         if let AudioPiece::Source {
                             silent,
                             joined,
@@ -4178,8 +4206,24 @@ fn bus_for(
     buses.len() - 1
 }
 
-fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
+fn played(m: &Media, audio: &crate::model::ClipAudio, format: TrackFormat) -> Option<Box<Heard>> {
+    let mut channels = m.info.heard(audio);
+    channels.truncate(format.channels());
+    let all = u32::from(m.info.stream_channels(audio.stream).max(1));
+    let whole = channels.len() <= 2 && channels == (0..all).collect::<Vec<_>>();
+    (!whole || format.channels() > 2).then(|| Box::new(Heard { channels, format }))
+}
+
+fn source_audio(
+    p: &Project,
+    c: &Clip,
+    m: &Media,
+    format: TrackFormat,
+    x: i64,
+    samples: i64,
+) -> AudioPiece {
     let audio = c.audio.as_ref().expect("has audio");
+    let heard = played(m, audio, format);
     let (path, origin) = origin_of(m);
     let (fps, rate) = (p.fps(), p.settings.sample_rate);
     let speed = c.speed_at(x);
@@ -4216,6 +4260,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         media: c.media.clone(),
         path,
         stream: audio.stream,
+        heard,
         origin,
         source_sample,
         samples,
@@ -4777,6 +4822,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, fps: Rational, samples: i64) -> A
         media: m.id.clone(),
         path,
         stream: 0,
+        heard: None,
         origin,
         source_sample: fps.frame_to_sample(head, p.settings.sample_rate),
         samples,

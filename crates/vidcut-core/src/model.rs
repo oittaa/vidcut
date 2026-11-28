@@ -1981,6 +1981,289 @@ pub struct AudioInfo {
     pub duration: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TrackFormat {
+    Mono,
+    #[default]
+    Stereo,
+    Lrc,
+    Lcr,
+    Lrcs,
+    Lcrs,
+    Quad,
+    Five,
+    FiveFilm,
+    FiveOne,
+    FiveOneFilm,
+    Seven,
+    SevenFilm,
+    SevenOne,
+    SevenOneFilm,
+    Adaptive(u8),
+}
+
+pub const ADAPTIVE_MOST: u8 = 36;
+
+impl TrackFormat {
+    pub const NAMED: [TrackFormat; 15] = [
+        Self::Mono,
+        Self::Stereo,
+        Self::Lrc,
+        Self::Lcr,
+        Self::Lrcs,
+        Self::Lcrs,
+        Self::Quad,
+        Self::Five,
+        Self::FiveFilm,
+        Self::FiveOne,
+        Self::FiveOneFilm,
+        Self::Seven,
+        Self::SevenFilm,
+        Self::SevenOne,
+        Self::SevenOneFilm,
+    ];
+
+    pub fn all() -> impl Iterator<Item = TrackFormat> {
+        Self::NAMED
+            .into_iter()
+            .chain((1..=ADAPTIVE_MOST).map(Self::Adaptive))
+    }
+
+    pub fn channels(self) -> usize {
+        match self {
+            Self::Mono => 1,
+            Self::Stereo => 2,
+            Self::Lrc | Self::Lcr => 3,
+            Self::Lrcs | Self::Lcrs | Self::Quad => 4,
+            Self::Five | Self::FiveFilm => 5,
+            Self::FiveOne | Self::FiveOneFilm => 6,
+            Self::Seven | Self::SevenFilm => 7,
+            Self::SevenOne | Self::SevenOneFilm => 8,
+            Self::Adaptive(n) => usize::from(n),
+        }
+    }
+
+    pub fn name(self) -> String {
+        match self {
+            Self::Mono => "mono".into(),
+            Self::Stereo => "stereo".into(),
+            Self::Lrc => "lrc".into(),
+            Self::Lcr => "lcr".into(),
+            Self::Lrcs => "lrcs".into(),
+            Self::Lcrs => "lcrs".into(),
+            Self::Quad => "quad".into(),
+            Self::Five => "5.0".into(),
+            Self::FiveFilm => "5.0_film".into(),
+            Self::FiveOne => "5.1".into(),
+            Self::FiveOneFilm => "5.1_film".into(),
+            Self::Seven => "7.0".into(),
+            Self::SevenFilm => "7.0_film".into(),
+            Self::SevenOne => "7.1".into(),
+            Self::SevenOneFilm => "7.1_film".into(),
+            Self::Adaptive(n) => format!("adaptive_{n}"),
+        }
+    }
+
+    pub fn title(self) -> String {
+        match self {
+            Self::Mono => "Mono".into(),
+            Self::Stereo => "Stereo".into(),
+            Self::Lrc => "LRC".into(),
+            Self::Lcr => "LCR".into(),
+            Self::Lrcs => "LRCS".into(),
+            Self::Lcrs => "LCRS".into(),
+            Self::Quad => "Quad".into(),
+            Self::Five => "5.0".into(),
+            Self::FiveFilm => "5.0 Film".into(),
+            Self::FiveOne => "5.1".into(),
+            Self::FiveOneFilm => "5.1 Film".into(),
+            Self::Seven => "7.0".into(),
+            Self::SevenFilm => "7.0 Film".into(),
+            Self::SevenOne => "7.1".into(),
+            Self::SevenOneFilm => "7.1 Film".into(),
+            Self::Adaptive(n) => format!("Adaptive {n}"),
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Mono => "1.0".into(),
+            Self::Stereo => "2.0".into(),
+            Self::Lrc | Self::Lcr => "3.0".into(),
+            Self::Lrcs | Self::Lcrs | Self::Quad => "4.0".into(),
+            Self::Five | Self::FiveFilm => "5.0".into(),
+            Self::FiveOne | Self::FiveOneFilm => "5.1".into(),
+            Self::Seven | Self::SevenFilm => "7.0".into(),
+            Self::SevenOne | Self::SevenOneFilm => "7.1".into(),
+            Self::Adaptive(n) => format!("({n})"),
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim().to_ascii_lowercase().replace(' ', "_");
+        if let Some(n) = s.strip_prefix("adaptive_") {
+            return n
+                .parse()
+                .ok()
+                .filter(|n| (1..=ADAPTIVE_MOST).contains(n))
+                .map(Self::Adaptive);
+        }
+        Self::NAMED.into_iter().find(|f| f.name() == s)
+    }
+
+    pub fn of_stream(channels: u16) -> Self {
+        match channels {
+            0 | 1 => Self::Mono,
+            2 => Self::Stereo,
+            n => Self::Adaptive(n.min(u16::from(ADAPTIVE_MOST)) as u8),
+        }
+    }
+
+    pub fn is_stereo(&self) -> bool {
+        *self == Self::Stereo
+    }
+}
+
+impl std::fmt::Display for TrackFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name())
+    }
+}
+
+impl std::str::FromStr for TrackFormat {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        Self::parse(s).ok_or_else(|| {
+            format!("{s:?} is not a track format (mono, stereo, 5.1, adaptive_4, …)")
+        })
+    }
+}
+
+impl Serialize for TrackFormat {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for TrackFormat {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        String::deserialize(d)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for TrackFormat {
+    fn schema_name() -> Cow<'static, str> {
+        "TrackFormat".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let names: Vec<String> = Self::all().map(Self::name).collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": "The channels of an audio track: `mono`, `stereo`, `lrc`, `lcr`, `lrcs`, `lcrs`, `quad`, `5.0`, `5.0_film`, `5.1`, `5.1_film`, `7.0`, `7.0_film`, `7.1`, `7.1_film`, or `adaptive_1` to `adaptive_36`.",
+            "enum": names,
+        })
+    }
+}
+
+/// One audio track of a file as an edit puts it on the timeline: a stream,
+/// or one channel of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoundTrack {
+    pub stream: u32,
+    pub channels: Vec<u32>,
+    pub format: TrackFormat,
+}
+
+pub const SPLIT_FROM: u16 = 5;
+
+impl MediaInfo {
+    pub fn sound_tracks(&self) -> Vec<SoundTrack> {
+        let mut out = Vec::new();
+        for (k, a) in self.audio.iter().enumerate() {
+            let stream = k as u32;
+            if a.channels >= SPLIT_FROM {
+                out.extend((0..u32::from(a.channels)).map(|ch| SoundTrack {
+                    stream,
+                    channels: vec![ch],
+                    format: TrackFormat::Mono,
+                }));
+            } else {
+                out.push(SoundTrack {
+                    stream,
+                    channels: Vec::new(),
+                    format: TrackFormat::of_stream(a.channels),
+                });
+            }
+        }
+        out
+    }
+
+    pub fn stream_channels(&self, stream: u32) -> u16 {
+        self.audio.get(stream as usize).map_or(0, |a| a.channels)
+    }
+
+    pub fn heard(&self, audio: &ClipAudio) -> Vec<u32> {
+        if audio.channels.is_empty() {
+            (0..u32::from(self.stream_channels(audio.stream).max(1))).collect()
+        } else {
+            audio.channels.clone()
+        }
+    }
+
+    pub fn embedded(&self, stream: u32, channel: u32) -> u32 {
+        let before: u32 = self.audio[..(stream as usize).min(self.audio.len())]
+            .iter()
+            .map(|a| u32::from(a.channels.max(1)))
+            .sum();
+        before + channel + 1
+    }
+
+    pub fn of_embedded(&self, n: u32) -> Option<(u32, u32)> {
+        let mut left = n.checked_sub(1)?;
+        for (k, a) in self.audio.iter().enumerate() {
+            let c = u32::from(a.channels.max(1));
+            if left < c {
+                return Some((k as u32, left));
+            }
+            left -= c;
+        }
+        None
+    }
+
+    pub fn embedded_count(&self) -> u32 {
+        self.audio
+            .iter()
+            .map(|a| u32::from(a.channels.max(1)))
+            .sum()
+    }
+
+    pub fn sound_track_of(&self, stream: u32, channel: u32) -> Option<(usize, u32)> {
+        self.sound_tracks().iter().enumerate().find_map(|(i, t)| {
+            if t.stream != stream {
+                return None;
+            }
+            if t.channels.is_empty() {
+                return Some((i, channel));
+            }
+            t.channels
+                .iter()
+                .position(|&c| c == channel)
+                .map(|k| (i, k as u32))
+        })
+    }
+
+    pub fn of_sound_track(&self, track: usize, channel: u32) -> Option<(u32, u32)> {
+        let t = self.sound_tracks().into_iter().nth(track)?;
+        if t.channels.is_empty() {
+            return Some((t.stream, channel));
+        }
+        t.channels.get(channel as usize).map(|&c| (t.stream, c))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackKind {
@@ -2044,6 +2327,11 @@ pub struct Track {
     pub pan_on: bool,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
+    /// The channels of an audio track. It plays the first channels of each
+    /// clip, as many as it has; a clip of one channel plays on each side.
+    /// Left out when stereo, and on a video track.
+    #[serde(default, skip_serializing_if = "TrackFormat::is_stereo")]
+    pub format: TrackFormat,
     /// A name shown in the track header and the mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -9420,6 +9708,10 @@ pub struct TrackClip {
 pub struct ClipAudio {
     /// Index into the media's audio streams.
     pub stream: u32,
+    /// The channels of the stream that the clip holds, from 0, in order.
+    /// Left out when it holds all of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channels: Vec<u32>,
     /// The volume in dB, from -100 to 30, while the clip has no volume
     /// keyframes.
     pub gain_db: f64,
@@ -9738,8 +10030,17 @@ impl VoiceIsolation {
 
 impl ClipAudio {
     pub fn of(stream: u32) -> Self {
-        Self {
+        Self::of_track(&SoundTrack {
             stream,
+            channels: Vec::new(),
+            format: TrackFormat::Stereo,
+        })
+    }
+
+    pub fn of_track(t: &SoundTrack) -> Self {
+        Self {
+            stream: t.stream,
+            channels: t.channels.clone(),
             gain_db: 0.0,
             gain_keys: Vec::new(),
             muted: false,
@@ -11601,6 +11902,7 @@ impl Track {
             pan: 0.0,
             pan_on: true,
             video_enabled: true,
+            format: TrackFormat::Stereo,
             name: None,
             transitions: Vec::new(),
             render_cache: true,

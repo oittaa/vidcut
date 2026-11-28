@@ -4,8 +4,8 @@ use std::sync::Arc;
 use vidcut_core::dynamics::Dynamics;
 use vidcut_core::equalizer::Filter;
 use vidcut_core::leveler::Leveler;
-use vidcut_core::model::{ClipCompressor, Equalizer, TrackDynamics, TrackEqualizer};
-use vidcut_core::render::{AudioPiece, Bus, Dip, Ducking, Fade};
+use vidcut_core::model::{ClipCompressor, Equalizer, TrackDynamics, TrackEqualizer, TrackFormat};
+use vidcut_core::render::{AudioPiece, Bus, Dip, Ducking, Fade, Heard};
 
 use super::ahead::Ahead;
 use crate::denoise::Denoiser;
@@ -86,8 +86,129 @@ impl Drop for Resampler {
     }
 }
 
+pub(crate) fn frame_channels(src: &frame::Audio) -> u16 {
+    // SAFETY: the frame pointer is valid for the life of `src`.
+    let n = unsafe { (*src.as_ptr()).ch_layout.nb_channels };
+    u16::try_from(n).unwrap_or(1).max(1)
+}
+
+fn speakers(format: TrackFormat) -> Vec<u64> {
+    let (l, r, c, lfe) = (
+        ffi::AV_CH_FRONT_LEFT,
+        ffi::AV_CH_FRONT_RIGHT,
+        ffi::AV_CH_FRONT_CENTER,
+        ffi::AV_CH_LOW_FREQUENCY,
+    );
+    let (sl, sr, bl, br, bc) = (
+        ffi::AV_CH_SIDE_LEFT,
+        ffi::AV_CH_SIDE_RIGHT,
+        ffi::AV_CH_BACK_LEFT,
+        ffi::AV_CH_BACK_RIGHT,
+        ffi::AV_CH_BACK_CENTER,
+    );
+    match format {
+        TrackFormat::Mono => vec![c],
+        TrackFormat::Stereo => vec![l, r],
+        TrackFormat::Lrc => vec![l, r, c],
+        TrackFormat::Lcr => vec![l, c, r],
+        TrackFormat::Lrcs => vec![l, r, c, bc],
+        TrackFormat::Lcrs => vec![l, c, r, bc],
+        TrackFormat::Quad => vec![l, r, bl, br],
+        TrackFormat::Five => vec![l, r, c, sl, sr],
+        TrackFormat::FiveFilm => vec![l, c, r, sl, sr],
+        TrackFormat::FiveOne => vec![l, r, c, lfe, sl, sr],
+        TrackFormat::FiveOneFilm => vec![l, c, r, sl, sr, lfe],
+        TrackFormat::Seven => vec![l, r, c, sl, sr, bl, br],
+        TrackFormat::SevenFilm => vec![l, c, r, sl, sr, bl, br],
+        TrackFormat::SevenOne => vec![l, r, c, lfe, sl, sr, bl, br],
+        TrackFormat::SevenOneFilm => vec![l, c, r, sl, sr, bl, br, lfe],
+        TrackFormat::Adaptive(n) => {
+            let mask = channel_layout(u16::from(n)).bits();
+            (0..64)
+                .map(|b| 1u64 << b)
+                .filter(|bit| mask & bit != 0)
+                .collect()
+        }
+    }
+}
+
+fn downmix(speakers: &[u64], out: &ffi::AVChannelLayout) -> Option<Vec<Vec<f64>>> {
+    let mask = speakers.iter().fold(0, |m, s| m | s);
+    let outs = usize::try_from(out.nb_channels).ok()?;
+    // SAFETY: both layouts are valid; the matrix has room for outs rows of `ins` values.
+    unsafe {
+        let mut layout: ffi::AVChannelLayout = std::mem::zeroed();
+        if ffi::av_channel_layout_from_mask(&mut layout, mask) < 0 {
+            return None;
+        }
+        let ins = usize::try_from(layout.nb_channels).ok()?;
+        let mut m = vec![0.0f64; outs.max(1) * ins.max(1)];
+        let ret = ffi::swr_build_matrix2(
+            &layout,
+            out,
+            std::f64::consts::FRAC_1_SQRT_2,
+            std::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            f64::from(i32::MAX),
+            1.0,
+            m.as_mut_ptr(),
+            ins as isize,
+            ffi::AVMatrixEncoding::AV_MATRIX_ENCODING_NONE,
+            std::ptr::null_mut(),
+        );
+        ffi::av_channel_layout_uninit(&mut layout);
+        if ret < 0 {
+            return None;
+        }
+        Some(
+            speakers
+                .iter()
+                .map(|&s| (mask & (s - 1)).count_ones() as usize)
+                .map(|k| (0..outs).map(|o| m[o * ins + k]).collect())
+                .collect(),
+        )
+    }
+}
+
+fn heard_matrix(heard: &Heard, ins: usize, out: &ffi::AVChannelLayout) -> Option<Vec<f64>> {
+    let outs = usize::try_from(out.nb_channels).ok()?;
+    let one = heard.channels.len() == 1;
+    let spoken = if one {
+        vec![ffi::AV_CH_FRONT_CENTER]
+    } else {
+        let mut s = speakers(heard.format);
+        s.truncate(heard.channels.len());
+        s
+    };
+    let columns = if one && outs == 2 {
+        vec![MONO_TO_STEREO.to_vec()]
+    } else {
+        downmix(&spoken, out)?
+    };
+    let mut m = vec![0.0; outs * ins.max(1)];
+    for (&ch, weights) in heard.channels.iter().zip(&columns) {
+        let ch = ch as usize;
+        if ch >= ins {
+            continue;
+        }
+        for (o, w) in weights.iter().enumerate() {
+            m[o * ins + ch] += w;
+        }
+    }
+    Some(m)
+}
+
 impl Resampler {
     pub(crate) fn new(src: &frame::Audio, rate: u32, channels: u16) -> Result<Self> {
+        Self::heard(src, rate, channels, &Heard::default())
+    }
+
+    pub(crate) fn heard(
+        src: &frame::Audio,
+        rate: u32,
+        channels: u16,
+        heard: &Heard,
+    ) -> Result<Self> {
         unsafe {
             let f = &*src.as_ptr();
             let Some(in_fmt) = sample_format(f.format) else {
@@ -117,7 +238,15 @@ impl Resampler {
                 0,
                 std::ptr::null_mut(),
             );
-            let ret = if ret >= 0 && in_layout.nb_channels == 1 && channels == 2 {
+            let ins = usize::try_from(in_layout.nb_channels).unwrap_or(1);
+            let ret = if ret < 0 {
+                ret
+            } else if !heard.channels.is_empty() {
+                match heard_matrix(heard, ins, &out_layout) {
+                    Some(m) => ffi::swr_set_matrix(swr, m.as_ptr(), ins as i32),
+                    None => -1,
+                }
+            } else if in_layout.nb_channels == 1 && channels == 2 {
                 ffi::swr_set_matrix(swr, MONO_TO_STEREO.as_ptr(), 1)
             } else {
                 ret
@@ -222,6 +351,7 @@ impl Resampler {
 struct SourceAudio {
     path: PathBuf,
     ordinal: u32,
+    heard: Heard,
     input: format::context::Input,
     stream: usize,
     tick: f64,
@@ -244,7 +374,14 @@ struct SourceAudio {
 const DECODE_AHEAD: i64 = 1;
 
 impl SourceAudio {
-    fn open(path: &Path, ordinal: u32, start: f64, rate: u32, channels: u16) -> Result<Self> {
+    fn open(
+        path: &Path,
+        ordinal: u32,
+        heard: Heard,
+        start: f64,
+        rate: u32,
+        channels: u16,
+    ) -> Result<Self> {
         crate::init();
         let input = crate::decode::open_file(path)?;
         let (index, tb, tick, stream_start, params) = {
@@ -279,6 +416,7 @@ impl SourceAudio {
         let mut s = Self {
             path: path.to_path_buf(),
             ordinal,
+            heard,
             input,
             stream: index,
             tick,
@@ -439,7 +577,7 @@ impl SourceAudio {
             if let Some(mut old) = self.resampler.take() {
                 old.convert(None, &mut self.pending)?;
             }
-            self.resampler = Some(Resampler::new(f, self.rate, self.channels)?);
+            self.resampler = Some(Resampler::heard(f, self.rate, self.channels, &self.heard)?);
         }
         self.resampler
             .as_mut()
@@ -680,26 +818,34 @@ impl Lane {
         &mut self,
         path: &Path,
         stream: u32,
+        heard: Heard,
         start: f64,
         rate: u32,
         channels: u16,
     ) -> Result<()> {
         let source = match self.source.take() {
-            Some(mut s) if s.path == path && s.ordinal == stream => {
+            Some(mut s) if s.path == path && s.ordinal == stream && s.heard == heard => {
                 s.reposition(start)?;
                 s
             }
             _ => match self.ahead.take(self.piece) {
                 Some(opened) => opened?,
-                None => SourceAudio::open(path, stream, start, rate, channels)?,
+                None => SourceAudio::open(path, stream, heard.clone(), start, rate, channels)?,
             },
         };
         self.source = Some(source);
-        self.open_next(path, stream, rate, channels);
+        self.open_next(path, stream, &heard, rate, channels);
         Ok(())
     }
 
-    fn open_next(&mut self, current: &Path, current_stream: u32, rate: u32, channels: u16) {
+    fn open_next(
+        &mut self,
+        current: &Path,
+        current_stream: u32,
+        current_heard: &Heard,
+        rate: u32,
+        channels: u16,
+    ) {
         let next = self
             .pieces
             .iter()
@@ -709,23 +855,27 @@ impl Lane {
                 AudioPiece::Source {
                     path,
                     stream,
+                    heard,
                     origin,
                     source_sample,
                     samples,
                     ..
-                } if *samples > 0 => Some((i, path.clone(), *stream, *origin, *source_sample)),
+                } if *samples > 0 => {
+                    let heard = heard.as_deref().cloned().unwrap_or_default();
+                    Some((i, path.clone(), *stream, heard, *origin, *source_sample))
+                }
                 _ => None,
             });
-        let Some((i, path, stream, origin, source_sample)) = next else {
+        let Some((i, path, stream, heard, origin, source_sample)) = next else {
             return;
         };
-        if path == current && stream == current_stream {
+        if path == current && stream == current_stream && heard == *current_heard {
             return;
         }
         let start = origin + source_sample as f64 / f64::from(rate);
         let key = (path.clone(), stream, start.to_bits());
         self.ahead.start(i, key, move || {
-            SourceAudio::open(&path, stream, start, rate, channels)
+            SourceAudio::open(&path, stream, heard, start, rate, channels)
         });
     }
 
@@ -762,6 +912,7 @@ impl Lane {
             if let AudioPiece::Source {
                 path,
                 stream,
+                heard,
                 origin,
                 source_sample,
                 gain_db,
@@ -840,7 +991,8 @@ impl Lane {
                         self.paced = Some(paced);
                         start
                     };
-                    self.start_piece(path, *stream, start, rate, channels)?;
+                    let heard = heard.as_deref().cloned().unwrap_or_default();
+                    self.start_piece(path, *stream, heard, start, rate, channels)?;
                     self.isolator = match isolation {
                         Some(amount) if *amount > 0.0 => match crate::isolate::model() {
                             Ok(model) => {

@@ -152,6 +152,9 @@ The snapshot:
 - The `Snapshot` carries the project, players, selection, notices, waveforms, missing media and jobs. It also lists the media whose pool thumbnails are on disk.
 - It also carries the timecode count (`TimecodeDisplay`) and the Timer 1 zeros (`Timer1Origin`) of this session.
 - Each change of the project calls `Live::forget_removed`. The waveforms, the thumbnail list and the ducking measurements of removed media leave memory.
+- The `Waveform` of a file is its first audio stream in the channels of the project. Its `sources` hold each audio stream in its own channels.
+  - The timeline draws a clip, and each lane of the Audio page, from `sources` (`paint::lanes`). The Mixer meters read them too.
+  - Why: a clip can hold one channel of a stream, and a lane shows one channel.
 - An undo that brings the media back makes them again.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread, and the rest to the UI.
 

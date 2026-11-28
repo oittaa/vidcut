@@ -128,6 +128,7 @@ pub struct TrackProps {
     pub equalizer: Option<Option<crate::request::TrackEqualizerSet>>,
     pub pan: Option<f64>,
     pub pan_on: Option<bool>,
+    pub format: Option<crate::model::TrackFormat>,
     pub video_enabled: Option<bool>,
     pub render_cache: Option<bool>,
     pub name: Option<Option<String>>,
@@ -169,7 +170,8 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
         || props.dynamics.is_some()
         || props.equalizer.is_some()
         || props.pan.is_some()
-        || props.pan_on.is_some();
+        || props.pan_on.is_some()
+        || props.format.is_some();
     if sound && t.kind == TrackKind::Video {
         return Err(Error::invalid(format!(
             "{id} is a video track: it has no sound"
@@ -215,6 +217,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(on) = props.pan_on {
         t.pan_on = on;
+    }
+    if let Some(f) = props.format {
+        t.format = f;
     }
     if let Some(v) = props.video_enabled {
         t.video_enabled = v;

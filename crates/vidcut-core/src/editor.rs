@@ -4611,6 +4611,7 @@ fn mutate(
             voice_isolation_on,
             retime,
             render_cache,
+            channel,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -4643,6 +4644,7 @@ fn mutate(
                 voice_isolation_on: *voice_isolation_on,
                 retime: *retime,
                 render_cache: *render_cache,
+                channel: *channel,
             };
             ops::set_clips(p, &ids, &props)?;
             if retime.is_some() && *download && !dry_run {
@@ -5060,6 +5062,7 @@ fn mutate(
             equalizer: None,
             pan: None,
             pan_on: None,
+            format: None,
             video_enabled: None,
             render_cache: None,
             ..
@@ -5119,6 +5122,7 @@ fn mutate(
             equalizer,
             pan,
             pan_on,
+            format,
             download,
             video_enabled,
             render_cache,
@@ -5154,6 +5158,7 @@ fn mutate(
                 equalizer: equalizer.clone(),
                 pan: *pan,
                 pan_on: *pan_on,
+                format: *format,
                 video_enabled: *video_enabled,
                 render_cache: *render_cache,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
@@ -7691,6 +7696,33 @@ struct PlaceOpts<'a> {
     compounds: &'a mut HashMap<String, String>,
 }
 
+fn imported_sound(info: &MediaInfo, c: &otio::ImportedClip) -> (u32, Vec<u32>) {
+    let streams = info.audio.len() as u32;
+    let fits = |stream: u32, ch: &u32| *ch < u32::from(info.stream_channels(stream));
+    if let Some(stream) = c.stream.filter(|&s| s < streams) {
+        let channels = c.channels.iter().copied().filter(|ch| fits(stream, ch));
+        return (stream, channels.collect());
+    }
+    let found: Vec<(u32, u32)> = c
+        .sources
+        .iter()
+        .filter_map(|&(track, ch)| info.of_sound_track(track as usize, ch))
+        .collect();
+    let Some(&(stream, _)) = found.first() else {
+        return (0, Vec::new());
+    };
+    let channels: Vec<u32> = found
+        .iter()
+        .filter(|&&(s, _)| s == stream)
+        .map(|&(_, ch)| ch)
+        .collect();
+    let all = (0..u32::from(info.stream_channels(stream))).collect::<Vec<_>>();
+    match channels == all {
+        true => (stream, Vec::new()),
+        false => (stream, channels),
+    }
+}
+
 fn place_imported(
     p: &mut Project,
     t: &otio::Imported,
@@ -7863,12 +7895,10 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
+        let (stream, channels) = imported_sound(&m.info, c);
         let audio = (c.audio && !m.info.audio.is_empty()).then(|| ClipAudio {
-            stream: if (c.stream as usize) < m.info.audio.len() {
-                c.stream
-            } else {
-                0
-            },
+            stream,
+            channels: channels.clone(),
             gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
             gain_keys: c
                 .gain_keys
@@ -8731,6 +8761,7 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.muted = s.muted;
                 track.solo = s.solo;
                 track.solo_safe = s.solo_safe;
+                track.format = s.format;
                 track.volume_db = s.volume_db.clamp(
                     *crate::validate::FADER.start(),
                     *crate::validate::FADER.end(),
@@ -10770,6 +10801,7 @@ pub fn query(
                         v["render_cache"] = json!(t.render_cache);
                     } else {
                         v["solo_safe"] = json!(t.solo_safe);
+                        v["format"] = json!(t.format);
                         v["pan"] = json!(t.pan);
                         v["pan_on"] = json!(t.pan_on);
                     }
@@ -12456,6 +12488,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if let Some(a) = &c.audio {
         v["audio"] = json!({ "stream": a.stream, "gain_db": a.gain_db, "muted": a.muted });
+        if !a.channels.is_empty() {
+            v["audio"]["channels"] = json!(a.channels);
+        }
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
         }
@@ -12511,6 +12546,9 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
             }
             if t.solo_safe {
                 v["solo_safe"] = json!(true);
+            }
+            if t.kind == crate::model::TrackKind::Audio && !t.format.is_stereo() {
+                v["format"] = json!(t.format);
             }
             if t.volume_db != 0.0 {
                 v["volume_db"] = json!(t.volume_db);
