@@ -8618,7 +8618,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - DNxHR LB, SQ, HQ, HQX and 444
       - HEVC and AV1
     - Uncompressed 16-bit Float keeps each value of the picture, also below 0 and above 1, as half floats (pp. 201, 203). It also keeps the alpha channel (p. 201).
-    - ProRes 4444, ProRes 4444 XQ and DNxHR 444 cut the values to 0..1 ([X177](deviations.md#x177-prores-4444-and-dnxhr-444-render-cache-files-hold-only-01)).
     - A chosen codec goes to the encoder as it is. No other codec takes its place.
     - When no encoder on this computer makes it, the cache stays empty. Preferences then says so under Codec, and `cache.status` gives the error.
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
