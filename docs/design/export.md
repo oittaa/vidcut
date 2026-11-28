@@ -932,6 +932,8 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `grade.ripple` (`ops::ripple::ripple`) compares the JSON of two `CopiedNode` values, part by part. Why: one comparison covers each setting of a corrector, also a new one.
     - A part that only one side has goes whole. Why: a part at its usual value is left out of the JSON, and a part of it could be incomplete.
     - Each target then takes the changed parts on a copy of its own settings, and `grade.paste` stores it.
+    - `on_keys` puts the same parts on each keyframe of the target. A keyframe leaves out a part at its usual value, so `on_keys` adds that part first.
+    - When the keyframes of the source changed, they go whole, and `on_keys` does nothing.
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
   - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
   - A serial node takes the picture of the node before it. The oldest link that took that picture then takes the picture of the new node (`oldest_taker`).

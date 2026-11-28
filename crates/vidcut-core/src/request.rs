@@ -3513,10 +3513,11 @@ pub enum Request {
     /// corrector of the grade of a clip to the corrector of the same number
     /// in the grades of other clips. A change is a setting that differs
     /// from `before`. A changed part that one of the two has at its usual
-    /// value goes whole, and so do changed keyframes. The label and whether
-    /// the node is on do not go. A clip with no corrector of that number, or
-    /// with a locked one, takes nothing. Returns the clips that took the
-    /// changes, as `clips`.
+    /// value goes whole, and so do changed keyframes. A target with
+    /// keyframes keeps them, and each of them takes the new values. The
+    /// label and whether the node is on do not go. A clip with no corrector
+    /// of that number, or with a locked one, takes nothing. Returns the
+    /// clips that took the changes, as `clips`: none when nothing changed.
     #[serde(rename = "grade.ripple")]
     GradeRipple {
         /// The clip whose corrector changed.
