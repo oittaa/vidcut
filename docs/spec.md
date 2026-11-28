@@ -40,6 +40,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - the Video Monitor LUT, the Color Viewer LUT and the Scopes LUT ([§13](#the-lut-tables))
 - Quick Export (§10) and the Export page (§10.1)
+- the Audio page: the rows of the audio tracks, their headers, the meters and the Mixer (§9.1)
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
@@ -5818,6 +5819,36 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
     - A short message tells how many clips stopped at the volume limit or at the peak limit.
   - The defaults, the range and the measured part of a clip are in D80.
+
+### 9.1 Audio page (pp. 3748–3753, 3767–3772)
+
+The Audio page follows the Fairlight page of the manual.
+
+- **The page:**
+  - The status bar has an Audio button between Color and Export. `gui.page` with `audio` shows the page.
+  - The viewer of the page shows the timeline. Q does not switch it to a source (not measured).
+- **Layout** (pp. 3748–3749, 3767, 3771):
+  - The meter panel is at the top. It has a meter for each audio track, the meter of the mix and the loudness meter (§9). The viewer is at its right (not measured).
+  - The rows of the audio tracks are in the middle. The Mixer is at the right of the rows (not measured).
+  - The Media tab is at the left. The Inspector is at the right of the Mixer (not measured).
+  - At the start, the meters and the Mixer show. The Media tab and the Inspector do not show (not measured).
+  - The status bar has a switch for each panel: Media, Mixer, Meters and Inspector. The page keeps these switches apart from the other pages.
+  - `gui.show` and `gui.close` with `media`, `mixer`, `meters` and `inspector` show and hide the panels of the page. `gui.state` gives them.
+  - While the meter panel shows, the Mixer of the page has no loudness meter.
+- **Rows** (pp. 3749–3751):
+  - Each audio track has a row. A1 is at the top. Video tracks have no row (not measured).
+  - A clip shows its waveform at the full height of the row, its name, and its volume line with its keyframes (§9) (not measured).
+  - A sound clip that is linked to a picture shows on its own row (not measured).
+  - The rows keep their height. With more rows than room, the rows scroll (not measured).
+  - The edits of the Cut page act on the rows: select, move, trim, split, delete and the volume line.
+  - A drag on the edge of a sound clip is a trim, not an audio-only roll. Linked Selection acts on it as on the Cut page (§6) (not measured).
+  - A drag below the last row puts the clip on a new audio track.
+  - The Timeline Options, Timeline Actions and Edit Actions menus and the tools of the Cut page are at the left of the ruler.
+- **Track header** (pp. 3752–3753):
+  - It has the track number, the name, Lock, Solo, Mute, the fader value and a meter (not measured).
+  - The fader value is the fader of the Mixer, in dB. A drag up or right raises it. A typed value sets it (not measured).
+  - A click on the header makes the track the target of the edit functions (not measured).
+  - Its right-click menu has Add Audio Track and Remove Track.
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 

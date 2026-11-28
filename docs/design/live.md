@@ -291,6 +291,20 @@ The bar and the Jobs button:
 - The keys that a separate window does not use go to the main window in the next frame (`dialog::take_forwarded_keys`). Thus the shortcuts work there too.
   - Held keys do not go. Thus K with J or L works only in the main window.
 
+**The Audio page** ([spec §9.1](../spec.md#91-audio-page-pp-37483753-37673772)).
+
+- `audio_page_ui` draws the panels of the page. `AudioPage` holds the switches of its Mixer, meters, Media tab and Inspector.
+  - While the page shows, `gui.show` and `gui.close` set these switches (`AudioPage::panel`). On the other pages, they act on the panels of those pages.
+- The rows are the lower timeline of the Cut page, with no upper timeline (`timeline_panel`). Thus the clicks, the drags and the keys of the Cut page work on them.
+  - `Rows::audio_page` gives a row to each audio track, from the top. Each sound clip is on its own row, with no band (`Bands`).
+  - On these rows, a drag on the edge of a linked sound clip is a trim, not a J/L roll (`hit_clips`).
+- `audio_headers` draws the headers. The fader value (`fader_field`) sends what the fader of the Mixer sends.
+- `meter_row` draws the meters of the meter panel, and the loudness meter (`loudness_meter`) at their right.
+  - While the meter panel shows, `mixer_panel` leaves out the loudness meter. Thus the page shows it once.
+  - The headers, the meter panel and the Mixer read their levels from `timeline_levels`.
+  - They share one peak hold for each track.
+- The Export page and the Audio page hold the viewer on the timeline (`hold_timeline_viewer`). A switch to another page sets the earlier mode again (`free_viewer`).
+
 **The Effects page** ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
 
 - `EffectsPage` holds the page that shows, the selected nodes and the nodes of the two viewers of each clip (`viewed`). It also holds the state of the Node Editor and of a mask drag.

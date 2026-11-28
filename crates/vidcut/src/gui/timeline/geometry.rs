@@ -92,6 +92,7 @@ pub struct Rows {
     pub rows: Vec<Row>,
     pub area: Rect,
     pub bands: Bands,
+    pub audio_page: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -283,6 +284,51 @@ impl Rows {
                 .filter(|t| !bands.hides(t))
                 .map(|t| (t.id.as_str(), track(t), share(t))),
         );
+        let mut rows = Self::stack(&order, area, min, strip, enlarged);
+        let over = (rows.used() - (area.height() - strip).max(1.0)).max(0.0);
+        rows.lift(area.bottom() + 1.0 - rows.used() + lift.clamp(0.0, over));
+        Self { bands, ..rows }
+    }
+
+    pub fn audio_page(p: &Project, area: Rect, height: f32, strip: f32, lift: f32) -> Self {
+        let order: Vec<(&str, f32, f32)> = p
+            .tracks_of(TrackKind::Audio)
+            .into_iter()
+            .map(|i| (p.tracks[i].id.as_str(), height, 1.0))
+            .collect();
+        let mut rows = Self::stack(&order, area, height, strip, None);
+        let over = (rows.used() - (area.height() - strip).max(1.0)).max(0.0);
+        rows.lift(area.top() - over + lift.clamp(0.0, over));
+        Self {
+            audio_page: true,
+            ..rows
+        }
+    }
+
+    pub fn none(area: Rect) -> Self {
+        Self {
+            rows: Vec::new(),
+            area,
+            bands: Bands::default(),
+            audio_page: false,
+        }
+    }
+
+    fn lift(&mut self, top: f32) {
+        let dy = top - self.rows.first().map_or(top, |r| r.rect.rect.top());
+        for r in &mut self.rows {
+            r.rect.rect = r.rect.rect.translate(vec2(0.0, dy));
+            r.rect.audio_top += dy;
+        }
+    }
+
+    fn stack(
+        order: &[(&str, f32, f32)],
+        area: Rect,
+        min: f32,
+        strip: f32,
+        enlarged: Option<&str>,
+    ) -> Self {
         let big = order.iter().position(|t| Some(t.0) == enlarged);
         let want: Vec<f32> = order
             .iter()
@@ -312,8 +358,7 @@ impl Rows {
                 want[b]
             };
         }
-        let used: f32 = heights.iter().sum();
-        let mut y = area.bottom() + 1.0 - used + lift.clamp(0.0, (used - room).max(0.0));
+        let mut y = area.top();
         let rows = order
             .iter()
             .zip(heights)
@@ -327,7 +372,10 @@ impl Rows {
                 }
             })
             .collect();
-        Self { rows, area, bands }
+        Self {
+            rows,
+            ..Self::none(area)
+        }
     }
 
     pub fn get(&self, track: &str) -> Option<&Row> {
@@ -379,7 +427,7 @@ impl Rows {
         }
         let (top, bottom) = self.span();
         let count = |k| p.tracks_of(k).len() + 1;
-        if y < top && y >= self.area.top() - 4.0 {
+        if y < top && y >= self.area.top() - 4.0 && !self.audio_page {
             Some(format!("V{}", count(TrackKind::Video)))
         } else if y > bottom && y <= self.area.bottom() + 24.0 {
             Some(format!("A{}", count(TrackKind::Audio)))
@@ -470,10 +518,7 @@ pub fn slip_handle(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
     ))
 }
 
-pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
-    if !tr.rect.contains(pos) {
-        return Hit::Empty;
-    }
+fn near_clips<'a>(track: &'a Track, scale: &Scale, pos: Pos2) -> &'a [Clip] {
     let frame = scale.frame(pos.x);
     let slack = (f64::from(EDGE) / scale.ppf).ceil() as i64 + 1;
     let range = clips_in(
@@ -482,9 +527,15 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
         frame.ceil() as i64 + slack,
     );
     let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
-    let clips = &track.clips[range];
+    &track.clips[range]
+}
+
+pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
+    if !tr.rect.contains(pos) {
+        return Hit::Empty;
+    }
     if track.kind == TrackKind::Audio {
-        let near = clips
+        let near = near_clips(track, scale, pos)
             .iter()
             .filter(|c| sounds(c) && c.link.is_some())
             .flat_map(|c| [(c, Edge::Tail, c.end()), (c, Edge::Head, c.start)])
@@ -498,6 +549,14 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
             };
         }
     }
+    hit_clips(track, scale, tr, pos)
+}
+
+pub fn hit_clips(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
+    if !tr.rect.contains(pos) {
+        return Hit::Empty;
+    }
+    let clips = near_clips(track, scale, pos);
     for w in clips.windows(2) {
         let (a, b) = (&w[0], &w[1]);
         if !adjacent(a, b) {
@@ -851,6 +910,7 @@ pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<S
         Some(r) => {
             let what = match p.track(&r.track) {
                 None => Hit::Empty,
+                Some(t) if rows.audio_page => hit_clips(t, scale, &r.rect, pos),
                 Some(t) => band_hit(p, rows, t, scale, &r.rect, pos)
                     .unwrap_or_else(|| hit(&rows.bands.apart(t), scale, &r.rect, pos)),
             };
@@ -1065,5 +1125,64 @@ pub fn header_parts(header: Rect) -> HeaderParts {
         ),
         icons,
         label,
+    }
+}
+
+pub struct AudioHeaderParts {
+    pub label: Rect,
+    pub name: Option<Rect>,
+    pub buttons: [Rect; 3],
+    pub fader: Rect,
+    pub meter: Rect,
+}
+
+const HEADER_FADER: f32 = 64.0;
+
+pub fn audio_header_parts(header: Rect, meter_width: f32) -> AudioHeaderParts {
+    let (left, right) = (header.left().round(), header.right().round());
+    let meter = Rect::from_min_max(
+        pos2(right - meter_width, header.top() + HEADER_GAP),
+        pos2(right, header.bottom() - HEADER_GAP),
+    );
+    let inner = meter.left() - 2.0 * HEADER_GAP;
+    let h = HEADER_LINE.min(header.height() - 2.0).max(1.0);
+    let two = header.height() >= 2.0 * HEADER_LINE + 3.0 * HEADER_GAP;
+    let (first, second) = if two {
+        let top = (header.center().y - HEADER_LINE - HEADER_GAP / 2.0).round();
+        (top, top + HEADER_LINE + HEADER_GAP)
+    } else {
+        let top = (header.center().y - h / 2.0).round();
+        (top, top)
+    };
+    let label = Rect::from_min_max(pos2(left, first), pos2(left + HEADER_LABEL, first + h));
+    let start = if two {
+        left
+    } else {
+        label.right() + HEADER_GAP
+    };
+    let button = |i: u8| {
+        let x = start + f32::from(i) * (HEADER_TOGGLE + HEADER_GAP);
+        Rect::from_min_max(pos2(x, second), pos2(x + HEADER_TOGGLE, second + h))
+    };
+    let buttons = [button(0), button(1), button(2)];
+    let fader = Rect::from_min_max(
+        pos2(
+            (inner - HEADER_FADER).max(buttons[2].right() + HEADER_GAP),
+            second,
+        ),
+        pos2(inner, second + h),
+    );
+    let name = two.then(|| {
+        Rect::from_min_max(
+            pos2(label.right() + HEADER_GAP, first),
+            pos2(inner, first + h),
+        )
+    });
+    AudioHeaderParts {
+        label,
+        name,
+        buttons,
+        fader,
+        meter,
     }
 }
