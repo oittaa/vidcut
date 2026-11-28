@@ -695,6 +695,9 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - L1 had an Offset and L2 had two nodes with a Gain. Reset All Node Stack Layers reset both layers.
   - One Ctrl+Z after it did not give back the Offset, the nodes or the Gain.
   - vidcut: `grade.clear` with `all_layers` is one undo step, and Undo gives the grades back ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- **Ctrl+Z did not take back Grab Still or Delete Selected of a still, in one case each.**
+  - Ctrl+Z after one grab kept the still. Delete Selected of one still asked nothing, and Ctrl+Z did not bring it back.
+  - vidcut: `gallery.grab` and `gallery.remove` are undo steps, and Undo takes them back ([spec §8.31](spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
 - **A typed Soft of the HSL qualifier shows 0.1 more.**
   - A typed Hue Soft of 10, 20, 30, 40 and 80 shows 10.1, 20.1, 30.1, 40.1 and 80.1 after a clip switch.
   - Grade copies and Gallery stills show the same values. A typed Width shows as typed.
@@ -719,6 +722,13 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.
   - vidcut puts each keyframe at the same distance from the start ([spec §8.26](spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+- **Smart Reframe pans across a shot change.**
+  - Seven clips of one film have a shot change inside. The move of no clip jumps at the cut.
+  - On four clips, the picture pans from the subject of one shot to that of the next, over 22 to 45 frames.
+  - Thus the frames near the cut show the wrong part of each shot. On the other three clips, the move near the cut is small.
+  - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - Seven more clips of three other files show the same. On two clips of the press conference, the picture pans across the cut over about 30 and 45 frames.
+  - The owner rates the pan as a bug of Resolve.
 - **While jobs render, the pencils of the other jobs look active.**
   - On the Deliver page, the pencil of the job that renders is dim. The pencils of the other jobs stay white.
   - A click on a white pencil does nothing.

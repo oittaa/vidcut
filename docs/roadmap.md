@@ -20,5 +20,5 @@ The use cases decide what is built and tested.
 
 ## What comes next
 
-- Open work is in [docs/todo/](todo/), one file for each item. Each file has a **When:** line.
+- Open work is in [docs/todo/](todo/), one file for each item. An item is one area, with a list of what it misses.
 - The interchange (use case 1) is in place. The smaller items come next, then macOS.

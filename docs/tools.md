@@ -60,6 +60,18 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `--runs N` prints the median of N runs. `--seconds S` uses only the first S seconds of each clip. `--json FILE` writes each result.
 - The projects and their cache go to a temporary folder.
 
+**Smart Reframe fit:** `python3 scripts/reframe-fit.py [--size WxH] [--fps F] [--scaling S] [--subject S] [--smooth S,S] [--tolerance T,T] [--json FILE] TIMELINE.otio` (release build).
+
+- TIMELINE.otio holds clips with Position keyframes. They are the reference move of each clip.
+- The script makes a project with the frame size, the frame rate and the scaling given. The defaults are 1080x1920, 24 fps and `fill`.
+- Then it imports the file. Thus the import changes the Pan and Tilt of the file into the pixel moves of that scaling.
+- `--subject` follows that subject. Without it, the move follows what stands out.
+- For each smooth value and each tolerance, it runs `picture.reframe` on all the clips.
+- At each frame from the first to the last reference keyframe, it measures the distance between the two positions, in pixels of the frame.
+- Between two keyframes, each position is a straight line. The handles of the keyframes are not used.
+- It prints the median, the mean and the largest distance, and the keyframe counts of the two moves. `--json FILE` also writes the result of each clip.
+- The project goes to a temporary folder. The analysis stays in the cache of vidcut. Thus a second run measures no frame again.
+
 **Cost of a program:** `python3 scripts/usage.py -- COMMAND…`
 
 - It runs the command and prints the wall time, the CPU time, the CPU use, the peak memory and the use of each GPU engine.
@@ -85,6 +97,17 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - For each step, it prints the largest difference as a share of the largest value. A share of more than 0.01 is far off.
 - It needs what the face speed script needs, and numpy, onnx and onnxruntime. `uv run` gets these packages, and a Python version that onnxruntime supports.
 - `RANGE=A..B` checks another part of the clip. `VIDCUT_GPU_CONV` selects the convolution kernels.
+
+**Saliency check:** `uv run scripts/saliency-check.py` (release build).
+
+- It compares the saliency maps of vidcut with the official UNISAL code.
+- It runs `picture.reframe` with `VIDCUT_SALIENCY_DUMP` on 2 s of the clip `tos-720p-mov`, in a frame of 1080x1920.
+- It gets the UNISAL code at the commit of the weights in the catalog. It gives the same pictures to that code, with PyTorch on the CPU, in the same order of the five hidden states.
+- For each picture, it prints the largest difference of the map as a share of its range.
+- It also prints the distance between the point of vidcut and the point of the official map, in pixels of the map.
+- A share of more than 0.01 is far off.
+- It needs the model on this computer: `vidcut models check unisal --download`. `uv run` gets numpy and torch.
+- `RANGE=A..B` checks another part of the clip.
 
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).
 
@@ -275,6 +298,11 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
     - The models on the GPU are the slow face model, and YOLOX-S with `gpu.acceleration` on.
   - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
   - A check against an ONNX runtime reads them.
+- `VIDCUT_SALIENCY_DUMP=DIR` makes `picture.reframe` write what the saliency model gets and makes as `.npy` files into `DIR`.
+  - `NNNNN.npy`: each picture as the model gets it, `[H, W, 3]`: red, green and blue after the normalization.
+  - `map-NNNNN.npy`: the map of each picture before the softmax, `[H, W]`.
+  - `points.npy`: the point of each picture, `[N, 2]`, as fractions of the picture.
+  - `scripts/saliency-check.py` reads them.
 - `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.
   - `direct`: no Winograd convolutions (`WINO_GEMM`).
   - `plain`: no Winograd convolutions and no `CONV4`. Each convolution uses `CONV`.

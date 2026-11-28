@@ -36,6 +36,7 @@ pub struct Project {
     pub groups: Vec<SyncGroup>,
     pub speakers: Speakers,
     pub queue: Vec<RenderJob>,
+    pub stills: Vec<Still>,
 }
 
 /// A whole project: its media and its timelines.
@@ -89,6 +90,10 @@ pub struct ProjectFile {
     /// is empty. A change to it is not an undo step.
     #[serde(default)]
     pub queue: Vec<RenderJob>,
+    /// The stills of the Gallery of the Color page, the oldest first. Left
+    /// out while there are none.
+    #[serde(default)]
+    pub stills: Vec<Still>,
 }
 
 #[derive(Serialize)]
@@ -117,6 +122,8 @@ struct ProjectOut<'a> {
     speakers: &'a Speakers,
     #[serde(skip_serializing_if = "<[RenderJob]>::is_empty")]
     queue: &'a [RenderJob],
+    #[serde(skip_serializing_if = "<[Still]>::is_empty")]
+    stills: &'a [Still],
 }
 
 impl Serialize for Project {
@@ -148,6 +155,7 @@ impl Serialize for Project {
             groups: &self.groups,
             speakers: &self.speakers,
             queue: &self.queue,
+            stills: &self.stills,
         }
         .serialize(s)
     }
@@ -174,6 +182,7 @@ impl From<ProjectFile> for Project {
             groups: f.groups,
             speakers: f.speakers,
             queue: f.queue,
+            stills: f.stills,
         };
         p.check_out();
         p
@@ -280,6 +289,35 @@ impl ClipFilter {
     pub fn is_all(&self) -> bool {
         *self == Self::All
     }
+}
+
+/// A still of the Gallery: a picture of a frame of a timeline, and the
+/// grades of the clip that the Color page graded on that frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Still {
+    /// `s<N>`, never reused.
+    pub id: String,
+    /// The clip: the topmost clip on the frame that takes a grade.
+    pub clip: String,
+    /// The timeline of the clip.
+    pub timeline: String,
+    /// The frame of the timeline.
+    pub frame: i64,
+    /// The whole grade of the clip: each node stack layer, with its
+    /// keyframes. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<Grade>,
+    /// The timeline grade, with its keyframes. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_grade: Option<Grade>,
+    /// The label under the picture. A new still has none, and leaves it
+    /// out.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    /// The file name of the picture in the `stills` folder: the frame as
+    /// the viewer shows it, at the size of the timeline, in 32-bit float
+    /// OpenEXR.
+    pub picture: String,
 }
 
 /// A job of the render queue: an export of a timeline that waits for a
@@ -10332,6 +10370,7 @@ pub struct NextIds {
     pub cue: u64,
     pub group: u64,
     pub timeline: u64,
+    pub still: u64,
 }
 
 fn first_id() -> u64 {
@@ -10362,11 +10401,13 @@ impl Project {
                 cue: 1,
                 group: 1,
                 timeline: 1,
+                still: 1,
             },
             bins: Vec::new(),
             groups: Vec::new(),
             speakers: Default::default(),
             queue: Vec::new(),
+            stills: Vec::new(),
         }
     }
 
@@ -11166,6 +11207,16 @@ impl Project {
         let id = format!("q{}", self.next_id.cue);
         self.next_id.cue += 1;
         id
+    }
+
+    pub fn alloc_still_id(&mut self) -> String {
+        let id = format!("s{}", self.next_id.still);
+        self.next_id.still += 1;
+        id
+    }
+
+    pub fn still(&self, id: &str) -> Option<&Still> {
+        self.stills.iter().find(|s| s.id == id)
     }
 
     pub fn subtitle_index(&self, id: &str) -> Option<usize> {

@@ -1379,7 +1379,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
 - **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md)).
 
 ## X153. Every clip pans as on a stereo track
 
@@ -1543,3 +1543,16 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
 - **Why:**
   - Not built yet ([todo](todo/export-file-tab.md)).
+
+## X176. Auto Smart Reframe follows the published UNISAL saliency model
+
+- **Resolve:**
+  - With Object of Interest Auto, the Neural Engine analyzes the clip and chooses its most representative object (pp. 735, 920).
+  - The manual does not name the model. The model is not published.
+- **vidcut:**
+  - Without `reference` and `subject`, `picture.reframe` follows a point of the map of the UNISAL saliency model, with its weights for DHF1K ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - The shots are 42 shots of nine files and of 9:16 and 4:3 clips made from them. The timelines are 1080×1920, 1920×1080 and 1080×1080.
+  - On their frames, the position of vidcut is a median of 65 pixels and a mean of 166 pixels from that of Resolve.
+  - The pixels are those of a frame 1080 pixels on its short side.
+- **Why:**
+  - The owner chose the published UNISAL model. A published model cannot give the move of the model of Resolve.

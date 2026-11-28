@@ -12,10 +12,7 @@ pub fn check(f: &ClipFilter) -> Result<()> {
 pub fn admits(p: &Project, c: &Clip, f: &ClipFilter) -> bool {
     let picture = c.picture.as_ref();
     let media = p.media(&c.media);
-    let graded = || {
-        let grade = picture.and_then(|x| x.grade.as_ref());
-        grade.is_some_and(|g| !g.is_usual(p.frame_size()))
-    };
+    let graded = || (picture.and_then(|x| x.grade.as_ref())).is_some_and(|g| g.is_active());
     let marked = |color: Option<&str>| {
         let Some(m) = media else {
             return false;
