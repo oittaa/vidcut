@@ -2788,16 +2788,31 @@ fn gallery_targets(
     p: &Project,
     clips: Option<&OneOrMany<ClipRef>>,
     grade: crate::request::GradeLevel,
-    playhead: Option<i64>,
+    (at, playhead): (Option<i64>, Option<i64>),
 ) -> Result<Vec<String>> {
     match (clips, grade) {
         (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead),
         (None, crate::request::GradeLevel::Timeline) => Ok(Vec::new()),
         (None, crate::request::GradeLevel::Clip) => {
-            let t = playhead.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+            let t = at.or(playhead);
+            let t = t.ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
             Ok(vec![ops::gallery::graded_clip(p, t)?])
         }
     }
+}
+
+fn gallery_keys(
+    p: &Project,
+    keyframes: Option<crate::model::ApplyKeys>,
+    at: Option<&TimeSpec>,
+    playhead: Option<i64>,
+) -> Result<(crate::model::ApplyKeys, Option<i64>)> {
+    let keys = keyframes.unwrap_or(p.settings.apply_keys);
+    let at = match keys {
+        crate::model::ApplyKeys::CurrentFrame => time_or_playhead(p, at, playhead)?,
+        _ => None,
+    };
+    Ok((keys, at))
 }
 
 fn grades_of(
@@ -5597,7 +5612,7 @@ fn mutate(
         } => {
             let timeline = matches!(grade, crate::request::GradeLevel::Timeline);
             let layer = layer_of(timeline, *layer)?;
-            let ids = gallery_targets(p, clips.as_ref(), *grade, playhead)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, (None, playhead))?;
             ops::gallery::load_memory(p, *memory, (*grade, layer), &ids)?;
             Value::Null
         }
@@ -5605,9 +5620,12 @@ fn mutate(
             memory,
             clips,
             grade,
+            keyframes,
+            at,
         } => {
-            let ids = gallery_targets(p, clips.as_ref(), *grade, playhead)?;
-            ops::gallery::apply_memory(p, *memory, *grade, &ids)?;
+            let (keys, at) = gallery_keys(p, *keyframes, at.as_ref(), playhead)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, (at, playhead))?;
+            ops::gallery::apply_memory(p, *memory, (*grade, &ids), (keys, at))?;
             Value::Null
         }
         Request::GalleryRemove { stills } => {
@@ -5633,9 +5651,12 @@ fn mutate(
             still,
             clips,
             grade,
+            keyframes,
+            at,
         } => {
-            let ids = gallery_targets(p, clips.as_ref(), *grade, playhead)?;
-            ops::gallery::apply(p, still, *grade, &ids)?;
+            let (keys, at) = gallery_keys(p, *keyframes, at.as_ref(), playhead)?;
+            let ids = gallery_targets(p, clips.as_ref(), *grade, (at, playhead))?;
+            ops::gallery::apply(p, still, (*grade, &ids), (keys, at))?;
             Value::Null
         }
         Request::GalleryAppend {
@@ -10423,6 +10444,23 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
             )));
         }
         p.settings.dynamics_profile = profile;
+    }
+    if let Some(keys) = set.apply_keys {
+        if keys == crate::model::ApplyKeys::CurrentFrame {
+            return Err(Error::invalid(
+                "apply_keys is `none`, `source_timecode` or `start_frames`",
+            ));
+        }
+        p.settings.apply_keys = keys;
+    }
+    if let Some(n) = set.preserve_nodes {
+        let most = ops::grade::PRESERVED_NODES;
+        if n > most {
+            return Err(Error::invalid(format!(
+                "preserve_nodes is from 0 to {most}"
+            )));
+        }
+        p.settings.preserve_nodes = n;
     }
     if let Some(names) = &set.node_stack_layers {
         let most = ops::grade::NODE_STACK_LAYERS;

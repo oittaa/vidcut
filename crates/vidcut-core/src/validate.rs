@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::Path;
 
-use crate::model::{Generator, Grade, Media, Project, Track, TrackKind};
+use crate::model::{Generator, Grade, Media, Project, StillSource, Track, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
@@ -128,6 +128,13 @@ pub fn violations(p: &Project) -> Vec<String> {
         v.push(format!(
             "the project needs 1 to {most} named node stack layers"
         ));
+    }
+    if p.settings.apply_keys == crate::model::ApplyKeys::CurrentFrame {
+        v.push("apply_keys is `none`, `source_timecode` or `start_frames`".into());
+    }
+    let preserved = crate::ops::grade::PRESERVED_NODES;
+    if p.settings.preserve_nodes > preserved {
+        v.push(format!("preserve_nodes is from 0 to {preserved}"));
     }
     let pool = p.pool();
     let mut ids = HashSet::new();
@@ -514,7 +521,7 @@ fn stills(p: &Project, v: &mut Vec<String>) {
         held(
             v,
             &name,
-            (&s.picture, s.layers),
+            (&s.picture, s.layers, &s.source),
             (&s.grade, &s.timeline_grade),
         );
     }
@@ -527,7 +534,7 @@ fn stills(p: &Project, v: &mut Vec<String>) {
         held(
             v,
             &name,
-            (&m.picture, m.layers),
+            (&m.picture, m.layers, &m.source),
             (&m.grade, &m.timeline_grade),
         );
     }
@@ -536,7 +543,7 @@ fn stills(p: &Project, v: &mut Vec<String>) {
 fn held(
     v: &mut Vec<String>,
     name: &str,
-    (picture, layers): (&str, usize),
+    (picture, layers, f): (&str, usize, &StillSource),
     (grade, timeline_grade): (&Option<Grade>, &Option<Grade>),
 ) {
     let named = Path::new(picture).file_name() == Some(OsStr::new(picture));
@@ -545,6 +552,12 @@ fn held(
     }
     if layers == 0 {
         v.push(format!("{name} has 0 node stack layers"));
+    }
+    if !(f.first <= f.at && f.at <= f.last && f.origin.is_finite()) {
+        v.push(format!(
+            "{name}: its frame {} is not in its clip, {} to {}",
+            f.at, f.first, f.last
+        ));
     }
     for (which, g) in [("clip", grade), ("timeline", timeline_grade)] {
         if let Some(Err(e)) = g.as_ref().map(crate::ops::grade::checked) {

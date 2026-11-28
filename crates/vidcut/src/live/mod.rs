@@ -23,7 +23,9 @@ use vidcut_core::editor::{
     Env, compound_context, media_context, resolve_clip, resolve_cue, source_context,
 };
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, RenderStatus, Title};
+use vidcut_core::model::{
+    ApplyKeys, Clip, Format, Generator, GeneratorKind, Marks, RenderStatus, Title,
+};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
@@ -4297,6 +4299,17 @@ impl Live {
         self.edit_at(envelope, origin, playhead, Handed::new())
     }
 
+    fn color_targets(&self, playhead: i64) -> Result<OneOrMany<vidcut_core::request::ClipRef>> {
+        let p = self.project.as_ref().ok_or_else(no_project)?.project();
+        let mut targets = self.selection.thumbnails.clone();
+        if let Some(at) = vidcut_core::ops::gallery::color_clip(p, playhead)
+            && !targets.contains(&at)
+        {
+            targets.push(at);
+        }
+        Ok(OneOrMany::Many(targets))
+    }
+
     fn copied(&mut self) -> Option<Arc<CopiedClip>> {
         let first = &self.clipboard.first()?.clip;
         let p = self.project.as_ref()?.project();
@@ -4347,26 +4360,23 @@ impl Live {
             Request::GalleryApply {
                 clips,
                 grade: GradeLevel::Clip,
-                ..
-            }
-            | Request::GalleryMemoryLoad {
-                clips,
-                grade: GradeLevel::Clip,
+                keyframes,
                 ..
             }
             | Request::GalleryMemoryApply {
                 clips,
                 grade: GradeLevel::Clip,
+                keyframes,
+                ..
+            } if clips.is_none() && *keyframes != Some(ApplyKeys::CurrentFrame) => {
+                *clips = Some(self.color_targets(playhead)?);
+            }
+            Request::GalleryMemoryLoad {
+                clips,
+                grade: GradeLevel::Clip,
                 ..
             } if clips.is_none() => {
-                let p = self.project.as_ref().ok_or_else(no_project)?.project();
-                let mut targets = self.selection.thumbnails.clone();
-                if let Some(at) = vidcut_core::ops::gallery::color_clip(p, playhead)
-                    && !targets.contains(&at)
-                {
-                    targets.push(at);
-                }
-                *clips = Some(OneOrMany::Many(targets));
+                *clips = Some(self.color_targets(playhead)?);
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
