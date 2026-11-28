@@ -11,7 +11,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - The developer's copy is in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
 - Do not copy its text into the repository.
 
-**Legend:** **(later)** is not built yet, and comes after the work in progress. [todo/gaps.md](todo/gaps.md) lists the Resolve behavior that vidcut does not have.
+**Legend:**
+- **(later)** is not built yet, and comes after the work in progress.
+- A page number, for example (p. 774), tells where the manual gives the rule.
+- A rule with no page number and no mark comes from a measurement in Resolve Studio.
+- **(not measured)** marks a rule of vidcut where the manual and the measurements give none.
+- A line that starts with "vidcut:" tells what vidcut does.
+- [todo/gaps.md](todo/gaps.md) lists the Resolve behavior that vidcut does not have.
 
 ## 1. Scope
 
