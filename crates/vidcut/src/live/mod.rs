@@ -126,6 +126,7 @@ pub enum GuiChange {
     Gallery {
         album: Option<String>,
         albums: Option<bool>,
+        memories: Option<bool>,
     },
     PageTime(PageTime),
 }
@@ -204,6 +205,7 @@ pub struct GuiState {
     pub node_wide: bool,
     pub album: Option<String>,
     pub albums: bool,
+    pub memories: bool,
     pub viewers: ViewerState,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
@@ -3803,8 +3805,16 @@ impl Live {
                 let change = GuiChange::Viewers { left, right, shown };
                 self.gui_change(vec![change], |s| json!(s))
             }
-            Request::GuiGallery { album, albums } => {
-                let change = GuiChange::Gallery { album, albums };
+            Request::GuiGallery {
+                album,
+                albums,
+                memories,
+            } => {
+                let change = GuiChange::Gallery {
+                    album,
+                    albums,
+                    memories,
+                };
                 self.gui_change(vec![change], |s| json!(s))
             }
             Request::GuiPageTime { at, fast, speed } => {
@@ -4289,6 +4299,17 @@ impl Live {
         self.edit_at(envelope, origin, playhead, Handed::new())
     }
 
+    fn color_targets(&self, playhead: i64) -> Result<OneOrMany<vidcut_core::request::ClipRef>> {
+        let p = self.project.as_ref().ok_or_else(no_project)?.project();
+        let mut targets = self.selection.thumbnails.clone();
+        if let Some(at) = vidcut_core::ops::gallery::color_clip(p, playhead)
+            && !targets.contains(&at)
+        {
+            targets.push(at);
+        }
+        Ok(OneOrMany::Many(targets))
+    }
+
     fn copied(&mut self) -> Option<Arc<CopiedClip>> {
         let first = &self.clipboard.first()?.clip;
         let p = self.project.as_ref()?.project();
@@ -4341,15 +4362,21 @@ impl Live {
                 grade: GradeLevel::Clip,
                 keyframes,
                 ..
+            }
+            | Request::GalleryMemoryApply {
+                clips,
+                grade: GradeLevel::Clip,
+                keyframes,
+                ..
             } if clips.is_none() && *keyframes != Some(ApplyKeys::CurrentFrame) => {
-                let p = self.project.as_ref().ok_or_else(no_project)?.project();
-                let mut targets = self.selection.thumbnails.clone();
-                if let Some(at) = vidcut_core::ops::gallery::color_clip(p, playhead)
-                    && !targets.contains(&at)
-                {
-                    targets.push(at);
-                }
-                *clips = Some(OneOrMany::Many(targets));
+                *clips = Some(self.color_targets(playhead)?);
+            }
+            Request::GalleryMemoryLoad {
+                clips,
+                grade: GradeLevel::Clip,
+                ..
+            } if clips.is_none() => {
+                *clips = Some(self.color_targets(playhead)?);
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
@@ -4357,7 +4384,11 @@ impl Live {
                 }
                 *keyframes = Some(self.key_clipboard.clone());
             }
-            Request::GalleryGrab { album, .. } if album.is_none() => {
+            Request::GalleryGrab {
+                album,
+                memory: None,
+                ..
+            } if album.is_none() => {
                 *album = self.renderer.gui_state().and_then(|s| s.album);
             }
             Request::GradePaste { settings, .. } if settings.is_none() => {

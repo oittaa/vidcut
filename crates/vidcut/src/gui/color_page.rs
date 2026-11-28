@@ -83,6 +83,17 @@ const WINDOW_ADDS: [(Action, WindowKind); 4] = [
     (Action::AddCurveNode, WindowKind::Curve),
 ];
 
+const MEMORY_KEYS: [(Action, char); 8] = [
+    (Action::SaveMemoryA, 'A'),
+    (Action::SaveMemoryB, 'B'),
+    (Action::SaveMemoryC, 'C'),
+    (Action::SaveMemoryD, 'D'),
+    (Action::SaveMemoryE, 'E'),
+    (Action::SaveMemoryF, 'F'),
+    (Action::SaveMemoryG, 'G'),
+    (Action::SaveMemoryH, 'H'),
+];
+
 const KEY_PORT: usize = 1;
 
 const SPLIT_NAMES: [&str; 3] = ["Red", "Green", "Blue"];
@@ -2611,6 +2622,28 @@ impl Workspace {
         self.send("grade.printer", Value::Object(params));
     }
 
+    fn memories_menu(&mut self, ui: &mut Ui) {
+        let held: Vec<char> = (self.project())
+            .map(|p| p.memories.iter().map(|m| m.slot).collect())
+            .unwrap_or_default();
+        for (_, slot) in MEMORY_KEYS {
+            let button = egui::Button::new(format!("Load Memory {slot}"));
+            if ui.add_enabled(held.contains(&slot), button).clicked() {
+                self.load_memory(slot);
+                ui.close();
+            }
+        }
+        ui.separator();
+        for (action, slot) in MEMORY_KEYS {
+            let key = self.snap.bindings.first(action).unwrap_or_default();
+            let button = egui::Button::new(format!("Save Memory {slot}")).shortcut_text(key);
+            if ui.add(button).clicked() {
+                self.save_memory(slot);
+                ui.close();
+            }
+        }
+    }
+
     pub(super) fn color_menu(&mut self, ui: &mut Ui) {
         let page = self.effects_page.page == Page::Color && self.project().is_some();
         let key = self
@@ -2629,6 +2662,9 @@ impl Workspace {
             self.grab_still();
             ui.close();
         }
+        ui.add_enabled_ui(page, |ui| {
+            ui.menu_button("Memories", |ui| self.memories_menu(ui));
+        });
         ui.separator();
         for (action, text) in [
             (
@@ -2937,6 +2973,11 @@ impl Workspace {
         }
         if struck(Action::GrabStill) {
             self.grab_still();
+        }
+        for (action, slot) in MEMORY_KEYS {
+            if struck(action) {
+                self.save_memory(slot);
+            }
         }
         for (action, prior) in [
             (Action::ApplyGradeOneClipPrior, 1),

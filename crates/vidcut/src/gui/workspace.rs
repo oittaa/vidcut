@@ -444,7 +444,11 @@ impl Workspace {
                 live::GuiChange::Viewers { left, right, shown } => {
                     self.set_viewers([left, right], shown)?
                 }
-                live::GuiChange::Gallery { album, albums } => self.set_gallery(album, albums)?,
+                live::GuiChange::Gallery {
+                    album,
+                    albums,
+                    memories,
+                } => self.set_gallery(album, albums, memories)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -615,6 +619,7 @@ impl Workspace {
             node_wide: self.effects_page.grade_wide,
             album: self.shown_album(),
             albums: self.gallery.albums,
+            memories: self.gallery.memories,
             viewers: self.viewer_state(),
             time: self.page_clock(),
             edit,

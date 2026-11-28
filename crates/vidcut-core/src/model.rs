@@ -39,6 +39,7 @@ pub struct Project {
     pub stills: Vec<Still>,
     pub shared_nodes: Vec<SharedNode>,
     pub albums: Vec<Album>,
+    pub memories: Vec<Memory>,
 }
 
 /// A whole project: its media and its timelines.
@@ -103,6 +104,10 @@ pub struct ProjectFile {
     /// The still albums of the Gallery, in the order they were made. A
     /// project has one or more.
     pub albums: Vec<Album>,
+    /// The memories of the Gallery, in the order of their slots. Left out
+    /// while there are none.
+    #[serde(default)]
+    pub memories: Vec<Memory>,
 }
 
 #[derive(Serialize)]
@@ -136,6 +141,8 @@ struct ProjectOut<'a> {
     #[serde(skip_serializing_if = "<[SharedNode]>::is_empty")]
     shared_nodes: &'a [SharedNode],
     albums: &'a [Album],
+    #[serde(skip_serializing_if = "<[Memory]>::is_empty")]
+    memories: &'a [Memory],
 }
 
 impl Serialize for Project {
@@ -170,6 +177,7 @@ impl Serialize for Project {
             stills: &self.stills,
             shared_nodes: &self.shared_nodes,
             albums: &self.albums,
+            memories: &self.memories,
         }
         .serialize(s)
     }
@@ -199,6 +207,7 @@ impl From<ProjectFile> for Project {
             stills: f.stills,
             shared_nodes: f.shared_nodes,
             albums: f.albums,
+            memories: f.memories,
         };
         p.check_out();
         p
@@ -334,6 +343,15 @@ pub struct Still {
     pub timeline: String,
     /// The frame of the timeline.
     pub frame: i64,
+    /// The video track of the clip at the grab: the first number of the
+    /// still ID.
+    pub track: usize,
+    /// The place of the clip on its track at the grab, from 1: the second
+    /// number of the still ID. Generators, titles and adjustment clips do
+    /// not count.
+    pub shot: usize,
+    /// The number of node stack layers of the project at the grab.
+    pub layers: usize,
     /// The frames of the clip, counted as the keyframes of its grade are.
     pub source: StillSource,
     /// The whole grade of the clip: each node stack layer, with its
@@ -350,6 +368,33 @@ pub struct Still {
     /// The file name of the picture in the `stills` folder: the frame as
     /// the viewer shows it, at the size of the timeline, in 32-bit float
     /// OpenEXR.
+    pub picture: String,
+}
+
+/// A memory of the Gallery: the grades and the picture of a still, in a
+/// slot from A to Z.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Memory {
+    /// The slot, a letter from A to Z.
+    pub slot: char,
+    /// The clip of the still.
+    pub clip: String,
+    /// The timeline of the clip.
+    pub timeline: String,
+    /// The frame of the timeline.
+    pub frame: i64,
+    /// The frames of the clip, counted as the keyframes of its grade are.
+    pub source: StillSource,
+    /// The number of node stack layers of the project at the grab.
+    pub layers: usize,
+    /// The whole grade of the clip: each node stack layer, with its
+    /// keyframes. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<Grade>,
+    /// The timeline grade, with its keyframes. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_grade: Option<Grade>,
+    /// The file name of the picture in the `stills` folder.
     pub picture: String,
 }
 
@@ -10720,6 +10765,7 @@ impl Project {
                 id: "a1".into(),
                 name: "Stills 1".into(),
             }],
+            memories: Vec::new(),
         }
     }
 
@@ -11555,6 +11601,10 @@ impl Project {
 
     pub fn album(&self, id: &str) -> Option<&Album> {
         self.albums.iter().find(|a| a.id == id)
+    }
+
+    pub fn memory(&self, slot: char) -> Option<&Memory> {
+        self.memories.iter().find(|m| m.slot == slot)
     }
 
     pub fn subtitle_index(&self, id: &str) -> Option<usize> {

@@ -485,7 +485,31 @@ pub fn describe_at(
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
+        "gallery.grab" if d.params["memory"].is_string() => {
+            format!("Save Memory {} at {}", d.text("memory"), d.time("at"))
+        }
         "gallery.grab" => format!("Grab Still at {}", d.time("at")),
+        "gallery.label" => format!("Change the label of still {}", d.text("still")),
+        "gallery.memory.copy" => format!(
+            "Copy still {} to memory {}",
+            d.text("still"),
+            d.text("memory")
+        ),
+        "gallery.memory.clear" => format!("Clear memory {}", d.text("memory")),
+        "gallery.memory.load" if d.text("grade") == "timeline" => {
+            format!("Load the timeline grade of memory {}", d.text("memory"))
+        }
+        "gallery.memory.load" => {
+            format!("Load Memory {} to {}", d.text("memory"), d.clips("clips"))
+        }
+        "gallery.memory.apply" if d.text("grade") == "timeline" => {
+            format!("Apply the timeline grade of memory {}", d.text("memory"))
+        }
+        "gallery.memory.apply" => format!(
+            "Apply the grade of memory {} to {}",
+            d.text("memory"),
+            d.clips("clips")
+        ),
         "gallery.move" => match d.list("stills").as_slice() {
             [one] => format!("Move still {one} to album {}", d.text("album")),
             many => format!("Move {} stills to album {}", many.len(), d.text("album")),
