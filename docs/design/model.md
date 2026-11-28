@@ -965,6 +965,10 @@ Import:
   - The GUI sends one lead for a selection that holds two parts (`linked::leads`, `edits::Plan::new`), because each part acts on the other parts.
     - With Linked Selection off, it sends each selected clip, because each clip acts alone.
   - `linked::with_sound` puts the sound of each placed picture on the audio track of the same number, and each next stream on the next audio track. It writes over what is there, and links the clips.
+    - `ops::append_block` calls `linked::with_sound_around`. It does not write over a clip ([spec §7.2](../spec.md#72-edit-functions)).
+    - `fit_around` starts the sound after a clip at its first frame, and stops it at the next clip. `Clip::move_head` keeps it in sync. When no part fits, the edit fails.
+    - `above_main_row` gives the track of sound alone in an append: the audio track after the last one with sound linked to V1.
+  - Place On Top of sound alone gives the `playhead` at the end of the new clips. `moves_playhead` lets `playhead_after_edit` seek there. Place On Top of a picture gives none, so the playhead stays.
   - `linked::sounds` gives the linked sound clips of a picture clip. The sound requests, the Inspector and the clip menu use it. Why: a picture clip has no sound of its own.
   - `follow::follow` moves a clip that is linked to a V1 clip by the change of the start of that clip. Thus a J/L cut keeps its offset.
   - `linked::link` gives the clips one new link number. It writes `linked_at` on each clip: `start` less `source_in`. `linked::unlink` takes the link and `linked_at` of each clip away.

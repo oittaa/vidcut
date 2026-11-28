@@ -546,11 +546,37 @@ pub fn append(p: &mut Project, src: &Source) -> Result<String> {
     append_block(p, std::slice::from_ref(src), 0).map(only)
 }
 
+fn above_main_row(p: &mut Project) -> usize {
+    let links: HashSet<u32> = p.tracks[main_index(p)]
+        .clips
+        .iter()
+        .filter_map(|c| c.link)
+        .collect();
+    let row = p.tracks_of(TrackKind::Audio).into_iter().rposition(|ti| {
+        p.tracks[ti]
+            .clips
+            .iter()
+            .any(|c| c.link.is_some_and(|l| links.contains(&l)))
+    });
+    tracks::nth(p, TrackKind::Audio, row.map_or(1, |k| k + 1))
+}
+
 pub fn append_block(p: &mut Project, srcs: &[Source], lead: i64) -> Result<Vec<String>> {
     let mut clips = make_clips(p, srcs)?;
-    let ti = home(p, &mut clips, &srcs[0])?;
-    let start = p.tracks[ti].end() + lead.max(0);
-    put(p, ti, clips, start, &srcs[0])
+    let (ti, end) = if srcs[0].track.is_none() && !clips.iter().any(|c| c.video) {
+        let ti = above_main_row(p);
+        unlocked(p, ti)?;
+        (ti, p.end())
+    } else {
+        let ti = home(p, &mut clips, &srcs[0])?;
+        (ti, p.tracks[ti].end())
+    };
+    let start = end + lead.max(0);
+    if srcs[0].decompose {
+        return put(p, ti, clips, start, &srcs[0]);
+    }
+    let ids = place_block(p, ti, clips, start);
+    linked::with_sound_around(p, ids, &srcs[0])
 }
 
 pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
@@ -810,9 +836,8 @@ pub fn place_on_top_block(
     let ti = if clips.iter().any(|c| c.video) {
         track_above(p, start, end)
     } else {
-        let audio = p.tracks_of(TrackKind::Audio);
-        let free = audio.iter().position(|&i| !busy(&p.tracks[i], start, end));
-        tracks::nth(p, TrackKind::Audio, free.unwrap_or(audio.len()))
+        let audio = p.tracks_of(TrackKind::Audio).len();
+        tracks::nth(p, TrackKind::Audio, audio)
     };
     unlocked(p, ti)?;
     let start = if is_main(p, ti) && p.settings.ripple_on {
