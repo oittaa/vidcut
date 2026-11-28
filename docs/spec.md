@@ -5287,7 +5287,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Apply Grade in the menu of a still, or a middle-click on it, gives the grade to the selected clips (pp. 3364–3365).
   - The mode of the Node Editor selects the grade that changes: Clip or Timeline (pp. 3362, 3405).
   - The grade replaces the grade of each target clip (p. 3365).
-- [The todo](todo/color-gallery.md#what-resolve-does) has the other items of the Gallery and the measured results.
+- [The todo](todo/color-gallery.md) has the other items of the Gallery and the measured results.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
