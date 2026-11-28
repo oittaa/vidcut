@@ -4172,10 +4172,20 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - The changes go to the node of the same number. A clip with no node of that number takes no change (p. 3372).
   - Camera Raw, Sizing and Data Burn are not settings of a node. They do not ripple (p. 3373).
   - Ripple Node Changes to Current Group gives the changes to the other clips of the group of the current clip (p. 3373).
-  - Only the changed settings go. The other settings of the target node stay (not measured).
+  - Only the changed settings go. Each target takes the new value of a changed setting, not the difference. The other settings of the target node stay.
+  - A setting changed and then changed back to its first value gives no change.
+  - A clip with no node of that number gets no new node.
+  - A target node with keyframes keeps them. Its values before the first keyframe and the values on each keyframe take the new value.
+  - A change made before the other clips are selected goes too. A second Ripple Node Changes gives the same result.
+  - With two node stack layers, a change on layer 2 goes to layer 2 of the targets. An empty layer 2 takes it on its node 1. Layer 1 stays.
+  - A new curve point and a new window go to the targets. A later move of the window goes too.
   - vidcut: `grade.ripple` gives the changes of a corrector to the corrector of the same number in the grades of other clips. It is one undo step.
     - A change is a setting that differs from `before`, the settings that `grade.copy` gave before the change.
-    - A part at its usual value before or after the change goes whole (not measured). Such parts are the qualifier, the key output and the key input.
+    - A part at its usual value before or after the change goes whole, as a new window does.
+    - The qualifier, the key output and the key input go the same way (not measured).
+    - The values on each keyframe of a target take the changes too.
+    - The key output, the key input, the qualifier and the windows on each keyframe do the same (not measured).
+    - With no change, no clip takes anything.
     - Changed keyframes go whole, each on its frame from the start of the clip (not measured).
     - The label and the on state of the node do not go (not measured).
     - A clip whose corrector of that number is locked takes no change (not measured).

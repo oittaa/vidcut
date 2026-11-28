@@ -1,15 +1,17 @@
 use std::collections::BTreeSet;
 
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
-use crate::model::Project;
+use crate::model::{Corrector, GradeWindow, KeyInput, KeyOutput, Project, Qualifier};
 use crate::request::CopiedNode;
 
 use super::grade::{self, GradeOf};
 
 const KEPT: [&str; 2] = ["label", "on"];
 const WHOLE: [&str; 1] = ["keys"];
+const KEYED: [&str; 5] = ["values", "key", "key_input", "qualifier", "windows"];
 
 #[derive(Debug, Clone)]
 enum Step {
@@ -33,8 +35,45 @@ impl Step {
     }
 }
 
-fn json(c: &CopiedNode) -> Result<Value> {
+fn json<T: Serialize>(c: &T) -> Result<Value> {
     serde_json::to_value(c).map_err(|e| Error::internal(e.to_string()))
+}
+
+fn part(path: &[Step]) -> Option<&str> {
+    match path.first() {
+        Some(Step::Key(k)) => Some(k.as_str()),
+        _ => None,
+    }
+}
+
+fn on_keys(target: &mut Value, now: &Value, paths: &[Vec<Step>]) -> Result<()> {
+    let paths: Vec<&Vec<Step>> = (paths.iter())
+        .filter(|p| part(p).is_some_and(|k| KEYED.contains(&k)))
+        .collect();
+    let Some(keys) = target.get_mut("keys").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let usual = [
+        ("values", json(&Corrector::default())?),
+        ("key", json(&KeyOutput::default())?),
+        ("key_input", json(&KeyInput::default())?),
+        ("qualifier", json(&Qualifier::default())?),
+        ("windows", json(&Vec::<GradeWindow>::new())?),
+    ];
+    for key in keys {
+        if let Some(o) = key.as_object_mut() {
+            for (name, value) in &usual {
+                o.entry(*name).or_insert_with(|| value.clone());
+            }
+        }
+        for path in &paths {
+            took(key, now, path);
+        }
+    }
+    Ok(())
 }
 
 fn changes(was: Option<&Value>, now: Option<&Value>, at: &[Step], out: &mut Vec<Vec<Step>>) {
@@ -114,6 +153,10 @@ pub fn ripple(
     }
     let now = json(&grade::copy(p, from, n)?)?;
     let paths = changed(&json(before)?, &now);
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys_whole = (paths.iter()).any(|p| part(p).is_some_and(|k| WHOLE.contains(&k)));
     let mut rippled = Vec::new();
     for one in to.iter().filter(|o| *o != from) {
         let GradeOf::Clip(id, _) = one else {
@@ -126,6 +169,9 @@ pub fn ripple(
         let mut v = json(&grade::copy(p, one, n)?)?;
         for path in &paths {
             took(&mut v, &now, path);
+        }
+        if !keys_whole {
+            on_keys(&mut v, &now, &paths)?;
         }
         let settings: CopiedNode = serde_json::from_value(v).map_err(|e| {
             Error::invalid(format!("node {n} of {id} does not take the changes: {e}"))
