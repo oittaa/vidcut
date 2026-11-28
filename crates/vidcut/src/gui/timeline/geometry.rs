@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{Pos2, Rect, pos2, vec2};
@@ -101,19 +100,28 @@ pub struct Bands {
 
 impl Bands {
     pub fn of(p: &Project) -> Self {
-        let mut pictures: HashMap<u32, &str> = HashMap::new();
-        for i in p.tracks_of(TrackKind::Video) {
-            let t = &p.tracks[i];
-            for l in t.clips.iter().filter_map(|c| c.link) {
-                pictures.entry(l).or_insert(&t.id);
+        let videos: Vec<&Track> = p
+            .tracks_of(TrackKind::Video)
+            .into_iter()
+            .map(|i| &p.tracks[i])
+            .collect();
+        let pictures = pictures(p);
+        let mut sounds: HashMap<String, String> = HashMap::new();
+        for t in &videos {
+            for b in band(p, t) {
+                sounds
+                    .entry(b.sound.id.clone())
+                    .or_insert_with(|| t.id.clone());
             }
         }
-        let sounds = p
-            .tracks_of(TrackKind::Audio)
-            .into_iter()
-            .flat_map(|i| &p.tracks[i].clips)
-            .filter_map(|c| Some((c.id.clone(), pictures.get(&c.link?)?.to_string())))
-            .collect();
+        for t in &videos {
+            let Some(a) = over(p, t).and_then(|a| p.track(&a)) else {
+                continue;
+            };
+            for c in a.clips.iter().filter(|c| sound_only(c, &pictures)) {
+                sounds.entry(c.id.clone()).or_insert_with(|| t.id.clone());
+            }
+        }
         Self { sounds }
     }
 
@@ -123,26 +131,6 @@ impl Bands {
 
     pub fn row(&self, id: &str) -> Option<&str> {
         self.sounds.get(id).map(String::as_str)
-    }
-
-    pub fn hides(&self, t: &Track) -> bool {
-        t.kind == TrackKind::Audio && !t.clips.is_empty() && t.clips.iter().all(|c| self.has(&c.id))
-    }
-
-    pub fn apart<'a>(&self, t: &'a Track) -> Cow<'a, Track> {
-        if !t.clips.iter().any(|c| self.has(&c.id)) {
-            return Cow::Borrowed(t);
-        }
-        let mut kept = t.clone();
-        kept.clips.retain(|c| !self.has(&c.id));
-        Cow::Owned(kept)
-    }
-
-    pub fn joins(&self, x: &Transition) -> bool {
-        [&x.from, &x.to]
-            .into_iter()
-            .flatten()
-            .any(|id| self.has(id))
     }
 }
 
@@ -156,19 +144,25 @@ pub fn band<'a>(p: &'a Project, t: &'a Track) -> Vec<Banded<'a>> {
     if t.kind != TrackKind::Video {
         return Vec::new();
     }
-    let mut first: HashMap<u32, (&Track, &Clip)> = HashMap::new();
+    let mut top: HashMap<u32, (&Track, &Clip)> = HashMap::new();
     for i in p.tracks_of(TrackKind::Audio) {
         let a = &p.tracks[i];
         for s in &a.clips {
             if let Some(l) = s.link {
-                first.entry(l).or_insert((a, s));
+                top.entry(l)
+                    .and_modify(|e| {
+                        if a.number() > e.0.number() {
+                            *e = (a, s);
+                        }
+                    })
+                    .or_insert((a, s));
             }
         }
     }
     t.clips
         .iter()
         .filter_map(|c| {
-            let &(track, sound) = first.get(&c.link?)?;
+            let &(track, sound) = top.get(&c.link?)?;
             Some(Banded {
                 track,
                 sound,
@@ -196,6 +190,47 @@ pub fn heard_on(p: &Project, t: &Track) -> Vec<String> {
                 .any(|c| c.link.is_some_and(|l| links.contains(&l)))
         })
         .map(|a| a.id.clone())
+        .collect()
+}
+
+pub fn over(p: &Project, t: &Track) -> Option<String> {
+    let lowest = heard_on(p, t)
+        .into_iter()
+        .min_by_key(|id| p.track(id).map_or(usize::MAX, Track::number));
+    lowest.or_else(|| {
+        p.tracks_of(TrackKind::Audio)
+            .into_iter()
+            .map(|i| &p.tracks[i])
+            .filter(|_| t.id == MAIN)
+            .min_by_key(|a| a.number())
+            .map(|a| a.id.clone())
+    })
+}
+
+fn pictures(p: &Project) -> HashSet<u32> {
+    p.tracks_of(TrackKind::Video)
+        .into_iter()
+        .flat_map(|i| p.tracks[i].clips.iter().filter_map(|c| c.link))
+        .collect()
+}
+
+fn sound_only(c: &Clip, pictures: &HashSet<u32>) -> bool {
+    c.link.is_none_or(|l| !pictures.contains(&l))
+}
+
+fn own_rows(p: &Project) -> HashSet<&str> {
+    let label = p
+        .track(MAIN)
+        .and_then(|v| over(p, v))
+        .and_then(|a| p.track(&a))
+        .map_or(0, Track::number);
+    let pictures = pictures(p);
+    p.tracks_of(TrackKind::Audio)
+        .into_iter()
+        .map(|i| &p.tracks[i])
+        .filter(|t| t.number() > label && !t.clips.is_empty())
+        .filter(|t| t.clips.iter().all(|c| sound_only(c, &pictures)))
+        .map(|t| t.id.as_str())
         .collect()
 }
 
@@ -269,10 +304,10 @@ impl Rows {
             TrackKind::Video if t.id == MAIN => 0.32,
             TrackKind::Video => 0.3,
         };
-        let bands = if linked {
-            Bands::of(p)
+        let (bands, rowed) = if linked {
+            (Bands::of(p), own_rows(p))
         } else {
-            Bands::default()
+            (Bands::default(), HashSet::new())
         };
         order.extend(
             p.tracks_of(TrackKind::Video)
@@ -280,7 +315,7 @@ impl Rows {
                 .rev()
                 .chain(p.tracks_of(TrackKind::Audio))
                 .map(|i| &p.tracks[i])
-                .filter(|t| !bands.hides(t))
+                .filter(|t| !linked || t.kind != TrackKind::Audio || rowed.contains(t.id.as_str()))
                 .map(|t| (t.id.as_str(), track(t), share(t))),
         );
         let big = order.iter().position(|t| Some(t.0) == enlarged);
@@ -852,7 +887,7 @@ pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<S
             let what = match p.track(&r.track) {
                 None => Hit::Empty,
                 Some(t) => band_hit(p, rows, t, scale, &r.rect, pos)
-                    .unwrap_or_else(|| hit(&rows.bands.apart(t), scale, &r.rect, pos)),
+                    .unwrap_or_else(|| hit(t, scale, &r.rect, pos)),
             };
             (Some(r.track.clone()), what)
         }

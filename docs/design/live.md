@@ -386,9 +386,15 @@ The bar and the Jobs button:
 
 **Sound bands** ([spec §5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718)).
 
-- `geometry::Bands` holds each sound clip that is linked to a picture clip, with the video track of that picture. `Rows::layout` makes it.
-- `Rows::layout` leaves out an audio track whose clips are all in bands. Why: the row of the picture shows them.
-- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the first linked sound clip of each picture, at its own place. Thus a J/L cut shows.
+- With Linked Selection on, `Rows::layout` gives a row to each video track.
+  - It gives a row to an audio track only when the track is above the label track of the main track (`own_rows`).
+  - That track also holds a clip with no linked picture, and no clip linked to a picture.
+- `geometry::over` gives the audio track of the label of a video row: the lowest track in `geometry::heard_on`. `track_label` writes it under the name of the track.
+  - When `geometry::heard_on` of the main track is empty, `geometry::over` gives the lowest audio track.
+- `geometry::Bands` holds each sound clip that a band shows, with the video track of its row. `Rows::layout` makes it.
+- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the linked sound clip on the highest audio track of each picture, at its own place. Thus a J/L cut shows.
+  - `audio_edge` takes the same sound clip.
+- The band also draws each clip with no linked picture on the track that `geometry::over` gives. These clips take no clicks.
 - The band draws the sound transitions between its sound clips. It draws no volume line.
 - A sound block is a compound clip or a generator without picture. It fills its place in the band (`paint::clip_fill`).
 - The row draws the band first and the picture clips over it. Thus the frame of a selected item is on top of the band.
@@ -396,18 +402,20 @@ The bar and the Jobs button:
 - `geometry::band_hit` finds the edge of a band sound under the pointer. It gives `Hit::AudioEdit` with the picture clip.
   - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
   - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
-- An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
 - `Assets::sync` holds `linked::offsets` for each frame that is drawn. A clip that is out of sync shows its offset in a red badge before its name.
 - The clip menu gives Link Clips or Unlink Clips (`link_action`). With Linked Selection on, it takes the linked clips of the selection too.
   - It gives the four commands of the offset when the clip has an offset.
 - `Options::linked_selection` is the Linked Selection switch.
   - On, the timeline draws the linked clips of each selected clip as selected (`linked::with_ties`). The selection itself holds the clicked clip.
-  - Off, `Rows::layout` makes no `Bands`, and a video row has no band. Thus each sound clip shows on its audio row.
+  - Off, `Rows::layout` makes no `Bands`, each audio track has a row, and a video row has no band. Thus each sound clip shows on its audio row.
   - `Workspace::send` and `Workspace::send_drag` then add `alone` to the clip edits in `ALONE`, also inside an `apply`.
   - The previews then act alone too: `Ctx::alone` and `Preview::alone` for the drags, `Cut::apply` and `edits::applied` for the selected edits, and `dynamic_preview` for Dynamic Trim.
   - Then `edits::Plan::new` keeps the edits of linked clips, and the slip drag and `dynamic_target` keep each selected clip.
   - The header of a main track then has no Mute.
-- The Mute of a main track header sets `muted` on each audio track that holds the linked sound of its clips (`geometry::heard_on`). One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+- The Mute of a main track header shows `muted` of the track that `geometry::over` gives. With no such track, it is not lit.
+  - A click sets `muted` on each track in `geometry::heard_on` to the other state. One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+  - With no track in `geometry::heard_on`, a click sends nothing.
+- The row of an audio track keeps its own Mute, which sets only that track.
 
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
