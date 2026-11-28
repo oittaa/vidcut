@@ -7975,7 +7975,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A clip at Zoom 0.5 in a compound clip at Zoom 2 is softer than a clip at Zoom 1. One picture and two pictures inside give the same softness.
       - An effect on a clip inside works before the crop of the compound clip. Thus the cut edge stays hard.
     - The pictures of the compound clip in the frame set how they mix (measured in Resolve Studio 21.1.2). This rule is for each frame.
-    - **One picture in the frame:** it acts as if it were on the timeline ([X164](deviations.md#x164-a-mode-inside-a-compound-clip-always-mixes-with-the-tracks-below)).
+    - **One picture in the frame:** it acts as if it were on the timeline ([gotchas](gotchas.md#resolves-renders)).
       - Its composite mode mixes with the tracks below the compound clip.
       - Its opacity and the opacity of the compound clip multiply.
       - A composite mode on the compound clip replaces its mode.
