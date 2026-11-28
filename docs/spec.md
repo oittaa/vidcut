@@ -4272,6 +4272,21 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the palette of a locked node drops each change. Thus its controls show the stored values again.
   - Not measured in Resolve: Reset Grades and Keep Nodes, and the keyframe requests for all nodes. vidcut skips a locked node in them.
   - Not measured in Resolve: a lock on a mixer, and a label change on a locked node. vidcut follows the manual for a mixer, and lets the label change.
+- **Ripple Node Changes** (pp. 3372–3373):
+  - Color > Ripple Node Changes to Selected Clips gives the changes of a node of the current clip to the selected clips (p. 3372).
+  - The changes go to the node of the same number. A clip with no node of that number takes no change (p. 3372).
+  - Camera Raw, Sizing and Data Burn are not settings of a node. They do not ripple (p. 3373).
+  - Ripple Node Changes to Current Group gives the changes to the other clips of the group of the current clip (p. 3373).
+  - Only the changed settings go. The other settings of the target node stay.
+  - vidcut: `grade.ripple` gives the changes of a corrector to the corrector of the same number in the grades of other clips. It is one undo step.
+    - A change is a setting that differs from `before`, the settings that `grade.copy` gave before the change.
+    - A part at its usual value before or after the change goes whole (not measured). Such parts are the qualifier, the key output and the key input.
+    - Changed keyframes go whole, each on its frame from the start of the clip (not measured).
+    - The label and the on state of the node do not go (not measured).
+    - A clip whose corrector of that number is locked takes no change (not measured).
+  - vidcut: Color > Ripple Node Changes to Selected Clips sends `grade.ripple`. The clip at the playhead gives the changes to the selected clips of the Thumbnail timeline.
+    - The changes are those since the corrector became the current node, or since the last ripple (not measured).
+    - The item is greyed when no other clip is selected.
 - **Mixers**, measured in Resolve Studio 21.2 with float renders:
   - Serial: node 2 works on the output of node 1. The error is 6.8e-6.
   - Parallel Mixer: out = x + Σ (nᵢ − x). The error is 8.4e-7.
@@ -5300,6 +5315,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Apply Grade in the menu of a still, or a middle-click on it, gives the grade to the selected clips (pp. 3364–3365).
   - The mode of the Node Editor selects the grade that changes: Clip or Timeline (pp. 3362, 3405).
   - The grade replaces the grade of each target clip (p. 3365).
+  - Append Node Graph in the menu of a still adds its node graph after the end of the node tree of the current clip. The grade of the clip stays (p. 3366).
+  - A drop of a still onto a link adds its nodes at that link. A Command-drag adds them as one compound node (pp. 3366–3367).
+  - Apply Grades Using decides the keyframes of the added nodes (p. 3367).
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
   - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
@@ -5318,6 +5336,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The grade of the still replaces the whole grade of each target. A still with no clip grade gives the usual grade.
     - In the Timeline mode, the timeline grade of the still replaces the timeline grade.
     - A still whose grade has keyframes does not apply. The request gives an error.
+  - `gallery.append` adds the nodes of a still after the output of a grade. Append Node Graph in the menu of a still does it, on the clip at the playhead.
+    - The nodes of the still take the picture that the grade gave out. The output of the still becomes the output of the grade.
+    - Then all nodes get their numbers again, as after each new node.
+    - In the Clip mode, the clip takes the nodes of the same node stack layer of the still (not measured).
+    - In the Timeline mode, the timeline grade takes the nodes of the timeline grade of the still (not measured).
+    - A still whose grade has keyframes does not append. The request gives an error.
+    - It is one undo step.
   - `gallery.get` gives each still, with the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
   - Still IDs of the form Track.Shot.Version, labels, keyframe modes and the drag into the viewer come later ([todo](todo/color-gallery.md)).

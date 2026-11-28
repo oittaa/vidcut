@@ -5529,6 +5529,34 @@ fn mutate(
             ops::gallery::apply(p, still, *grade, &ids)?;
             Value::Null
         }
+        Request::GalleryAppend {
+            still,
+            clips,
+            layer,
+            grade,
+        } => {
+            use ops::grade::GradeOf;
+            let timeline = matches!(grade, crate::request::GradeLevel::Timeline);
+            let layer = layer_of(timeline, *layer)?;
+            let to = match (clips, timeline) {
+                (Some(_), true) => {
+                    return Err(Error::usage(
+                        "the timeline grade goes to the open timeline: leave out `clips`",
+                    ));
+                }
+                (None, true) => vec![GradeOf::Timeline],
+                (Some(refs), false) => (resolve_clips(p, &refs.to_vec(), playhead)?.into_iter())
+                    .map(|id| GradeOf::Clip(id, layer))
+                    .collect(),
+                (None, false) => {
+                    let t = playhead
+                        .ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+                    vec![GradeOf::Clip(ops::gallery::graded_clip(p, t)?, layer)]
+                }
+            };
+            ops::gallery::append(p, still, &to)?;
+            Value::Null
+        }
         Request::GradeRemove {
             clip,
             timeline,
@@ -5577,6 +5605,21 @@ fn mutate(
                 .ok_or_else(|| Error::usage("give `settings`: the clipboard has no node"))?;
             ops::grade::paste(p, &of, *node, settings)?;
             Value::Null
+        }
+        Request::GradeRipple {
+            clip,
+            layer,
+            node,
+            before,
+            clips,
+        } => {
+            use ops::grade::GradeOf;
+            let layer = layer.unwrap_or(1);
+            let from = GradeOf::Clip(resolve_clip(p, clip, playhead)?, layer);
+            let to: Vec<GradeOf> = (resolve_clips(p, &clips.to_vec(), playhead)?.into_iter())
+                .map(|id| GradeOf::Clip(id, layer))
+                .collect();
+            json!({ "clips": ops::ripple::ripple(p, &from, *node, before, &to)? })
         }
         Request::GradeCleanup {
             clip,

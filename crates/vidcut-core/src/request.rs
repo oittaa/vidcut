@@ -3416,6 +3416,29 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<CopiedNode>,
     },
+    /// Ripple Node Changes to Selected Clips: give the changes of a
+    /// corrector of the grade of a clip to the corrector of the same number
+    /// in the grades of other clips. A change is a setting that differs
+    /// from `before`. A changed part that one of the two has at its usual
+    /// value goes whole, and so do changed keyframes. The label and whether
+    /// the node is on do not go. A clip with no corrector of that number, or
+    /// with a locked one, takes nothing. Returns the clips that took the
+    /// changes, as `clips`.
+    #[serde(rename = "grade.ripple")]
+    GradeRipple {
+        /// The clip whose corrector changed.
+        clip: ClipRef,
+        /// The node stack layer of the grades, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+        /// The settings of the corrector before the changes, as
+        /// `grade.copy` gives them.
+        before: CopiedNode,
+        /// The clips that take the changes.
+        clips: OneOrMany<ClipRef>,
+    },
     /// Place the nodes of the grade of a clip, or with `timeline` of the
     /// timeline grade, in an even grid. Each node goes in the column of its
     /// longest path from the source. A chain stays on one row, and the
@@ -3947,6 +3970,29 @@ pub enum Request {
         /// grade. Not with the `timeline` grade.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clips: Option<OneOrMany<ClipRef>>,
+        /// The grade that changes. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
+    },
+    /// Append Node Graph: add the nodes of a still after the output of
+    /// grades. They take the picture that the grade gave out, and give the
+    /// picture out. With the `clip` grade, the nodes of the same node stack
+    /// layer of the clip grade of the still go to clips. With the
+    /// `timeline` grade, the nodes of the timeline grade of the still go to
+    /// the timeline grade of the open timeline. A grade with keyframes is
+    /// refused.
+    #[serde(rename = "gallery.append")]
+    GalleryAppend {
+        /// The id of the still (`s1`).
+        still: String,
+        /// The clips that get the nodes. Left out: the topmost clip at the
+        /// playhead that takes a grade. Not with the `timeline` grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The node stack layer, from 1 to the project's `node_stack_layers`
+        /// count. Not with the `timeline` grade. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
         /// The grade that changes. Left out: `clip`.
         #[serde(default)]
         grade: GradeLevel,

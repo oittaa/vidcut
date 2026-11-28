@@ -493,8 +493,18 @@ pub fn describe_at(
             d.text("still"),
             d.clips("clips")
         ),
+        "gallery.append" if d.text("grade") == "timeline" => format!(
+            "Append the nodes of still {} to the timeline grade",
+            d.text("still")
+        ),
+        "gallery.append" => format!(
+            "Append the nodes of still {} to {}",
+            d.text("still"),
+            d.clips("clips")
+        ),
         "grade.paste" if d.flag("timeline") => "Paste a node into the timeline grade".into(),
         "grade.paste" => format!("Paste a node into the grade of {}", d.clips("clips")),
+        "grade.ripple" => format!("Ripple Node Changes to {}", d.clips("clips")),
         "grade.add"
         | "grade.remove"
         | "grade.connect"

@@ -19,6 +19,7 @@ pub mod motion;
 pub mod normalize;
 pub mod picture;
 pub mod render;
+pub mod ripple;
 mod source_overwrite;
 pub mod speed;
 pub mod subtitles;
