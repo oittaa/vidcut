@@ -288,6 +288,8 @@ pub struct Snapshot {
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,
+    pub loudness: vidcut_av::player::LoudnessMeter,
+    pub loudness_absolute: bool,
     pub looping: bool,
     pub fast_review: bool,
     pub video_only: bool,

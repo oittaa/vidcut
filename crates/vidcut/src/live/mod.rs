@@ -637,6 +637,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
+        loudness: player.loudness().clone(),
+        loudness_absolute: false,
         looping: false,
         fast_review: false,
         video_only: false,
@@ -764,6 +766,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         next_job: 1,
         hearing: 0,
         audio_scrubbing: true,
+        loudness_absolute: false,
         looping: false,
         fast_review: false,
         review_speed: None,
@@ -1073,6 +1076,7 @@ struct Live {
     next_job: u64,
     hearing: usize,
     audio_scrubbing: bool,
+    loudness_absolute: bool,
     looping: bool,
     fast_review: bool,
     review_speed: Option<f64>,
@@ -1761,6 +1765,8 @@ impl Live {
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
+            loudness: self.player.loudness().clone(),
+            loudness_absolute: self.loudness_absolute,
             looping: self.looping,
             fast_review: self.fast_review,
             video_only: self.video_only,
@@ -2777,7 +2783,7 @@ impl Live {
         let rev = self.project.as_ref().map_or(0, |p| p.project().rev);
         let quiet = matches!(
             job.method.as_str(),
-            "player.state" | "selection.get" | "gui.log" | "gui.state"
+            "player.state" | "loudness.get" | "selection.get" | "gui.log" | "gui.state"
         ) || (matches!(job.origin, Origin::Gui { .. })
             && matches!(
                 job.method.as_str(),
@@ -3416,6 +3422,31 @@ impl Live {
                     )))),
                 }
             }
+            Request::LoudnessGet {} => Step::Now(Ok(self.loudness_response())),
+            Request::LoudnessSet { running, absolute } => {
+                if let Some(on) = running {
+                    let mut meter = self
+                        .player
+                        .loudness()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if on {
+                        meter.start();
+                    } else {
+                        meter.pause();
+                    }
+                }
+                if let Some(a) = absolute {
+                    self.loudness_absolute = a;
+                }
+                Step::Now(Ok(self.loudness_response()))
+            }
+            Request::LoudnessReset {} => {
+                (self.player.loudness().lock())
+                    .unwrap_or_else(|e| e.into_inner())
+                    .reset();
+                Step::Now(Ok(self.loudness_response()))
+            }
             Request::PlayerAudioScrubbing { on } => {
                 self.audio_scrubbing = on.unwrap_or(!self.audio_scrubbing);
                 self.player.set_scrubbing(self.audio_scrubbing);
@@ -3996,8 +4027,13 @@ impl Live {
                 Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
-            Request::MotionFind { subject, .. } if !envelope.dry_run => {
-                let title = format!("Find {}", subject.many());
+            Request::MotionFind { .. } if !envelope.dry_run => {
+                let p = self.project.as_ref().map(|o| o.project());
+                let playhead = Some(self.player.position(TIMELINE));
+                let found = p.and_then(|p| {
+                    vidcut_core::editor::find_subject(p, &envelope.request, playhead)
+                });
+                let title = format!("Find {}", found.unwrap_or_default().many());
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Encode(measure, Box::new(envelope), title, "find"),
                     None => Step::Now(self.edit(envelope, job.origin)),
@@ -5901,6 +5937,20 @@ impl Live {
             let _ = tx.send(Msg::Captured { id, result });
         }));
         id
+    }
+
+    fn loudness_response(&self) -> Response {
+        let reading = (self.player.loudness().lock())
+            .unwrap_or_else(|e| e.into_inner())
+            .reading();
+        let settings = self.project.as_ref().map(|o| &o.project().settings);
+        let target = settings.map_or(vidcut_core::loudness::TARGET, |s| s.target_loudness);
+        let scale = settings.map(|s| s.loudness_scale).unwrap_or_default();
+        let mut v = serde_json::to_value(reading).unwrap_or_default();
+        v["absolute"] = json!(self.loudness_absolute);
+        v["target"] = json!(target);
+        v["scale"] = json!(scale);
+        answer(v)
     }
 
     fn state_response(&self) -> Response {

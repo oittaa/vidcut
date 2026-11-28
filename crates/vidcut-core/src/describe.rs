@@ -698,6 +698,25 @@ pub fn describe_at(
             d.text("track"),
             db(&params["volume_db"])
         ),
+        "loudness.get" => "Read the loudness meter".into(),
+        "loudness.reset" => "Reset the loudness meter".into(),
+        "loudness.set" => {
+            let mut parts = Vec::new();
+            match params["running"].as_bool() {
+                Some(true) => parts.push("start"),
+                Some(false) => parts.push("pause"),
+                None => {}
+            }
+            match params["absolute"].as_bool() {
+                Some(true) => parts.push("show LUFS"),
+                Some(false) => parts.push("show LU"),
+                None => {}
+            }
+            match parts.is_empty() {
+                true => "Loudness meter".into(),
+                false => format!("Loudness meter: {}", parts.join(", ")),
+            }
+        }
         "pool.set" => format!("Media: {}", compact(params)),
         "selection.set" if !params["edit"].is_null() => format!(
             "{} {} nearest {} on {}",

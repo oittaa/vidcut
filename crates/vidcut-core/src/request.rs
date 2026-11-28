@@ -10,7 +10,7 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
     Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
-    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
+    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, FindValues, GeneratorKind, GlowAlpha,
     GlowFraming, GlowOutput, Grade, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop,
     GradientType, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel,
     MergeEdges, MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel,
@@ -807,9 +807,10 @@ pub enum Request {
         #[serde(default = "black_min")]
         min: TimeSpec,
     },
-    /// Loudness of the timeline's mix (EBU R128): integrated LUFS, range,
-    /// true peak (dBTP) and sample peak (dBFS), over `range` (default: In–Out
-    /// if set, else everything).
+    /// Loudness of the timeline's mix (ITU-R BS.1770-4, EBU R128), as the
+    /// loudness meter measures it: integrated LUFS, range (LU), the highest
+    /// momentary and short-term loudness (LUFS), true peak (dBTP) and sample
+    /// peak (dBFS), over `range` (default: In–Out if set, else everything).
     #[serde(rename = "analyze.loudness")]
     AnalyzeLoudness {
         #[serde(default)]
@@ -4256,7 +4257,9 @@ pub enum Request {
     /// looks at each frame of the file in the clip. A thing that is not
     /// found for up to a second, and then shows near the same place, stays
     /// on its path. A shot change inside the clip ends each path, and a thing
-    /// of the next shot gets a new one.
+    /// of the next shot gets a new one. A value that the request leaves out
+    /// comes from the `find` values of the tracker, or else it is the usual
+    /// value of the subject.
     /// A face found for under half a second gets no path. A person or a
     /// vehicle gets a path when it is found for a second. Text gets a path
     /// when it is found for a second, on four of each five frames. Less time
@@ -4280,12 +4283,13 @@ pub enum Request {
         node: String,
         /// The kind of thing to find: `face`, `text`, `person` or `vehicle`.
         /// Usual: `face`.
-        #[serde(default)]
-        subject: Subject,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<Subject>,
         /// The neural network that finds the things: `fast`, or `slow` for
-        /// `face`. Usual: `fast`.
-        #[serde(default)]
-        model: FindModel,
+        /// `face`. Usual: `fast`. The `slow` model of the tracker finds only
+        /// faces, and the other subjects take `fast`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<FindModel>,
         /// Find again in a tracker that has patterns of this subject. Without
         /// it, such a tracker is an error. A thing that such a pattern
         /// follows gets no second pattern: its new samples go into the path
@@ -5145,6 +5149,32 @@ pub enum Request {
     /// timeline's mix (muted, left out by solo, or empty) is an error.
     #[serde(rename = "mixer.preview")]
     MixerPreview { track: String, volume_db: f64 },
+    /// The loudness meter of the mix (ITU-R BS.1770-4, as
+    /// `analyze.loudness`): what the timeline plays, before the monitoring
+    /// mute. Loudness is in LUFS, and null where there is no level (-70
+    /// LUFS or less). `momentary` (400 ms) and `short` (3 s) end at the
+    /// sound heard last, and `channels` has the momentary loudness of each
+    /// channel, without LFE. `true_peak` (dBTP) is the highest since the
+    /// reset. `momentary_max`, `short_max`, `range` (LU) and `integrated`
+    /// gather only while `running`. `target` and `scale` come from the
+    /// project; LU is a value less `target`. `absolute`: the meter shows
+    /// LUFS, not LU.
+    #[serde(rename = "loudness.get")]
+    LoudnessGet {},
+    /// Start (`running: true`) or pause (`running: false`) what the
+    /// loudness meter gathers, and show it in LUFS (`absolute: true`) or in
+    /// LU from the target. Not saved. Answers what `loudness.get` does.
+    #[serde(rename = "loudness.set")]
+    LoudnessSet {
+        #[serde(default)]
+        running: Option<bool>,
+        #[serde(default)]
+        absolute: Option<bool>,
+    },
+    /// Clear the loudness meter and stop what it gathers until
+    /// `loudness.set` starts it. Answers what `loudness.get` does.
+    #[serde(rename = "loudness.reset")]
+    LoudnessReset {},
     /// The Media tab: the bin shown, the sort order and how it shows
     /// its items. Source Tape strings together that bin's media, and its
     /// bins', in that order.
@@ -5272,8 +5302,10 @@ pub enum Request {
     /// topmost title at the playhead, to edit in place in the viewer),
     /// `select_tool` (a tool to add on the effects page), `equalizer` (the
     /// Equalizer window of `track`), `dynamics` (the Dynamics window of
-    /// `track`), or `pan` (the Pan window of
-    /// `track`). Answers what `gui.state` does.
+    /// `track`), `pan` (the Pan window of `track`), or `meters` (the meter
+    /// panel of the `audio` page). On the `audio` page, `mixer`, `meters`,
+    /// `media` and `inspector` are the panels of that page. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
@@ -5286,8 +5318,10 @@ pub enum Request {
     GuiClose { panel: GuiPanel },
     /// Show a page of the window: `cut`; `effects`, the node editor of
     /// the composition of the topmost clip at the playhead; `color`, the
-    /// primary correction of that clip or of the timeline; or `export`, the
-    /// render settings and the render queue. Answers what `gui.state` does.
+    /// primary correction of that clip or of the timeline; `audio`, the
+    /// audio tracks as tall rows with their meters and the Mixer; or
+    /// `export`, the render settings and the render queue. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.page")]
     GuiPage {
         page: Page,
@@ -6947,6 +6981,9 @@ pub enum Page {
     /// The render settings, the viewer and the timeline with the range to
     /// render, and the render queue.
     Export,
+    /// The audio tracks as tall rows, with a header for each track, the
+    /// meters and the viewer at the top, and the Mixer at the right.
+    Audio,
 }
 
 /// A zoom of a node editor.
@@ -7086,6 +7123,9 @@ pub enum GuiPanel {
     /// The Pan window of a track with sound: the switch and Left/Right of
     /// its pan.
     Pan,
+    /// The meter panel at the top of the Audio page: a meter for each audio
+    /// track and for the mix, and the viewer.
+    Meters,
 }
 
 /// Media tab sort orders.
@@ -7503,6 +7543,14 @@ pub struct ProjectSet {
     /// until a longer list gives them back. Usual: `["L1"]`.
     #[serde(default)]
     pub node_stack_layers: Option<Vec<String>>,
+    /// The Target Loudness Level in LUFS, from -30 to 0: the loudness that
+    /// the loudness meter shows as 0 LU. Usual: -23.
+    #[serde(default)]
+    pub target_loudness: Option<f64>,
+    /// The scale of the loudness meter: `ebu9` (the usual: 18 LU under the
+    /// target to 9 LU over it) or `ebu18` (36 LU under to 18 LU over).
+    #[serde(default)]
+    pub loudness_scale: Option<crate::model::LoudnessScale>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -7896,6 +7944,11 @@ pub struct NodeChange {
     /// for `best_match` to take it again, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_tolerance: Option<f64>,
+    /// The values of Find of a tracker, in place of those it has, as
+    /// `{"subject": "person", "start": 0.6}`. `motion.find` takes each value
+    /// that its request leaves out from them. `{}` gives the usual values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<FindValues>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern
@@ -8970,6 +9023,9 @@ impl Request {
                 | Self::PlayerBounds { .. }
                 | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
+                | Self::LoudnessGet {}
+                | Self::LoudnessSet { .. }
+                | Self::LoudnessReset {}
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}
                 | Self::SelectionSet { .. }

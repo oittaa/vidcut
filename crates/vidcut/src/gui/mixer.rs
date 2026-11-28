@@ -5,7 +5,7 @@ use eframe::egui::{self, Color32, CornerRadius, Rect, RichText, Stroke, StrokeKi
 use serde_json::json;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{Project, Track};
-use vidcut_core::request::ViewerMode;
+use vidcut_core::request::{Page, ViewerMode};
 
 use super::theme;
 use super::workspace::{Workspace, dim};
@@ -229,9 +229,18 @@ fn sum_channels(tracks: &[Vec<f32>], n: usize) -> Vec<f32> {
     out
 }
 
-struct TimelineMeters {
+pub(super) struct TimelineMeters {
     tracks: Vec<(String, Vec<f32>)>,
-    mix: Vec<f32>,
+    pub(super) mix: Vec<f32>,
+}
+
+impl TimelineMeters {
+    pub(super) fn of(&self, track: &str) -> Vec<f32> {
+        self.tracks
+            .iter()
+            .find(|(id, _)| id == track)
+            .map_or_else(|| vec![0.0; self.mix.len().max(1)], |l| l.1.clone())
+    }
 }
 
 fn timeline_meters(p: &Project, at: i64, waveforms: &Waves) -> TimelineMeters {
@@ -294,7 +303,7 @@ fn held_level(prev: Option<(f32, f32)>, level: f32) -> f32 {
 }
 
 impl Workspace {
-    fn timeline_levels(&self) -> TimelineMeters {
+    pub(super) fn timeline_levels(&self) -> TimelineMeters {
         let Some(p) = self.project() else {
             return TimelineMeters {
                 tracks: Vec::new(),
@@ -383,6 +392,100 @@ impl Workspace {
             || self.mixer.holds.iter().any(|(_, (h, _))| *h > 0.0)
     }
 
+    pub(super) fn keep_meters_live(&self, ctx: &egui::Context, levels: &[f32]) {
+        if self.meters_live(levels, self.snap.timeline.playing) {
+            ctx.request_repaint_after(Self::METER_FRAME);
+        }
+    }
+
+    pub(super) fn track_meter(
+        &mut self,
+        painter: &egui::Painter,
+        rect: Rect,
+        track: &str,
+        level: &[f32],
+    ) {
+        let held = self.hold_channels(track, level);
+        paint_meters(painter, rect, level, &held);
+    }
+
+    pub(super) fn fader_field(&mut self, ui: &mut egui::Ui, at: Rect, t: &Track) -> egui::Response {
+        let mut value = self
+            .mixer
+            .dragging
+            .get(&t.id)
+            .copied()
+            .unwrap_or(t.volume_db);
+        let r = ui.put(
+            at,
+            egui::DragValue::new(&mut value)
+                .range(vidcut_core::validate::FADER)
+                .speed(0.1)
+                .custom_formatter(|v, _| fader_text(v))
+                .custom_parser(|text| {
+                    let number = text.trim().trim_end_matches("dB").trim();
+                    number.replace('∞', "inf").parse().ok()
+                })
+                .update_while_editing(false),
+        );
+        let value = (value * 10.0).round() / 10.0;
+        if r.changed() && r.dragged() {
+            if self.mixer.dragging.get(&t.id) != Some(&value) {
+                self.send(
+                    "mixer.preview",
+                    json!({ "track": t.id, "volume_db": value }),
+                );
+            }
+            self.mixer.dragging.insert(t.id.clone(), value);
+        } else if r.changed() {
+            self.mixer.dragging.remove(&t.id);
+            if value != t.volume_db {
+                self.send("track.set", json!({ "track": t.id, "volume_db": value }));
+            }
+        }
+        if r.drag_stopped()
+            && let Some(v) = self.mixer.dragging.remove(&t.id)
+            && v != t.volume_db
+        {
+            self.send("track.set", json!({ "track": t.id, "volume_db": v }));
+        }
+        r
+    }
+
+    pub(super) fn meter_row(&mut self, ui: &mut egui::Ui) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let meters = self.timeline_levels();
+        let full = ui.available_height();
+        let gap = ui.spacing().item_spacing.y;
+        let label = ui.text_style_height(&egui::TextStyle::Small) + gap;
+        let height = (full - label).max(1.0);
+        let rows = 2.0 * (ui.spacing().interact_size.y + gap) + gap;
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                for t in p.tracks.iter().filter(|t| t.has_sound()) {
+                    self.labeled_meter(ui, &t.id, &t.id, &meters.of(&t.id), height);
+                }
+                ui.separator();
+                self.labeled_meter(ui, "mix", "Mix", &meters.mix, height);
+                ui.separator();
+                self.loudness_meter(ui, (full - rows).max(1.0));
+            });
+        });
+        self.keep_meters_live(ui.ctx(), &meters.mix);
+    }
+
+    fn labeled_meter(&mut self, ui: &mut egui::Ui, key: &str, name: &str, level: &[f32], h: f32) {
+        ui.vertical(|ui| {
+            let n = level.len().max(1);
+            ui.set_width(meter_column_width(n).max(24.0));
+            let held = self.hold_channels(key, level);
+            self.channel_bars(ui, level, &held, h, &format!("{name} meter"));
+            ui.add(egui::Label::new(RichText::new(name).small()).truncate());
+        });
+    }
+
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project_shared() else {
             return;
@@ -415,6 +518,10 @@ impl Workspace {
                     ui.separator();
                 }
                 self.master_strip(ui, &meters.mix, height);
+                if !(self.effects_page.page == Page::Audio && self.audio_page.meters) {
+                    ui.separator();
+                    self.loudness_meter(ui, height - STRIP_ROOM);
+                }
             });
         });
         if self.meters_live(&meters.mix, self.snap.timeline.playing) {

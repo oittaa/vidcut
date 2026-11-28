@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{Pos2, Rect, pos2, vec2};
@@ -92,6 +91,7 @@ pub struct Rows {
     pub rows: Vec<Row>,
     pub area: Rect,
     pub bands: Bands,
+    pub audio_page: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -101,19 +101,28 @@ pub struct Bands {
 
 impl Bands {
     pub fn of(p: &Project) -> Self {
-        let mut pictures: HashMap<u32, &str> = HashMap::new();
-        for i in p.tracks_of(TrackKind::Video) {
-            let t = &p.tracks[i];
-            for l in t.clips.iter().filter_map(|c| c.link) {
-                pictures.entry(l).or_insert(&t.id);
+        let videos: Vec<&Track> = p
+            .tracks_of(TrackKind::Video)
+            .into_iter()
+            .map(|i| &p.tracks[i])
+            .collect();
+        let pictures = pictures(p);
+        let mut sounds: HashMap<String, String> = HashMap::new();
+        for t in &videos {
+            for b in band(p, t) {
+                sounds
+                    .entry(b.sound.id.clone())
+                    .or_insert_with(|| t.id.clone());
             }
         }
-        let sounds = p
-            .tracks_of(TrackKind::Audio)
-            .into_iter()
-            .flat_map(|i| &p.tracks[i].clips)
-            .filter_map(|c| Some((c.id.clone(), pictures.get(&c.link?)?.to_string())))
-            .collect();
+        for t in &videos {
+            let Some(a) = over(p, t).and_then(|a| p.track(&a)) else {
+                continue;
+            };
+            for c in a.clips.iter().filter(|c| sound_only(c, &pictures)) {
+                sounds.entry(c.id.clone()).or_insert_with(|| t.id.clone());
+            }
+        }
         Self { sounds }
     }
 
@@ -123,26 +132,6 @@ impl Bands {
 
     pub fn row(&self, id: &str) -> Option<&str> {
         self.sounds.get(id).map(String::as_str)
-    }
-
-    pub fn hides(&self, t: &Track) -> bool {
-        t.kind == TrackKind::Audio && !t.clips.is_empty() && t.clips.iter().all(|c| self.has(&c.id))
-    }
-
-    pub fn apart<'a>(&self, t: &'a Track) -> Cow<'a, Track> {
-        if !t.clips.iter().any(|c| self.has(&c.id)) {
-            return Cow::Borrowed(t);
-        }
-        let mut kept = t.clone();
-        kept.clips.retain(|c| !self.has(&c.id));
-        Cow::Owned(kept)
-    }
-
-    pub fn joins(&self, x: &Transition) -> bool {
-        [&x.from, &x.to]
-            .into_iter()
-            .flatten()
-            .any(|id| self.has(id))
     }
 }
 
@@ -156,19 +145,25 @@ pub fn band<'a>(p: &'a Project, t: &'a Track) -> Vec<Banded<'a>> {
     if t.kind != TrackKind::Video {
         return Vec::new();
     }
-    let mut first: HashMap<u32, (&Track, &Clip)> = HashMap::new();
+    let mut top: HashMap<u32, (&Track, &Clip)> = HashMap::new();
     for i in p.tracks_of(TrackKind::Audio) {
         let a = &p.tracks[i];
         for s in &a.clips {
             if let Some(l) = s.link {
-                first.entry(l).or_insert((a, s));
+                top.entry(l)
+                    .and_modify(|e| {
+                        if a.number() > e.0.number() {
+                            *e = (a, s);
+                        }
+                    })
+                    .or_insert((a, s));
             }
         }
     }
     t.clips
         .iter()
         .filter_map(|c| {
-            let &(track, sound) = first.get(&c.link?)?;
+            let &(track, sound) = top.get(&c.link?)?;
             Some(Banded {
                 track,
                 sound,
@@ -196,6 +191,47 @@ pub fn heard_on(p: &Project, t: &Track) -> Vec<String> {
                 .any(|c| c.link.is_some_and(|l| links.contains(&l)))
         })
         .map(|a| a.id.clone())
+        .collect()
+}
+
+pub fn over(p: &Project, t: &Track) -> Option<String> {
+    let lowest = heard_on(p, t)
+        .into_iter()
+        .min_by_key(|id| p.track(id).map_or(usize::MAX, Track::number));
+    lowest.or_else(|| {
+        p.tracks_of(TrackKind::Audio)
+            .into_iter()
+            .map(|i| &p.tracks[i])
+            .filter(|_| t.id == MAIN)
+            .min_by_key(|a| a.number())
+            .map(|a| a.id.clone())
+    })
+}
+
+fn pictures(p: &Project) -> HashSet<u32> {
+    p.tracks_of(TrackKind::Video)
+        .into_iter()
+        .flat_map(|i| p.tracks[i].clips.iter().filter_map(|c| c.link))
+        .collect()
+}
+
+fn sound_only(c: &Clip, pictures: &HashSet<u32>) -> bool {
+    c.link.is_none_or(|l| !pictures.contains(&l))
+}
+
+fn own_rows(p: &Project) -> HashSet<&str> {
+    let label = p
+        .track(MAIN)
+        .and_then(|v| over(p, v))
+        .and_then(|a| p.track(&a))
+        .map_or(0, Track::number);
+    let pictures = pictures(p);
+    p.tracks_of(TrackKind::Audio)
+        .into_iter()
+        .map(|i| &p.tracks[i])
+        .filter(|t| t.number() > label && !t.clips.is_empty())
+        .filter(|t| t.clips.iter().all(|c| sound_only(c, &pictures)))
+        .map(|t| t.id.as_str())
         .collect()
 }
 
@@ -269,10 +305,10 @@ impl Rows {
             TrackKind::Video if t.id == MAIN => 0.32,
             TrackKind::Video => 0.3,
         };
-        let bands = if linked {
-            Bands::of(p)
+        let (bands, rowed) = if linked {
+            (Bands::of(p), own_rows(p))
         } else {
-            Bands::default()
+            (Bands::default(), HashSet::new())
         };
         order.extend(
             p.tracks_of(TrackKind::Video)
@@ -280,9 +316,54 @@ impl Rows {
                 .rev()
                 .chain(p.tracks_of(TrackKind::Audio))
                 .map(|i| &p.tracks[i])
-                .filter(|t| !bands.hides(t))
+                .filter(|t| !linked || t.kind != TrackKind::Audio || rowed.contains(t.id.as_str()))
                 .map(|t| (t.id.as_str(), track(t), share(t))),
         );
+        let mut rows = Self::stack(&order, area, min, strip, enlarged);
+        let over = (rows.used() - (area.height() - strip).max(1.0)).max(0.0);
+        rows.lift(area.bottom() + 1.0 - rows.used() + lift.clamp(0.0, over));
+        Self { bands, ..rows }
+    }
+
+    pub fn audio_page(p: &Project, area: Rect, height: f32, strip: f32, lift: f32) -> Self {
+        let order: Vec<(&str, f32, f32)> = p
+            .tracks_of(TrackKind::Audio)
+            .into_iter()
+            .map(|i| (p.tracks[i].id.as_str(), height, 1.0))
+            .collect();
+        let mut rows = Self::stack(&order, area, height, strip, None);
+        let over = (rows.used() - (area.height() - strip).max(1.0)).max(0.0);
+        rows.lift(area.top() - over + lift.clamp(0.0, over));
+        Self {
+            audio_page: true,
+            ..rows
+        }
+    }
+
+    pub fn none(area: Rect) -> Self {
+        Self {
+            rows: Vec::new(),
+            area,
+            bands: Bands::default(),
+            audio_page: false,
+        }
+    }
+
+    fn lift(&mut self, top: f32) {
+        let dy = top - self.rows.first().map_or(top, |r| r.rect.rect.top());
+        for r in &mut self.rows {
+            r.rect.rect = r.rect.rect.translate(vec2(0.0, dy));
+            r.rect.audio_top += dy;
+        }
+    }
+
+    fn stack(
+        order: &[(&str, f32, f32)],
+        area: Rect,
+        min: f32,
+        strip: f32,
+        enlarged: Option<&str>,
+    ) -> Self {
         let big = order.iter().position(|t| Some(t.0) == enlarged);
         let want: Vec<f32> = order
             .iter()
@@ -312,8 +393,7 @@ impl Rows {
                 want[b]
             };
         }
-        let used: f32 = heights.iter().sum();
-        let mut y = area.bottom() + 1.0 - used + lift.clamp(0.0, (used - room).max(0.0));
+        let mut y = area.top();
         let rows = order
             .iter()
             .zip(heights)
@@ -327,7 +407,10 @@ impl Rows {
                 }
             })
             .collect();
-        Self { rows, area, bands }
+        Self {
+            rows,
+            ..Self::none(area)
+        }
     }
 
     pub fn get(&self, track: &str) -> Option<&Row> {
@@ -379,7 +462,7 @@ impl Rows {
         }
         let (top, bottom) = self.span();
         let count = |k| p.tracks_of(k).len() + 1;
-        if y < top && y >= self.area.top() - 4.0 {
+        if y < top && y >= self.area.top() - 4.0 && !self.audio_page {
             Some(format!("V{}", count(TrackKind::Video)))
         } else if y > bottom && y <= self.area.bottom() + 24.0 {
             Some(format!("A{}", count(TrackKind::Audio)))
@@ -470,10 +553,7 @@ pub fn slip_handle(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
     ))
 }
 
-pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
-    if !tr.rect.contains(pos) {
-        return Hit::Empty;
-    }
+fn near_clips<'a>(track: &'a Track, scale: &Scale, pos: Pos2) -> &'a [Clip] {
     let frame = scale.frame(pos.x);
     let slack = (f64::from(EDGE) / scale.ppf).ceil() as i64 + 1;
     let range = clips_in(
@@ -482,9 +562,15 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
         frame.ceil() as i64 + slack,
     );
     let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
-    let clips = &track.clips[range];
+    &track.clips[range]
+}
+
+pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
+    if !tr.rect.contains(pos) {
+        return Hit::Empty;
+    }
     if track.kind == TrackKind::Audio {
-        let near = clips
+        let near = near_clips(track, scale, pos)
             .iter()
             .filter(|c| sounds(c) && c.link.is_some())
             .flat_map(|c| [(c, Edge::Tail, c.end()), (c, Edge::Head, c.start)])
@@ -498,6 +584,14 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
             };
         }
     }
+    hit_clips(track, scale, tr, pos)
+}
+
+pub fn hit_clips(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
+    if !tr.rect.contains(pos) {
+        return Hit::Empty;
+    }
+    let clips = near_clips(track, scale, pos);
     for w in clips.windows(2) {
         let (a, b) = (&w[0], &w[1]);
         if !adjacent(a, b) {
@@ -851,8 +945,9 @@ pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<S
         Some(r) => {
             let what = match p.track(&r.track) {
                 None => Hit::Empty,
+                Some(t) if rows.audio_page => hit_clips(t, scale, &r.rect, pos),
                 Some(t) => band_hit(p, rows, t, scale, &r.rect, pos)
-                    .unwrap_or_else(|| hit(&rows.bands.apart(t), scale, &r.rect, pos)),
+                    .unwrap_or_else(|| hit(t, scale, &r.rect, pos)),
             };
             (Some(r.track.clone()), what)
         }
@@ -1065,5 +1160,64 @@ pub fn header_parts(header: Rect) -> HeaderParts {
         ),
         icons,
         label,
+    }
+}
+
+pub struct AudioHeaderParts {
+    pub label: Rect,
+    pub name: Option<Rect>,
+    pub buttons: [Rect; 3],
+    pub fader: Rect,
+    pub meter: Rect,
+}
+
+const HEADER_FADER: f32 = 64.0;
+
+pub fn audio_header_parts(header: Rect, meter_width: f32) -> AudioHeaderParts {
+    let (left, right) = (header.left().round(), header.right().round());
+    let meter = Rect::from_min_max(
+        pos2(right - meter_width, header.top() + HEADER_GAP),
+        pos2(right, header.bottom() - HEADER_GAP),
+    );
+    let inner = meter.left() - 2.0 * HEADER_GAP;
+    let h = HEADER_LINE.min(header.height() - 2.0).max(1.0);
+    let two = header.height() >= 2.0 * HEADER_LINE + 3.0 * HEADER_GAP;
+    let (first, second) = if two {
+        let top = (header.center().y - HEADER_LINE - HEADER_GAP / 2.0).round();
+        (top, top + HEADER_LINE + HEADER_GAP)
+    } else {
+        let top = (header.center().y - h / 2.0).round();
+        (top, top)
+    };
+    let label = Rect::from_min_max(pos2(left, first), pos2(left + HEADER_LABEL, first + h));
+    let start = if two {
+        left
+    } else {
+        label.right() + HEADER_GAP
+    };
+    let button = |i: u8| {
+        let x = start + f32::from(i) * (HEADER_TOGGLE + HEADER_GAP);
+        Rect::from_min_max(pos2(x, second), pos2(x + HEADER_TOGGLE, second + h))
+    };
+    let buttons = [button(0), button(1), button(2)];
+    let fader = Rect::from_min_max(
+        pos2(
+            (inner - HEADER_FADER).max(buttons[2].right() + HEADER_GAP),
+            second,
+        ),
+        pos2(inner, second + h),
+    );
+    let name = two.then(|| {
+        Rect::from_min_max(
+            pos2(label.right() + HEADER_GAP, first),
+            pos2(inner, first + h),
+        )
+    });
+    AudioHeaderParts {
+        label,
+        name,
+        buttons,
+        fader,
+        meter,
     }
 }

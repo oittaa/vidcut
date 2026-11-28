@@ -579,6 +579,16 @@ pub struct Settings {
         skip_serializing_if = "Settings::has_one_layer"
     )]
     pub node_stack_layers: Vec<String>,
+    /// The Target Loudness Level in LUFS: the 0 LU of the loudness meter.
+    /// Left out at -23.
+    #[serde(
+        default = "Settings::usual_target_loudness",
+        skip_serializing_if = "Settings::has_usual_target_loudness"
+    )]
+    pub target_loudness: f64,
+    /// The scale of the loudness meter. Left out at `ebu9`.
+    #[serde(default, skip_serializing_if = "LoudnessScale::is_usual")]
+    pub loudness_scale: LoudnessScale,
 }
 
 impl Default for Settings {
@@ -606,6 +616,39 @@ impl Default for Settings {
             scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
             node_stack_layers: Self::one_layer(),
+            target_loudness: crate::loudness::TARGET,
+            loudness_scale: LoudnessScale::Ebu9,
+        }
+    }
+}
+
+/// The scale of the loudness meter, around the Target Loudness Level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoudnessScale {
+    /// EBU +9: from 18 LU under the target to 9 LU over it.
+    #[default]
+    Ebu9,
+    /// EBU +18: from 36 LU under the target to 18 LU over it.
+    Ebu18,
+}
+
+impl LoudnessScale {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::Ebu9
+    }
+
+    pub fn span(self) -> (f64, f64) {
+        match self {
+            Self::Ebu9 => (-18.0, 9.0),
+            Self::Ebu18 => (-36.0, 18.0),
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Ebu9 => "EBU +9",
+            Self::Ebu18 => "EBU +18",
         }
     }
 }
@@ -675,6 +718,14 @@ impl Format {
 }
 
 impl Settings {
+    pub fn usual_target_loudness() -> f64 {
+        crate::loudness::TARGET
+    }
+
+    pub fn has_usual_target_loudness(target: &f64) -> bool {
+        *target == crate::loudness::TARGET
+    }
+
     pub fn one_layer() -> Vec<String> {
         vec![Self::layer_name(1)]
     }
@@ -5939,6 +5990,11 @@ pub struct Tracker {
     /// change, and at 1 it takes each. Usual: 0.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_tolerance: Option<f64>,
+    /// The values of Find of the tracker. `motion.find` takes each value
+    /// that its request leaves out from them. Usual: none, which gives the
+    /// usual values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<FindValues>,
 }
 
 /// How a track takes the picture of a `point` pattern again.
@@ -5991,6 +6047,47 @@ pub enum PatternChannel {
     Luminance,
     /// The alpha channel.
     Alpha,
+}
+
+/// The values of Find of a tracker, as `motion.find` takes them. A value
+/// left out is at its usual value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FindValues {
+    /// The kind of thing to find. Usual: `face`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Subject>,
+    /// The neural network that finds the things: `fast`, or `slow` for
+    /// `face`. Usual: `fast`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<FindModel>,
+    /// The longer side, in pixels, of the picture that the model sees,
+    /// from 320 to 3840. Usual: as `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
+    /// The score, from 0 to 1, at which a box starts a path. Usual: as
+    /// `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<f32>,
+    /// The score, from 0 to `start`, at which a box continues a path.
+    /// Usual: as `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep: Option<f32>,
+    /// How much a box must overlap the last box of a path to join that
+    /// path, from 0 to 1. Usual: 0.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap: Option<f64>,
+    /// The seconds that a path waits for its thing while no box joins it,
+    /// from 0 to 60. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<f64>,
+    /// The seconds that a path must last, from 0 to 60. Usual: as
+    /// `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortest: Option<f64>,
+    /// The share of its frames on which a path must have a box, from 0 to
+    /// 1. Usual: as `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steady: Option<f64>,
 }
 
 /// What a `tracker` does with its pictures.

@@ -260,6 +260,8 @@ impl Env for FakeEnv {
             range: 0.0,
             true_peak: integrated + 6.0,
             sample_peak: integrated + 5.0,
+            momentary_max: integrated + 2.0,
+            short_max: integrated + 1.0,
         })
     }
 

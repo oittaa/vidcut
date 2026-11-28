@@ -26,7 +26,7 @@ flowchart TD
 | `edit.ripple_delete_silence`, `analyze.silence` | `Env::audio_levels`: peaks of one audio stream; with `detect: speech`, `Env::voice_activity`: its speech probabilities | `analysis::silent_parts`, or `analysis::non_speech_parts`; the edit then calls `ops::remove_parts` |
 | `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: the smaller of each frame's difference from the last and the change in that difference; the first frame scores 0 | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
-| `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
+| `analyze.loudness` | `Env::loudness` of the flattened timeline: `analysis::mix_loudness` runs `loudness::Meter` over the mix | none |
 | `analyze.ducking` | `Env::audio_levels` of the sources of the ducking; with `detect: speech`, also `Env::voice_activity` | `duck::graph`: `Heard::peak` and `Dip::gain_db` at each point |
 | `clip.normalize` | `Env::loudness` of each sound clip alone (`render::sound_alone`), without its volume keyframes. A picture clip gives its linked sound clips (`linked::sounds`) | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
@@ -53,6 +53,20 @@ flowchart TD
 - `keyframes::Gain` gives the gain of a clip with volume keyframes at each level. Silence, ducking and the quiet edges of `edit.ripple_delete_words` use it ([spec D84](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 **Why** probabilities, not the segments of transcribe.cpp: the segments depend on the threshold and the lengths. Thus each change in the dialog would run the VAD over the whole file again. The probabilities are measured once and cached, and each change is decided again at once.
+
+## Loudness
+
+- `loudness::Meter` measures loudness by ITU-R BS.1770-4. The live meter and `analyze.loudness` use it ([playback](playback.md#sound)).
+  - Why one measurement: the meter, `analyze.loudness`, `clip.normalize` and the loudness of an export then agree.
+- Each channel goes through the K-weighting: two biquad filters, made for the sample rate from their analog forms (`k_weighting`).
+- The meter adds the squared samples of each channel in steps of 100 ms. The last steps give M and Short.
+  - The weight of each channel comes from the channel layout of the mix (`loudness_weights`). LFE has none, and surround channels have more.
+- Each full block of M goes into the bins of Integrated. Each full window of Short goes into the bins of Range.
+  - The bins are by hundredths of an LU. A bin keeps its count and the sum of its energies. Thus a long play keeps a fixed amount of data.
+  - Integrated gates the blocks by an absolute and a relative gate, and gives the loudness of the mean energy of the rest.
+  - Range gates the windows in the same way, and gives the difference between two percentiles (EBU Tech 3342).
+- `TruePeak` finds the true peak. It oversamples each channel by a windowed sinc filter, in phases. A phase of 0 is the sample itself.
+- Only `running` adds to the bins and to the highest values. M, Short and the true peak always change.
 
 ## Subjects
 
@@ -169,6 +183,7 @@ flowchart TD
     - The growth does not change which paths stay.
       - Why: a short path of a thing that is not a face can have more low boxes before it. They must not make it long enough to stay.
   - `motion.find` takes each of these values: `start`, `keep`, `overlap`, `wait`, `shortest` and `steady`. `Join::of` gives the usual values of a subject, and `Join::problem` checks the given values.
+    - A value that the request leaves out comes from the find values of the Tracker (`Join::with`, [model](model.md#compositions)). Else it is the usual value.
     - The boxes of a find stay in the disk cache. Thus a find with other values takes the boxes from there, and the model does not run again.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
@@ -836,7 +851,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 
 ## Code
 
-- `crates/vidcut-core/src/analysis.rs`, `crates/vidcut-core/src/editor.rs`, `crates/vidcut-core/src/catalog.rs`
+- `crates/vidcut-core/src/analysis.rs`, `crates/vidcut-core/src/editor.rs`, `crates/vidcut-core/src/catalog.rs`, `crates/vidcut-core/src/loudness.rs`
 - `crates/vidcut-core/src/fingerprint.rs`, `crates/vidcut-core/src/dirs.rs`, `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`

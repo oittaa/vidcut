@@ -108,12 +108,9 @@ pub const PARTS: &[Part] = &[
     encoder(&[own("png")], "stills and storyboards"),
     filter(&[own("buffer")], "every picture conversion"),
     filter(&[own("buffersink")], "every picture conversion"),
-    filter(&[own("abuffer")], "loudness"),
-    filter(&[own("abuffersink")], "loudness"),
     filter(&[own("scale")], "every picture conversion"),
     filter(&[own("format")], "every picture conversion"),
     filter(&[own("bwdif")], "deinterlacing"),
-    filter(&[own("ebur128")], "loudness"),
 ];
 
 fn without() -> &'static HashSet<String> {

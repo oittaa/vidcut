@@ -1,5 +1,6 @@
 mod app;
 mod attributes;
+mod audio_page;
 mod bar;
 mod cache_manager;
 mod cells;
@@ -35,6 +36,7 @@ mod keyframe_editor;
 mod leveler;
 mod look_tiles;
 mod looks;
+mod loudness;
 mod luts;
 mod mixer;
 mod node_editor;

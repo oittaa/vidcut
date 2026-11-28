@@ -6013,18 +6013,13 @@ fn mutate(
             ops::motion::remove(p, &id, node, patterns.as_deref())?;
             Value::Null
         }
-        Request::MotionFind {
-            node,
-            subject,
-            download,
-            ..
-        } => {
+        Request::MotionFind { node, download, .. } => {
             let f = find_plan(p, request, playhead)?;
-            let found = env.subjects(&f.media, *subject, f.look, *download)?;
+            let found = env.subjects(&f.media, f.subject, f.look, *download)?;
             let tracks =
                 crate::motion::joined(&found, f.media.origin(), f.rate, f.frames, &f.rules);
-            let mut out = ops::motion::found(p, &f.id, (*subject, node), tracks)?;
-            out["subject"] = json!(subject);
+            let mut out = ops::motion::found(p, &f.id, (f.subject, node), tracks)?;
+            out["subject"] = json!(f.subject);
             out
         }
         Request::MotionTrack {
@@ -9589,6 +9584,7 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
 struct FindPlan {
     id: String,
     media: Media,
+    subject: Subject,
     rules: crate::motion::Join,
     frames: (i64, i64),
     rate: f64,
@@ -9614,33 +9610,44 @@ fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Fi
     else {
         return Err(Error::invalid("not a motion.find request"));
     };
-    let usual = crate::motion::Join::of(*subject);
-    let rules = crate::motion::Join {
-        start: start.unwrap_or(usual.start),
-        keep: keep.unwrap_or(usual.keep),
-        overlap: overlap.unwrap_or(usual.overlap),
-        wait_secs: wait.unwrap_or(usual.wait_secs),
-        shortest_secs: shortest.unwrap_or(usual.shortest_secs),
-        steady: steady.unwrap_or(usual.steady),
+    let asked = crate::model::FindValues {
+        subject: *subject,
+        model: *model,
+        size: *size,
+        start: *start,
+        keep: *keep,
+        overlap: *overlap,
+        wait: *wait,
+        shortest: *shortest,
+        steady: *steady,
     };
+    let id = resolve_clip(p, clip, playhead)?;
+    let kept = ops::motion::find_values(p, &id, node).unwrap_or_default();
+    let values = asked.over(kept);
+    let subject = values.subject.unwrap_or_default();
+    let rules = crate::motion::Join::of(subject).with(&values);
     if let Some(why) = rules.problem() {
         return Err(Error::usage(why));
     }
-    finder_checked(*model, *subject, *size)?;
-    let id = resolve_clip(p, clip, playhead)?;
-    ops::motion::findable(p, &id, node, *subject, *replace)?;
+    let model = match model {
+        Some(m) => *m,
+        None => kept.model.unwrap_or_default().for_subject(subject),
+    };
+    finder_checked(model, subject, values.size)?;
+    ops::motion::findable(p, &id, node, subject, *replace)?;
     let c = p.clip(&id);
     let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
     let (media, c) = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
     let (frames, rate) = ops::motion::file_frames(p, c);
     let look = Look {
-        side: *size,
-        model: *model,
+        side: values.size,
+        model,
         ..subject_look(&media, rate, frames)
     };
     Ok(FindPlan {
         id,
         media,
+        subject,
         rules,
         frames,
         rate,
@@ -9649,16 +9656,17 @@ fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Fi
 }
 
 pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
-    let Request::MotionFind {
-        subject, download, ..
-    } = request
-    else {
+    let Request::MotionFind { download, .. } = request else {
         return Vec::new();
     };
     let plan = find_plan(p, request, playhead).ok();
-    plan.map(|f| (f.media, *subject, f.look, *download))
+    plan.map(|f| (f.media, f.subject, f.look, *download))
         .into_iter()
         .collect()
+}
+
+pub fn find_subject(p: &Project, request: &Request, playhead: Option<i64>) -> Option<Subject> {
+    find_plan(p, request, playhead).ok().map(|f| f.subject)
 }
 
 struct StabilizePlan {
@@ -10236,6 +10244,20 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
             ops::grade::count_layers(p, count);
         }
         p.settings.node_stack_layers = names.iter().map(|n| n.trim().to_owned()).collect();
+    }
+    if let Some(target) = set.target_loudness {
+        let range = ops::normalize::LOUDNESS;
+        if !range.contains(&target) {
+            return Err(Error::invalid(format!(
+                "target_loudness {target} LUFS is outside {}..{}",
+                range.start(),
+                range.end()
+            )));
+        }
+        p.settings.target_loudness = target;
+    }
+    if let Some(scale) = set.loudness_scale {
+        p.settings.loudness_scale = scale;
     }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
@@ -11222,6 +11244,7 @@ pub fn query(
             let l = env.loudness(&plan)?;
             json!({
                 "integrated": finite(l.integrated), "range": l.range,
+                "momentary_max": finite(l.momentary_max), "short_max": finite(l.short_max),
                 "true_peak": finite(l.true_peak), "sample_peak": finite(l.sample_peak),
                 "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
             })

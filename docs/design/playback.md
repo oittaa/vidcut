@@ -389,6 +389,16 @@ Ducking in the preview:
 - A measurement that failed shows as a notice. That source is not tried again until the next `track.set` with `duck`.
 - The job keeps a measured source in `duck_kept`.
 
+The loudness meter ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)):
+
+- The session's `Player` keeps one `loudness::Meter` (`LoudnessMeter`). It gives the meter to the engine while the engine plays the timeline (`Player::measure`).
+- `audio::run` keeps each chunk that goes into the `Ring`, before the mute. It gives a chunk to the meter when `Heard` passes the end of the chunk.
+  - Why: the meter then shows the sound that the user hears now.
+- A seek, a pause or a new plan gives the meter the chunks that were heard, and drops the rest.
+- The first chunk of a new play cuts the meter first (`Meter::cut`). Its windows start again, and what it gathered stays.
+- The meter follows the rate and the channels of the engine (`Meter::fit`, `loudness_weights`).
+- The GUI reads the meter from the snapshot each frame (`Snapshot::loudness`). `loudness.get`, `loudness.set` and `loudness.reset` act on the same meter.
+
 Faders:
 
 - A dragged mixer fader sends `mixer.preview`. `Player::preview_fader` makes the value a lane gain (`Player::set_lane_gain`). The user hears it at once, with no new plan.
