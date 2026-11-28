@@ -553,6 +553,14 @@ fn type_new(p: &mut Project, ti: usize, had: usize, format: TrackFormat) {
     }
 }
 
+fn new_sound_track(p: &mut Project, c: &Clip) -> usize {
+    let had = p.tracks_of(TrackKind::Audio).len();
+    let ti = tracks::nth(p, TrackKind::Audio, had);
+    let format = sound_format(p, c);
+    type_new(p, ti, had, format);
+    ti
+}
+
 pub(crate) fn sound_format(p: &Project, c: &Clip) -> TrackFormat {
     match (c.audio.as_ref(), p.media(&c.media)) {
         (Some(a), Some(m)) => TrackFormat::of_stream(m.info.heard(a).len() as u16),
@@ -875,8 +883,7 @@ pub fn place_on_top_block(
     let ti = if clips.iter().any(|c| c.video) {
         track_above(p, start, end)
     } else {
-        let audio = p.tracks_of(TrackKind::Audio).len();
-        tracks::nth(p, TrackKind::Audio, audio)
+        new_sound_track(p, &clips[0])
     };
     unlocked(p, ti)?;
     let start = if is_main(p, ti) && p.settings.ripple_on {
@@ -2297,7 +2304,7 @@ fn set_channel(p: &mut Project, ids: &[String], n: u32) -> Result<()> {
             ))
         })?;
         let channels = match info.stream_channels(stream) {
-            1 => Vec::new(),
+            0 | 1 => Vec::new(),
             _ => vec![ch],
         };
         targets.push((id.clone(), stream, channels.clone()));

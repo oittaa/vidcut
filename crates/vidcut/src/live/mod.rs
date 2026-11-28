@@ -4794,10 +4794,10 @@ impl Live {
                     let result = match cached {
                         Some(w) => Ok(w),
                         None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE, channels)
-                            .and_then(|mut w| {
+                            .map(|mut w| {
                                 w.sources =
-                                    vidcut_av::waveform::sources(&path, streams, WAVEFORM_RATE)?;
-                                Ok(w)
+                                    vidcut_av::waveform::sources(&path, streams, WAVEFORM_RATE);
+                                w
                             })
                             .map_err(|e| e.to_string())
                             .inspect(|w| {

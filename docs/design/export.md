@@ -490,7 +490,10 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - `render::played` gives them: the channels of the clip, cut to the channels of the track.
   - The piece leaves `render::Heard` out for a whole stream of one or two channels on a Mono or Stereo track. Then `Resampler::new` converts the stream as above.
   - Else `Resampler::heard` sets a matrix (`heard_matrix`). Channel k of the piece goes to speaker k of the track type (`speakers`, in the order of [spec §6](../spec.md#6-track-model-pp-647-649-716-721-727), Track types).
-  - `swr_build_matrix2` gives the mix of those speakers into the layout of the mix (`downmix`). A piece of one channel goes to each side, as above.
+  - `swr_build_matrix2` gives the mix of all the speakers of the type into the layout of the mix (`downmix`). The piece uses the columns of its channels. A piece of one channel goes to each side, as above.
+  - Why all the speakers: FFmpeg refuses a layout with one speaker of a pair. A stereo clip on an LCR track has the left and the center only.
+  - An Adaptive type of more than 24 channels has the 24 speakers of 22.2 (`channel_layout`). Its other channels have no column.
+  - The source that `AudioMix` opens ahead is known by its file, stream, start and `render::Heard`.
   - Why a matrix: the stream's own layout does not tell which channels the track plays, or in which order.
 - A piece has the Pan of its clip (`pan` of an `AudioPiece`), or its pan keyframes (`pan_keyed`). `render::clip_pan_gains` gives the gain of each side.
   - The pan of a clip adds to the pan of its track ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), Track pan). `render::pan_gains` gives the law of the sum.

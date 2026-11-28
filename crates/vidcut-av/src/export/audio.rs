@@ -176,9 +176,7 @@ fn heard_matrix(heard: &Heard, ins: usize, out: &ffi::AVChannelLayout) -> Option
     let spoken = if one {
         vec![ffi::AV_CH_FRONT_CENTER]
     } else {
-        let mut s = speakers(heard.format);
-        s.truncate(heard.channels.len());
-        s
+        speakers(heard.format)
     };
     let columns = if one && outs == 2 {
         vec![MONO_TO_STEREO.to_vec()]
@@ -772,7 +770,7 @@ struct Lane {
     started: bool,
     source: Option<SourceAudio>,
     paced: Option<Paced>,
-    ahead: Ahead<SourceAudio, (PathBuf, u32, u64)>,
+    ahead: Ahead<SourceAudio, (PathBuf, u32, Heard, u64)>,
     declick: i64,
     scratch: Vec<f32>,
     trim: f32,
@@ -873,7 +871,7 @@ impl Lane {
             return;
         }
         let start = origin + source_sample as f64 / f64::from(rate);
-        let key = (path.clone(), stream, start.to_bits());
+        let key = (path.clone(), stream, heard.clone(), start.to_bits());
         self.ahead.start(i, key, move || {
             SourceAudio::open(&path, stream, heard, start, rate, channels)
         });

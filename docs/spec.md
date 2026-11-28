@@ -885,6 +885,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Mono, Stereo, LRC, LCR, LRCS, LCRS and Quad.
     - 5.0, 5.0 Film, 5.1, 5.1 Film, 7.0, 7.0 Film, 7.1 and 7.1 Film.
     - Adaptive 1 to 36.
+    - The manual gives Adaptive 1 to 24 (pp. 1100, 3805). The menu has 1 to 36.
   - The type gives the channels of the track and their order (pp. 3804–3805):
     - 5.0 and 5.1 put L, R and C first. 5.0 Film and 5.1 Film put L, C and R first. Then come the surrounds, with the LFE fourth in 5.1 and last in 5.1 Film.
     - 7.0, 7.0 Film, 7.1 and 7.1 Film are in the same order, with the back surrounds after the side surrounds.
@@ -902,6 +903,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - vidcut: a clip of one channel plays at its full level on each side, on a track of each type (§9, Clip pan).
   - vidcut: a channel of the track that the clip does not fill is silent (not measured).
   - vidcut: a track of three channels or more mixes into the channels of the project as a file with its channels does (not measured).
+  - vidcut: an Adaptive track of more than 24 channels mixes its first 24 channels. FFmpeg has no layout of more channels (not measured).
 - **Sound tracks of a file:**
   - A file has a sound track for each audio stream of one to four channels.
     - The sound track is Mono for one channel, Stereo for two, and Adaptive 3 or 4 for more.
@@ -2838,6 +2840,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - Thus V2 and V3 become V1 and V2. V1 and V3 become V1, an empty V2 and V3.
   - They have default names.
   - They are enabled, also when the outer track is disabled.
+  - vidcut: an inner audio track has the type of the track that its clips come from (not measured).
 - **Where it goes:**
   - The picture goes on the lowest selected video track.
   - A clip on that track in the span that is not selected puts the picture on a new track directly above. Higher tracks move up.
@@ -2981,6 +2984,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - Cuts stay. A clip that was cut at In comes back as two pieces.
   - A free track is used as it is, and no track is added.
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
+  - vidcut: a new audio track has the type of its inner track (not measured).
   - This is the same on video tracks and on audio tracks.
   - The settings of the compound clip itself are dropped:
     - Transform, Crop, Opacity, Composite, Dynamic Zoom and their keyframes.

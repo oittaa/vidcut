@@ -2168,8 +2168,6 @@ impl JsonSchema for TrackFormat {
     }
 }
 
-/// One audio track of a file as an edit puts it on the timeline: a stream,
-/// or one channel of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SoundTrack {
     pub stream: u32,

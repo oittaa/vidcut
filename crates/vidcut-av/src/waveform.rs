@@ -129,9 +129,17 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
     build(path, ordinal, per_second, Some(channels.max(1)))
 }
 
-pub fn sources(path: &Path, streams: usize, per_second: u32) -> Result<Vec<Waveform>> {
+pub fn sources(path: &Path, streams: usize, per_second: u32) -> Vec<Waveform> {
+    let silent = Waveform {
+        per_second,
+        start: 0.0,
+        peaks: Vec::new(),
+        channels: 1,
+        channel_peaks: Vec::new(),
+        sources: Vec::new(),
+    };
     (0..streams as u32)
-        .map(|k| build(path, k, per_second, None))
+        .map(|k| build(path, k, per_second, None).unwrap_or_else(|_| silent.clone()))
         .collect()
 }
 

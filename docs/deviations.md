@@ -1408,7 +1408,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The player runs the same code as the export. Level rules with a short look ahead run in real time.
   - Background Reduction in the renders was uneven. A fixed amount is predictable.
   - A value outside the range is an error in the script. A refusal shows the error.
-  - A track of vidcut has no channel type. Thus a clip with many channels gets what the user asks for.
+  - The leveler of vidcut is on the clip. Thus the channels of the track do not limit it, and a clip with many channels gets what the user asks for.
 
 ## X156. The Compressor is on a clip
 
