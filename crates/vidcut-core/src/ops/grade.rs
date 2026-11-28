@@ -9,7 +9,8 @@ use crate::model::{
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
-    CopiedNode, GradeAdd, GradeChange, GradeMixer, GradeNodeChange, GradePalette, PrinterColor,
+    CopiedNode, GradeAdd, GradeChange, GradeMixer, GradeNodeChange, GradePalette, GroupGrade,
+    PrinterColor,
 };
 
 use super::locate;
@@ -517,6 +518,7 @@ pub const NODE_STACK_LAYERS: usize = 8;
 pub enum GradeOf {
     Timeline,
     Clip(String, usize),
+    Group(String, GroupGrade),
 }
 
 impl GradeOf {
@@ -532,8 +534,19 @@ impl GradeOf {
                     m.insert("layer".into(), Value::from(*layer));
                 }
             }
+            Self::Group(id, side) => {
+                m.insert(key.into(), Value::String(id.clone()));
+                m.insert("group".into(), json!(side));
+            }
         }
         m
+    }
+
+    pub fn clip(&self) -> Option<&str> {
+        match self {
+            Self::Timeline => None,
+            Self::Clip(id, _) | Self::Group(id, _) => Some(id),
+        }
     }
 }
 
@@ -563,9 +576,9 @@ fn no_timeline() -> Error {
 }
 
 pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
-    match of {
-        GradeOf::Timeline => Ok(at),
-        GradeOf::Clip(id, _) => {
+    match of.clip() {
+        None => Ok(at),
+        Some(id) => {
             let (ti, ci) = locate(p, id)?;
             Ok(p.tracks[ti].clips[ci].content_at(at))
         }
@@ -588,6 +601,11 @@ pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
                 Some(g) => g.layer(layer, frame),
                 None => Grade::usual(frame),
             })
+        }
+        GradeOf::Group(id, side) => {
+            whole(p, id)?;
+            let g = super::color_groups::of_clip(p, id)?;
+            Ok((g.grade(*side).cloned()).unwrap_or_else(|| Grade::usual(frame)))
         }
     }
 }
@@ -623,6 +641,17 @@ pub(super) fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> 
             let was = whole(p, id)?.unwrap_or_else(|| Grade::usual(frame));
             put_whole(p, id, was.with_layer(layer, grade.layer(1, frame), frame))?;
         }
+        GradeOf::Group(id, side) => {
+            if grade.is_masked() {
+                return Err(Error::invalid("a group grade has no Magic Mask"));
+            }
+            whole(p, id)?;
+            let gid = super::color_groups::of_clip(p, id)?.id.clone();
+            let own = grade.layer(1, frame);
+            let own = (!own.is_usual(frame)).then_some(own);
+            let g = p.color_group_mut(&gid).expect("found above");
+            *g.grade_mut(*side) = own;
+        }
     }
     Ok(())
 }
@@ -642,9 +671,7 @@ pub fn clear_layers(p: &mut Project, of: &[GradeOf]) -> Result<()> {
     let frame = p.frame_size();
     for o in of {
         let GradeOf::Clip(id, _) = o else {
-            return Err(Error::invalid(
-                "the timeline grade has no node stack layers",
-            ));
+            return Err(Error::invalid("only a clip grade has node stack layers"));
         };
         if let Some(mut g) = whole(p, id)? {
             g.reset_layers(frame);
@@ -1497,7 +1524,7 @@ pub fn append_graph(p: &mut Project, of: &GradeOf, add: &Grade) -> Result<()> {
     })
 }
 
-fn appended(g: &mut Grade, add: &Grade) {
+pub(super) fn appended(g: &mut Grade, add: &Grade) {
     if add.nodes.is_empty() {
         return;
     }
@@ -1635,9 +1662,9 @@ fn lone_input(g: &Grade, m: u32) -> Option<GradeLink> {
 }
 
 fn start_of(p: &Project, of: &GradeOf) -> Result<i64> {
-    match of {
-        GradeOf::Timeline => Ok(0),
-        GradeOf::Clip(id, _) => {
+    match of.clip() {
+        None => Ok(0),
+        Some(id) => {
             let (ti, ci) = locate(p, id)?;
             let c = &p.tracks[ti].clips[ci];
             Ok(c.content_at(c.start))

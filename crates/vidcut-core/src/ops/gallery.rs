@@ -118,13 +118,19 @@ pub fn albums(p: &Project) -> Value {
 
 pub fn grab(
     p: &mut Project,
-    (clip, frame): (&str, i64),
+    (clip, frame, level): (&str, i64, GradeLevel),
     (album, picture): (&str, String),
 ) -> Result<String> {
     let timeline = open_timeline(p)?;
     let album = album_found(p, album)?.id.clone();
-    let grade = grade::whole(p, clip)?;
-    let timeline_grade = p.timeline_grade().cloned();
+    let (grade, timeline_grade) = match level.group() {
+        Some(side) => {
+            grade::whole(p, clip)?;
+            let g = super::color_groups::of_clip(p, clip)?;
+            (g.grade(side).cloned(), None)
+        }
+        None => (grade::whole(p, clip)?, p.timeline_grade().cloned()),
+    };
     let id = p.alloc_still_id();
     p.stills.push(Still {
         id: id.clone(),
@@ -171,6 +177,19 @@ pub fn apply(p: &mut Project, id: &str, level: GradeLevel, clips: &[String]) -> 
             let g = (still.grade).unwrap_or_else(|| Grade::usual(size));
             grade::apply(p, &g, clips)?;
         }
+        GradeLevel::PreClip | GradeLevel::PostClip => {
+            if still.grade.as_ref().is_some_and(keyed) {
+                return Err(refused(id, "clip grade", "Apply Grade"));
+            }
+            if clips.is_empty() {
+                return Err(Error::usage("give the clips that get the grade"));
+            }
+            let side = level.group().expect("a group grade");
+            let g = (still.grade.as_ref()).map_or_else(|| Grade::usual(size), |g| g.layer(1, size));
+            for of in super::color_groups::grades_of(p, clips, side)? {
+                grade::store(p, &of, &g)?;
+            }
+        }
         GradeLevel::Timeline => {
             if !clips.is_empty() {
                 return Err(Error::usage(
@@ -198,6 +217,10 @@ pub fn append(p: &mut Project, id: &str, to: &[GradeOf]) -> Result<()> {
             GradeOf::Clip(_, layer) => {
                 let g = still.grade.as_ref();
                 g.map_or_else(|| Grade::usual(size), |g| g.layer(*layer, size))
+            }
+            GradeOf::Group(..) => {
+                let g = still.grade.as_ref();
+                g.map_or_else(|| Grade::usual(size), |g| g.layer(1, size))
             }
             GradeOf::Timeline => {
                 let g = (still.timeline_grade.clone()).unwrap_or_else(|| Grade::usual(size));

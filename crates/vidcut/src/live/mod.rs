@@ -125,6 +125,7 @@ pub enum GuiChange {
         album: Option<String>,
         albums: Option<bool>,
     },
+    ColorGroup(String),
     PageTime(PageTime),
 }
 
@@ -202,6 +203,7 @@ pub struct GuiState {
     pub node_wide: bool,
     pub album: Option<String>,
     pub albums: bool,
+    pub color_group: Option<String>,
     pub viewers: ViewerState,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
@@ -3757,6 +3759,7 @@ impl Live {
                 clips,
                 clip_label,
                 edit_job,
+                group,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
                     .chain(layer.map(GuiChange::Layer))
@@ -3767,6 +3770,7 @@ impl Live {
                     .chain(job_details.map(GuiChange::JobDetails))
                     .chain(clips.map(GuiChange::Clips))
                     .chain(clip_label.map(GuiChange::ClipLabel))
+                    .chain(group.map(GuiChange::ColorGroup))
                     .collect();
                 changes.push(GuiChange::Page(page));
                 if let Some(job) = edit_job {

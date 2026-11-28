@@ -2630,6 +2630,40 @@ fn offline(p: &Project) -> Option<Project> {
     Some(out)
 }
 
+fn grouped(p: &Project) -> Option<Project> {
+    let tracks = || {
+        (p.tracks.iter())
+            .chain(p.compounds.iter().flat_map(|k| k.tracks.iter()))
+            .flat_map(|t| t.clips.iter())
+    };
+    let acts = |c: &Clip| crate::ops::color_groups::graded(p, c).is_some();
+    if !tracks().any(acts) {
+        return None;
+    }
+    let mut out = p.clone();
+    for t in out.tracks.iter_mut() {
+        joined(p, &mut t.clips);
+    }
+    for k in out.compounds.iter_mut() {
+        for t in k.tracks.iter_mut() {
+            joined(p, &mut t.clips);
+        }
+    }
+    Some(out)
+}
+
+fn joined(p: &Project, clips: &mut [Clip]) {
+    for c in clips {
+        let Some(grade) = crate::ops::color_groups::graded(p, c) else {
+            continue;
+        };
+        c.color_group = None;
+        let mut picture = c.picture.take().map(Shared::into_inner).unwrap_or_default();
+        picture.grade = grade;
+        c.picture = Some(picture.into());
+    }
+}
+
 fn slated(clips: &mut [Clip], gone: &HashSet<&str>) {
     for c in clips {
         if gone.contains(c.media.as_str()) {
@@ -3424,6 +3458,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     }
     let offline = offline(p);
     let p = offline.as_ref().unwrap_or(p);
+    let grouped = grouped(p);
+    let p = grouped.as_ref().unwrap_or(p);
     let expanded = expanded(p);
     let (p, within) = match &expanded {
         Some((q, w)) => (q, Some(w)),

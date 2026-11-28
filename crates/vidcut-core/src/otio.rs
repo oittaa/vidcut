@@ -903,6 +903,9 @@ fn export_with(
                 if let Some(x) = &c.picture {
                     meta["picture"] = json!(x);
                 }
+                if let Some(g) = &c.color_group {
+                    meta["color_group"] = json!(g);
+                }
                 if m.is_some_and(Media::is_still) {
                     meta["source_in"] = json!(c.source_at(s));
                 }
@@ -1204,6 +1207,7 @@ fn export_with(
             compounds: (p.compounds.iter())
                 .map(|k| written_compound(p, k, locations))
                 .collect(),
+            color_groups: p.color_groups.clone(),
         });
     }
     let tracks = with(
@@ -1435,6 +1439,9 @@ fn compound_item(
     if let Some(x) = &c.picture {
         v["metadata"][VIDCUT]["picture"] = json!(x);
     }
+    if let Some(g) = &c.color_group {
+        v["metadata"][VIDCUT]["color_group"] = json!(g);
+    }
     if let Some(x) = c.linked_at {
         v["metadata"][VIDCUT]["linked_at"] = json!(x);
     }
@@ -1601,6 +1608,7 @@ pub struct ImportedClip {
     pub fade_out: Option<crate::model::SoundFade>,
     pub link: Option<i64>,
     pub linked_at: Option<i64>,
+    pub color_group: Option<String>,
     pub effects: Vec<Value>,
     pub audio_effects: Vec<Value>,
     pub generator: Option<Value>,
@@ -1700,6 +1708,7 @@ impl ImportedClip {
             fade_out: None,
             link: link_group(item),
             linked_at: item["metadata"][VIDCUT]["linked_at"].as_i64(),
+            color_group: our_str(item, "color_group"),
             effects: Vec::new(),
             audio_effects: Vec::new(),
             generator: None,
@@ -1831,6 +1840,8 @@ pub struct ProjectMeta {
     pub recent: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compounds: Vec<Compound>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub color_groups: Vec<crate::model::ColorGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1229,6 +1229,36 @@ The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-gra
   - `Workspace::album_list` draws the Albums list. A drag of a still carries `Dragged`, and a drop on an album sends `gallery.move`.
   - `Workspace::remove_album_window` asks before `gallery.album.remove`.
 
+## Color groups
+
+Clips that share a Pre-Clip and a Post-Clip grade ([spec §8.33](../spec.md#833-color-groups-pp-33763381-3400)):
+
+- `Project::color_groups` holds each `ColorGroup`, in the order in which they were made. `Clip::color_group` names the group of a clip.
+  - `ColorGroup::pre` and `ColorGroup::post` hold the two grades. Each has one layer.
+  - `NextIds::color_group` gives the next ID. Thus an ID is not used again.
+  - `validate` refuses a group with no name, and a group grade with layers or a Magic Mask.
+  - `validate` also refuses a clip whose group is not in the project.
+- `ops::color_groups` holds the edits: `add`, `assign`, `unassign`, `rename`, `remove`, `collapse` and `get`.
+  - `proposed_name` gives the name of a new group: the name of the last group made, with its number one higher.
+  - `remove` takes the group out of each clip, also in the other timelines and in the compound clips.
+  - `collapse` joins the Pre-Clip grade, layer 1 of the clip and the Post-Clip grade with `ops::grade::appended`. The other layers stay.
+- `GradeOf::Group` names a group grade by a clip of the group and a `GroupGrade`. Each grade request takes `group` for it.
+  - Thus `ops::grade::stored` and `store` give and take a group grade as they do a clip grade. The keyframes count in the frames of the clip.
+  - `grades_of` gives each group once, also when the request names several clips of it.
+- The render:
+  - `around` joins the Pre-Clip grade, the clip grade and the Post-Clip grade into one `Grade`. The Pre-Clip grade is its base, and the others are its layers.
+  - Why: `Grade::stacked` then joins them in order, and the passes, the thumbnails and the render cache need no case for groups.
+  - `render::grouped` gives each clip of a group that has a grade the joined grade, before the plan (`graded`).
+  - The joined grade works after the effects of the clip, as a clip grade does ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
+  - The plans of Auto Color and of the Magic Mask join the grades up to the node that they measure (`solo_plan`).
+- OTIO keeps `ProjectMeta::color_groups` and the group of each clip in the metadata of vidcut.
+- The GUI:
+  - `GradeLevel::PreClip` and `GradeLevel::PostClip` are the two modes of a group. `Workspace::shown_level` gives the Clip mode on a clip in no group.
+  - `Workspace::graded_wanted` and `Workspace::with_group` join the grades for the live preview. Thus a dragged value of a group grade shows at once.
+  - `ColorGroups` holds the current group, the Group Name dialog and the Delete prompt (`color_group_windows`).
+  - `Workspace::keep_color_group` makes the group of a new clip at the playhead current. `gui.page` with `group` sets it, as Load does.
+  - `group_items` draws the group items in the menu of the thumbnail at the playhead. `Workspace::group_act` sends their requests.
+
 ## Compositions
 
 The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500), [model](model.md#compositions)):

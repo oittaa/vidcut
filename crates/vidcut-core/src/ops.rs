@@ -2,6 +2,7 @@ pub mod attributes;
 pub mod beside;
 pub mod clip_filter;
 pub mod close_up;
+pub mod color_groups;
 pub mod comp;
 pub mod compound;
 pub mod conform;
@@ -283,6 +284,7 @@ pub(crate) fn block_clip(
         render_cache: crate::model::ClipCache::Auto,
         link: None,
         linked_at: None,
+        color_group: None,
     }
 }
 
@@ -377,6 +379,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         render_cache: crate::model::ClipCache::Auto,
         link: None,
         linked_at: None,
+        color_group: None,
     })
 }
 

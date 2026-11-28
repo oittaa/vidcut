@@ -4394,6 +4394,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: at one layer, the switch has Clip and Timeline. At more, it is a menu with the same items.
   - vidcut: the dots, Switch to Node Layer and the Keyframes panel are the same. `gui.page` with `layer` shows a layer, and `gui.state` gives it.
   - vidcut: `grade.clear` with `all_layers` resets each layer. Undo gives the grades back ([gotchas](gotchas.md#resolves-edits)).
+  - vidcut: the group items are grey on a clip in no color group ([§8.33](#833-color-groups-pp-33763381-3400)).
   - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still are not built yet ([todo](todo/color-gallery.md)).
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
@@ -5204,6 +5205,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The still goes into `album`. Left out, it goes into the open album of a running GUI. Without a GUI, it goes into the first album (not measured).
     - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
     - The still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
+    - In the mode Group Pre Clip or Group Post Clip, the still holds only that grade of the group ([§8.33](#833-color-groups-pp-33763381-3400)).
     - The picture is the frame of the timeline with all grades and the output LUT, at the size of the timeline.
     - The picture has no display LUT. It is a 32-bit float OpenEXR file ([design](design/export.md#the-gallery)).
     - The ID of a still is `s1`, `s2` and so on. A new still has no label.
@@ -5211,7 +5213,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A click selects one still. A Ctrl-click adds a still to the selection or takes it out. `selection.set` with `stills` does the same.
   - `gallery.remove` deletes stills. Delete Selected in the menu of a still does it, with no prompt.
   - `gallery.apply` gives the grade of a still. Apply Grade in the menu of a still, or a middle-click, does it.
-    - The mode of the Node Editor (`grade`) selects the grade: Clip or Timeline.
+    - The mode of the Node Editor (`grade`) selects the grade: Clip, Timeline, or a grade of the group ([§8.33](#833-color-groups-pp-33763381-3400)).
     - In the Clip mode, the targets are the clips selected in the Thumbnail timeline and the clip at the playhead.
     - The grade of the still replaces the whole grade of each target. A still with no clip grade gives the usual grade.
     - In the Timeline mode, the timeline grade of the still replaces the timeline grade.
@@ -5269,10 +5271,76 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With the focus there, Ctrl+C copies the whole grade of the clip at the playhead. Ctrl+V gives it to that clip and the selected clips.
     - Else Ctrl+C and Ctrl+V copy and paste one node ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - On the Color page, the menu of a thumbnail has Apply Grade. A middle-click on a thumbnail does the same.
+    - The menu of the clip at the playhead has the group items in place of Apply Grade ([§8.33](#833-color-groups-pp-33763381-3400)).
     - The clip at the playhead and the selected clips take the grade of the thumbnail. Apply Grade is greyed when no other clip is there.
   - Color > Apply Grade From One Clip Prior (=) and Apply Grade From Two Clips Prior (−) send `grade.apply` with `prior`.
     - On the Color page, these keys go before Go to Timecode and Jump Back.
   - The copies give the clip grade, also in the Timeline mode of the Node Editor.
+
+### 8.33 Color groups (pp. 3376–3381, 3400)
+
+- The manual:
+  - A group is a set of clips. They share a Pre-Clip grade and a Post-Clip grade (p. 3378).
+  - The current group is the group of the last selected clip that is in a group (p. 3376).
+  - Add Into New Group in the menu of a selected thumbnail opens the Group Name dialog. The selected clips go into the new group (p. 3376).
+  - Groups > name > Load makes that group current. Add Into Current Group then adds a clip to it (pp. 3376–3377).
+  - Groups > name > Assign to Group adds the selected clips to that group (p. 3377).
+  - Remove From Group takes the selected clips out of their group (p. 3377).
+  - Groups > name > Rename opens the Group Name dialog. Groups > name > Delete removes the group, and each clip keeps its grade (p. 3377).
+  - A clip in a group has four modes of the Node Editor: Group Pre-Clip, Clip, Group Post-Clip and Timeline. Four dots select them (pp. 3377–3378).
+  - The Pre-Clip grade comes before the clip grade, and the Post-Clip grade after it (p. 3378). The layers come between them (p. 3400).
+  - Each mode of the Node Editor has its own undo (p. 3380).
+  - A still of a clip in a group shows the whole look. It holds only the grade of the open mode (p. 3380).
+  - A grade from a still goes into the grade of the open mode (p. 3380).
+  - Collapse Group Grades puts the Pre-Clip nodes before the nodes of the clip grade, and the Post-Clip nodes after them. The clip leaves its group (p. 3381).
+  - Groups have versions. A smart filter, Grouped > Current Group, shows the clips of the current group (pp. 3377, 3381).
+- **Measured**:
+  - The menu of the thumbnail at the playhead has these group items:
+    - Collapse Group Grades, Add into Current Group, Add into a New Group, Remove from Group and Groups.
+  - It has no Apply Grade. The menu of another thumbnail has Apply Grade and no group items.
+  - Groups has a row for each group, with Assign to Group, Load, Rename, Delete and Versions. The row of the current group has a tick.
+  - Collapse Group Grades is grey on a clip in no group.
+  - Group members show a link icon under the thumbnail.
+  - With one layer, the modes are Group Pre Clip, Clip, Group Post Clip and Timeline. With two, Clip is Clip - L1 and Clip - L2.
+  - The Group Name dialog proposes the name of the last group made, with its number one higher: H3 after H2.
+  - Remove from Group acts only on the clip whose menu is open. The other selected clips stay in the group.
+  - Add into Current Group on a clip in no group puts it in the group of the last clip at the playhead that had one.
+  - Assign to Group takes a clip out of its old group. The old group stays, also when it is empty.
+  - Delete asks "Delete Clip Group?" with Cancel and Delete. The clips leave the group and keep their clip grades.
+  - Collapse Group Grades in the mode Clip - L1 makes layer 1: the Pre-Clip nodes, the clip nodes, then the Post-Clip nodes. The other layers stay.
+  - After a collapse, the group keeps its grades and its other clips.
+  - Grab Still in the mode Group Pre Clip gives a still with only the Pre-Clip grade. Its picture shows the whole look.
+  - Apply Grade of a still in a group mode replaces that grade of the group. The clip grade stays.
+  - Apply Grade of a still in the Clip mode replaces only the clip grade.
+  - Undo works on each clip and each mode alone. Some group items are not undo steps ([gotchas](gotchas.md#resolves-edits)).
+  - Each timeline keeps its own mode of the Node Editor.
+- vidcut:
+  - `color_group.add` makes a group of clips and gives its ID (`cg1`). Add into a New Group opens the Group Name dialog for it.
+    - The dialog proposes the name of the last group made, with its number one higher. A request with no `name` gets the same name.
+    - After a name with no number at its end, the proposed name is Group 1. A name that is in use gets the next number (not measured).
+  - `color_group.assign` puts clips in a group. A clip leaves its old group. Assign to Group sends it for the selected clips and the clip at the playhead.
+  - Add into Current Group does the same with the current group. It is grey when there is no current group.
+  - The current group is the group of the last clip at the playhead that had one. Load makes a group current.
+  - `gui.page` with `group` makes a group current. `gui.state` gives the current group as `color_group`.
+  - `color_group.unassign` takes clips out of their group. Remove from Group sends it for the clip at the playhead. It is grey on a clip in no group.
+  - `color_group.rename` renames a group. `color_group.remove` deletes a group after the "Delete Clip Group?" prompt. The clips keep their clip grades.
+  - `color_group.collapse` makes layer 1 of each clip: the Pre-Clip nodes, the nodes of layer 1, then the Post-Clip nodes. Each clip leaves its group.
+  - `color_group.get` gives each group with its clips.
+  - The grade requests take `group`, `pre` or `post`. They then change that grade of the group of the clip.
+    - A group grade has one layer. It takes no Magic Mask.
+    - Its keyframes count in the frames of each clip, as the keyframes of a clip grade do (not measured).
+  - The picture of a clip in a group gets the Pre-Clip grade, the clip grade with each layer, then the Post-Clip grade.
+    - vidcut runs them as one grade, after the effects of the clip ([§13](#13-order-of-operations-pp-287296-3407)).
+  - The Node Editor of a clip in a group has the modes Group Pre Clip and Group Post Clip.
+    - The switch, the dots and Switch to Node Layer have them.
+    - `gui.page` with `grade` `pre_clip` or `post_clip` shows that grade. On a clip in no group, the page shows the clip grade.
+    - The palette shows the name of the group in place of the name of the clip.
+  - The thumbnails of the clips of the current group show a link icon before the name.
+  - `gallery.grab` with `grade` `pre_clip` or `post_clip` keeps only that grade of the group. Grab Still does it in these modes.
+  - `gallery.apply` and `gallery.append` in these modes change that grade of the group of each clip.
+  - An OTIO file keeps the groups, their grades and the group of each clip in the metadata of vidcut.
+  - Each group edit is one undo step. vidcut has one undo history for all clips and modes ([todo](todo/color-gallery.md)).
+  - Group versions, the Grouped filter, a mode for each timeline and Ripple Node Changes to Current Group come later ([todo](todo/color-gallery.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -6311,7 +6379,7 @@ The Audio page follows the Fairlight page of the manual.
   - `thumbnails` of `selection.set` sets the clips with a red outline, and `selection.get` gives them. A change of the open timeline clears them.
   - The right-click menu has Mark In, Mark Out and Render This Clip. Mark In sets the In at the first frame of the clip. Mark Out sets the Out at its last frame.
   - Render This Clip sets both marks. Each of the three switches Entire Timeline to In/Out Range, in one undo step with the marks.
-  - On the Color page, the menu also has Apply Grade ([§8.32](#832-copying-grades-between-clips-pp-33613364-3464)).
+  - On the Color page, the menu also has Apply Grade ([§8.32](#832-copying-grades-between-clips-pp-33613364-3464)). On the clip at the playhead, it has the group items ([§8.33](#833-color-groups-pp-33763381-3400)).
   - On the Color page, the Thumbnail timeline is over the timeline too. An arrow next to Clips opens the filters.
   - `clip_filter` of `timeline.set` sets the filter of a timeline. A pick of a filter is an undo step.
   - The Thumbnail timeline of both pages shows only the clips that meet the filter. It numbers them from 1.
@@ -8571,6 +8639,8 @@ Then the compositing of the Fusion page.
 6. The output of the Deliver page.
 
 The display LUT of the Color page is on a branch after Data Burn-In. The output of the Deliver page does not get it.
+
+vidcut runs the Pre-Clip grade, the clip grade and the Post-Clip grade of a clip as one grade, after its effects ([§8.33](#833-color-groups-pp-33763381-3400)).
 
 vidcut runs the timeline grade, then the burned-in subtitles, then the output LUT. The viewer of the Color page then runs the display LUT on its own branch ([the display LUTs](#the-lut-tables)). [§8.20](#820-primaries-palette-pp-118-31413159) gives the facts of the timeline grade.
 

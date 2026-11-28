@@ -25,7 +25,7 @@ impl Clock {
     fn of(p: &Project, of: &GradeOf) -> Result<Self> {
         Ok(match of {
             GradeOf::Timeline => Self::Timeline,
-            GradeOf::Clip(id, _) => {
+            GradeOf::Clip(id, _) | GradeOf::Group(id, _) => {
                 let (ti, ci) = locate(p, id)?;
                 Self::Clip(Box::new(p.tracks[ti].clips[ci].clone()))
             }

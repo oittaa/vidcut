@@ -4941,6 +4941,7 @@ mod tests {
             render_cache: vidcut_core::model::ClipCache::Auto,
             link: None,
             linked_at: None,
+            color_group: None,
         }
     }
 

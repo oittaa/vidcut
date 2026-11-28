@@ -350,7 +350,7 @@ impl Workspace {
                 self.send("selection.set", json!({ "stills": [id] }));
             }
             Some(Act::Apply(id)) => {
-                let grade = self.effects_page.grading;
+                let grade = self.shown_level();
                 self.send("gallery.apply", json!({ "still": id, "grade": grade }));
             }
             Some(Act::Append(id)) => self.append_still(&id),
@@ -388,11 +388,15 @@ impl Workspace {
     }
 
     fn append_still(&self, id: &str) {
-        let grade = self.effects_page.grading;
+        let grade = self.shown_level();
         let mut params = json!({ "still": id, "grade": grade });
-        if let Some((GradeOf::Clip(clip, layer), _, _)) = self.grade_shown() {
-            params["clips"] = json!([clip]);
-            params["layer"] = json!(layer);
+        match self.grade_shown() {
+            Some((GradeOf::Clip(clip, layer), _, _)) => {
+                params["clips"] = json!([clip]);
+                params["layer"] = json!(layer);
+            }
+            Some((GradeOf::Group(clip, _), _, _)) => params["clips"] = json!([clip]),
+            _ => {}
         }
         self.send("gallery.append", params);
     }
@@ -400,6 +404,9 @@ impl Workspace {
     pub(super) fn grab_still(&self) {
         let at = self.snap.timeline.position;
         let mut params = json!({ "at": at });
+        if self.shown_level().group().is_some() {
+            params["grade"] = json!(self.shown_level());
+        }
         if let Some(album) = self.shown_album() {
             params["album"] = json!(album);
         }

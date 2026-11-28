@@ -462,7 +462,50 @@ pub fn violations(p: &Project) -> Vec<String> {
     }
     timelines(p, &mut v);
     stills(p, &mut v);
+    color_groups(p, &mut v);
     v
+}
+
+fn color_groups(p: &Project, v: &mut Vec<String>) {
+    let mut ids = HashSet::new();
+    for g in &p.color_groups {
+        if !ids.insert(g.id.as_str()) {
+            v.push(format!("duplicate color group {}", g.id));
+        }
+        let n = g.id.strip_prefix("cg").and_then(|n| n.parse::<u64>().ok());
+        if n.is_none_or(|n| n == 0 || n >= p.next_id.color_group) {
+            v.push(format!(
+                "color group id {} is not cg1 to cg{}",
+                g.id,
+                p.next_id.color_group.saturating_sub(1)
+            ));
+        }
+        if g.name.trim().is_empty() {
+            v.push(format!("color group {} has no name", g.id));
+        }
+        for (which, grade) in [("Pre-Clip", &g.pre), ("Post-Clip", &g.post)] {
+            let Some(grade) = grade else {
+                continue;
+            };
+            if let Err(e) = crate::ops::grade::checked(grade) {
+                v.push(format!("the {which} grade of {}: {}", g.id, e.message));
+            }
+            if grade.is_masked() || !grade.layers.is_empty() || !grade.kept_layers.is_empty() {
+                v.push(format!(
+                    "the {which} grade of {} has layers or a Magic Mask",
+                    g.id
+                ));
+            }
+        }
+    }
+    let tracks = (p.tracks.iter())
+        .chain(p.timelines.iter().flat_map(|t| t.tracks.iter()))
+        .chain(p.compounds.iter().flat_map(|k| k.tracks.iter()));
+    for c in tracks.flat_map(|t| t.clips.iter()) {
+        if let Some(g) = c.color_group.as_deref().filter(|g| !ids.contains(g)) {
+            v.push(format!("{} is in unknown color group {g}", c.id));
+        }
+    }
 }
 
 fn albums(p: &Project, v: &mut Vec<String>) {

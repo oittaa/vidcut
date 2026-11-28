@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_bytes};
 use crate::lru::Lru;
 use crate::model::{
-    Album, Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds,
+    Album, Clip, ClipFilter, ColorGroup, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds,
     OpenCompound, PathSample, Project, RenderJob, RenderRange, Settings, Speakers, Still,
     SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool, Track,
     TrackKind, Transition, VoiceIsolation,
@@ -226,6 +226,7 @@ struct MetaRow<'a> {
     queue: Cow<'a, [RenderJob]>,
     stills: Cow<'a, [Still]>,
     albums: Cow<'a, [Album]>,
+    color_groups: Cow<'a, [ColorGroup]>,
 }
 
 impl<'a> MetaRow<'a> {
@@ -251,6 +252,7 @@ impl<'a> MetaRow<'a> {
             queue,
             stills,
             albums,
+            color_groups,
         } = p;
         Self {
             settings: Cow::Borrowed(settings),
@@ -264,6 +266,7 @@ impl<'a> MetaRow<'a> {
             queue: Cow::Borrowed(queue.as_slice()),
             stills: Cow::Borrowed(stills.as_slice()),
             albums: Cow::Borrowed(albums.as_slice()),
+            color_groups: Cow::Borrowed(color_groups.as_slice()),
         }
     }
 }
@@ -1252,6 +1255,7 @@ fn load_project_from_conn(
         queue: meta.queue.into_owned(),
         stills: meta.stills.into_owned(),
         albums: meta.albums.into_owned(),
+        color_groups: meta.color_groups.into_owned(),
     };
     project.check_out();
     resolve_paths(&mut project, dir);
@@ -2677,6 +2681,7 @@ mod tests {
             render_cache: ClipCache::Auto,
             link: None,
             linked_at: None,
+            color_group: None,
         }
     }
 
