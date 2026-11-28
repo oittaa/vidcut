@@ -56,6 +56,7 @@ const KEEPS_PREMULTIPLIED: u32 = 2;
 pub(super) struct Encoders {
     layout: wgpu::BindGroupLayout,
     pipelines: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+    cut: std::result::Result<wgpu::ComputePipeline, String>,
 }
 
 impl Encoders {
@@ -127,7 +128,21 @@ impl Encoders {
                 made.ok().map(|pipeline| (format, pipeline))
             })
             .collect();
-        Self { layout, pipelines }
+        let cut = super::checked(device, || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("vidcut values outside 0..1"),
+                layout: None,
+                module: shader,
+                entry_point: Some("cut_off"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        });
+        Self {
+            layout,
+            pipelines,
+            cut,
+        }
     }
 
     fn pipeline(&self, format: wgpu::TextureFormat) -> Result<&wgpu::RenderPipeline> {
@@ -705,9 +720,16 @@ impl Screen {
             (
                 Sink::Held,
                 Some(Made {
-                    texture: Some(t), ..
+                    texture: Some(t),
+                    params,
+                    ..
                 }),
-            ) => Some(gpu.held.pack(&gpu.device, &mut encoder, t)),
+            ) => {
+                let rest = deep
+                    .then(|| cut_off(gpu, &mut encoder, (&wide.view, params), size))
+                    .transpose()?;
+                Some((gpu.held.pack(&gpu.device, &mut encoder, t), rest))
+            }
             _ => None,
         };
         let submission = gpu.submit([encoder.finish()]);
@@ -723,14 +745,81 @@ impl Screen {
                 f
             }
             Sink::Held => {
-                let buffer = held.ok_or_else(|| Error::Invalid("no RGB plane to hold".into()))?;
-                let held = super::held::Held::new(buffer, (&gpu.device, &gpu.queue), gpu.id);
+                let (buffer, rest) =
+                    held.ok_or_else(|| Error::Invalid("no RGB plane to hold".into()))?;
+                let mut held = super::held::Held::new(buffer, (&gpu.device, &gpu.queue), gpu.id);
+                if let Some((values, seen)) = rest {
+                    let done = (&gpu.device, submission);
+                    held = held.with_rest(super::held::Rest::new((values, size), seen, done));
+                }
                 return super::held::picture(held, size, None, (deep, colors.1));
             }
         };
         crate::color::tag_frame(&mut out, colors.1);
         Ok(out)
     }
+}
+
+fn cut_off(
+    gpu: &Gpu,
+    encoder: &mut wgpu::CommandEncoder,
+    (drawn, params): (&wgpu::TextureView, &wgpu::Buffer),
+    (w, h): (u32, u32),
+) -> Result<(wgpu::Buffer, wgpu::Buffer)> {
+    let pipeline =
+        gpu.encoders().cut.as_ref().map_err(|e| {
+            Error::Invalid(format!("the GPU can't keep the values outside 0..1: {e}"))
+        })?;
+    let buffer = |size: u64, usage: wgpu::BufferUsages| {
+        gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut values outside 0..1"),
+            size,
+            usage,
+            mapped_at_creation: false,
+        })
+    };
+    let values = buffer(
+        u64::from(w) * u64::from(h) * 12,
+        wgpu::BufferUsages::STORAGE,
+    );
+    let seen = buffer(
+        4,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    );
+    let read = buffer(
+        4,
+        wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+    );
+    let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("vidcut values outside 0..1"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::TextureView(drawn),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 16,
+                resource: values.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 17,
+                resource: seen.as_entire_binding(),
+            },
+        ],
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(w.div_ceil(16), h.div_ceil(16), 1);
+    }
+    encoder.copy_buffer_to_buffer(&seen, 0, &read, 0, 4);
+    Ok((values, read))
 }
 
 fn handed(

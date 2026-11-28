@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use vidcut_core::model::Hdr;
 
@@ -14,6 +14,71 @@ pub(crate) struct Held {
     queue: wgpu::Queue,
     gpu: u64,
     memory: Option<Arc<HeldMemory>>,
+    rest: Option<Rest>,
+}
+
+#[derive(Clone)]
+pub(crate) struct Rest(Arc<CutOff>);
+
+struct CutOff {
+    values: wgpu::Buffer,
+    size: (u32, u32),
+    seen: wgpu::Buffer,
+    device: wgpu::Device,
+    done: wgpu::SubmissionIndex,
+    outside: Mutex<Option<bool>>,
+}
+
+impl Rest {
+    pub(crate) fn new(
+        (values, size): (wgpu::Buffer, (u32, u32)),
+        seen: wgpu::Buffer,
+        (device, done): (&wgpu::Device, wgpu::SubmissionIndex),
+    ) -> Self {
+        Self(Arc::new(CutOff {
+            values,
+            size,
+            seen,
+            device: device.clone(),
+            done,
+            outside: Mutex::new(None),
+        }))
+    }
+
+    pub(crate) fn outside(&self) -> Result<bool> {
+        let cut = &self.0;
+        let mut known = cut.outside.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(outside) = *known {
+            return Ok(outside);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        cut.seen.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        let failed = |e: &dyn std::fmt::Display| {
+            Error::Invalid(format!("the values outside 0..1 weren't counted: {e}"))
+        };
+        cut.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(cut.done.clone()),
+                timeout: None,
+            })
+            .map_err(|e| failed(&e))?;
+        rx.recv().map_err(|e| failed(&e))?.map_err(|e| failed(&e))?;
+        let outside = cut
+            .seen
+            .slice(..)
+            .get_mapped_range()
+            .map_err(|e| failed(&e))?
+            .iter()
+            .any(|b| *b != 0);
+        cut.seen.unmap();
+        if !outside {
+            cut.values.destroy();
+        }
+        *known = Some(outside);
+        Ok(outside)
+    }
 }
 
 static MARK: u8 = 0;
@@ -32,7 +97,13 @@ impl Held {
             queue: queue.clone(),
             gpu,
             memory: None,
+            rest: None,
         }
+    }
+
+    pub(crate) fn with_rest(mut self, rest: Rest) -> Self {
+        self.rest = Some(rest);
+        self
     }
 
     pub(crate) fn imported_on(
@@ -89,11 +160,19 @@ impl Held {
 
 pub(crate) fn picture(
     held: Held,
-    (w, h): (u32, u32),
+    size: (u32, u32),
     pts: Option<i64>,
     (deep, hdr): (bool, Option<Hdr>),
 ) -> Result<frame::Video> {
-    let (pixel, bytes) = rgb_pixel(deep);
+    framed(held, size, pts, (rgb_pixel(deep), hdr))
+}
+
+fn framed(
+    held: Held,
+    (w, h): (u32, u32),
+    pts: Option<i64>,
+    ((pixel, bytes), hdr): ((ffmpeg::format::Pixel, usize), Option<Hdr>),
+) -> Result<frame::Video> {
     let mut f = frame::Video::empty();
     // SAFETY: fresh `f` takes one zeroed row at no stride.
     unsafe {
@@ -117,6 +196,8 @@ pub(crate) fn picture(
 }
 
 pub(crate) const RGB48: usize = 6;
+
+const RGB_FLOAT: usize = 12;
 
 pub(crate) fn rgb_pixel(deep: bool) -> (ffmpeg::format::Pixel, usize) {
     match deep {
@@ -150,8 +231,19 @@ pub(crate) fn deep(f: &frame::Video) -> bool {
     f.format() == ffmpeg::format::Pixel::RGB48LE
 }
 
+pub(crate) fn float(f: &frame::Video) -> bool {
+    f.format() == ffmpeg::format::Pixel::RGBF32LE
+}
+
+pub(crate) fn pixel_bytes(f: &frame::Video) -> usize {
+    match float(f) {
+        true => RGB_FLOAT,
+        false => rgb_pixel(deep(f)).1,
+    }
+}
+
 fn bytes(f: &frame::Video) -> usize {
-    f.width() as usize * f.height() as usize * rgb_pixel(deep(f)).1
+    f.width() as usize * f.height() as usize * pixel_bytes(f)
 }
 
 pub(crate) fn of(f: &frame::Video) -> Option<&Held> {
@@ -160,6 +252,58 @@ pub(crate) fn of(f: &frame::Video) -> Option<&Held> {
 
 pub(crate) fn held(f: &frame::Video) -> Result<&Held> {
     of(f).ok_or_else(|| Error::Invalid("the picture isn't held on the GPU".into()))
+}
+
+pub(crate) fn rest(f: &frame::Video) -> Option<Rest> {
+    of(f).and_then(|h| h.rest.clone())
+}
+
+pub(crate) fn whole(f: &frame::Video) -> Result<frame::Video> {
+    with_rests(f, &[(rest(f), 1.0)])
+}
+
+pub(crate) fn with_rests(f: &frame::Video, parts: &[(Option<Rest>, f32)]) -> Result<frame::Video> {
+    let mut outside = Vec::new();
+    for (rest, weight) in parts {
+        if let Some(r) = rest
+            && *weight != 0.0
+            && r.outside()?
+        {
+            outside.push((r, *weight));
+        }
+    }
+    if outside.is_empty() {
+        return crate::export::video::frame_ref(f);
+    }
+    let held = held(f)?;
+    let on = super::offscreen().map_err(Error::Invalid)?;
+    if !deep(f) || !held.on(&on.gpu) {
+        return Err(Error::Invalid(
+            "only a 16-bit picture on the drawing's GPU takes its values outside 0..1".into(),
+        ));
+    }
+    let size = (f.width(), f.height());
+    let gpu = &on.gpu;
+    let clock = std::time::Instant::now();
+    let folded = gpu
+        .held
+        .fold((&gpu.device, &gpu.queue), held.buffer(), size, &outside);
+    crate::debug!(
+        "ai",
+        "{}x{}: {} pictures of values outside 0..1 added in {:.2} ms",
+        size.0,
+        size.1,
+        outside.len(),
+        clock.elapsed().as_secs_f64() * 1e3
+    );
+    let folded = Held::new(folded, (&gpu.device, &gpu.queue), gpu.id);
+    let pixel = (ffmpeg::format::Pixel::RGBF32LE, RGB_FLOAT);
+    framed(
+        folded,
+        size,
+        f.pts(),
+        (pixel, crate::color::Source::of(f).hdr),
+    )
 }
 
 pub(crate) fn rgb(f: &frame::Video) -> Result<Vec<u8>> {
@@ -224,6 +368,7 @@ fn share(f: &frame::Video, held: &Held) -> Result<frame::Video> {
         queue: held.queue.clone(),
         gpu: held.gpu,
         memory: Some(Arc::new(memory)),
+        rest: None,
     };
     let mut out = crate::export::video::frame_ref(f)?;
     super::carried::carry(&mut out, shared, &MARK)?;
@@ -232,8 +377,8 @@ fn share(f: &frame::Video, held: &Held) -> Result<frame::Video> {
 
 pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {
     let rgb = rgb(f)?;
-    let (pixel, size) = rgb_pixel(deep(f));
-    let mut out = crate::buffers::unpacked(pixel, (f.width(), f.height()), size, &rgb);
+    let mut out =
+        crate::buffers::unpacked(f.format(), (f.width(), f.height()), pixel_bytes(f), &rgb);
     // SAFETY: both frames are valid.
     let ret = unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), f.as_ptr()) };
     if ret < 0 {
@@ -253,7 +398,7 @@ pub(crate) fn small_luma(
 ) -> Result<Vec<u8>> {
     let held = held(f)?;
     let size = (f.width(), f.height());
-    if !held.on(gpu) || held.buffer().size() < bytes(f) as u64 {
+    if float(f) || !held.on(gpu) || held.buffer().size() < bytes(f) as u64 {
         return Err(Error::Invalid(
             "the picture to measure isn't held on the drawing's GPU".into(),
         ));
@@ -288,6 +433,8 @@ pub(super) struct Pipes {
     unpack16: wgpu::ComputePipeline,
     luma: wgpu::ComputePipeline,
     luma16: wgpu::ComputePipeline,
+    fold: wgpu::ComputePipeline,
+    unpack32: wgpu::ComputePipeline,
 }
 
 impl Pipes {
@@ -326,6 +473,8 @@ impl Pipes {
             unpack16: made("unpack16"),
             luma: made("luma"),
             luma16: made("luma16"),
+            fold: made("fold"),
+            unpack32: made("unpack32"),
         }
     }
 
@@ -410,6 +559,107 @@ impl Pipes {
             picture.height().div_ceil(16),
             1,
         );
+    }
+
+    pub(super) fn unpack_floats(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        floats: &wgpu::Buffer,
+        picture: &wgpu::Texture,
+    ) {
+        let view = picture.create_view(&Default::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut rgb"),
+            layout: &self.unpack32.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: floats.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&self.unpack32);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(
+            picture.width().div_ceil(16),
+            picture.height().div_ceil(16),
+            1,
+        );
+    }
+
+    fn fold(
+        &self,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        rgb: &wgpu::Buffer,
+        (w, h): (u32, u32),
+        parts: &[(&Rest, f32)],
+    ) -> wgpu::Buffer {
+        let folded = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut held picture"),
+            size: u64::from(w) * u64::from(h) * RGB_FLOAT as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let (first, second) = (parts[0], parts.get(1).copied().unwrap_or((parts[0].0, 0.0)));
+        let ((fw, fh), (sw, sh)) = (first.0.0.size, second.0.0.size);
+        let count = parts.len().min(2) as u32;
+        let words = [w, h, count, 0, fw, fh, 0, 0, sw, sh, 0, 0];
+        let weights = [first.1, second.1, 0.0, 0.0];
+        let bytes: Vec<u8> = words
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .chain(weights.iter().flat_map(|v| v.to_le_bytes()))
+            .collect();
+        let folding = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut folding"),
+            size: bytes.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&folding, 0, &bytes);
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut rgb"),
+            layout: &self.fold.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: rgb.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: first.0.0.values.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: second.0.0.values.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: folded.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: folding.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.fold);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(w.div_ceil(16), h.div_ceil(16), 1);
+        }
+        queue.submit([encoder.finish()]);
+        folded
     }
 
     fn packer(&self, encoded: &wgpu::Texture) -> &wgpu::ComputePipeline {

@@ -187,6 +187,7 @@ impl PlayerStats {
                 Layout::Gbrpf16 => "GBRPF16",
                 Layout::Gbrpf32 => "GBRPF32",
                 Layout::Rgbaf32 => "RGBAF32",
+                Layout::Rgbf32 => "RGBF32",
             };
             let matrix = match c.matrix {
                 Matrix::Bt601 => "BT.601",

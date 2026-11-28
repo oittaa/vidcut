@@ -27,10 +27,11 @@ pub enum Layout {
     Gbrpf16,
     Gbrpf32,
     Rgbaf32,
+    Rgbf32,
 }
 
 impl Layout {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Yuv420p,
         Self::Nv12,
         Self::P010,
@@ -47,6 +48,7 @@ impl Layout {
         Self::Gbrpf16,
         Self::Gbrpf32,
         Self::Rgbaf32,
+        Self::Rgbf32,
     ];
 
     pub(crate) fn of(p: format::Pixel) -> Self {
@@ -67,6 +69,7 @@ impl Layout {
             P::GBRPF16LE | P::GBRAPF16LE => Self::Gbrpf16,
             P::GBRPF32LE | P::GBRAPF32LE => Self::Gbrpf32,
             P::RGBAF32LE => Self::Rgbaf32,
+            P::RGBF32LE => Self::Rgbf32,
             _ => Self::Yuv420p,
         }
     }

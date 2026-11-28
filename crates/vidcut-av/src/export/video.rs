@@ -954,6 +954,7 @@ struct Session {
     given: Option<(Key, frame::Video)>,
     fed: Option<frame::Video>,
     held: Option<frame::Video>,
+    rests: Vec<(i64, crate::screen::held::Rest)>,
 }
 
 impl Session {
@@ -1016,6 +1017,17 @@ impl Session {
         let Some(p) = found else {
             return Ok(None);
         };
+        let index = match id.key {
+            Key::Frame(k) => k,
+            Key::Still(_) => 0,
+        };
+        self.rests.retain(|(i, _)| *i >= index);
+        let rest = self
+            .rests
+            .iter()
+            .find(|(i, _)| *i == index)
+            .map(|(_, r)| r.clone());
+        let p = crate::screen::held::with_rests(&p, &[(rest, 1.0)])?;
         let out = frame_ref(&p)?;
         self.given = Some((id.key, p));
         Ok(Some(out))
@@ -1053,6 +1065,22 @@ fn made_picture(
         crate::upscale::Picture::Held(held) => crate::screen::held::picture(held, made, pts, form),
         crate::upscale::Picture::Frame(f) => Ok(f),
     }
+}
+
+fn made_between(
+    retime: Retime,
+    key: &(std::path::PathBuf, u64, i64, i64),
+    (a, b): (&frame::Video, &frame::Video),
+    size: (u32, u32),
+    (t, pts): (f64, Option<i64>),
+) -> Result<frame::Video> {
+    let made = crate::interpolate::between(retime, key, a, b, size, t)?;
+    let made = made_picture(made, size, pts, form_of(a))?;
+    let rests = [
+        (crate::screen::held::rest(a), (1.0 - t) as f32),
+        (crate::screen::held::rest(b), t as f32),
+    ];
+    crate::screen::held::with_rests(&made, &rests)
 }
 
 fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
@@ -1427,6 +1455,7 @@ impl Source {
             given: None,
             fed: None,
             held: None,
+            rests: Vec::new(),
         });
         if still {
             let (frame, _) = self.current.as_ref().expect("have a frame");
@@ -1532,7 +1561,15 @@ impl Source {
         };
         let converted = clock.elapsed();
         let outs = match input {
-            Fed::Rgb(rgb) => run.run.push(i, f.pts(), &rgb)?,
+            Fed::Rgb(rgb) => {
+                let outs = run.run.push(i, f.pts(), &rgb)?;
+                if let Some(rest) = crate::screen::held::rest(&rgb)
+                    && rest.outside()?
+                {
+                    run.rests.push((i, rest));
+                }
+                outs
+            }
             Fed::Frame(f) => run.run.push_frame(i, &f)?,
         };
         let pushed = clock.elapsed();
@@ -3796,7 +3833,7 @@ impl VideoFrames {
                 crate::interpolate::name(*retime)
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
-            let mut picture = frame_ref(if weight < 0.5 { &a } else { &b })?;
+            let mut picture = crate::screen::held::whole(if weight < 0.5 { &a } else { &b })?;
             picture.set_pts(pb);
             let nearer = Made::Nearer {
                 retime: *retime,
@@ -3807,10 +3844,7 @@ impl VideoFrames {
         } else {
             let made = match frames {
                 true => crate::interpolate::between_frames(&key, &a, &b, size, weight)?,
-                false => {
-                    let made = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
-                    made_picture(made, size, pb, form_of(&a))?
-                }
+                false => made_between(*retime, &key, (&a, &b), size, (weight, pb))?,
             };
             let took = clock.elapsed();
             crate::debug!(
@@ -4048,10 +4082,7 @@ impl VideoFrames {
         let clock = Instant::now();
         let big = match frames {
             true => crate::interpolate::between_frames(&key, &a, &b, size, t)?,
-            false => {
-                let made = crate::interpolate::between(retime, &key, &a, &b, size, t)?;
-                made_picture(made, size, pb, form_of(&a))?
-            }
+            false => made_between(retime, &key, (&a, &b), size, (t, pb))?,
         };
         let matte = match smooth.clear {
             true => {

@@ -115,6 +115,7 @@ The draw:
 - The draw writes an RGB plane as RGBA. `held::Pipes` packs it to three bytes a pixel (`rgb.wgsl`). An RGB frame in memory is packed the same way.
   - Why: a plane of one byte a texel is three times as wide as the picture. A wide picture then goes past the texture size limit of the GPU.
 - `held::Pipes` unpacks a picture of 16-bit RGB into `Rgba16Unorm`, which keeps each value exactly. A device without `TEXTURE_FORMAT_16BIT_NORM` takes `Rgba32Float`.
+- It unpacks a picture of 32-bit float RGB into `Rgba32Float` ([values outside 0..1](#values-outside-01)).
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
 - `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
   - All of them share one wgpu device (`screen::offscreen`). It is on the GPU in use (`gpus::in_use`).
@@ -149,7 +150,7 @@ The draw:
   - The viewer's device imports that memory and draws from it (`shared::held_on`). Nothing comes down.
   - A held picture keeps the id of its `Gpu`. Only that `Gpu` draws from its buffer directly (`Held::on`, [gotchas](../gotchas.md#wgpu-and-egui)).
   - The stats panel shows a held picture in GPU memory (`Picture::held`). It tells whether the viewer drew it from GPU memory (`Screen::held_shared`).
-  - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24 or RGB48 in memory.
+  - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24, RGB48 or 32-bit float RGB in memory.
   - This occurs on Linux and Windows, where Vulkan on both devices has the extension for external memory.
   - Why: each picture went down to memory and up again before the viewer could show it.
 
@@ -163,7 +164,7 @@ Frames that come down:
 - In the other cases, the player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`).
   - After a share fails, these pictures come down (`held::stop_sharing`). When a clip starts to use an AI model again, the player tries to share again (`held::share_again`).
   - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
-  - They go to the viewer as RGB24 or RGB48, with no conversion on the CPU (`Screen::write_rgb`). An RGB24 still goes to the draw as it is too.
+  - They go to the viewer as RGB24, RGB48 or 32-bit float RGB, with no conversion on the CPU (`Screen::write_rgb`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 - The light meter brings SDR pictures down ([the light meter](#the-light-meter)).
 
@@ -203,7 +204,8 @@ The AI upscalers share one path in the reader:
 - A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `upscale::Run`), which starts at `upscale::first_frame`.
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
-- A picture of AI Fast or AI Slow stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
+- A picture of AI Fast or AI Slow stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`, `Layout::Rgbf32`).
+- The values outside 0..1 go around the model ([values outside 0..1](#values-outside-01)).
 - AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Slow takes and gives 16-bit SDR RGB. The scaler of macOS takes 16-bit 4:4:4 VideoToolbox frames (P416) in the timeline color space.
   - The models of vidcut refuse 8-bit pictures. Retime Process takes 16 bits too.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast and AI Slow came nearer to the real frames with 16 bits than with 8 bits.
@@ -281,6 +283,7 @@ The scaler of macOS (`macos`):
 
 - `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
 - The pictures are 16-bit RGB in the timeline color space (`Form`). The kernels read and write 16-bit values (`Ops`).
+  - The values outside 0..1 go around the models ([values outside 0..1](#values-outside-01)).
 - It runs on the shared off-screen device (`compute::Gpu`), with the GPU layers of vidcut ([GPU layers](#gpu-layers)).
   - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
@@ -303,6 +306,27 @@ On macOS (`interpolate::macos`):
 `interpolate::report` tells the last frame that a process made. The stats panel shows it (`RetimeStats`).
 
 Each kept picture tells its own process, source frames and position (`Origin`, [playback](playback.md#the-engine)).
+
+## Values outside 0..1
+
+The AI models take 16-bit RGB, which holds only the values from 0 to 1. The values outside 0..1 go around the models.
+
+- A draw into 16-bit RGB for a model also writes the part of each value outside 0..1 (`cut_off` in `picture.wgsl`).
+  - This part is 32-bit float RGB at the size of the draw (`held::Rest`).
+  - The same pass sets a flag when a value is outside 0..1 by more than half a step of 16 bits.
+  - Why the half step: the conversion to RGB gives small errors near 0 and 1. These errors stay in the 16-bit picture.
+- `Rest::outside` reads the flag. Without the flag, the rest goes, and the picture takes the 16-bit path.
+  - Thus a picture inside 0..1 gives the same output as with no rest.
+- `held::with_rests` adds the rests to the picture that a model gives (`fold` in `rgb.wgsl`).
+  - The result is 32-bit float RGB (`RGBF32LE`). The draw reads it as `Rgba32Float` (`Layout::Rgbf32`).
+  - A bilinear filter enlarges the rest of a smaller picture.
+  - The picture of an upscaler gets the rest of its own frame (`Session::take`).
+  - A frame of Retime Process or of a Smooth Cut gets the rests of its two frames, mixed by the weight of the frame (`made_between`).
+  - At a shot change, the nearer frame keeps its rest (`held::whole`).
+- Why: a model does not take values outside 0..1. A plain enlargement and a mix keep them.
+- The rest does not follow the motion that the model finds. A highlight that moves between two frames shows its part above 1 at both places.
+- The gray picture of an alpha takes no rest. Why: an alpha is always in 0..1.
+- The upscaler of macOS and the frame rate conversion of macOS take no rest ([todo](../todo/float-cache-and-ai.md)).
 
 ## GPU layers
 

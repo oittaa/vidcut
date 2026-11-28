@@ -3625,12 +3625,13 @@ impl Slot {
                     v: make((1, 1), one),
                     a: a(wgpu::TextureFormat::R8Unorm),
                 },
-                Layout::Rgb | Layout::Rgb48 => Planes {
+                Layout::Rgb | Layout::Rgb48 | Layout::Rgbf32 => Planes {
                     key,
                     y: made(
                         (w, h),
                         match layout {
                             Layout::Rgb48 => gpu.held.deep,
+                            Layout::Rgbf32 => wgpu::TextureFormat::Rgba32Float,
                             _ => wgpu::TextureFormat::Rgba8Unorm,
                         },
                         wgpu::TextureUsages::STORAGE_BINDING,
@@ -3646,7 +3647,7 @@ impl Slot {
     fn write_planes(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
-        if matches!(layout, Layout::Rgb | Layout::Rgb48) {
+        if matches!(layout, Layout::Rgb | Layout::Rgb48 | Layout::Rgbf32) {
             return self.write_rgb(gpu, picture.frame(), false, encoder);
         }
         let (cw, ch) = chroma_size(layout, w, h);
@@ -3713,7 +3714,7 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
-            (Layout::Rgb | Layout::Rgb48, _) => {}
+            (Layout::Rgb | Layout::Rgb48 | Layout::Rgbf32, _) => {}
             (Layout::Gbrpf16 | Layout::Gbrpf32, _) => {
                 let bytes = match layout {
                     Layout::Gbrpf16 => 2,
@@ -3786,10 +3787,7 @@ impl Slot {
             None => {
                 let bytes = match found {
                     Some(_) => held::rgb(frame),
-                    None => Ok(crate::buffers::packed(
-                        frame,
-                        held::rgb_pixel(held::deep(frame)).1,
-                    )),
+                    None => Ok(crate::buffers::packed(frame, held::pixel_bytes(frame))),
                 };
                 let mut bytes = match bytes {
                     Ok(bytes) => bytes,
@@ -3818,7 +3816,10 @@ impl Slot {
         };
         let planes = self.planes.as_ref().expect("made for it");
         let plane = if matte { &planes.a } else { &planes.y };
-        gpu.held.unpack(&gpu.device, encoder, &source, plane);
+        match held::float(frame) {
+            true => gpu.held.unpack_floats(&gpu.device, encoder, &source, plane),
+            false => gpu.held.unpack(&gpu.device, encoder, &source, plane),
+        }
     }
 }
 
@@ -4126,9 +4127,12 @@ fn nvdec_bytes(can: &Can, layout: Layout) -> Result<u64, String> {
         Layout::Nv12 => Ok(1),
         Layout::P010 | Layout::P210 if can.wide => Ok(2),
         Layout::P010 | Layout::P210 => Err(format!("no 16-bit textures for {layout:?}")),
-        Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => {
-            Err(format!("{layout:?} pictures aren't NVDEC's"))
-        }
+        Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Rgb48
+        | Layout::Rgbaf32
+        | Layout::Rgbf32 => Err(format!("{layout:?} pictures aren't NVDEC's")),
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -4157,7 +4161,8 @@ fn vaapi_formats(
         | Layout::Ayuv64
         | Layout::Rgb
         | Layout::Rgb48
-        | Layout::Rgbaf32 => Err(format!("{layout:?} pictures aren't VA-API's")),
+        | Layout::Rgbaf32
+        | Layout::Rgbf32 => Err(format!("{layout:?} pictures aren't VA-API's")),
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -4198,7 +4203,8 @@ fn d3d11_formats(
         | Layout::Ayuv64
         | Layout::Rgb
         | Layout::Rgb48
-        | Layout::Rgbaf32 => Err(format!("{layout:?} pictures aren't Direct3D 11's")),
+        | Layout::Rgbaf32
+        | Layout::Rgbf32 => Err(format!("{layout:?} pictures aren't Direct3D 11's")),
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -4230,7 +4236,7 @@ fn videotoolbox_formats(
         Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64 => {
             Err(format!("no 16-bit textures for {layout:?}"))
         }
-        Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => {
+        Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 | Layout::Rgbf32 => {
             Err("RGB pictures aren't VideoToolbox's".into())
         }
         Layout::Yuv420p
@@ -4258,6 +4264,7 @@ fn vulkan_layout(can: &Can, layout: Layout) -> Result<(), String> {
         | Layout::Rgb
         | Layout::Rgb48
         | Layout::Rgbaf32
+        | Layout::Rgbf32
         | Layout::Gbrp16
         | Layout::Gbrpf16
         | Layout::Gbrpf32
@@ -4518,7 +4525,8 @@ fn sixteen(layout: Layout) -> bool {
         | Layout::Rgb48
         | Layout::Gbrpf16
         | Layout::Gbrpf32
-        | Layout::Rgbaf32 => false,
+        | Layout::Rgbaf32
+        | Layout::Rgbf32 => false,
         Layout::P010
         | Layout::Yuv420p10
         | Layout::Yuv422p10
@@ -4552,7 +4560,7 @@ fn packing(layout: Layout) -> u32 {
         | Layout::Yuv444p12 => 0,
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
         Layout::Ayuv64 => 2,
-        Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => 3,
+        Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 | Layout::Rgbf32 => 3,
         Layout::Gbrp16 | Layout::Gbrpf16 | Layout::Gbrpf32 => 4,
     }
 }
@@ -4567,6 +4575,7 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
         | Layout::Rgb
         | Layout::Rgb48
         | Layout::Rgbaf32
+        | Layout::Rgbf32
         | Layout::Gbrp16
         | Layout::Gbrpf16
         | Layout::Gbrpf32 => (1, 1),

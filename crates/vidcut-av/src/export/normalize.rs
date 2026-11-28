@@ -77,6 +77,7 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
             | P::GBRAPF16LE
             | P::GBRPF32LE
             | P::GBRAPF32LE
+            | P::RGBF32LE
     )
 }
 

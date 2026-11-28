@@ -129,3 +129,66 @@ fn small_luma(id: vec3<u32>, deep: bool) {
     }
     small[id.x] = v;
 }
+
+struct Folding {
+    size: vec4<u32>,
+    first: vec4<u32>,
+    second: vec4<u32>,
+    weights: vec4<f32>,
+};
+
+@group(0) @binding(7) var<storage, read> first_rest: array<f32>;
+@group(0) @binding(8) var<storage, read> second_rest: array<f32>;
+@group(0) @binding(9) var<storage, read_write> folded: array<f32>;
+@group(0) @binding(10) var<uniform> folding: Folding;
+
+fn rest_texel(second: bool, at: vec2<i32>) -> vec3<f32> {
+    if second {
+        let i = u32(at.y * i32(folding.second.x) + at.x) * 3u;
+        return vec3<f32>(second_rest[i], second_rest[i + 1u], second_rest[i + 2u]);
+    }
+    let i = u32(at.y * i32(folding.first.x) + at.x) * 3u;
+    return vec3<f32>(first_rest[i], first_rest[i + 1u], first_rest[i + 2u]);
+}
+
+fn spread(second: bool, held: vec2<u32>, px: vec2<u32>) -> vec3<f32> {
+    let at = (vec2<f32>(px) + 0.5) * vec2<f32>(held) / vec2<f32>(folding.size.xy) - 0.5;
+    let base = floor(at);
+    let f = at - base;
+    let top = vec2<i32>(held) - vec2<i32>(1);
+    let a = clamp(vec2<i32>(base), vec2<i32>(0), top);
+    let b = clamp(vec2<i32>(base) + vec2<i32>(1), vec2<i32>(0), top);
+    let upper = mix(rest_texel(second, a), rest_texel(second, vec2<i32>(b.x, a.y)), f.x);
+    let lower = mix(rest_texel(second, vec2<i32>(a.x, b.y)), rest_texel(second, b), f.x);
+    return mix(upper, lower, f.y);
+}
+
+@compute @workgroup_size(16, 16)
+fn fold(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = folding.size.xy;
+    if id.x >= size.x || id.y >= size.y {
+        return;
+    }
+    let i = (id.y * size.x + id.x) * 3u;
+    var c = vec3<f32>(half(i), half(i + 1u), half(i + 2u));
+    c += folding.weights.x * spread(false, folding.first.xy, id.xy);
+    if folding.size.z > 1u {
+        c += folding.weights.y * spread(true, folding.second.xy, id.xy);
+    }
+    folded[i] = c.x;
+    folded[i + 1u] = c.y;
+    folded[i + 2u] = c.z;
+}
+
+@group(0) @binding(11) var<storage, read> floats: array<f32>;
+@group(0) @binding(12) var float_picture: texture_storage_2d<rgba32float, write>;
+
+@compute @workgroup_size(16, 16)
+fn unpack32(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = textureDimensions(float_picture);
+    if id.x >= size.x || id.y >= size.y {
+        return;
+    }
+    let i = (id.y * size.x + id.x) * 3u;
+    textureStore(float_picture, id.xy, vec4<f32>(floats[i], floats[i + 1u], floats[i + 2u], 1.0));
+}

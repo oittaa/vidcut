@@ -370,6 +370,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.
 - An exact source frame, the first frame of a file, a piece played backward and a still take the usual path.
 - The RGB of the pair is 16-bit, in the timeline color space (`Form`). In an SDR timeline, an HDR frame is tone-mapped into it.
+  - The values outside 0..1 go around the model ([gpu](gpu.md#values-outside-01)).
 - A picture with an alpha channel keeps it through the pair. The RGB has three channels, thus the alpha is a second picture (`Matte`).
   - The draw makes each frame of the pair twice (`Look::with_alpha`): its colors by its Alpha Mode, and its alpha as gray (`AlphaUse::Matte`).
   - The colors have the alpha in them (`AlphaUse::Multiplied`). Why: a mix of two such pictures gives the mix of the two frames over any picture below.
@@ -416,6 +417,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - A flat side in a compound clip keeps the `Placed` list of that compound clip (`VideoPiece::Flat`).
 - With Faster, a gradient with keyframes stays on one source frame (`Generated::held`).
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
+  - The values outside 0..1 go around the model ([gpu](gpu.md#values-outside-01)).
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
 - The made frame replaces the incoming layer, at full weight. With no `Smooth::mode` and no flat side, it covers the outgoing layer, and the layers below are not in the plan.
 - With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte. `Smooth::lay` gives it a place in the layers, in the mix of its compound clip.

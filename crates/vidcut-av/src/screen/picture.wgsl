@@ -1167,14 +1167,11 @@ struct Encoding {
 
 @group(0) @binding(10) var<uniform> encoding: Encoding;
 
-fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
+fn whole_rgb(code: vec3<f32>) -> vec3<f32> {
     let coded = encoding.how.x;
     let wanted = encoding.how.y;
-    if coded == wanted && encoding.how.z == 32u {
-        return code;
-    }
     if coded == wanted {
-        return clamp(code, vec3<f32>(0.0), vec3<f32>(1.0));
+        return code;
     }
     var c: vec3<f32>;
     if coded == 0u {
@@ -1184,9 +1181,16 @@ fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
     }
     c = vec3<f32>(dot(encoding.gamut0.xyz, c), dot(encoding.gamut1.xyz, c), dot(encoding.gamut2.xyz, c));
     if wanted == 0u {
-        return clamp(tone_mapped(c, encoding.tone), vec3<f32>(0.0), vec3<f32>(1.0));
+        return tone_mapped(c, encoding.tone);
     }
-    return clamp(encode(c, wanted), vec3<f32>(0.0), vec3<f32>(1.0));
+    return encode(c, wanted);
+}
+
+fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
+    if encoding.how.x == encoding.how.y && encoding.how.z == 32u {
+        return code;
+    }
+    return clamp(whole_rgb(code), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn drawn_at(x: i32, y: i32) -> vec4<f32> {
@@ -1202,6 +1206,40 @@ fn pixel_at(x: i32, y: i32) -> vec3<f32> {
     }
     let color = encoded_rgb(c.rgb / c.a);
     return select(color, color * min(c.a, 1.0), encoding.alpha.x == 2u);
+}
+
+fn whole_at(x: i32, y: i32) -> vec3<f32> {
+    let c = drawn_at(x, y);
+    if encoding.alpha.x == 0u || c.a <= 0.0 {
+        return whole_rgb(c.rgb);
+    }
+    let color = whole_rgb(c.rgb / c.a);
+    return select(color, color * min(c.a, 1.0), encoding.alpha.x == 2u);
+}
+
+@group(0) @binding(16) var<storage, read_write> cut_rest: array<f32>;
+@group(0) @binding(17) var<storage, read_write> cut_seen: atomic<u32>;
+var<workgroup> cut_here: atomic<u32>;
+
+@compute @workgroup_size(16, 16)
+fn cut_off(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    let size = textureDimensions(timeline);
+    if id.x < size.x && id.y < size.y {
+        let x = i32(id.x);
+        let y = i32(id.y);
+        let r = whole_at(x, y) - pixel_at(x, y);
+        let i = (id.y * size.x + id.x) * 3u;
+        cut_rest[i] = r.x;
+        cut_rest[i + 1u] = r.y;
+        cut_rest[i + 2u] = r.z;
+        if any(abs(r) > vec3<f32>(0.5 / 65535.0)) {
+            atomicOr(&cut_here, 1u);
+        }
+    }
+    workgroupBarrier();
+    if lane == 0u && atomicLoad(&cut_here) != 0u {
+        atomicOr(&cut_seen, 1u);
+    }
 }
 
 fn output_ycc(c: vec3<f32>) -> vec3<f32> {
