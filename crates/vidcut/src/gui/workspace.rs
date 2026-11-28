@@ -159,6 +159,29 @@ pub struct Workspace {
     pub(super) gallery: super::gallery::Gallery,
 }
 
+const ALONE: [&str; 7] = [
+    "edit.compound",
+    "edit.move",
+    "edit.trim",
+    "edit.roll",
+    "edit.slip",
+    "edit.slide",
+    "edit.delete",
+];
+
+fn alone(method: &str, params: &mut Value) {
+    if ALONE.contains(&method) {
+        params["alone"] = Value::Bool(true);
+    } else if method == "apply"
+        && let Some(list) = params["commands"].as_array_mut()
+    {
+        for c in list {
+            let m = c["method"].as_str().unwrap_or_default().to_string();
+            alone(&m, &mut c["params"]);
+        }
+    }
+}
+
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
     if (edited.year, edited.month, edited.day) == (today.year, today.month, today.day) {
         format!("edited {:02}:{:02}", edited.hour, edited.minute)
@@ -650,7 +673,14 @@ impl Workspace {
     }
 
     pub(super) fn send(&self, method: &str, params: Value) {
-        self.live.request(method, params);
+        self.live.request(method, self.linked(method, params));
+    }
+
+    fn linked(&self, method: &str, mut params: Value) -> Value {
+        if !self.timeline.options.linked_selection {
+            alone(method, &mut params);
+        }
+        params
     }
 
     pub(super) fn show_timeline(&self) {
@@ -660,7 +690,7 @@ impl Workspace {
     }
 
     pub(super) fn send_drag(&self, method: &str, params: Value) {
-        self.live.request_drag(method, params);
+        self.live.request_drag(method, self.linked(method, params));
     }
 
     pub(super) fn project(&self) -> Option<&Project> {

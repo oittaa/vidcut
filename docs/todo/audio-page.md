@@ -1,7 +1,6 @@
 # Audio page
 
 - The Audio page: the tall track view, the Mixer and the meters on one page.
-- Link and unlink of clips, Linked Selection, and the sync offset of linked clips.
 - A lane and a sound clip for each channel of a multichannel track.
 - Audio track layers, Range mode and sample editing.
 - Elastic Wave.
