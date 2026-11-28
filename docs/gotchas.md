@@ -374,10 +374,16 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - It keeps `strokeSize` and `strokeColor`, and writes them back. But it draws nothing at 4, 8 or 16.
   - It drops `-qt-stroke` styles from the rich text.
   - The outline of a title does not show in Resolve.
+- **Resolve draws a black edge of 1 pixel on each letter of a title read from a file.**
+  - In Resolve Studio 21.1.2, the reader gives each piece of text an outline width of 1.
   - Resolve Studio 21.2 sets Stroke Size 1 and a black color on each title that it reads, whatever the file says.
   - This occurs with `strokeSize` 0, with no `strokeSize`, and with the Stroke group off or not there.
-  - It draws that thin black line around the letters.
-  - A measurement of a title read from a file removes that line first.
+  - The edge goes over all that is under it. The letters are 1 pixel thinner, and they sit half a pixel higher.
+  - The same value moves the lines of `<u>`, `<o>` and `<s>` 2 to 3 pixels down.
+  - The same title typed in the Inspector, saved and opened again, or read from a `.drt` file has no such edge.
+  - The manual does not name this edge.
+  - A measurement of a title read from a file removes that edge first.
+  - vidcut does not copy this fault. A title draws the same from any source, as a title typed in the Inspector (`otio::titles`).
 - **Resolve drops metadata it doesn't know**, which includes the `vidcut` key of the clip.
   - Thus a title comes back from Resolve by its parameters alone.
   - A placed clip comes back by its Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling alone.
@@ -415,7 +421,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - `otio::picture::take_retime` extracts these parameters before picture parsing, so unmodeled `Transform` effects do not block retime import.
   - `otio::picture` writes `ClipRetime::Nearest` as 1 and `FrameBlend` as 2.
   - It writes `AiFast` as 3 and 6, `AiSlow` as 3 and 5, and `Macos` as 3 and 7.
-  - On import, 3 with 0 to 4 becomes local AI (`Macos` on macOS, `AiFast` elsewhere; deviation X93).
+  - On import, 3 with 0 to 4 becomes local AI (`Macos` on macOS, `AiFast` elsewhere; deviation X21).
   - A non-zero `motion estimation mode` with `retime process` 0, 1 or 2 stays carried and unplayed.
   - Measured in Resolve Studio 21.2.
 - **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`.
@@ -528,16 +534,23 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - `otio::effects` reads and writes the handles of the volume, the pan and the picture in Resolve's form.
 - **Resolve keeps `Enabled` and the `Key Frames` of `Fairlight Clip Pan`.**
   - Resolve Studio 21.2 keeps `Enabled` when false and reads and writes `Key Frames` with `InBez` and `OutBez` handles.
-  - A disabled pan plays centered, and an enabled eased pan holds before jumping at the second keyframe, as for volume ([X74](deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+  - A disabled pan plays centered, and an enabled eased pan holds before jumping at the second keyframe, as for volume ([Resolve's renders](#resolves-renders)).
 - **Resolve's eases of the picture are Bezier handles, as on the volume.**
   - In the Inspector, Ease Out and Ease In put a flat handle at a third of the gap. Thus the two together play an S-curve.
   - Renders of an eased zoom fit the cubic Bezier curve within 0.0004 of the zoom.
   - A handle raised by 0.2 fits the curve with its value in units of zoom.
 - **Resolve plays each ease of Dynamic Zoom as a straight line.**
+  - The manual gives four eases: Linear, Ease In, Ease Out and Ease In and Out (p. 768).
   - It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
   - All four play the same straight line, in stills and in a Deliver render.
   - This is so when the ease is set through scripting and when it is read from a file. Its Inspector menu was not tried.
-  - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)). Thus a clip with an ease other than Linear plays differently in Resolve.
+  - vidcut does not copy this fault. Its eases are curves (`Ease::of`). t is the part of the clip that has played, from 0 to 1:
+    - Linear: e = t.
+    - Ease In: e = t², slow at the start.
+    - Ease Out: e = 1 − (1 − t)², slow at the end.
+    - Ease In and Out: e = 3t² − 2t³, slow at the two ends.
+  - The box goes from the start box to the end box as e goes from 0 to 1.
+  - Thus a clip with an ease other than Linear plays differently in Resolve.
 - **Resolve reads a wipe only as its Edge Wipe effect.**
   - It writes a `Custom_Transition` named `Edge Wipe`, with `"Transition Type": "Edge Wipe"` and an effect of type 13 in its metadata.
   - The `angle` parameter (`Int`, −360 to 360, with `Key Frames`) gives the edge. 0 is the bottom, 90 the left, 180 the top and −90 the right.
@@ -743,7 +756,6 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Thus the frames near the cut show the wrong part of each shot. On the other three clips, the move near the cut is small.
   - vidcut moves the picture at the cut. The move of a shot does not use the frames of the next shot ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208)).
   - Seven more clips of three other files show the same. On two clips of the press conference, the picture pans across the cut over about 30 and 45 frames.
-  - The owner rates the pan as a bug of Resolve.
 - **While jobs render, the pencils of the other jobs look active.**
   - On the Deliver page, the pencil of the job that renders is dim. The pencils of the other jobs stay white.
   - A click on a white pencil does nothing.
@@ -775,6 +787,133 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 - **After a pick of All Filtered Clips, the Render menu shows Entire Timeline.**
   - The In and the Out are then at the span of the filtered clips. The job renders only these clips.
   - vidcut does not copy this fault. The menu shows All Filtered Clips ([spec §10.1](spec.md#101-export-page-pp-41034132)).
+- **A dissolve on the Cut page does not shorten to the media of the clips.**
+  - In Resolve Studio 21.1.1, the clips sometimes do not have media for the full second at the edit.
+  - Then the Cut page adds no dissolve and shows no message.
+  - With no media past the cut, Ctrl+T on one selected side adds the full second. The missing frames are black.
+  - The manual says that a transition is as long as the media of the clips allow (p. 1159).
+  - vidcut does not copy this fault. It shortens the dissolve to the media that each side has (`room_at`, [D50](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - When neither side has media past the cut, the Dissolve button and Ctrl+T tell this and add nothing.
+- **Up and Down in Dynamic Trim move only the playhead.**
+  - On the Cut page of Resolve Studio 21.1.1, the selected edit stays. The next J or L moves the playhead back to it.
+  - Down during a run rolls the edit to the next edit with the playhead. It removes the clip between them.
+  - The manual says that Up and Down move both the selection and the playhead (p. 731).
+  - vidcut does not copy this fault. It does what the manual says (`Action::PreviousCut`, `Action::NextCut`).
+  - Up and Down stop a run and apply it. Then they select the next edit on the same track and move the playhead to it.
+  - Thus no clip disappears.
+- **The Trim Editor draws one title-safe box over its two pictures.**
+  - The Safe Area button and View > Safe Area set overlays on the viewer (pp. 682–683, 1177).
+  - The Trim Editor also shows the title-safe guide. It is one box over the whole two-up view, fitted to the viewer.
+  - It is not one box for each picture. Thus it marks neither picture.
+  - vidcut does not copy this fault. The Trim Editor and Dynamic Trim show no guides (`paint_guides`).
+- **Delete All Keyframes removes one speed keyframe.**
+  - The keyframe items of the Mark menu act on the selected values of the Keyframes panel or the keyframe tray (p. 4343).
+  - With the panel and the tray closed, they act on the speed keyframes of the selected clips.
+  - Then in Resolve Studio 21.1.2, Delete Keyframe and Delete All Keyframes do the same thing.
+  - Each removes one speed keyframe: the one at the playhead, or else the nearest one before it. No question opens.
+  - With no row and no keyframe selected, Delete All Keyframes asks a question. In one check, the question named no value.
+  - After Delete, a Position X with no keyframes also went back to 0.
+  - vidcut does not copy these faults. With the Keyframes tab and the tray closed, Delete All Keyframes asks first (`delete_all_window`).
+  - An example is "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - With no row and no keyframe selected, Delete All Keyframes is off.
+  - Delete All Keyframes removes only the keyframes of the selected rows. A value with no keyframes keeps its value.
+- **A speed slower than 100% at the end of the media loses the last source frame.**
+  - The last key of the speed of a clip is one frame of the retimed media before the end of the media.
+  - Its source time is the end of the media less the speed of the last section.
+  - In Resolve Studio 21.1.2, a 900-frame clip has a speed keyframe at frame 30, and 50% after it. The clip shows source frames 0 to 898.
+  - The manual does not tell this.
+  - vidcut does not copy this fault. The last section shows each source frame to the end of the media, the last frame too (`Speed`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Reverse changes the speed of the next section and the length of the clip.**
+  - The Direction buttons of the Inspector act on the section under the playhead.
+  - In Resolve Studio 21.1.2, a clip of 884 frames has speed keyframes at frames 30 and 60.
+  - The middle section plays at 200%, and the last at 100%.
+  - After Reverse, frames 31 to 45 show source frames 28, 26 and so on to 0. The section plays backward to the first frame of the media.
+  - Frames 46 to 494 show source frames 2, 4 and so on to 898. The last section changes to 200%, and the clip has 495 frames.
+  - The manual does not tell this.
+  - vidcut does not copy this fault (`speed.reverse`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The sections after the turned section go on from where it stops, at their own speeds. The speed keyframes and the length of the clip stay.
+  - When the turn needs frames that the media does not have, Reverse refuses.
+- **Ease In, Ease Out and Ease In and Out of a speed section give the same result.**
+  - The Ease list of the Inspector acts on the section under the playhead. It has Linear, Ease In, Ease Out and Ease In and Out.
+  - In Resolve Studio 21.1.2, a clip has speed keyframes at frames 30 and 60, and 25% between them.
+  - Ease In, Ease Out and Ease In and Out each ease only the speed keyframe at frame 30. They give the same export and the same render.
+  - The speed keyframe at frame 60 stays linear. There, the speed changes at once.
+  - The manual does not tell this. Its Speed Change controls of the Cut page have no Ease list.
+  - vidcut does not copy this fault (`speed.ease`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Ease In eases the speed keyframe where the section starts. Ease Out eases the one where it ends.
+  - Ease In and Out eases both, and Linear neither.
+- **Source Overwrite holds the first frame of the file before the file starts.**
+  - In Resolve Studio 21.1.2, with timeline marks, the clip keeps the marked length before the start of the file.
+  - The clip holds the first frame of the file for the frames before the file starts.
+  - With marks that end before the start of the file, the whole clip is that frame.
+  - A frozen frame is not in sync with the timeline.
+  - Its OTIO export does not hold this offset. Thus the OTIO file alone places the file early.
+  - vidcut does not copy this fault. The clip starts where the file starts (`source_overwrite`).
+  - When nothing of the marked range is left, the edit writes nothing.
+- **A typed Duration gives an edit one frame longer.**
+  - The Duration field takes a typed length, and it then shows that length.
+  - In Resolve Studio 21.1.2, the edit from these marks has one frame more.
+  - `00:00:02:00` gives 51 frames at 25 fps, and 61 frames at 30 fps.
+  - The Multi Source grid and Source Clip act the same.
+  - vidcut does not copy this fault. The marks hold exactly the typed length (`marks.set` with `duration`).
+  - `00:00:02:00` gives 50 frames at 25 fps, and 60 frames at 30 fps.
+- **The Ripple Overwrite button cuts the other tracks at the start of the replaced part.**
+  - A drop of a file onto a Track 1 clip follows the rule in [D21](spec.md#12-decisions-on-gaps-and-contradictions).
+  - In Resolve Studio 21.1.2, the button and Shift+F10 act differently, on the Cut page and the Edit page.
+  - They cut each other track at the start of the replaced part. Everything from there on moves by the change in length.
+  - With a shorter clip, the frames just before that start also go away. The edit does not replace these frames.
+  - vidcut does not copy this fault. The button, the key, the CLI, IPC and MCP follow the rule of the drop (`edit.ripple_overwrite`).
+- **Ripple Overwrite leaves the cues over the replaced clip in place.**
+  - In Resolve Studio 21.1.2, a cue over the replaced clip stays where it is, also past the new end of the clip.
+  - A later cue that moves back cuts the cue that it lands on. From its landing on, it removes the cues of the replaced clip.
+  - The user then has to re-time the cues.
+  - vidcut does not copy this fault. Cues keep the frames of Track 1 under them (`follow`, [D57](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A cue loses its part over the frames that the edit takes out. A cue with no frames left goes away.
+  - A longer clip splits a cue across the end of the replaced part. Both parts keep the text.
+  - Later cues move with their picture.
+- **Source Overwrite at the end of the timeline picks its reference by the length of the last clip.**
+  - The playhead is at the end of the timeline, after the last clip. The last clip shows part of the marks.
+  - With a last clip of 139 frames or less, the reference is that last clip.
+  - With a last clip of 140 frames or more, the reference is the first clip that shows part of the marks.
+  - This is measured in Resolve Studio 21.1.2, in the Multi Source viewer, with one layout. The reason for the limit is not known.
+  - vidcut does not copy this fault (`by_playhead`).
+  - With no clip under the playhead, the reference is the first clip that shows part of the marks. The length of the last clip plays no part.
+- **Auto Sync in an opened group puts the clip on the timeline offline.**
+  - In Resolve Studio 21.1.2, Auto Sync in an opened group replaces the pool item at once.
+  - The clip on the timeline goes offline, and it stays offline after Save Sync.
+  - vidcut does not copy this fault. Auto Sync changes only the places in the window (`multicam.layout`).
+  - Save Sync writes them to the same group (`multicam.set`). Cancel loses nothing.
+- **The Sync Clips icon makes a new group from the files of a saved group.**
+  - In Resolve Studio 21.1.2, the icon always starts a new group from the timecodes. The old group stays in the pool.
+  - A saved group plus one new file gives a new group of all the files, at their timecodes.
+  - Thus the icon brings back a file that a drag dropped, and it loses the saved places.
+  - vidcut does not copy this fault. The icon on files that are already one saved group opens that group (`sync_clips_files`).
+  - A file that the group dropped does not count as new.
+- **Sync by Sound drops a file by its place in the bin.**
+  - In Resolve Studio 21.1.2, Sync by Sound takes the files of a row in bin order.
+  - With c2 first in the bin and c1 second, it drops c1 with no message. But nothing is over the frames 0 to 375 of c1.
+  - vidcut does not copy this fault. Files on a row go by their place from the sound. A tie goes by bin order (`camera_row`).
+  - A file keeps only the part after everything before it. A file with no such part is not on the row.
+  - Thus c2 and c1 give the same result as c1 and c2: c1 at 0 whole, c2 at 500 with head 125.
+- **Source Overwrite with a timeline Out alone puts the clip out of sync.**
+  - In Resolve Studio 21.1.2, the timeline has an Out mark and no In.
+  - Then the clip starts at the first frame of the timeline with the first frame of the file.
+  - The clip is not in sync, also when a clip with the same timecode is under it.
+  - vidcut does not copy this fault. The reference is the first clip before Out with shared timecode (`by_marks`).
+  - The new clip goes in sync from where the file starts to Out.
+- **A file deleted from the Media Pool stays in its group.**
+  - In Resolve Studio 21.1.2, the group keeps its 3 angles.
+  - vidcut does not copy this fault. `media.remove` also takes the file out of its groups. A group with no file left goes too.
+- **A camera opened alone from the Multi Source grid loses the last frame of the marks.**
+  - In Resolve Studio 21.1.2, an In at 250 and an Out at 350 in the Multi Source grid give 101 frames.
+  - Opening a camera alone gives the file an In at 250 and an Out at 349. An edit then takes 100 frames.
+  - vidcut does not copy this fault. Opening a camera alone gives the file the marks of the grid as they are (`SourceGrid::file_marks`).
+  - An edit from the grid and an edit from the camera alone take the same frames.
+- **A new compound clip loses the dissolve between two selected clips, unless the dissolve is selected too.**
+  - The dissolve goes inside only when it is also selected. It then plays inside ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126)).
+  - Else the dissolve goes away. The user did not ask for this loss.
+  - vidcut does not copy this fault. A dissolve goes inside when its clips go inside, and it plays there (`edit.compound`).
+  - `edit.decompose` brings such a dissolve back.
 
 ## Resolve's scopes
 
@@ -901,6 +1040,103 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - With two video tracks, some ranges gave no file, with clips on V1 and V2 under the range. Other ranges gave the clip of one track only.
   - The runs on three such timelines show no rule for these cases.
   - vidcut does not copy this fault. Individual clips renders each clip with a frame in the range, on each track ([spec §10.1](spec.md#101-export-page-pp-41034132)).
+- **Resolve renders the curve of a Cross Fade as straight lines between points.**
+  - In Resolve Studio 21.1.1, the points are on the curve, at 48 kHz.
+  - They are the first sample, every 1000th sample from there and from the edit, and the last sample.
+  - Early in a +3 dB fade, the gain is up to 0.06 off.
+  - vidcut does not copy this fault. The gain of each sample is the value of the curve (`Curve::gain`, [D50](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The two differ by more than 1% only in the 20 ms where a curve leaves silence or reaches it.
+- **The Ducker times a stereo target track at half its controls.**
+  - The Ducker times a mono target track by its controls (pp. 778–779, [D76](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - On a stereo target track, Rise Time, Hold and Recovery Time act at half their values.
+  - The fall starts at the same time as on a mono track.
+  - The two channels get different gains while the gain changes. This moves the stereo image while the track dips.
+  - These facts come from renders of Resolve Studio 21.1.1. The cause of these differences is not known.
+  - vidcut does not copy this fault. Every track has the timing of a mono track, whatever its channels.
+  - Every channel of the track gets the same gain (`Dip`). Thus a Hold of 150 ms holds the dip for 150 ms.
+- **With Ease Out then Ease In, the volume and the clip pan hold and then jump.**
+  - In Resolve Studio 21.1.1 and 21.2, an ease is a Bezier handle on its keyframe.
+  - With Ease Out then Ease In, the volume and the clip pan hold the first value. They jump at the second keyframe.
+  - The manual says that an ease starts or stops a change slowly (p. 1112).
+  - A hold and a jump is a step in the sound.
+  - vidcut does not copy this fault. The curve between two volume or pan keyframes is always their Bezier curve (`keyframes::value_at`).
+  - Thus Ease Out followed by Ease In gives a smooth S-curve ([D81](spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Resolve's scaling filter reads 16 source pixels across and 16 down at each scale.**
+  - The formula is measured down to a shrink of 18.6:1 ([spec §13](spec.md#the-scaling-filter)).
+  - Above a shrink of 8:1, the filter gives some source pixels more weight than others. Thin lines then make bands.
+  - In Resolve Studio 21.1.2, one-pixel lines every 3 source pixels read 64 at a shrink of 24:1. Their mean is 117.3.
+  - A 4K picture with one-pixel lines every 25 pixels has a mean of 70.4. At a shrink of 32:1, the filter alone reads 64 to 84.
+  - Timeline thumbnails and storyboards often shrink this far.
+  - vidcut does not copy this fault. Up to a shrink of 8:1, vidcut uses the same filter.
+  - Above a shrink of 8:1, vidcut first halves the picture until the shrink that remains is 8:1 or less (`halvings`).
+  - With the halving, the 4K picture at 32:1 reads 69 to 71.
+- **A very negative line spacing draws only the first line of a title.**
+  - Line spacing moves the lines closer, and lines can overlap (p. 1184).
+  - These are measurements in Resolve Studio 21.1.2 from files, with Arial at size 96.
+  - At −112, Resolve draws both lines. At −200 and at −500, it draws only the first of two lines.
+  - At −200 on the first line alone, or on the last line alone, it also draws only the first line.
+  - The manual does not name lines that disappear.
+  - vidcut does not copy this fault. It draws all the lines at any line spacing (`lay_out`).
+- **The text box of a Scroll stays at 51% of the width when the alignment changes.**
+  - In Resolve Studio 21.1.1, the default lines of a Scroll align left, at 1% of the width of the picture.
+  - Thus its middle alignment is 1% right of the middle of the picture.
+  - Its right alignment goes 1% past the right edge, and it cuts the last letters.
+  - vidcut does not copy this fault (`Title::usual_position`). The middle alignment is at the middle of the picture.
+  - The right alignment ends at 99% of the width.
+- **A Scroll line wider than the picture loses the letters at its edges.**
+  - In Resolve Studio 21.1.2, a line of a Scroll that is wider than its text box stays on one line. The box is as wide as the picture.
+  - The picture cuts the line at its edges, and those letters are lost.
+  - vidcut does not copy this fault. The line wraps at 90% of the picture width, as the lines of other titles do (`Title::SAFE`).
+- **A Glow makes the frame black around a smaller picture.**
+  - These are measurements in Resolve Studio 21.1.2 and 21.2, with Use Alpha on (Glow, p. 3590). An effect added in the GUI has it on.
+  - The output of a Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.
+  - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
+  - The float renders of 21.2 on two pictures with alpha bands and rings have an alpha of 1 in each pixel.
+  - Over white, they give the same picture as over black.
+  - vidcut does not copy this fault (`fs_glow`). The colors of the output are those of Resolve. Thus over black, vidcut gives the same picture.
+  - The alpha of the output is the larger of the alpha of the picture and the brightest color of the output.
+  - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
+- **A Film Grain jumps at Symmetry 0.4 and 0.6.**
+  - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559), with Grain Only and Softness 0, at each 0.02 of Symmetry.
+  - At exactly 0.4 and 0.6, the standard deviation of the noise is 0.0109 and 0.0855. At the values on each side, it is about 0.026.
+  - vidcut does not copy this fault. Symmetry follows a table of the measured curves and blends between them (`SYMMETRIES`).
+  - The table has no curve at 0.4 and 0.6. There, vidcut blends the curves at 0.38 and 0.42, and at 0.58 and 0.62.
+  - Thus a small change of Symmetry does not make a large change of the grain ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
+- **Resolve's generators have wrong pixels in an HLG timeline and at an odd size.**
+  - These are measurements in Resolve Studio 21.1.2. Both faults repeat.
+  - In an HLG timeline, the YCbCr Ramp has green × 1.0634 for x 0 to 204 at 1920 wide. This gives a step at x 205.
+  - At an odd size (1001 × 777), column 0 has noise in red on the BT.2111 Color Bars and SMPTE Color Bar.
+  - The other kinds have extra colors there.
+  - vidcut does not copy these faults. The YCbCr Ramp has no step. Its code values are the same in each timeline (`ycbcr_ramp`).
+  - Each kind follows its rule at each size, in each column (`bands`).
+- **A Mosaic Blur Triangle gives other colors in a corner at the side of the frame.**
+  - These are measurements in Resolve Studio 21.1.2. The manual does not tell this.
+  - A Triangle has corners at the sides of the frame, from triangles with a middle off the frame.
+  - When that middle is 0.691 of a column step or more off the frame, the corners take other colors.
+  - Two renders of Aspect 2 at Pixel Frequency 25 differ in these corners. Thus the result does not repeat.
+  - vidcut does not copy this fault (`mosaic_column`).
+  - A corner has the box at the middle of the own triangle of the pixel, clamped into the frame, at each distance.
+- **A Mosaic Blur gives a pixel exactly on a cell edge to either cell.**
+  - These are measurements in Resolve Studio 21.1.2. The manual does not tell this.
+  - Where a cell edge falls exactly on a pixel, Resolve gives that pixel to either cell. The renders show no rule.
+  - vidcut does not copy this fault. That pixel goes to the cell on the right or below (`MOSAIC_NEAR`).
+- **A ProRes 4444 file with the Alpha Mode Straight holds premultiplied colors.**
+  - With Straight, a ProRes 4444 file still holds premultiplied colors. ProRes 4444 XQ is not measured.
+  - Thus the file does not agree with its own setting.
+  - vidcut does not copy this fault. With `video.alpha_mode` `straight`, ProRes 4444 and 4444 XQ hold straight colors.
+- **An OpenEXR in drop-frame timecode has no drop-frame flag.**
+  - In drop-frame timecode, the frame digits of `timeCode` skip the dropped numbers. The drop-frame flag (bit 6) is 0.
+  - This is so at 29.97, 59.94 and 119.88 fps.
+  - The `timeCode` of OpenEXR follows SMPTE 12M. There, bit 6 is the drop-frame flag.
+  - Without the flag, a reader takes the digits as non-drop-frame.
+  - At 29.97 fps, a frame count from them is then 2 frames too high for each minute that drops numbers.
+  - vidcut does not copy this fault. The frame digits are the same, and vidcut sets the drop-frame flag (`packed_timecode`).
+- **A subtitle shadow moves 1 pixel less to the right than its X offset.**
+  - These are measurements on 1920×1080 and 3840×2160 timelines.
+  - A positive X offset moves the shadow 1 pixel less than the Inspector shows.
+  - An offset of 40 moves it 39 pixels, and an offset of 2 moves it 1 pixel.
+  - A negative X offset moves it by the value that the Inspector shows, within 0.1 pixel.
+  - vidcut does not copy this fault (`shade`). The shadow moves by the value that the Inspector shows, to the left and to the right.
 
 ## Resolve's key files
 
@@ -945,6 +1181,38 @@ These facts come from measurements in Resolve Studio 21.2, by hand.
   - The slider of Pattern Width goes from 0.001 to 0.5. The field keeps a typed 1000000.
   - About 5 seconds later, Resolve 21.2.0.0006 crashes. The project has the state of its last automatic save.
   - vidcut refuses a pattern side outside 0.001 to 0.5, and a side of the search area outside 0.001 to 1 ([spec §8.19](spec.md#the-tracker)).
+
+## Resolve's imports
+
+These facts come from imports in Resolve Studio 21.1.1, by hand and through its scripting API. An item gives another version where it has one.
+
+- **A GIF of one frame with a delay comes in as a video clip.**
+  - A GIF of one frame comes in as a still only when its frame has no delay.
+  - With a delay, it is a video clip as long as the delay. For example, 0.1 s came in as 3 frames at 25 fps.
+  - A WebP of one frame is a still, whatever the duration of its frame.
+  - A clip of a few frames of one picture is a blink that the user cannot trim longer.
+  - vidcut does not copy this fault. A GIF or WebP of one frame is a still (`VideoStreamInfo`, [D38](spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Resolve's import of subtitle files loses text and styles.**
+  - A Windows-1252 file shows U+FFFD for each accented letter.
+  - Resolve leaves out a WebVTT cue that has no hours in its times.
+  - A cue that starts before the previous cue ends starts at that end instead. When nothing of such a cue remains, Resolve leaves it out.
+  - `{\an8}` shows as text. Resolve ignores WebVTT `line`, `align` and color classes.
+  - From a TTML file, Resolve Studio 21.2 keeps only the cues of the first region. With no named region, it imports nothing.
+  - In 21.2, an italic span in a TTML cue makes the whole cue italic. An italic span after a `<br/>` does not come in italic.
+  - vidcut does not copy these faults (`subtitles::parse`).
+  - It reads UTF-8, UTF-16 and Windows-1252. It reads WebVTT times without hours, and every TTML cue, span and region.
+  - It keeps cues that overlap.
+  - `{\an8}`, WebVTT `line` and the place of a TTML region put a cue at the top, middle or bottom.
+  - WebVTT `align` gives the alignment of the lines.
+  - Italic, bold, underline and colors come in from all three formats, on the words that have them.
+- **Resolve takes a broken `.cube` file with no message.**
+  - In Resolve Studio 21.1.2, the script call `SetLUT` returns True on each of these files:
+    - A lower-case size line gives no LUT.
+    - A file with no size line gives no LUT.
+    - Too few rows give a wrong picture.
+    - `LUT_3D_SIZE 1` gives a black picture.
+  - The window of Resolve Studio 21.2 shows no message for these files.
+  - vidcut does not copy this fault. `media.set` and `project.set` refuse the file and give the reason (`cube::read`).
 
 ## transcribe.cpp and its models
 

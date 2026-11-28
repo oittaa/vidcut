@@ -78,7 +78,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
   - The Effects tab also has a Generators page (p. 766, §8.17).
-  - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
+  - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X17).
   - A Keyframes tab sits beside the Inspector.
   - The Timeline menu opens that tab.
   - `gui.show keyframes` opens that tab.
@@ -89,7 +89,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Each value that can have keyframes has a track, in a group for its section.
     - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
     - Volume and Pan are tracks in an Audio group.
-    - Speed is one track, in a Speed group. It shows the speed keyframes of the clip (D48, [X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
+    - Speed is one track, in a Speed group. It shows the speed keyframes of the clip (D48, [gotchas](gotchas.md#resolves-edits)).
     - The ⋯ menu has Display All Parameters and Display Parameters with Keyframes. All is the default.
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
@@ -130,8 +130,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Shift and a drag on a curve point change only the time or only the value (p. 1262). The direction of the first movement selects which one.
     - A drag on a Bezier handle also moves the other handle of that keyframe. The two are then on one line.
       - The other handle goes to the opposite direction on the screen and keeps its length on the screen.
+      - vidcut: the other handle stops at the next keyframe on its side (not measured).
       - The value scale of the curve stays during the drag.
-      - With Alt, the handle moves alone ([X161](deviations.md#x161-alt-moves-a-handle-alone-and-the-other-handle-stops-at-a-keyframe)).
+      - vidcut: with Alt, the handle moves alone. The other handle stays.
+      - vidcut: the handle of a first or a last keyframe moves alone. Its keyframe has no other handle to line up.
     - A drag on the line between two keyframes moves the two keyframes together.
       - It changes only their values, and the two become the selection.
     - A click on the line clears the selection. A double-click on it adds a keyframe.
@@ -176,11 +178,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
     - Mark > Delete All Keyframes removes the selected keyframes. With none selected, it asks first. Then it removes all the keyframes of the selected rows.
-      - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)). Cancel has the focus.
+      - The question names the values, the number of keyframes and the clip ([gotchas](gotchas.md#resolves-edits)). Cancel has the focus.
     - These three items act on the clip that the tab shows.
     - Resolve's Mark menu also has Add Static Keyframe (Ctrl+]) and a Keyframe Timeline Mode submenu. On the Cut page, both are off.
-    - With the tab and the tray closed, they act on the speed keyframes of the selected clips (D48, X94).
-    - With the tray open, the tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe (X94).
+    - With the tab and the tray closed, they act on the speed keyframes of the selected clips (D48, [gotchas](gotchas.md#resolves-edits)).
+    - With the tray open, the tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe ([gotchas](gotchas.md#resolves-edits)).
     - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
     - Ctrl+V there pastes them on the selected clips (p. 1258).
       - The first keyframe goes at the playhead. The others keep their distance from it.
@@ -197,7 +199,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
       - A button is off when no selected keyframe takes its ease.
-      - The eases are the curves of the volume line (X74). The anchor point's keyframes take no ease (D92).
+      - The eases are the curves of the volume line ([gotchas](gotchas.md#resolves-renders)). The anchor point's keyframes take no ease (D92).
     - A right-click on a keyframe of the editor opens no menu, on the Cut page and on the Edit page.
     - vidcut: a right-click on a keyframe also sets the ease. On a selected keyframe, it sets the ease of all the selected keyframes.
     - vidcut: with two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
@@ -207,7 +209,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - vidcut: a double-click on an empty part of a track or its curve adds a keyframe at the frame under the pointer, inside the clip.
       - A double-click outside the clip adds nothing.
       - The playhead moves to the new keyframe.
-    - The curve of a value shows under its track (X90).
+    - The curve of a value shows under its track.
     - vidcut: the bar under the tracks shows the selected keyframe: the name of the value, the time, the value, the ease and Delete.
       - The value is in the units of the Inspector.
       - With two or more keyframes selected, the bar shows their number, their ease and Delete.
@@ -223,7 +225,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
   - The Sync Bin tab ([§7.4](#74-sync-bin-pp-708710)).
-  - vidcut's bar also has Jobs (deviation X3) and Help.
+  - vidcut's bar also has Jobs and Help. Jobs shows the progress of each job, and can cancel it (§10).
   - vidcut: F1, or Help in the top bar, opens the Help window.
     - It lists every shortcut, with one action in each row.
     - A ? beside a less obvious action explains it in a few plain words.
@@ -288,7 +290,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Clips dragged from the file system go into the Media Pool, or into a bin in the Bin list (p. 364).
     - For the Cut page, the manual says macOS only (p. 372).
     - Folders dragged into the Bin list come in as bins (p. 365).
-    - vidcut takes files and folders dropped anywhere on its window into the open bin (deviation X66).
+    - vidcut takes files and folders dropped anywhere on its window into the open bin (deviation X15).
     - It brings in the files as Import Media does, and each folder as Import Media Folder does.
   - In a project made without a format, the first video sets the format without a question (D37).
 - **Stills and image sequences** (pp. 114, 366, 1194):
@@ -307,7 +309,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Import of the same file puts the item back in the pool. Its clips are then online again.
   - vidcut also puts back the removed subclips of that file (not measured).
 - **Views** (pp. 638, 661–665):
-  - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
+  - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata. In vidcut, it opens the Clip Info window.
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
   - **List:** a column for each field. A click on a header sorts by that field.
   - **Metadata** (pp. 661–663): a card for each clip, in as many columns as fit the pool.
@@ -383,7 +385,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - The start is the same count of frames. Thus 01:00:00:00 at 25 fps is 00:50:00:00 at 30 fps.
       - The import gives a warning with the two rates and the speed.
 - **Clip Info** (vidcut):
-  - Clip Info shows all that vidcut knows of a file.
+  - Clip Info is a window. It shows all that vidcut knows of a file.
   - The info button of the metadata strip or of a thumbnail corner opens it. The menu of a pool item also opens it.
   - It reads the file again for its container and streams: codecs and profiles, bit rates, color tags, channel layouts, languages and tags (`media.details`).
   - Copy puts all of it on the clipboard as text.
@@ -436,7 +438,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The other files of the row keep their timecode distance from that file. The order of the request plays no part.
   - **The row rule:** files of one named row do not overlap.
     - Files go in timecode order. With one timecode, they go in the order of the request.
-    - By `sound`, files go by their places from the sound. A tie goes by the order of the request ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
+    - By `sound`, files go by their places from the sound. A tie goes by the order of the request ([gotchas](gotchas.md#resolves-edits)).
     - A file keeps only the part after everything before it. A file with no such part is not on the row, and `dropped` names it.
     - A file does not move. It loses frames at its start, and `head` gives those frames.
     - Example: tags 01:00:05:00 and 01:00:10:00 on one row, 750 frames each. The first stays whole. The second keeps 125 frames from 01:00:35:00.
@@ -457,7 +459,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The whole files line up. An item with marks then uses only the frames between them, at the place of those frames.
     - The empty front stays. Thus marks at 100 to 400 on both files, 250 frames apart, give 650 frames.
   - vidcut compares the first sound stream of each file, with all its channels (not measured).
-  - Each file is placed by its own sound. The row rule then acts in the order of the places ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
+  - Each file is placed by its own sound. The row rule then acts in the order of the places ([gotchas](gotchas.md#resolves-edits)).
     - Thus of two files that overlap on a row, the earlier file stays whole. The later file loses its head.
     - A file that starts after the other file ends keeps all its frames.
     - The order of the request counts only in a tie. Of two files with one place and one length, the first in the order of the request stays whole. The second file is not on the row.
@@ -474,7 +476,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - `multicam.list` gives each group with its layout. `media.get` and `media.list` give `group` for a file in a group.
   - `multicam.rename` and `multicam.move` act on the group. `multicam.remove` removes the group, and its files stay.
   - A group can have one file.
-  - `media.remove` also takes the file out of its groups. A group with no file left goes too ([deviation X128](deviations.md#x128-removing-a-file-takes-it-out-of-its-groups)).
+  - `media.remove` also takes the file out of its groups. A group with no file left goes too ([gotchas](gotchas.md#resolves-edits)).
   - No command places a group on the timeline.
   - The pool does not show a group as an item. A file in a group has a blue sync badge.
   - `multicam.set` sets the rows and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708)). `multicam.create` takes them as `rows`, and the group then starts at 01:00:00:00.
@@ -500,22 +502,33 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Invert: b + (c − b) × (1 − α).
   - A ProRes 4444 with alpha and no tags is Straight.
   - vidcut reads the alpha channel of each file as Straight until `media.set` changes it.
-- **Upscale** (pp. 288, 432–433; deviation [X91](deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)):
+- **Upscale** (pp. 288, 432–433; deviation [X19](deviations.md#x19-upscale-is-on-or-off-with-ai-by-default)):
   - Upscale enlarges the pictures of a media item with a better upscaler before they are fitted.
   - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
-  - Right-click the media in the pool, or use the Upscale section of the Inspector.
+  - Right-click the media in the pool, or use the Upscale section of the Inspector. That section acts on the media of the selected clips.
   - Upscale is Off or On.
-  - Its Upscaler is Project Settings, the default, AI or Classic. Project Settings has the upscaler of the project: Auto, AI or Classic.
-    - AI is a neural network on the GPU. It has no settings.
+  - Its Upscaler is Project Settings, the default, AI Slow, AI Fast or Classic. Project Settings has the upscaler of the project: Auto, AI Slow, AI Fast or Classic.
+    - Auto is AI on macOS, and AI Fast elsewhere.
+    - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Fast).
+    - On macOS, the upscalers are AI and Classic. AI Fast and AI Slow are off there: exports and the viewer refuse them.
+    - AI on macOS is the super-resolution scaler of macOS 26 and later. It takes SDR and HDR pictures up to 1920×1080, the limit of macOS for video.
+    - macOS downloads its models only when the user agrees. macOS does not give their size. Thus the question says that the size is unknown.
+    - AI Slow is the one-step diffusion model FlashVSR+ Turbo, on the GPU. It is slow, and it adds more detail. It has no setting.
+    - AI Fast is the video model NanoVSR 5.4M, on the GPU. It has no Noise Reduction and no other setting. It takes SDR and HDR pictures of any size.
+    - The weights of AI Slow (7.0 GB) and AI Fast (25 MB) download at their first use. vidcut does not ship them.
     - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
   - The first time that a change needs an AI upscaler, vidcut asks to download its weights.
   - AI takes the picture in the timeline color space (§13). In an SDR timeline, HDR media is tone-mapped first.
-  - In an HDR timeline, AI Slow refuses HDR media, and the Inspector shows a warning (X98).
+  - In an HDR timeline, AI Slow refuses HDR media, and the Inspector shows a warning (X22).
+  - vidcut refuses a picture when the picture needs enlarging and the upscaler cannot take it.
+    - The viewer and an export use one rule and one message. The message names the file and the reason.
+    - An export refuses before it starts. The viewer shows the same message over its picture.
+    - An export also refuses an AI upscaler that it needs without its weights, or without a GPU that can run the network.
   - A placed picture is made at most 4 times as large as its source, before it is placed.
   - A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Upscale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
   - View > Show Upscale shows it in the viewer (`viewer.upscale`). It is off by default, as it costs playback speed.
-  - With AI, the viewer then shows the result of the AI upscaler, as the export makes it.
+  - With an AI upscaler, the viewer then runs the upscaler of the export on each picture that the export enlarges. With AI Slow, a picture can take seconds.
   - `media.set` sets `upscale`, `upscaler` and `sharpness`. With `download`, it downloads the weights first.
 - **Relinking media** (pp. 668–669):
   - An item whose file is missing has the mark MISSING.
@@ -698,7 +711,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Action is 93% of the extents width and height, centered. Title is 90% (D90).
   - Center is a cross through the middle of the extents.
   - The guides draw in Timeline mode and in both source modes.
-  - They do not draw in the Trim Editor or during Dynamic Trim (X80).
+  - They do not draw in the Trim Editor or during Dynamic Trim ([gotchas](gotchas.md#resolves-edits)).
   - An export never shows them.
   - The choice is a user preference (`viewer.guides`), not part of the project.
   - With no fields, `viewer.guides` toggles framing guides.
@@ -1036,8 +1049,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With In alone, no marked range counts: the reference is a clip at In, else any clip.
     - In each, the lowest track comes first, then the earliest clip.
     - The new clip goes from In to Out. With no Out, it goes to the file's end.
-    - It stops at the file's end. It starts at the file's start ([deviation X113](deviations.md#x113-source-overwrite-starts-where-the-file-starts)).
-    - With Out alone, the reference is the first clip before Out. The new clip goes in sync from the file's start to Out ([deviation X126](deviations.md#x126-source-overwrite-keeps-sync-with-a-timeline-out-alone)).
+    - It stops at the file's end. It starts at the file's start ([gotchas](gotchas.md#resolves-edits)).
+    - With Out alone, the reference is the first clip before Out. The new clip goes in sync from the file's start to Out ([gotchas](gotchas.md#resolves-edits)).
   - **With source marks and no timeline marks,** the playhead plays no part, except past the timeline's end.
     - The reference is the first clip that overlaps the marked range: lowest track first, then the earliest clip.
     - The marked range goes in. A source Out with no In goes from the file's start to Out.
@@ -1063,7 +1076,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.
     - When the edit made a new video track, the playhead stops at the old timeline end at the latest.
-  - With no overlap, or on an empty timeline, nothing changes and vidcut tells why ([deviation X114](deviations.md#x114-source-overwrite-tells-when-it-writes-nothing)).
+  - With no overlap, or on an empty timeline, nothing changes.
+    - vidcut: the request returns the error `INVALID_EDIT` for the CLI, IPC and MCP. The window shows a short message.
   - **By the synced group:** `group` lines up the file by its synced group, as the Sync Bin does. In the other views, the edit does not use the group.
     - The rules above do not change. The place in the group takes the place of the timecode.
     - Only clips of that group count as the reference.
@@ -1107,7 +1121,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With no clip at the frame, nothing changes, and no message shows.
   - It has no default key. The manual names no key for it.
   - vidcut: the Out frame is in the copy, as in the other edits (D16). Resolve leaves it out ([gotchas](gotchas.md#resolves-edits)).
-  - vidcut: the face model of `motion.find` looks at the first frame of the copy ([deviations X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - vidcut: the `fast` face model of `motion.find` ([§8.19](#the-tracker)) looks at the first frame of the copy.
     - With no face, the copy has Zoom 2.0 at the middle.
     - With faces, the zoom is at most the `zoom` of the request, usual 1.5. Why: the manual says about 150%.
     - The zoom is the largest up to that value at which the box around the faces, 1.1 times as large, fits in the frame. It is never under 1.0. Why: faces spread across the frame give 1.0.
@@ -1185,8 +1199,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With one file selected, no window opens.
   - With fewer than two files, no window opens. The row rule counts too: two files of one camera with one start and one length open no window.
   - Two files of one camera open one row and one cell when they do not overlap or overlap only in part. Two files with no name and no overlap do the same.
-  - Files that are one saved group open that group ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
-  - A file that the group's `dropped` lists is not a new file, so the icon opens the group ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
+  - Files that are one saved group open that group ([gotchas](gotchas.md#resolves-edits)).
+  - A file that the group's `dropped` lists is not a new file, so the icon opens the group ([gotchas](gotchas.md#resolves-edits)).
   - A saved group plus a new file opens as a new sync, by the rows of [§3](#3-media-pool-ch-34-pp-653675). Files of two saved groups or more do the same.
     - Cancel adds nothing. Save Sync makes a new group, and the earlier groups stay.
   - "Open Sync Group…" in the menu of a file in a group opens its newest group.
@@ -1239,9 +1253,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each row that it lines up gets one sync icon, the sync lock.
   - With In or Out, one mark counts for each row ([§3](#3-media-pool-ch-34-pp-653675)). A file stays whole. A file with no mark lines up at its first frame by In, and at its end by Out.
   - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
-  - By sound, files of a row go by their places, and a tie goes by bin order. Thus the result does not depend on bin order when the places differ ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
+  - By sound, files of a row go by their places, and a tie goes by bin order. Thus the result does not depend on bin order when the places differ ([gotchas](gotchas.md#resolves-edits)).
   - Auto Sync reads the marks at that moment.
-  - On a saved group, the result waits for Save Sync ([deviation X119](deviations.md#x119-auto-sync-on-a-saved-group-waits-for-save-sync)).
+  - On a saved group, the result waits for Save Sync ([gotchas](gotchas.md#resolves-edits)).
 - **By hand:**
   - Keys and drags act on the selected or dragged clip only. The other clips of the row stay.
   - A drag moves a clip on a row with no sync icon. On a row with one, nothing moves.
@@ -1250,7 +1264,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Shift+Comma moves it 5 frames earlier (p. 707).
   - These keys work by the key's place too, so Shift+Comma and Shift+Period work on a layout that makes them other signs.
   - Comma on a clip at the start changes nothing. A drag before the start stops the clip at the start, and the other clips stay.
-  - A drag on an opened group changes the group at Save Sync ([deviation X120](deviations.md#x120-a-drag-in-an-opened-group-changes-the-group-at-save-sync)).
+  - A drag on an opened group changes only the places in the window. Save Sync writes them to the group.
 - **Overlap by a drag:** the moved clip stays as it is. The other clip of the row gives way when the drag ends.
   - The moved clip's start is inside the other: the other ends at the moved clip's start. Its tail is gone, also past the moved clip's end.
   - The moved clip covers the other's start and ends inside it: the other starts at the moved clip's end. Its tail stays in place.
@@ -1262,7 +1276,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The start of that group is always 01:00:00:00, with any tags and after Auto Sync.
   - After the rule of far gaps, the frames of a group run from the first row's start to the last row's end.
   - A Save Sync on an opened group keeps the group, its name and its start. It is `multicam.set`.
-  - A clip on the timeline does not follow ([deviation X122](deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
+  - A clip already on the timeline stays as it is. vidcut has no clip of a group on the timeline: Source Overwrite makes clips of one file ([todo](todo/sync-bin.md)).
 - **Cancel,** Escape or the close button changes nothing.
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
@@ -1379,8 +1393,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves the head or the tail of a clip to the playhead.
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for each selected clip (D48).
   - The Speed Change controls of the Inspector set the same (pp. 736–737).
-  - vidcut: the Speed section of the Inspector tab (X70).
-  - vidcut: the window also sets Retime Process (X93).
+  - vidcut: the Speed section of the Inspector tab.
+    - It has no Pitch Correction. Sound always keeps its pitch (D48).
+    - Ripple Timeline starts as Ripple On. A change of it applies to the Inspector only.
+  - vidcut: the window also sets Retime Process ([§8.15](#815-transform-and-crop-pp-766768)), for the selected clips with a picture.
   - Keyframes: Maintain Timing or Stretch to Fit (p. 1217).
     - Maintain Timing keeps each keyframe at its frame of the clip.
     - Stretch to Fit keeps each Transform, Crop and Composite keyframe on its source frame. The volume, the pan and the effects keep their timing.
@@ -1411,7 +1427,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A slide right stops in the same way at a later clip.
     - A clip with a gap on both sides also slides. (not measured)
   - L slides the clip right. It also slips its content right, to earlier frames, as a drag does.
-  - Space plays around the playhead, and Up/Down go to another edit (D32, deviation X28).
+  - Space plays around the playhead, and Up/Down go to another edit (D32, [gotchas](gotchas.md#resolves-edits)).
   - W again deselects the edit.
 
 ### 8.7 J/L cuts (p. 728)
@@ -1528,19 +1544,19 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D50.
 - **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
 - **Smooth Cut** (p. 759):
-  - The button puts a 0.2-second Smooth Cut centered on the edit nearest the playhead (deviation X100).
+  - The button puts a 0.2-second Smooth Cut centered on the edit nearest the playhead (deviation X23).
   - Its Mode is Better, its Process is AI and its Ease is None.
   - Where the sounds of the clips meet at that edit, a Cross Fade 0 dB of the same length goes on the sound too.
 - **A selected dissolve** (pp. 759, 761):
   - A click selects it.
   - Its right-click menu has Change Transition Duration, then Start on Edit, Center on Edit and End on Edit. The current one is greyed.
   - Change Transition Duration takes a timecode or frames (Format, remembered), or a 1, 5 or 15-second preset.
-  - The duration is shortened to the media (deviation X27).
+  - The duration is shortened to the media ([gotchas](gotchas.md#resolves-edits)).
   - Ctrl+D also opens Change Transition Duration.
   - Delete removes the dissolve.
   - A change of its length or its alignment keeps its type: a wipe stays a wipe.
   - A drag on an edge of a dissolve, in either timeline, makes it longer or shorter evenly about the edit.
-  - The drag works at the scale of that timeline. The length is shortened to the media (X27).
+  - The drag works at the scale of that timeline. The length is shortened to the media ([gotchas](gotchas.md#resolves-edits)).
   - A tooltip shows the move of the edge and the new length. The drag also selects the dissolve.
   - Each of these also acts on the Cross Fade at the edit.
 - **How it plays** (pp. 747, 760, 1159, 1173):
@@ -1613,7 +1629,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It uses the same length rules as a dissolve.
   - With the Mode Better, both clips play on, as in a dissolve. Each frame morphs the frame of one clip into the frame of the other.
   - With the Mode Faster, it morphs two still frames. They are the outgoing clip at the first frame of the transition and the incoming clip at its last frame.
-  - The Process makes the frames between the two pictures: AI Fast, AI Slow or Frame Blend (deviation X99). Frame Blend gives a Cross Dissolve.
+  - The Process makes the frames between the two pictures: AI Fast, AI Slow or Frame Blend. Frame Blend gives a Cross Dissolve.
+    - AI Fast is the default. On macOS, the Process is AI, the default, or Frame Blend.
+    - These are the processes of Retime Process ([§8.15](#815-transform-and-crop-pp-766768)). Frame Blend needs no model and no download.
+    - A request sets it as `process`: `ai`, `ai_slow` or `frame_blend`. `ai` is the AI of the computer that plays or exports.
   - Ease and Transition Curve are as for a Push. Frame f of n frames shows the morph at curve(f) + 0.5 / n, at most 1.
   - The morph takes the nearest source frame of each clip. A clip with a speed change shows no frames between its source frames.
   - A Solid Color side acts as a still side. Two Solid Colors give the same picture as two stills of those colors.
@@ -1633,14 +1652,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The values of Resolve are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "smooth_cut", "mode": "faster", "process": "frame_blend"}`.
   - An OTIO file holds it as Resolve's Smooth Cut, with its values.
+    - AI Fast, AI and AI Slow are Speed Warp on. Frame Blend is Speed Warp off.
 - **The Transitions tab** (pp. 759–761):
   - It has cards for Cross Dissolve, Dip To Color Dissolve and Smooth Cut under Dissolve.
   - It has a card for Edge Wipe under Wipe, and cards for Push and Slide under Motion.
   - The Edge Wipe of the card has the Angle 0. It comes in from the bottom.
   - The Push of the card is Push Left. The Slide of the card is Left-Right, In. The Smooth Cut of the card is the Smooth Cut of the button.
-  - A drag of a card onto an edit of a video track adds that transition there, one second long. A Smooth Cut is 0.2 seconds long (X100).
+  - A drag of a card onto an edit of a video track adds that transition there, one second long. A Smooth Cut is 0.2 seconds long (X23).
     - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
-    - The length is shortened to the media (X27).
+    - The length is shortened to the media ([gotchas](gotchas.md#resolves-edits)).
   - A drag of a card onto a transition changes its type. The length stays.
   - A double-click on a card adds it on the edit nearest the playhead, as the Dissolve button does.
   - The right-click menu of a card has Add to Selected Edit Points and Clips.
@@ -1650,13 +1670,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **The Transition Inspector** (pp. 747–748):
   - A double-click on a transition selects it and opens the Inspector.
   - The Inspector shows the selected transition: Transition Type, Duration and Alignment.
-  - Duration is in frames, with the time beside it. A change keeps the alignment. The length is shortened to the media (X27).
+  - Duration is in frames, with the time beside it. A change keeps the alignment. The length is shortened to the media ([gotchas](gotchas.md#resolves-edits)).
   - Alignment is Start on Edit, Center on Edit or End on Edit.
   - An Edge Wipe also has Angle, Border, Feather, Color and Ease.
   - A Dip To Color Dissolve also has Color. A change goes to the project when the color picker closes.
   - A Push and a Slide also have Preset, Border, Feather, Color, Motion Blur and Ease. A Slide also has Direction: In or Out.
   - Border shows the band in pixels of the timeline width, as Resolve shows it. A change of Angle, Border or Motion Blur goes to the project when the drag ends.
-  - A Smooth Cut also has Mode, Process and Ease. Mode is Faster or Better. Process is AI Fast, AI Slow or Frame Blend (X99).
+  - A Smooth Cut also has Mode, Process and Ease. Mode is Faster or Better. Process is AI Fast, AI Slow or Frame Blend.
   - A Process with an AI model that is not on the computer asks for its download first, as Retime Process does.
   - An Edge Wipe, a Push, a Slide and a Smooth Cut also have Transition Curve: the curve at the playhead, from 0 to 1. The row has the value, the previous-key and next-key arrows, a keyframe button and Reset.
     - The frame of a key counts from the first frame of the transition. A key can be outside the transition, as in Resolve.
@@ -1705,6 +1725,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The cue goes on that track, also when the destination control of the track is off. The track does not become the shown track.
   - vidcut: Add Subtitle in Timeline Actions puts the cue on the shown track, else on the oldest subtitle track. With no subtitle track, it first makes Subtitle 1.
   - You type its text in the Inspector. The text shows on the cue as you type it.
+  - vidcut: the Subtitle section of the Inspector tab has the In, the Out, the text and the position of the cue.
+    - A double-click on a cue, Enter with one cue selected, Edit Subtitle… and Add Subtitle open it.
+    - While the Inspector tab shows, a click on a cue also shows its section.
+    - The position shows in the viewer when the user selects it.
+    - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
+    - A line under the heading has the In and Out fields, the duration and "N Characters", in that order.
+    - Digits fill a timecode from the right, as in the timecode field of the viewer. A `+` or `-` before the value moves the edge by that much.
   - The Captions list, at the bottom of the Inspector, shows every cue of the track (pp. 1231, 1233).
   - Each row of the list has its number, its In above its Out, its text and its characters per second (CPS).
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
@@ -1712,6 +1739,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
   - vidcut: the text of a row shows on two lines at most. The list scrolls the row of a newly opened cue to its middle.
   - vidcut: the line with Add New also has the name of the track. The Delete button of the section deletes the open cue.
+  - vidcut: the row of the open cue is highlighted. While the user types, the row shows the typed text.
+  - vidcut: Prev, Next and a click on a row first put in the changes of the section. Then they select the cue and move the playhead to its start.
   - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Copy (Ctrl+C), Cut (Ctrl+X) and Paste (Ctrl+V) take cues too:
@@ -1721,7 +1750,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Else it goes on the lowest subtitle track whose control is on.
     - When no control is on, a new subtitle track takes it.
     - A pasted cue trims a cue that it partly covers. vidcut applies the whole rule of Add New.
-  - Details: D56, D57, D78, D79; deviation X43.
+  - Details: D56, D57, D78, D79.
 - **Keyframes:**
   - A cue acts as a picture as large as the frame. It takes the Transform, Crop and Composite keyframes of a clip (§8.15, D75), without an anchor point, flips, Dynamic Zoom, composite mode or effects.
   - The Inspector of a cue has no Keyframe buttons. The Keyframes tab and the keyframe tray show the item selected first, a cue or a clip.
@@ -1753,7 +1782,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - They relink as video clips do.
   - Insert Selected Subtitles to Timeline Using Timecode puts each cue at its timecode.
   - Drag a subtitle clip onto a subtitle track, or above the video tracks for a new track. Its first cue goes where you drop it.
-  - Details: D58; deviations X40, X41.
+  - Details: D58; deviation X10; [gotchas](gotchas.md#resolves-imports).
 - **Export** (pp. 1247–1248):
   - File > Export Subtitle, or Export Subtitle on a subtitle track header, writes a track as SRT or WebVTT.
   - On the Deliver page, a render can write each selected track as a file beside it (IMSC1, DFXP, SRT, WebVTT).
@@ -1766,6 +1795,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Only Resolve Studio has it (p. 1234).
   - It is in Timeline > AI Tools (p. 1234), and it is the first item of Timeline Actions (p. 646).
   - A dialog box shows its progress (p. 1235).
+  - vidcut: it is a job, and no progress dialog opens. Jobs shows its progress. It also downloads its models as a job.
   - More languages come in a package of the Extras Downloads Manager (p. 1235).
   - It transcribes the speech of the timeline's In–Out range, or of the whole timeline.
   - The cues go onto the highest subtitle track. If there is no subtitle track, it makes one.
@@ -1775,7 +1805,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - the characters per line (42), and one or two lines
     - the frames between subtitles (0)
   - A muted track is not heard.
-  - Details: D62; deviations X3 and X56.
+  - Details: D62; deviation X12.
 - **Local speech models** (vidcut):
   - Every build has Create Subtitles from Audio. `subtitles.transcribe` runs transcribe.cpp on this computer.
   - It runs on the GPU, unless GPU acceleration is off.
@@ -1818,7 +1848,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It hears the tracks ticked in its dialog. By default, these are the tracks that playback hears.
   - It aligns where Silero VAD hears speech with where the cues show.
   - It finds one offset, up to 60 s in either direction. Where a speed change from 0.95 to 1.05 fits better, it also finds that speed.
-  - Also match words reads the words of the speech with Parakeet Ultra, as Create Subtitles from Audio does (X56).
+  - Also match words reads the words of the speech with Parakeet Ultra, as Create Subtitles from Audio does (X12).
   - Find shows a preview: the offset, or one offset for each section, the speed and how many cues move.
   - Under Details, Find shows how clear the peak was. With words, Details also shows which cues matched.
   - For the matched cues, it shows their errors after the offset of the speech and after the correction.
@@ -1887,7 +1917,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Word Highlight colors the word.
   - Update Word Timings times the words of a cue to the speech after a correction.
   - Synchronize Word Timings does this for a track, also for captions not made from the speech.
-  - Details: D69, D70; deviation X58.
+  - vidcut: the animation is part of the style of a track (D69). The Subtitle Track section of the Inspector and `track.set` set it.
+  - vidcut: the looks of Create Subtitles from Audio put the speech on a new track that is already animated.
+  - vidcut: word times follow edits and new text (D70).
+  - Details: D69, D70.
 - **Style presets** (pp. 1239–1240):
   - The option menu of the Subtitle Inspector saves the style of a track under a name.
   - It loads a preset onto a track as one change that you can undo.
@@ -1969,7 +2002,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - `markers.list` with `media` lists them. `markers.move`, `markers.set` and `markers.remove` take their ids.
   - On the timeline, Delete takes the words out of every unlocked track (`edit.ripple_delete_words`, D63).
     - With Ripple On, the gap closes. With it off, a gap is left (`lift`).
-    - The edges move to the quiet points around the words (`quiet`, X92).
+    - The edges move to the quiet points around the words (`quiet`, X20).
   - On the timeline, Cut takes the selected words out of every unlocked track and leaves a gap (`edit.cut` with `range`).
   - Copy on the timeline also keeps the selected words for Paste (`edit.copy` with `range`).
   - Paste puts them in at the first selected word, else at the playhead (`edit.paste`).
@@ -1998,7 +2031,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - First, Previous, Next and Last go to the differences.
     - The project keeps the words that it took. They stay when their transcript is removed.
   - `analyze.words`, `media.leave_out`, `media.words.set`, `edit.ripple_delete_words`, `edit.cut`, `edit.copy` and `edit.paste` do the same by request.
-  - Details: D63, D73; deviations X61, X92.
+  - Details: D63, D73; deviations X14 and X20.
 
 ### 8.14 Titles (pp. 762–764, 1176–1178)
 
@@ -2008,8 +2041,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - You move, trim and superimpose them like clips.
   - With Hover Scrub Preview on, a hover over the thumbnail of a title shows the title in the viewer.
   - An animated title moves as the pointer crosses its thumbnail (p. 762).
-  - vidcut: the Titles tab, and Add Title in Timeline Actions or the Timeline menu (deviation X52).
+  - vidcut: the Titles tab, and Add Title in Timeline Actions or the Timeline menu.
   - You drag the cards of the Titles tab onto either timeline, or double-click a card to add it at the playhead.
+    - vidcut: the double-click also opens the Title section of the Inspector tab.
   - A title clip shows its title on the timeline.
   - Details: D65, D66.
 - **Editing** (pp. 763–764, 1176):
@@ -2047,7 +2081,19 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title. (not measured)
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
-  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
+  - vidcut: the Title section of the Inspector tab sets a title.
+    - A double-click on a title clip, or Edit Title… in its right-click menu, opens the section.
+    - While the Inspector tab shows, a click on a title clip also shows its section.
+    - The section has the text, the kind of the title, the alignment and a Look list (D71).
+    - It shows the place of the title, or of each line of a lower third, as X and Y in frame pixels.
+    - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
+    - A value at its usual number shows an empty box with that number as a hint. A number in the other box of a pair keeps this usual number.
+  - vidcut: when the pointer is near a title, the viewer shows its outline, its corners and the handle above it. They work without a click.
+    - Over them, the pointer becomes a move, resize or hand cursor.
+    - The corners zoom the title, and the pointer shows the zoom. The zoom stops at 400%.
+    - A scroll moves only across.
+    - The title shows during the drag. One `titles.set` follows on release.
+  - vidcut: a double-click on a title in the viewer also opens the Title section.
     - The double-click puts the caret at the pointer. A click or a drag in the text moves the caret or selects letters.
     - A typed letter takes the style of the letter before it. At the start of a line, it takes the style of the letter after it.
     - Esc or a click outside the title keeps the change and ends the edit. Then each step of the edit goes in as its own `titles.set`.
@@ -2055,16 +2101,17 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - vidcut edits the two lines of a lower third as one text, inside one outline. vidcut also edits a Scroll in place.
     - `gui.show` with `title_text` starts the edit, and `gui.close` ends it.
   - With several titles selected, the Inspector shows nothing.
-  - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
+  - vidcut: the Title section does not show then. The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
   - L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe.
   - Title safe is 90% of the picture by default (p. 1178).
   - Text is one body of text.
   - Scroll moves its text from the bottom of the picture to the top. The length of the clip sets its speed.
   - vidcut has these five kinds:
-    - Markup in the text styles words separately (X53).
+    - Markup in the text styles words separately (D65).
+    - The B, I, U, Overline, Strike, Super, Sub, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words. Plain takes it off.
     - The X and Y of a title are frame pixels from the bottom left, with Y up.
-    - A scroll has its own motion and line spacing (X55).
+    - A scroll has its own motion and line spacing (X11; [gotchas](gotchas.md#resolves-renders)).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
 - **Clip stages** (p. 763):
@@ -2169,7 +2216,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A switch to Scroll drops the zoom and rotation keyframes and the position handles.
   - A `look` in `titles.set` keeps the keyframes and the position handles. A look that makes a scroll drops what a switch to Scroll drops.
   - A `look` adds no keyframe. Its number for a value with keyframes shows when the last of them goes.
-- **Later** (X53):
+- **Later** ([todo](todo/titles.md)):
   - Text+ and Fusion titles (p. 1178)
   - animation
   - Safe area overlays in the viewer are in §4.5 (D90).
@@ -2184,10 +2231,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Transform and Crop show and hide their handles on the selected clip, as T and Shift+T do.
     - Each of these two buttons is lit while its handles show.
     - With Transform come its switch, Flip Horizontal, Flip Vertical and Reset. With Crop come its switch and Reset.
-    - A switch that is off keeps the values of the tool, and they do nothing. The Inspector has the same switch (X70).
+    - A switch that is off keeps the values of the tool, and they do nothing. The Inspector has the same switch.
     - An OpenTimelineIO export writes a tool that is off at its usual values.
     - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
-    - Dynamic Zoom has no switch (X70).
+    - Dynamic Zoom has no switch.
     - The Color tool comes after them ([§8.25](#825-auto-color-pp-117-771-31283129)).
 - **Transform** (p. 767):
   - A drag inside the box of the clip moves it.
@@ -2196,10 +2243,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Shift keeps a move on one axis.
   - Its values are Zoom (width and height, linked or not), Position X and Y, and Rotation Angle about the anchor point.
   - Its other values are Pitch, Yaw, and Flip Horizontal and Vertical.
-  - vidcut: the shape and snapping of the title handles (X52).
-  - vidcut: the Inspector shows lengths in pixels, zoom in percent and rotation in degrees (X70).
+  - vidcut: a title has handles of its own ([§8.14](#814-titles-pp-762764-11761178)).
+  - vidcut: the Inspector shows lengths in pixels, zoom in percent and rotation in degrees (X17).
   - vidcut: the zoom and the rotation work about the anchor point, and a cross marks it in the viewer (D92).
-  - vidcut: Pitch and Yaw are in the Inspector, and the viewer does not set them (D93, X83).
+  - vidcut: Pitch and Yaw are in the Inspector, and the viewer does not set them (D93, X18).
   - Details: D75.
 - **Crop** (p. 768):
   - A handle on each side crops that side.
@@ -2212,9 +2259,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each box is moved and resized in the viewer, and a path shows the motion.
   - Swap reverses the boxes. The ease is Linear, Ease In, Ease Out or Ease In and Out.
   - Shift keeps a drag on one axis.
-  - vidcut: Alt+T shows the boxes. The eases are curves of their own (X67).
+  - vidcut: Alt+T shows the boxes. The eases are curves of their own ([gotchas](gotchas.md#resolves-otio-files)).
   - vidcut: the Tools row has Dynamic Zoom, lit while its boxes show. With it come Swap, a menu of the four eases and Reset.
   - vidcut: the right-click menu of the clip has Dynamic Zoom and Reset Dynamic Zoom.
+  - vidcut: the Dynamic Zoom rows of the Inspector are Off or On, the start box, the end box, the Ease, Show Boxes and Swap.
+    - Each box has a Zoom, an X and a Y: Start Zoom, Start X and Start Y, and End Zoom, End X and End Y.
+    - Off takes the Dynamic Zoom off the clip. A value typed while it is off turns it on.
+    - Show Boxes shows the start box and the end box in the viewer, as Alt+T does. On also shows them.
+    - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
   - Details: D75.
 - **Composite** (p. 769):
   - Opacity goes from 0 to 100. The tracks below show through the rest.
@@ -2232,7 +2284,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Rotation, Pitch and Yaw are values of their own. Each crop side, Softness and Opacity are values of their own.
   - The flips have no keyframes.
   - Dynamic Zoom has no Keyframe button. Its two boxes stay at the ends of the clip.
-  - A Keyframe button sits between Previous and Next arrows on each keyed value (X70).
+  - A Keyframe button sits between Previous and Next arrows on each keyed value.
   - Resolve's Inspector also has a Keyframe button between Previous and Next arrows on each group.
     - The groups with buttons are Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, and Volume and Pan.
     - The text of the Video panel names no Keyframe buttons for Transform, Cropping or Dynamic Zoom (pp. 734–737).
@@ -2244,7 +2296,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A right-click on the button sets the ease of the keyframes on that frame. The anchor point stays linear.
     - The arrows go to the keyframes of all the values of the section.
     - The button sends one `apply` with a `keyframes.add`, `keyframes.remove` or `keyframes.set` for each value.
-  - A right-click on the button sets the ease. The ease is the volume curve (X74).
+  - A right-click on the button sets the ease. The ease is the volume curve ([gotchas](gotchas.md#resolves-renders)).
   - After the first keyframe, a change at another frame adds a keyframe.
   - This applies to the Inspector and to the viewer handles.
   - The Reset of a value removes its keyframes. The Reset of a section removes that section's keyframes.
@@ -2259,13 +2311,44 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Cropping has Left, Right, Top and Bottom in pixels, Softness, and Retain Image Position.
   - Dynamic Zoom has Ease and Swap.
   - Retime and Scaling has Retime Process, Motion Estimation, Scaling and Resize Filter (pp. 739–740).
-  - vidcut: Retime Process is in its Speed section, with AI models in the place of Optical Flow (X93).
-  - vidcut: the project's Retime Process is in Project Settings. Its default is Auto, not Nearest (X93).
+  - vidcut: Retime Process is in its Speed section, with AI models in the place of Optical Flow (X21).
+    - Its values are Project Settings, the default, Nearest, Frame Blend, AI Fast and AI Slow. On macOS, they are Project Settings, Nearest, Frame Blend and AI.
+    - `clip.set` sets it too. The Change Clip Speed window also sets it ([§8.6](#86-trimming-pp-693-716-718-726732)).
+    - AI Fast (RIFE 4.25) and AI Slow (EMA-VFI) are AI models on the GPU. Each makes the frame from the motion between the two source frames.
+    - The models make a frame at any point between the two source frames.
+    - Their weights download at their first use: 25 MB and 264 MB. vidcut does not ship them.
+    - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
+    - On macOS, AI is the frame rate conversion of macOS. macOS does not download a model for it.
+    - An export on another system refuses AI. An export on macOS refuses AI Fast and AI Slow.
+    - Between two source frames with a shot change, the frame is the nearer source frame.
+    - On OTIO import, Optical Flow with modes 0 to 4 reads as the AI of this computer: AI on macOS and AI Fast elsewhere.
+  - vidcut: the project's Retime Process is in Project Settings. Its default is Auto, not Nearest (X21).
+    - Its values are Auto, Nearest, Frame Blend, AI Fast and AI Slow. On macOS, they are Auto, Nearest, Frame Blend and AI.
+    - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.
+    - Auto gives Nearest to clips at 100% or faster, and to frozen and backward clips.
+    - The lists name the process that Auto and Project Settings give on this computer, as in Project Settings (AI Fast).
   - vidcut: Scaling is in a Scaling group after Composite ([input scaling](#input-scaling-pp-292293)).
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
-  - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: an Inspector tab in the place of the Media Pool (X17).
+    - It shows the Title section of a title and the Subtitle section of a subtitle. Other clips get the picture, Speed, Audio, Equalizer and Dialogue Leveler sections.
+    - Of the Title, Subtitle and Subtitle Track sections, one shows at a time. Another selection puts its changes in first. A field that is not valid then loses its change.
+    - With nothing selected that it can show, it shows one line.
+    - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
+    - The Transform, Crop, Equalizer and Dialogue Leveler sections have a switch at the left of their names. The Pan row has a switch too.
+    - Dynamic Zoom, Composite, Speed and the other Audio rows have no switch ([gaps](todo/gaps.md)).
+    - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
+    - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
+    - The link button of Zoom turns the link on again, and makes Zoom Y equal to Zoom X. A picture with two different zooms shows the link off.
+  - vidcut: its Audio section has Volume, Pan, Mute, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound.
+    - Mute does what Mute and Unmute in the right-click menu of the clip do.
+    - A drag on Volume sends one change on release. The sound does not change during the drag.
+    - The Audio section has no Reset of the whole section.
+    - Normalize in the header opens Normalize Audio Levels for the clips of the section ([§9](#9-audio-pp-642-649650-743744-771-773-778779)).
+    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question (§9).
+    - Pan sets the pan of the selected clips (§9).
+    - The Compressor row and the Noise Reduction row each have a switch and a button that opens the window of the effect (§9).
+    - The Audio section has no Pitch or Music Remixer ([todo](todo/audio-page.md)).
   - vidcut: an Equalizer section and then a Dialogue Leveler section follow the Audio section ([§9](#9-audio-pp-642-649650-743744-771-773-778779)).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector:**
@@ -2302,7 +2385,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: on the Effects page, Shift+Space opens the Select Tool window, and Effects Search does not open.
   - A generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API add none.
   - vidcut: `effects.add` refuses a generator. A drag of a card onto a generator does nothing, and the double-click and Add to Selected Clips skip it.
-- **Inspector** (vidcut, X70):
+- **Inspector** (vidcut, X17):
   - The Inspector shows the effects of the first selected clip, after its Upscale section. A change applies to that clip only.
   - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
   - An effect that is off stays on the clip and does nothing.
@@ -2332,8 +2415,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Zoom X and Zoom Y multiply the sigma by √(Zoom X × Zoom Y), in both directions.
   - Across and down are the directions of the frame. A rotated clip thus blurs across the frame, not across the clip.
   - It also blurs the alpha. Over a lower track, the edge of a smaller picture fades into that track.
-  - Reflect and Wrap-Around match a blur of one pass. Black and Replicate do not ([X101](deviations.md#x101-black-and-replicate-borders-follow-their-plain-definitions)).
-  - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
+  - Reflect and Wrap-Around match a blur of one pass. Black and Replicate do not ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
+  - A portrait timeline gives a sigma 3% smaller than the rule ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
 - **Mosaic Blur** (p. 3538). Its values and their defaults:
   - Pixel Frequency goes from 0.1 to 4000 and is 100.
   - Smooth Strength goes from 0 to 1 and is 0.
@@ -2467,15 +2550,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Alpha Masks Sources: the mask is `a` × the mask of `c`.
     - Usual Behavior gives the same picture as Alpha Masks Sources.
     - Alpha Is Source: the mask is `max(0, a − th + 0.001) / (1 − th + 0.001)`, with `th` the Alpha Level Threshold, for all three colors.
-    - The glow works on `c` as on an opaque picture. The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - The glow works on `c` as on an opaque picture. The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([gotchas](gotchas.md#resolves-renders)).
     - Opacity and Blend mix `c` and that output. Opacity 0.5 and Blend 0.5 give the same picture.
     - With Use Alpha off, the mask is the same. The output is `a` × the result on `c`, and `a` stays.
     - Invert Effect takes the negative of the input and of the output, with an alpha of 1.
 - **Glow in vidcut:**
-  - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+  - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([gotchas](gotchas.md#resolves-renders)).
     - The colors are those of Resolve. Thus over black, vidcut gives the same picture.
-  - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels with no known rule. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
-  - vidcut makes the Atmosphere noise itself. It has the statistics of Resolve's noise at the defaults, not its pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
+  - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels with no known rule. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
+  - vidcut makes the Atmosphere noise itself. It has the statistics of Resolve's noise at the defaults, not its pattern ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
     - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
     - Its size is proportional to Scale × the height of the picture on the frame. Its middle is the middle of the frame.
     - Follow FX Tracker changes nothing.
@@ -2538,11 +2621,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A change of Texture, Grain Size, Grain Aspect Ratio or Animate On Every Refresh gives a new pattern.
 - **Film Grain in vidcut:**
   - vidcut has no Optimized Mode, as the Inspector of Resolve has none.
-  - vidcut makes the noise itself. It has the spectrum and the statistics of Resolve's noise, not its pattern ([X143](deviations.md#x143-the-noise-of-a-film-grain-has-its-own-pattern)).
+  - vidcut makes the noise itself. It has the spectrum and the statistics of Resolve's noise, not its pattern ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
     - One picture of noise comes from an inverse Fourier transform at the size of the canvas. Each frame reads it at another random shift.
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
-    - Resolve gives spikes in the standard deviation at exactly 0.4 and 0.6. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
+    - Resolve gives spikes in the standard deviation at exactly 0.4 and 0.6. vidcut does not copy them ([gotchas](gotchas.md#resolves-renders)).
     - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
   - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
     - The table of `K` for Grain Size 0 to 0.4 comes from fits to Resolve's renders.
@@ -2703,7 +2786,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Window has no Generator tab. 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, SMPTE Color Bar and the BT.2111 Color Bars have its OTIO shape.
   - vidcut shows no Generator section for those eight kinds (not measured).
   - The Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
-  - vidcut: the Inspector shows a Generator section with these rows, over the picture sections (X70).
+  - vidcut: the Inspector shows a Generator section with these rows, over the picture sections.
 - **Picture sections:**
   - A Solid Color gives the same picture as a still of its color. This holds with Transform, Crop and composite modes.
   - With Pitch and Yaw, the edge pixels of vidcut differ from those of Resolve. A still in Resolve gives the same picture as the generator.
@@ -2803,7 +2886,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     | PQ Full | 589, 592, 370; 491, 586, 592; 478, 584, 355 | 551, 347, 584; 544, 334, 225; 296, 201, 582 |
 
   - In an HDR timeline, these kinds keep their SDR code values. The BT.2111 Color Bars are the same in SDR, PQ and HLG.
-  - vidcut does not copy two faults in these pictures ([X129](deviations.md#x129-generators-have-the-correct-picture-where-resolve-has-a-fault)).
+  - vidcut does not copy two faults in these pictures ([gotchas](gotchas.md#resolves-renders)).
 - **Length and dissolves:**
   - A generator can have any length.
   - Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
@@ -2820,7 +2903,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - The other kinds have the `Effect Name` `Generator`, `Type` 42 and `Display Type` 3. They have only the `Display Name` parameter.
   - The `generator_kind` of a BT.2111 Color Bar has a lower-case word: `BT.2111 Color bar PQ Full`. Its clip name has `Color Bar`.
   - vidcut reads its kinds back from that shape.
-  - vidcut keeps a generator of any other section as data. It plays as a gap, and an import warns about it (X9).
+  - vidcut keeps a generator of any other section as data. It plays as a gap, and an import warns about it (X3).
 
 ### 8.18 Compound clips (pp. 1052–1054, 1126)
 
@@ -2854,6 +2937,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - Clip markers, a clip's Transform and a disabled clip's state go inside.
   - A compound clip can hold a compound clip.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. Else it is removed.
+  - vidcut: a dissolve goes inside when its clips go inside, and it plays there. `edit.decompose` brings it back.
   - A dissolve to a clip that is not selected is removed.
   - Subtitle items stay out. Passing a subtitle item with other items leaves it on its subtitle track, and a subtitle alone makes no compound clip.
     - vidcut: `edit.compound` takes clip ids only, so a subtitle cue id is refused.
@@ -2875,6 +2959,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - With only In, the range runs to the end of the timeline. With only Out, the range starts at the start of the timeline.
   - With no marks, the menu does not have this item or Create Compound Clip….
   - A range with no clips does nothing, and shows no message.
+  - vidcut: a range with no clips is refused, with a message.
   - Clips outside the range stay on the timeline.
   - A copy goes into the Media Pool. The marks stay.
 - **Create Compound Clip…**, on the same menu, under Create SubClip:
@@ -2997,7 +3082,7 @@ The Cut page chapters do not tell about compound clips. The Edit page has them (
   - The dissolve uses the frames that a trim hides in the compound clip.
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
   - A side with a composite mode also acts as on a plain clip.
-  - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
+  - At a compound clip with no hidden frames, the dissolve is shortened to the media ([gotchas](gotchas.md#resolves-edits)).
   - One picture inside a compound clip gives its composite mode to the transition, frame by frame:
     - On a frame with one picture inside, the transition has the mode of that picture.
     - On a frame with two pictures inside, or inside a transition of the compound clip, the transition has no mode.
@@ -3816,8 +3901,17 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Remove (vidcut: Disconnect) leaves the Center at the point that it shows on that frame.
   - vidcut: the menu of a connected Center also has Disconnect.
   - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern.
-- vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-  - The Tracker gets a pattern for each thing.
+- vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip. It is `motion.find`.
+  - It looks at each frame of the file in the clip. The subjects are `face`, the default, `text`, `person` and `vehicle`.
+  - A vehicle is a bicycle, a car, a motorcycle, a bus, a train or a truck.
+  - The Tracker gets a pattern for each thing, with its motion path.
+  - A found path holds its first box for 0.2 seconds before the first frame where the model finds its thing. It holds its last box for 0.2 seconds after the last such frame.
+    - It holds no box over a shot change or outside the clip.
+    - Before and after that, it has no box. Thus a mask that follows it ends soon after its thing is gone.
+  - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
+  - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
+  - A face has two models. `fast`, the default, is a small network on the CPU. `slow` is a larger network on the GPU.
+  - After a Find, the status line tells how many things it found.
   - Blur there adds a Mosaic Blur before Media Out. For each pattern that has a path, it adds a mask on the blur. The mask follows that pattern with Follow Size.
   - A pattern without a path does not move. Blur gives it no mask.
 
@@ -5206,7 +5300,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Reframe can set no keyframes on a clip.
 - vidcut:
   - `picture.reframe` moves the picture of one or more clips of video files, and stores the move as Position keyframes.
-    - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame (X176).
+    - Without `reference` and `subject`, it follows the point of each frame that stands out most. A saliency model (UNISAL, with its weights for the DHF1K videos) makes a map of each frame.
       - The point is the mean place of the map, weighted by the share of the looks at each place to the power 8.
       - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them.
       - Why 8: it brings the move much nearer to that of Resolve than the plain mean. Powers from 4 to 32 give almost the same move.
@@ -5576,9 +5670,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Hold: 150 ms.
     - Recovery Time: 750 ms.
   - A graph shows the level of the source against the ducking.
-  - vidcut: `track.set` with `duck`, and the strip of the track in the Mixer. Alt+D turns it on or off (X69).
-  - vidcut gives every track the timing of a mono track (X68).
-  - vidcut adds Detect: Speech, the default, or Sound level (X69).
+  - vidcut: `track.set` with `duck`, and the strip of the track in the Mixer. Alt+D turns it on or off (X16).
+  - vidcut gives every track the timing of a mono track ([gotchas](gotchas.md#resolves-renders)).
+  - vidcut adds Detect: Speech, the default, or Sound level (X16).
   - The curve, the timing and the limits are in D76.
   - vidcut: the Ducking window draws the graph above its controls. `analyze.ducking` gives its numbers.
     - The graph shows the seconds around the playhead, with the playhead at the center. It needs no playback.
@@ -5748,7 +5842,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - A clip at −100 on a track at 50R plays as at 50L.
   - vidcut: each audio track has a pan from −100 to 100, and a switch. `track.set` sets `pan` and `pan_on`.
   - vidcut: the switch off keeps the pan, and the sound plays as at 0.
-  - vidcut: a track pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: a track pans as on a stereo track ([X30](deviations.md#x30-every-clip-pans-as-on-a-stereo-track)).
   - vidcut: the pan of a clip adds to the pan of its track. A sum past 100 plays as at 100.
   - vidcut: `track.set` refuses a pan outside −100 to 100, as `clip.set` does.
   - vidcut: the strip of a track in the Mixer has a Pan indicator. A drag moves the pan, and a double click opens the Pan window.
@@ -5807,7 +5901,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
   - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
   - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
-  - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
+  - vidcut: Volume and Mute in the Audio section of the Inspector. `clip.set` sets `gain_db` and `muted`. D12 gives the range.
   - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (D77).
   - The scale of the line and the step of Shift are in D77.
 - **Clip fades** (pp. 3875–3876, 3892–3894):
@@ -5871,16 +5965,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An OTIO export writes the effect `Fairlight Clip Pan`, `Type` 72, on a clip with a Pan other than 0.
     - Its parameter `pan` has its range and `Key Frames`.
     - An OTIO import sets the Pan from it.
-  - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
+  - vidcut: the Pan row of the Audio section and `clip.set` set `pan`.
   - vidcut: the switch at the left of the Pan row, and `pan_on` in `clip.set`, turn the Pan off and keep its value.
   - vidcut: Pan takes keyframes in the Inspector, in the Keyframe Editor and in `keyframes.*` (`KeyParam::Pan`).
     - `clip.set` with `pan` and `at` adds a pan keyframe on a keyed clip.
-    - The curve between pan keyframes is the volume Bezier curve ([X74](deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+    - The curve between pan keyframes is the volume Bezier curve ([gotchas](gotchas.md#resolves-renders)).
   - vidcut: an OpenTimelineIO export writes `Fairlight Clip Pan` with `Enabled` from `pan_on` and `Key Frames` from `pan_keys`.
     - An OpenTimelineIO import reads `Enabled`, `pan` and `Key Frames` back.
-  - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: a clip pans as on a stereo track ([X30](deviations.md#x30-every-clip-pans-as-on-a-stereo-track)).
   - vidcut: a source of one channel plays at its full level on each side of a stereo mix.
-  - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: `clip.set` refuses a Pan outside the range ([X30](deviations.md#x30-every-clip-pans-as-on-a-stereo-track)).
 - **Clip equalizer** (pp. 743, 745–746, 3950–3952):
   - The Equalizer of a clip has six bands, a switch for all the bands and a reset button (p. 745).
   - The switch turns the equalizer off and on, and keeps the values (p. 745).
@@ -5937,7 +6031,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Resolve does not clamp `eq frequency` above 19000 Hz to `maxValue` on import.
     - A `Fairlight Equaliser Band` without `Fairlight Clip Equaliser` does nothing.
     - Resolve drops a `Fairlight Clip Equaliser` with `Enabled` false on import.
-  - vidcut: the Equalizer section follows the Audio section of the Inspector (X70). It has the switch, Reset, the graph and a row for each band.
+  - vidcut: the Equalizer section follows the Audio section of the Inspector. It has the switch, Reset, the graph and a row for each band.
   - vidcut: a change applies at once. A drag on a handle or on a field makes one change when it stops.
   - vidcut: with several clips with sound selected, the section shows the first clip.
     - A change of a band goes to all of them, and turns on the equalizer of each.
@@ -5980,7 +6074,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Background Reduction changes only the sound between lines. It lowers the noise there by 1 to 11 dB, and only in the first gaps of the clip.
   - The Output Gain changes the sound only with Reduce Loud Dialogue on. With it, it adds its full value.
   - An OTIO export writes no effect for the Dialogue Leveler.
-  - vidcut: the Dialogue Leveler section of the Inspector comes after the Equalizer section (X70).
+  - vidcut: the Dialogue Leveler section of the Inspector comes after the Equalizer section.
     - It has the switch, Mode, Reduce Loud Dialogue, Lift Soft Dialogue, Reduce Background and Output Gain.
     - A new clip has no Dialogue Leveler. Its switch is off.
     - The first switch-on gives the same values as in Resolve, with an Output Gain of 2 dB.
@@ -5989,7 +6083,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: `clip.set` sets `dialogue_leveler`.
     - On a clip with none, `{"on": true}` gives the values of the first switch-on.
     - Another change on a clip with none starts from the switch on, the first preset, no process and 0 dB.
-  - vidcut: `clip.set` refuses an Output Gain outside the range. A clip with more than two channels takes the Dialogue Leveler too ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+  - vidcut: `clip.set` refuses an Output Gain outside the range. A clip with more than two channels takes the Dialogue Leveler too ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
 - **Compressor** (pp. 3946–3947):
   - The Dynamics of a track have a Compressor module, with a switch (p. 3946).
   - Its values (pp. 3946–3947):
@@ -6001,7 +6095,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Hold goes from 0 to 4000 ms. Its default is 0.
     - Release goes from 50 to 4000 ms. Its default is 93 ms.
   - The Track Dynamics item gives the ranges of the window and the processor.
-  - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X156](deviations.md#x156-the-compressor-is-on-a-clip)).
+  - vidcut: the Compressor row of the Audio section and `clip.set` set `compressor`.
   - vidcut: the compressor of a clip has the processor, the ranges and the Mix of the Compressor of the Track Dynamics.
   - vidcut: the Makeup Gain of a clip compressor goes from 0 to 24 dB. It raises the compressed sound before the Mix.
 - **Noise Reduction** (pp. 4041–4042):
@@ -6015,7 +6109,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The scripting API can add the effect, but it cannot read or set its values.
   - At its default values, the effect lowers dialogue by 0.3 to 6.0 dB. Quiet dialogue loses the most.
   - At its default values, it lowers the noise between lines by about 0.4 dB.
-  - vidcut: the Noise Reduction row of the Audio section (X70) and `clip.set` set `noise_reduction` ([X157](deviations.md#x157-noise-reduction-is-our-own-spectral-gate)).
+  - vidcut: the Noise Reduction row of the Audio section and `clip.set` set `noise_reduction` ([X24](deviations.md#x24-some-effects-use-a-known-method-and-come-close-to-resolve)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).
@@ -6025,7 +6119,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Cut, copy and paste work on keyframes. Backspace deletes them (p. 1113).
   - Audio keyframes can be between frames (p. 1113).
   - The Cut page has a Keyframe Editor (p. 1255). Its timeline has no volume overlay.
-  - vidcut: the volume line takes the keyframe controls of the Edit page (X73). Its eases are Bezier handles that drag (X74).
+  - vidcut: the volume line takes the keyframe controls of the Edit page. Its eases are Bezier handles that drag ([gotchas](gotchas.md#resolves-renders)).
+    - A new keyframe from an Alt-click on the volume line is selected.
+    - A click on a keyframe selects only that keyframe. Shift adds it to the selection. Ctrl adds it or takes it out.
+    - A click on another part of a clip takes the keyframes out of the selection.
+    - A dragged keyframe does not pass its neighbors.
+    - Before the first or after the last keyframe, a drag on the line moves that keyframe.
+    - The right-click menu of a keyframe also has Delete Keyframes.
+    - During a drag, the timeline shows the new curve and the volume beside the pointer.
+    - A selected keyframe with an ease shows its handles.
   - vidcut: `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move`, `keyframes.remove`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` (D81).
   - A keyframe is on a whole source frame (D81). The Keyframes tab copies and pastes keyframes alone (§2). On the volume line, Ctrl+C copies the clips.
   - A volume change on a clip with keyframes is in D82. Normalize Audio Levels with keyframes is in D83.
@@ -6119,7 +6221,11 @@ The Audio page follows the Fairlight page of the manual.
   - TikTok (vertical 1080×1920)
 - **User presets:** you can add them to the Quick Export row.
 - **In vidcut:**
-  - The Quick Export row, the Export page and jobs are deviation X3.
+  - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube, Vimeo and TikTok.
+  - TikTok is one preset, 1080×1920, with no menu (deviation X2).
+  - vidcut has no HyperDeck, Presentations, Dropbox or Replay preset, and it does not upload ([todo](todo/quick-export.md)).
+  - In a running GUI, an export is a job ([design/export.md](design/export.md#the-guis-exports)). No progress dialog opens.
+  - Jobs shows the progress of each job, and can cancel it ([design/live.md](design/live.md#jobs)).
   - The suggested file name is the name of the project.
   - AAC takes 96 to 320 kb/s, and 320 by default.
   - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
@@ -6161,10 +6267,10 @@ The Audio page follows the Fairlight page of the manual.
   - A PNG holds straight colors in both modes.
   - **In vidcut:**
     - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export page shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
-    - Straight writes straight colors in a TIFF and in ProRes 4444 and 4444 XQ ([X146](deviations.md#x146-straight-prores-4444-holds-straight-colors)).
+    - Straight writes straight colors in a TIFF and in ProRes 4444 and 4444 XQ ([gotchas](gotchas.md#resolves-renders)).
     - OpenEXR takes only Premultiplied. An export refuses Straight with it, and the Export page lists only Premultiplied. Why: the OpenEXR format takes premultiplied colors, so another program reads a straight file wrongly.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
-    - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
+    - DNxHR 444 has no alpha ([X29](deviations.md#x29-dnxhr-444-exports-without-alpha)).
     - With it off, the export composites over black, and the file has no alpha channel.
     - With it on, what shows nothing is transparent: a gap, a bar beside a picture, and a dip to black.
     - With it on, a composite mode mixes with the layers below as far as they show. Over nothing, the color stays as it is.
@@ -6256,10 +6362,10 @@ The Audio page follows the Fairlight page of the manual.
     - vidcut has no Compression Level for ZIP, and no HTJ2K ([todo](todo/image-compression.md)).
     - Each OpenEXR has the `timeCode` of its frame on the timeline, with the frame digits and bit 15 that Resolve writes. A TIFF has no timecode.
     - Each OpenEXR also has the `framesPerSecond` of the timeline.
-    - A DWAA or DWAB file holds its level in `dwaCompressionLevel` ([X151](deviations.md#x151-an-openexr-with-dwaa-or-dwab-holds-its-level)).
-    - In drop-frame timecode, vidcut sets the drop-frame flag ([X148](deviations.md#x148-an-openexr-in-drop-frame-timecode-has-the-drop-frame-flag)).
+    - A DWAA or DWAB file holds its level in `dwaCompressionLevel`.
+    - In drop-frame timecode, vidcut sets the drop-frame flag ([gotchas](gotchas.md#resolves-renders)).
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1, as Resolve does with no color management.
-    - The files hold no sound. An export with sound settings is refused ([X147](deviations.md#x147-an-image-sequence-refuses-sound-settings)).
+    - The files hold no sound. An export with `audio` settings stops with an error, and it writes no files.
     - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).
     - A frame file name that the system refuses stops the export before the encode starts.
 
@@ -6495,7 +6601,7 @@ The Audio page follows the Fairlight page of the manual.
   - On the Cut page, I and O switch Entire Timeline to In/Out Range, in one undo step with the mark.
   - On the Cut page, Alt+X with In/Out Range sets Entire Timeline, which clears the marks.
   - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
-  - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
+  - The Render Settings also show the live plan and the export as a shell command.
   - The queue is `render.add`, `render.update`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it.
   - Each change of the queue is an undo step. These are Add, Update Job, the X, a drag, a new name, Clear Rendered, Clear All and Clear Status.
   - The status that a render records is not an undo step.
@@ -6503,7 +6609,7 @@ The Audio page follows the Fairlight page of the manual.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
   - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
-  - Each render is a job, and Jobs shows it too ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
+  - Each render is a job, and Jobs shows it too (§10).
   - A job that failed shows "Failed:" and the error, in red.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
   - The pencil of a job puts its settings in the Render Settings. `gui.page` with `edit_job` does the same.
@@ -6602,7 +6708,7 @@ The Audio page follows the Fairlight page of the manual.
 - The table gives the default keys. The Keyboard Customization window (p. 121), `keys.set`, `keys.reset` and `keys.use` change them.
 - File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
-  - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
+  - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X28).
   - A key file can give one key to two actions of one level. The import keeps the key on both, as Resolve does.
     - The row of each such action has a warning mark (p. 125). Its tooltip names the other actions.
     - A click on the mark selects that key on the on-screen keyboard. The Active Key list then shows all its actions (p. 125).
@@ -6730,7 +6836,7 @@ The Audio page follows the Fairlight page of the manual.
 | Ctrl+T | Dissolve (§8.11) |
 | Delete / Backspace / Shift+Backspace | Delete (ripples on Track 1, p. 725); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
 | [ / ] | Previous / next volume keyframe of the selected clips (D85) |
-| Alt+click on the volume line | Add a volume keyframe (X73) |
+| Alt+click on the volume line | Add a volume keyframe (§9) |
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Alt+V | Paste Attributes (§8.26) |
@@ -6749,12 +6855,12 @@ The Audio page follows the Fairlight page of the manual.
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |
-| Alt+D | Ducking of the selected clip's track on or off (X69) |
+| Alt+D | Ducking of the selected clip's track on or off (X16) |
 | Ctrl+D | Change clip or dissolve duration |
 | R† | Change clip speed (D48) |
 | T / Shift+T | Transform / Crop handles on the selected clip, on or off (§8.15) |
 | Wheel / Alt+wheel over the picture, with T's handles | Zoom / turn it (§8.15) |
-| Enter | Edit the selected subtitle (X43) |
+| Enter | Edit the selected subtitle (§8.12) |
 | N | Snapping on/off |
 | M / Alt+M | Add or edit / delete marker |
 | Alt+B | Create a subclip of the clip in the Source Clip viewer |
@@ -6763,7 +6869,7 @@ The Audio page follows the Fairlight page of the manual.
 | Shift+S | Audio scrubbing on/off |
 | Alt+wheel | Zoom the lower timeline |
 | Ctrl+wheel | Move along the timeline |
-| Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
+| Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X13) |
 | Ctrl+Z or ` / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
 | Shift+Ctrl+N | New bin |
@@ -7027,7 +7133,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
-  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate ([X149](deviations.md#x149-a-project-takes-any-frame-rate)).
+  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too.
+  - `project create --fps` and the first video can set any positive frame rate.
   - A new timeline starts at record timecode 01:00:00:00 (p. 678). New Timeline and Timeline Settings also offer 00 and 10 hours, or any typed timecode.
   - Its Frame rate menu offers the rates that Resolve takes for a project:
     - 16, 18, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120 fps.
@@ -7051,7 +7158,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A clip keeps its source position, which can be less than 0.
   - A GIF or WebP of one frame is a still too. A GIF or WebP of more frames is a clip.
   - Resolve imports a WebP of one frame as a still.
-  - It imports a GIF of one frame as a still only when its frame has no delay (deviation X39).
+  - It imports a GIF of one frame as a still only when its frame has no delay ([gotchas](gotchas.md#resolves-imports)).
   - FFmpeg 8 cannot decode an animated WebP. With FFmpeg 8, vidcut refuses such a file on import. The message says that it needs FFmpeg 9.0 ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
 - **D39. Image sequences** (§3; p. 366).
   - `media.add` with `sequence` brings numbered files (`frame_000001.png`, …) in as one clip.
@@ -7059,8 +7166,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It is at the project's rate, unless `fps` gives another rate.
   - `media.add_folder` with `sequence` does this for each run of two or more files in its folders.
   - The pool names the clip as Resolve does: `frame_[000001-000120].png`.
-  - Without `sequence`, a numbered image is a still (deviation X17).
-- **D40. Timeline interchange with Resolve** (deviation X9; pp. 527–530, 4160).
+  - Without `sequence`, a numbered image is a still (deviation X5).
+- **D40. Timeline interchange with Resolve** (deviation X3; pp. 527–530, 4160).
   - The manual describes Resolve's OTIO import and export, not the files.
   - vidcut's OTIO uses the shapes that Resolve writes and needs: source ranges in media timecode, plain paths, link groups, marker notes.
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
@@ -7071,7 +7178,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - An AAF file can go into the open timeline, with Import AAF to Current Timeline (pp. 513, 521).
       - An EDL can go to a new track of a timeline, with EDL to New Track (p. 526). An OTIO file cannot.
     - A file whose clips cannot be read also refuses, and the error names them.
-  - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
+  - Mapping: [deviation X3](deviations.md#x3-opentimelineio-interchange), [model](design/model.md#opentimelineio).
   - **A multicam clip in a file of Resolve:**
     - It is a `Stack` with the `Sequence Type` "Multicam Clip".
     - The `Stack` has one video track and one audio track for each angle.
@@ -7119,7 +7226,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The longest side of a proxy is 960 px, unless set.
   - `auto` selects a codec that the GPU plays ([export](design/export.md#proxies)).
   - A project names a proxy by its file. Each computer keeps the file in its own proxy folder.
-  - The proxy folder is `proxies` in the folder of playback files (deviation X26).
+  - The proxy folder is `proxies` in the folder of playback files (deviation X7).
   - That folder is the project's folder, unless `playback_files.folder` sets another. A relative folder is in the project's folder. An absolute folder is shared by every project.
   - With `use_proxies` on, the preview plays fresh proxies, frame for frame as the originals. Thus heavy media play in real time.
   - Sound and analyses use the originals. Exports use the originals unless `video.use_proxy_media` is on.
@@ -7134,7 +7241,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The enlarged track is three times its height, and at least 180 px.
   - In a short timeline, the other tracks shrink first, to a line each.
   - It is a view, like the zoom. It is not in the project or in the undo history.
-- **D44. An export's dynamic range follows the timeline, and its bit depth follows its footage** (§10; deviation X14).
+- **D44. An export's dynamic range follows the timeline, and its bit depth follows its footage** (§10; deviation X4).
   - `video.hdr` `auto` (the default) follows the timeline color space (D50).
   - The export is HDR when both of these are true:
     - The timeline color space is HDR.
@@ -7153,7 +7260,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - At constant quality, they gain nothing worth the time.
   - Thus an unset `video.passes` is two with a bitrate, where the encoder makes two. Otherwise it is one.
   - A request for two passes from an encoder that makes one is an error.
-- **D46. HDR metadata follows the footage** (§10; deviation X19).
+- **D46. HDR metadata follows the footage** (§10; deviation X6).
   - With no grade and no LUT, an export carries what its sources give (`video.hdr_metadata` `auto`).
   - PQ output gets the widest mastering display of the pictures shown.
   - It also gets their highest MaxCLL and MaxFALL, measured where a source gives none.
@@ -7183,7 +7290,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It shows as `;` before the frames.
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
-- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96, X97).
+- **D48. Clips at another speed** (§1, §8.6; deviation X3; [gotchas](gotchas.md#resolves-edits)).
   - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 0.01% to 100000%, forward or backward.
@@ -7192,7 +7299,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
   - Each frame shows the source frame in which its stretch of the source starts.
   - Backward, it shows the bottom of the stretch, as Resolve shows it.
-  - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X93).
+  - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X21).
   - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
   - Edits count frames through the speed.
   - **A speed under 0.01%, or 0.** These rules are for a clip with no speed keyframes. `speed.set` follows them:
@@ -7241,10 +7348,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The header of the Speed Change group has a keyframe diamond between < and > buttons. The diamond is red with the playhead on a speed keyframe.
     - The speed tool of the viewer has its own Keyframe button.
     - Change Speed and Frames per Second show and change the speed of the section under the playhead.
-    - The Direction buttons act on that section. Reverse plays it backward to the media's first frame ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
+    - The Direction buttons act on that section. Reverse plays it backward to the media's first frame ([gotchas](gotchas.md#resolves-edits)).
     - The Duration field shows the length of the section or of the clip.
     - The Ease list under Direction has Linear, Ease In, Ease Out and Ease In and Out.
-      - Each of the three eases sets only the speed keyframe at the start of the section ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
+      - Each of the three eases sets only the speed keyframe at the start of the section ([gotchas](gotchas.md#resolves-edits)).
       - Its handles are 1/6 s before and after the speed keyframe at 30 fps.
   - **In vidcut:**
     - The Inspector's Speed section shows the section under the playhead. With the playhead outside the clip, it shows the nearest section.
@@ -7252,7 +7359,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Freeze sends `speed.freeze`. Forward and Reverse send `speed.reverse`. They are off when the section is frozen.
       - Reverse turns the section at the speed keyframe where it starts, and the first section at the one where it ends.
       - The sections after it go on from where it stops, at their own speeds. Thus the picture does not jump.
-      - Ease sends `speed.ease` ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)). Ease In eases the speed keyframe at the section's start, and Ease Out the one at its end.
+      - Ease sends `speed.ease` ([gotchas](gotchas.md#resolves-edits)). Ease In eases the speed keyframe at the section's start, and Ease Out the one at its end.
         - The list shows the eases of the section's two speed keyframes. It offers only the eases that they can take.
       - An ease reaches 1/6 s before and after its speed keyframe, at each frame rate (not measured)
       - An ease stops at the speed keyframes next to it and at the clip's edges, as in Resolve. Where two eases overlap, the later one keeps its length.
@@ -7265,9 +7372,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The diamond is red on a speed keyframe. The other Keyframe buttons are orange on a keyframe (p. 1250).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
     - Add Speed Point in the right-click menu adds a speed keyframe at the playhead.
-    - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
+    - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([gotchas](gotchas.md#resolves-edits)).
       - A speed keyframe does not move or copy. Its value is the speed of the section after it.
-      - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
+      - Its ease menu has Linear and Ease In and Out ([gotchas](gotchas.md#resolves-edits)).
       - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
       - A change of its value in the tab sends `speed.set`. The field takes 0.01% to 100000%.
       - The field is off when the section is frozen or plays backward.
@@ -7278,7 +7385,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
     - `speed.set`, `speed.freeze`, `speed.reverse` and `speed.ease` change the sections. All six act at a time, the playhead by default.
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
-    - `speed.reverse` turns a section at its speed keyframe ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
+    - `speed.reverse` turns a section at its speed keyframe ([gotchas](gotchas.md#resolves-edits)).
     - `speed.set` takes 0.01% to 100000% forward, in a section that plays forward.
     - On a clip with no speed keyframes, `speed.set` also takes the speeds of `edit.change_speed`, and a speed under 0.01%.
     - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
@@ -7300,9 +7407,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With two or more clips selected, the selected clips that meet join.
   - Otherwise the clips at the playhead join. They are selected as for Split (D2).
   - The first part keeps its id.
-- **D50. Dissolves** (§8.11; deviations X9, X24, X27).
+- **D50. Dissolves** (§8.11; deviation X3; [gotchas](gotchas.md#resolves-renders); [gotchas](gotchas.md#resolves-edits)).
   - The manual says only that one picture fades as the next comes in.
-  - These rules match Resolve's renders without color management. Deviation X14 tells how they differ with it.
+  - These rules match Resolve's renders without color management. Deviation X4 tells how they differ with it.
   - Frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n, and the outgoing picture at the rest.
   - The mix is in the code values of the timeline color space, not in linear light.
   - The timeline color space is a setting of the project: Auto, SDR (BT.709), HDR PQ or HDR HLG.
@@ -7321,7 +7428,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit between two selected clips gets one dissolve.
   - A new dissolve is one second long.
   - It is centered. For an odd length, its middle frame is before the edit.
-  - It is shortened to the media that each side has (deviation X27).
+  - It is shortened to the media that each side has ([gotchas](gotchas.md#resolves-edits)).
   - It adds a Cross Fade of +3 dB where the sounds meet.
   - If it is longer than both sides allow, it fills both sides, as in Resolve.
   - Example: 999 frames on a cut between two 300-frame clips with long handles make 300 + 300.
@@ -7365,7 +7472,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut: the result names each skipped file and why vidcut skipped it. The notice of the GUI counts them, and names up to five of each kind.
   - vidcut: a folder without media is an error.
   - A bin that exists takes the media of the folder.
-  - Media already in the pool keep their ids, and move into the bin of their folder (deviation X31).
+  - Media already in the pool keep their ids, and move into the bin of their folder (deviation X9).
   - Thus a second import of a folder brings in only its new files.
   - In Resolve, an import into the bin that holds a file adds nothing.
   - Numbered images follow D39: `sequence`, or a question in the GUI.
@@ -7378,7 +7485,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Held longer, J or L plays in that direction at half speed until J, L or K is released.
   - In Dynamic Trim, it runs the trim at half speed.
   - The run then applies as K applies it, as one undo step, as in D32 (not measured)
-  - The sound plays slowed, with its pitch kept, as at any speed other than 1× (deviation X30).
+  - The sound plays slowed, with its pitch kept, as at any speed other than 1× (deviation X8).
   - The repeats of a held key are not presses. Thus L held alone plays at 1×.
 - **D55. Undo steps** (§8.10; pp. 651–652).
   - The manual does not say what a step is, or how a step gets its name.
@@ -7406,6 +7513,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - These two cues keep their words and keyframes as a split does (D70, §8.12).
   - The new cue has the text "Subtitle", selected in the text box.
   - `subtitles.add` alone does not overwrite. A script that wants the overwrite sends its own `apply`.
+  - `subtitles.set` and `subtitles.move` alone do not overwrite either. Scripts and imports keep the cues that overlap.
   - Cues of one track can overlap, and show together.
   - On the timeline, cues that overlap share the height of their track, each in its own lane.
   - Split leaves its text in both parts.
@@ -7507,7 +7615,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Its `offset` is two fractions of the picture, from −4 to 4, as on a title.
     - The Subtitle Track section shows the offset in pixels of the timeline. A typed value stops at 4 times the width or the height.
     - A change of the timeline size keeps the fraction.
-    - The shadow moves by the shown pixels, but 1 pixel less to the right. vidcut moves it by the shown pixels ([X150](deviations.md#x150-a-subtitle-shadow-moves-right-by-its-full-offset)).
+    - The shadow moves by the shown pixels, but 1 pixel less to the right. vidcut moves it by the shown pixels ([gotchas](gotchas.md#resolves-renders)).
     - `off` in `background` or `shadow` draws none and keeps the values.
   - The Subtitle Track section has these rules for empty boxes and for switches:
     - A color has no empty state. An outline, background or shadow color box that the user empties keeps its color.
@@ -7650,7 +7758,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Curves are straight lines within 1/6 of a pixel.
     - Zoom draws the letters as the bigger font. The height of a line is its height at zoom 1, in whole pixels, times the zoom.
     - A scroll keeps hinted letters. Subtitles keep them too.
-    - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
+    - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([gotchas](gotchas.md#resolves-otio-files)).
     - A scroll spaces its lines by the Windows line height of the font at 4/3 of the size, plus 10 timeline pixels.
       - That line height is the hinted ascent plus descent of the font, in whole pixels. This holds also for a font that sets `USE_TYPO_METRICS`.
       - Thus Times New Roman at 108 has 164 + 10 = 174 pixels. Its `usWin` heights give only 159.5 + 10.
@@ -7662,7 +7770,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws it. Thus vidcut takes -4096 to 4096.
     - The value takes the same pixels at any timeline height, and zoom scales it.
     - Below the last line, a positive value makes the block taller and a negative value does nothing.
-    - A very negative value keeps all the lines (X111).
+    - A very negative value keeps all the lines ([gotchas](gotchas.md#resolves-renders)).
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
     - The Inspector takes -100 to 100.
     - One unit is 1/100 of the width of the font's letter X, and 1/200 below 0. Zoom scales it.
@@ -7722,8 +7830,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A top row moves the lines down by half of one line's height. A bottom row moves them up by that much.
     - That height is the font's ascent plus its descent, as above. The number of lines does not change the move.
     - For a font that sets `USE_TYPO_METRICS`, the rows move by its typographic heights, not by the `usWin` heights of its line distance.
-    - A line wider than the box wraps at 90% of the picture width ([X137](deviations.md#x137-a-scroll-line-wider-than-the-picture-wraps)).
-  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
+    - A line wider than the box wraps at 90% of the picture width ([gotchas](gotchas.md#resolves-renders)).
+  - Markup in the text styles words separately: `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
   - `<font>` takes a `color`, a `face`, a `size`, a `spacing`, a `tracking` and a `case`.
   - A line takes the height of its largest size.
   - A larger size grows the upper line up from its point and the lower line down from its point.
@@ -7796,7 +7904,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip that fades in or out above the title fades over it.
     - Subtitles go over the title.
   - The lines of a scroll wrap at title safe, and align left, in the middle or right. By default they align left, 1% of the picture width in from its left edge.
-  - They rise at a steady speed (X55). At the first frame of the clip, they are just below the picture. At its last frame, they are just above it.
+  - They rise at a steady speed (X11). At the first frame of the clip, they are just below the picture. At its last frame, they are just above it.
   - A dissolve at the edge of a title fades it in or out, as Resolve does.
   - The title is drawn through all of the frames of the dissolve, at the level of the dissolve, on both sides of its edge.
   - The opacity of the clip's Composite fades the whole title (§8.14).
@@ -7815,7 +7923,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `TITLE` over `Sample`, for a lower third
     - `Scroll Title`, for a scroll
   - A drop puts the title where the pointer is, on the video track under it, as `titles.add` with that track and frame does.
-- **D67. Titles in OTIO files** (§8.14; deviation X9).
+- **D67. Titles in OTIO files** (§8.14; deviation X3).
   - The manual does not say how a title goes into an OTIO file.
   - vidcut writes a title in the shape of Resolve's own file of its titles.
   - **The clip:**
@@ -7920,7 +8028,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not say what Delete does when the timeline In and Out are both past the end of the timeline.
   - This occurs after cuts make the timeline shorter under them.
   - Nothing is there to remove. Thus Delete takes the selected clips instead.
-- **D69. Animated subtitles** (§8.12; p. 1240; deviation X58).
+- **D69. Animated subtitles** (§8.12; p. 1240).
   - The manual shows Word Highlight coloring each word as it is spoken.
   - It says that the Inspector sets the parameters of the templates.
   - It does not say when a word counts as spoken.
@@ -7951,7 +8059,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The default of the request stays files.
 - **D70. Word times on cues** (§8.12; p. 1241).
   - In the manual, a button updates the word timings. It does not say what edits do to them.
-  - In Resolve, no edit changes the word times of a cue ([X58](deviations.md#x58-animated-subtitles-are-a-track-style-made-from-the-speech-in-one-step)).
+  - In Resolve, no edit changes the word times of a cue.
   - A cue keeps the frame on which each word starts, counted from the start of the cue.
   - A word is what spaces and line breaks separate in its text, without the markup.
   - Create Subtitles from Audio keeps the word starts of the model.
@@ -8027,7 +8135,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - the name of the shown clip, and the name of the open bin
     - a notice, and the line of the Trim Editor
   - When even the items that stay do not fit, they are cut off at the edge of the panel.
-- **D73. Speakers** (§8.13; pp. 997–1001; deviation X61).
+- **D73. Speakers** (§8.13; pp. 997–1001; deviation X14).
   - The manual's Speaker Detection numbers speakers, and remembers their voices across the clips of a project.
   - It does not say how a word gets its speaker, or how many speakers there can be.
   - vidcut numbers the speakers for each run. It uses one of these:
@@ -8041,7 +8149,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With the language on Auto, MOSS is used when the speech model reports English or Chinese. Else Sortformer is used.
   - If MOSS is not downloaded, `download` downloads it. Without `download`, the run stops and says so.
   - If MOSS fails, the run stops with its error. The error points to Sortformer under Speakers By.
-  - Create Subtitles from Audio over In–Out hears only that part (deviation X56).
+  - Create Subtitles from Audio over In–Out hears only that part (deviation X12).
   - Speakers By, under Advanced (`speaker_model`), selects one of the two models on this computer instead.
   - Its Automatic also names that model.
   - A kept transcript is used again only when the selected model told its speakers.
@@ -8195,7 +8303,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A keyframe is the volume `Keyframe`: a source frame, a value, an In handle and an Out handle (D81).
     - Position stores X on the keyframe and Y beside it, one Y for each keyframe.
     - Zoom and the anchor point do the same. The other values store one value.
-    - The curve between two keyframes is the volume Bezier curve (X74).
+    - The curve between two keyframes is the volume Bezier curve ([gotchas](gotchas.md#resolves-renders)).
     - The curve changes the value itself. Thus a Zoom from 0.1 to 0.4 is 0.25 halfway. Position, Rotation and the crop change in the same way.
     - A handle value moves the key's own value.
     - Position Y, zoom Y and anchor Y keep the handle frames and use a value offset of 0.
@@ -8209,7 +8317,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take these values in `param`.
     - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` take them in `param` too.
     - `timeline.get` names each picture value that has keyframes, as it names `volume`.
-    - The Inspector shows the value at the playhead. Its Keyframe button adds or removes the keyframe there (X70).
+    - The Inspector shows the value at the playhead. Its Keyframe button adds or removes the keyframe there.
       - With the playhead outside the clip, the clip time is the playhead's frame minus the clip's first frame.
       - The Inspector then shows the curve at that time, and the button or a new number adds the keyframe there, outside the clip.
     - With several clips selected, the header of Resolve's Inspector is Multiple Clips, on the Cut page and the Edit page.
@@ -8272,7 +8380,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
   - Titles keep their own place.
-  - **Viewer handles** (those of a title, X52):
+  - **Viewer handles** (those of a title, §8.14):
     - A drag inside moves the picture. Its middle, as drawn, snaps to the middle and thirds of the frame, and a guide shows.
     - Shift keeps the drag on one axis, and Alt turns snapping off.
     - A corner zooms both ways in proportion, and a side zooms one way, about the anchor point. The pointer shows the zoom.
@@ -8312,7 +8420,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The `scale` of Retime and Scaling is the `scaling` of the clip ([gotchas](gotchas.md#resolves-otio-files)).
     - The anchor point of Transform becomes the `anchor`.
     - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
-    - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
+    - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X3).
       - X and Y keys on different frames are such keyframes ([todo](todo/keyframes.md)). So are anchor point keys with Bezier handles.
     - Resolve imports its own file with anchor point, Pitch and Yaw keys, and gives the same keys.
     - Resolve imports a file that vidcut writes with these keys. It renders and exports the same keys.
@@ -8320,7 +8428,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
   - **Dynamic Zoom.** The manual gives the boxes and the eases, not the units or the timing.
-    - The units, the order and the timing match Resolve ([gotchas](gotchas.md#resolves-otio-files)). The eases are vidcut's own (X67).
+    - The units, the order and the timing match Resolve ([gotchas](gotchas.md#resolves-otio-files)). The eases are vidcut's own ([gotchas](gotchas.md#resolves-otio-files)).
     - **The boxes.** `dynamic_zoom` has a `start` box, an `end` box and an `ease`. A box has the shape of the picture.
     - The `center` of a box is `[x, y]` in fractions of the picture from its top left, each from −100 to 100.
     - The `size` of a box is its width and height as a fraction of those of the picture, from 1/100 to 100.
@@ -8347,8 +8455,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `picture.clear` with the tool `dynamic_zoom` removes it too.
     - **In an OTIO file**, the Dynamic Zoom is in the `vidcut` metadata of the clip and in Resolve's Dynamic Zoom effect.
     - An import reads Resolve's effect when its center and its scale each have exactly two keys.
-    - Otherwise the effect stays on the clip unplayed (X9), with Transform, Cropping and Retime and Scaling.
-- **D76. Ducking** (§9; pp. 744, 778–779; deviations X68, X69).
+    - Otherwise the effect stays on the clip unplayed (X3), with Transform, Cropping and Retime and Scaling.
+- **D76. Ducking** (§9; pp. 744, 778–779; deviation X16; [gotchas](gotchas.md#resolves-renders)).
   - The manual gives the controls and their defaults. It does not give the gain curve, the threshold or the limits.
   - **Resolve's gain:**
     - The dip is the Duck Amount exactly.
@@ -8364,8 +8472,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The fall starts Lookahead + Rise Time + 10 to 15 ms before the source starts.
     - The recovery starts Hold + 1 to 21 ms after the source ends.
     - The recovery lasts the Recovery Time.
-    - The fall with a Rise Time of 10 ms has another shape (X69).
-  - **A stereo target track in Resolve** (X68):
+    - The fall with a Rise Time of 10 ms has another shape (X16).
+  - **A stereo target track in Resolve** ([gotchas](gotchas.md#resolves-renders)):
     - Rise Time, Hold and Recovery Time act at half their values.
     - The fall starts at the same time as on a mono track.
     - The recovery starts (Hold − Lookahead − Rise Time) / 2 after the source ends, to within 7 ms.
@@ -8382,9 +8490,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Where the curves of two active parts meet, the lower gain applies. Thus a gap of up to Hold + Lookahead keeps the full dip.
     - With several sources, a part is active where any source is active.
     - Thus a fall starts 10 to 15 ms later than in Resolve, and a recovery 1 to 21 ms sooner.
-    - The gain is computed for each sample. Every channel of the track gets the same gain (X68).
+    - The gain is computed for each sample. Every channel of the track gets the same gain ([gotchas](gotchas.md#resolves-renders)).
     - The preview and the export hear the same samples. The loudness gain of an export comes after the ducking.
-  - **What is active** (X69):
+  - **What is active** (X16):
     - Speech: a source is active where Silero VAD hears speech in its own sound, as for Ripple Delete Silence (§9).
     - The rule has the defaults of Silero: a probability of 0.5, speech longer than 0.25 s, and pauses of 0.1 s or more.
     - Sound level: a source is active where a 10 ms peak, after its clip gain and fader, is at or above the Threshold.
@@ -8401,10 +8509,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Hold: 0 to 1000 ms.
     - Recovery Time: 0 to 1000 ms.
     - Threshold: −96 to 0 dBFS.
-    - `track.set` refuses a value outside its range, and changes no value (X69).
+    - `track.set` refuses a value outside its range, and changes no value (X16).
     - The project file keeps only the values that are not the usual ones.
   - **Sources:**
-    - A new ducking has every other audio track as its sources (X69).
+    - A new ducking has every other audio track as its sources (X16).
     - A source is an audio track. A track cannot duck under itself.
     - When a track is removed, it leaves the sources. The other sources follow their new numbers.
   - Each change is one undo step.
@@ -8425,7 +8533,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
   - The line is in the sound part of the clip, 2 px in from its top and its bottom.
   - It shows only where the sound part is 20 px high or more.
-  - It is on the clips of an audio row. The band of a main track has no line, as in Resolve (X73). The Inspector sets the volume of a linked sound clip.
+  - It is on the clips of an audio row. The band of a main track has no line, as in Resolve. The Inspector sets the volume of a linked sound clip.
   - **Scale:**
     - −100 dB is at the bottom, and +30 dB is at the top.
     - 0 dB is at 10/13 of the height.
@@ -8443,7 +8551,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The gain of the dragged clip goes in steps of 0.1 dB. During the drag, a label beside the line shows it with one decimal.
     - A drag that ends at the gain of the clip, to one decimal, changes nothing.
   - Reason: the usual gains are near 0 dB, as on a fader. `clip.set` sets an exact value anywhere in the range.
-- **D78. Characters per second** (§8.12; pp. 1231, 1233; deviation X43).
+- **D78. Characters per second** (§8.12; pp. 1231, 1233).
   - The manual shows the CPS column of the Captions list. It does not tell how CPS is counted.
   - On the Cut page of Resolve:
     - The count of characters includes the spaces.
@@ -8452,12 +8560,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut counts the characters of the text that shows, as Resolve does. The style tags (`<i>`, `<b>`, `<u>` and `<font>`) do not count.
   - A line break counts as one character, as the space between two words on one line does (not measured)
   - Thus a text has the same CPS on one line and on two lines.
-- **D79. The In and Out fields against other cues** (§8.12; deviation X43).
+- **D79. The In and Out fields against other cues** (§8.12).
   - In Resolve, an In typed inside the cue before, or an Out typed inside the cue after, changes nothing. Both cues stay.
   - vidcut does the same. Its field shows the stored time at once, and Resolve's field shows it when the cue is selected again. The result is the same.
   - `subtitles.set` does not refuse such a value.
-  - Resolve's scripting API cannot set the In or the Out of a cue. A script move of a cue overwrites the other cues (X43).
-  - A new In or Out overwrites only the part that it newly covers (X43).
+  - Resolve's scripting API cannot set the In or the Out of a cue. A script move of a cue overwrites the other cues.
+  - A new In or Out overwrites only the part that it newly covers. A cue of the track that lies fully inside that part is removed.
+  - A cue that already overlaps the edited cue and reaches into the part loses its frames in the part.
   - In Resolve, a track has no overlaps. Thus a field cannot put a cue inside a longer cue.
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
   - Such a cue stays as it is. Thus both cues show in that part, as they show together in the overlap.
@@ -8508,7 +8617,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Each volume stops at −100 dB and +30 dB (D12). The result marks each clip that stopped (`held`).
   - The result also marks each clip that the peak limit stopped (`limited`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
-- **D81. Volume keyframes** (§9; pp. 1109, 1112–1113, 1258; deviations X73, X74).
+- **D81. Volume keyframes** (§9; pp. 1109, 1112–1113, 1258; [gotchas](gotchas.md#resolves-renders)).
   - The manual does not give the curve between audio keyframes, or what edits do with them.
   - **Resolve**, in its renders and its OTIO files:
     - A volume keyframe is on a whole frame. Its value is in dB.
@@ -8541,11 +8650,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Play and export:** each sample takes the volume of the curve at its source position. The player and the export use the same mixer.
   - **OTIO:**
     - vidcut writes the keyframes in the `vidcut` metadata of the clip, and in the `Key Frames` of the clip volume effect.
-    - An import reads the `vidcut` metadata first, else the `Key Frames` of the clip volume effect. Then they play (X9).
+    - An import reads the `vidcut` metadata first, else the `Key Frames` of the clip volume effect. Then they play (X3).
     - A time in `Key Frames` counts from the first source frame of the item. On a clip at a speed s other than 1, Resolve adds f × (1 − 1/s) and divides the frames from f by s. f is the first source frame.
   - **Requests:** each request that changes keyframes is one undo step. `keyframes.set`, `keyframes.move` and `keyframes.remove` take keyframes by their source frames (`frames`) or their timeline frames (`at`).
   - Reason: the curve is the curve that Resolve plays and writes. Whole frames keep the files that Resolve reads.
-- **D82. A volume change on a clip with volume keyframes** (§9; p. 1251; deviation X70).
+- **D82. A volume change on a clip with volume keyframes** (§9; p. 1251).
   - After the first keyframe of a value, Resolve's Inspector adds a keyframe at the playhead for each change of the value (p. 1251).
   - vidcut does the same. `clip.set` with `gain_db`, and the Inspector's Volume, set a keyframe at `at`, or at the playhead.
   - A keyframe that is already on that frame takes the new value.
@@ -8564,7 +8673,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Every keyframe of the clip then moves by the same dB. Each stops at −100 and +30 dB.
   - `from_db` and `gain_db` of the result give the highest keyframe before and after.
   - Reason: Normalize changes the volume of a clip. The curve keeps its shape, and its loudest part gets the volume that a flat clip would get.
-- **D84. The volume curve in the measurements** (§9; deviation X69).
+- **D84. The volume curve in the measurements** (§9; deviation X16).
   - The manual does not tell what these measurements do with keyframes.
   - These take the volume of the curve at each frame, as the mix plays it:
     - ducking by sound level (D76)
@@ -8646,7 +8755,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Resolve imports its own file with anchor point keys and gives the same keys.
     - An import reads these keys only without Bezier handles.
   - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.
-- **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
+- **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X18).
   - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
   - It does not give their units or the order in which they work.
   - The range, the order and the lean come from Resolve's stills and OTIO files ([gotchas](gotchas.md#resolves-otio-files)).
@@ -8661,11 +8770,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With no rotation, yaw keeps vertical edges vertical.
   - With no rotation, pitch keeps horizontal edges horizontal.
   - The viewer and the export use the same map.
-  - The Inspector sets them. The viewer handles do not set them (X83).
+  - The Inspector sets them. The viewer handles do not set them (X18).
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
-- **D98. Render cache** (deviations X103, X105, X106; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
+- **D98. Render cache** (deviations X25 and X26; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
   - The render cache keeps on disk the frames that are slow to make. The viewer plays them from there. Exports do not use it.
   - The project has a mode (`render_cache`): Off, Smart or User. A new project has Off, as in Resolve.
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
@@ -8686,14 +8795,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Smart renders each part of the timeline that has one of these:
     - a clip set to On
     - a checked effect
-    - media that are slow to decode (X103)
+    - media that are slow to decode (X25)
     - a speed change
-    - a Retime Process other than Nearest (X103)
-    - AI Upscale (X103)
+    - a Retime Process other than Nearest (X25)
+    - AI Upscale (X25)
     - a transition
     - an opacity below 100%, or keyframes of the opacity
     - a composite mode other than Normal
-    - a part where frames drop steadily during play (X103)
+    - a part where frames drop steadily during play (X25)
   - Smart marks a part where frames drop steadily:
     - The timeline plays forward, at normal speed.
     - Frames drop in each second of a stretch of at least 5 s. In each of these seconds, a quarter of the frames or more come late or are skipped.
@@ -8723,7 +8832,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Upscale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - Media with an alpha channel is at the clip level only with Uncompressed 16-bit Float, ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
+    - Media with an alpha channel is at the clip level only with Uncompressed 16-bit Float, ProRes 4444 or 4444 XQ (p. 201, X26). Its file then keeps the alpha channel.
       - With an Alpha Mode of None, it counts as media with no alpha channel.
       - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color at an alpha of 0. An integer file also cannot hold a color above its alpha.
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
@@ -8735,7 +8844,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Activity is an edit, a play, a seek, a scrub, the preview of a change, or a job.
     - Each activity stops the render at once. The render continues later.
     - It renders from the playhead forward, then from the start of the timeline.
-    - Where the memory keeps the frames that played before the playhead, it starts at the first of them (X103).
+    - Where the memory keeps the frames that played before the playhead, it starts at the first of them (X25).
     - With proxies off, it draws a frame that the memory keeps. It does not make that frame again.
     - In an HDR timeline, it makes these frames again:
       - an AI picture
@@ -8747,7 +8856,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - a frame of a Smooth Cut
     - A frame of a Smooth Cut comes from two clips. Thus it is not a frame of one clip.
     - `render_cache.background` turns it off. Then the cache keeps what it has, and renders nothing new.
-  - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
+  - The codec of the cache files is a preference of this computer (X25). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
     - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).
     - The other choices:
       - Uncompressed 16-bit Float
@@ -8760,23 +8869,30 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
     - DNxHR 444 files keep no alpha channel. The DNxHR encoder of FFmpeg has no pixel format with alpha.
     - A change of the codec renders the cache again. The files of the other codec stay until Delete Render Cache > Unused removes them.
-  - The cache files are in `render-cache` in the folder of playback files, beside the proxies (X26).
+  - The cache files are in `render-cache` in the folder of playback files, beside the proxies (X7).
     - Proxies and Render Cache > Folder sets that folder for proxies and the render cache.
     - Proxies and Render Cache > Advanced > Folder sets a folder for the render cache only (`playback_files.render_cache`).
     - Outside the cache dir, the files do not count in the limit of the disk cache. Delete Render Cache removes them.
     - Outside the cache dir, the render stops when the disk of the folder has less than 10% free. `cache.status` then gives the error. In the cache dir, the limit of the disk cache keeps that space free.
-  - Playback does not write the cache (X103).
+  - Playback does not write the cache (X25).
   - Playback > Delete Render Cache has three choices:
     - All empties the cache. It removes the cache files and leaves any other file in the folder.
     - Unused keeps only the frames of the open timeline.
+    - All and Unused also remove the frames of the other projects that share the folder.
     - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media. The media of a compound clip are the media of the clips in it.
-  - Playback > Manage Render Cache shows the render cache of each project that vidcut opened on this computer (p. 206, X105).
+  - Playback > Manage Render Cache shows the render cache of each project that vidcut opened on this computer (p. 206).
+    - A project whose file is gone is not in the list.
     - It opens also when no project is open.
     - Current Project shows the row of the open project.
     - Location and Project Library select the rows to show. Location has All, Local and Network.
+    - Location is Network when a network drive holds the project file. Else it is Local.
+    - Project Library is the folder that holds the project file. vidcut has no project libraries (X1).
+    - Projects whose render cache is in one folder share a row. By default, the projects in one folder share a render cache folder (X7).
+    - The names of the cache files come from their content. Thus two projects can share a file, and vidcut clears only a full folder.
     - The columns are Location, Project Library, Project Name and Render Cache. A click on a column title sorts the rows. A second click reverses the order.
     - Render Cache shows the size of the cache, also when it is 0 kB. Its checkbox selects the row.
     - Clear Selected Cache deletes the cache of each checked row that is shown. As in Resolve, there is no warning and no undo.
+    - Clear Selected Cache clears the folder of a shared row for all of its projects.
     - When it deletes the cache of the open project, the render of that cache starts again.
     - Close closes the window.
   - In Smart and User mode, a line along the bottom of the ruler of both timelines shows the state (p. 203).
@@ -8802,7 +8918,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 The manual gives the order in which each picture is processed, on each page, as a chart (Ch. 144, p. 3407). vidcut keeps this order for the stages that it has.
 
 - A different order is a deviation, as for any other behavior.
-- [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) tells where it is different.
+- [design](design/README.md#picture-order) gives the order of the code. [Deviation X22](deviations.md#x22-in-an-hdr-timeline-ai-slow-works-before-the-conversion) tells where it is different.
 
 Resolve converts each clip into full-range, uncompressed 32-bit float data when it reads it (p. 222). All stages then work on that data.
 
@@ -8936,7 +9052,7 @@ A script gets no error for a broken file, and the window shows no message:
 - Too few rows give a changed picture, which the rule above does not fit.
 - Too many rows: only the first rows that the size calls for are used.
 - `LUT_3D_SIZE 1` gives a black picture.
-- vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
+- vidcut refuses these files ([gotchas](gotchas.md#resolves-imports)).
 
 **The Video Monitor LUT, the Color Viewer LUT and the Scopes LUT** (pp. 152, 811):
 
@@ -9001,7 +9117,7 @@ The default Resize Filter of a project is Sharper.
 - The weights of each axis are divided by their sum.
 - A read past the edge of the picture takes the edge pixel.
 - The filter works in the timeline gamma.
-- Above a shrink of 8:1, vidcut is different ([X110](deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
+- Above a shrink of 8:1, vidcut is different ([gotchas](gotchas.md#resolves-renders)).
 
 ### The fit to the timeline
 
@@ -9047,7 +9163,7 @@ These rules are for a project that scales a picture to fit.
   - The map uses the size of the media file. A proxy or an upscale does not change it.
   - Stretch fills the frame on each axis, also on pixels that are not square.
   - The crop, the anchor point and the Dynamic Zoom boxes are in fractions of the mapped picture.
-  - Position X and Y are in frame pixels (X70). Thus a new scaling keeps the place of a moved picture.
+  - Position X and Y are in frame pixels (X17). Thus a new scaling keeps the place of a moved picture.
   - Bypass re-encode copies no frame of a clip with another map than the fit.
 
 ### The limit for a thin bar

@@ -56,7 +56,7 @@ flowchart LR
 
 ## Picture order
 
-One output frame takes one route. The [spec](../spec.md#13-order-of-operations-pp-287296-3407) gives the order of the picture. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) is where vidcut differs.
+One output frame takes one route. The [spec](../spec.md#13-order-of-operations-pp-287296-3407) gives the order of the picture. [Deviation X22](../deviations.md#x22-in-an-hdr-timeline-ai-slow-works-before-the-conversion) is where vidcut differs.
 
 ```mermaid
 flowchart TD
@@ -148,7 +148,7 @@ A clip skips each step that it does not use. The steps run in this order:
 The AI stages get the picture in the timeline color space (`Single`).
 
 - Each stage gets 16-bit pictures (`Form`). The models of vidcut get RGB. The AI of macOS gets P416.
-- In an HDR timeline, AI Slow gets SDR media only. The draw then converts its result into the timeline color space (X98). There the input LUT comes after AI Slow, because the LUT follows the conversion.
+- In an HDR timeline, AI Slow gets SDR media only. The draw then converts its result into the timeline color space (X22). There the input LUT comes after AI Slow, because the LUT follows the conversion.
 
 vidcut has none of the other stages of the spec:
 

@@ -26,3 +26,6 @@
 - Paste Attributes of a copied speed that has keyframes.
 - The Stabilization tool of the viewer, and the Stabilizer mode and the graph of the Tracker palette.
 - Resync Clip in the Edit Actions of the Cut page.
+- The information overlay of a thumbnail in the Media Pool.
+- New Compound Clip leaves a selected clip on a locked track out, and puts the other clips in.
+- Analyze Clips for People, and the Face Refinement effect with Detect Faces in Frame.

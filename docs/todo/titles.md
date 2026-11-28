@@ -7,3 +7,5 @@
 - Edit in place of one line of a lower third.
 - Tab types a tab character in a title.
 - A spell check.
+- Text+ and Fusion titles in the Titles tab.
+- A Scroll starts with the middle of its first line on the bottom edge, one frame before the clip. It rises at the speed of Resolve.
