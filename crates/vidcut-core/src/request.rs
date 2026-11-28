@@ -1083,7 +1083,8 @@ pub enum Request {
     /// (made if needed), never rippling. Sound alone goes on a new audio
     /// track after the last one. Lines up with the timeline In, a lone Out,
     /// the edit nearest `at` (within 5 frames), or `at`. Returns the clip
-    /// and its track.
+    /// and its track. For sound alone, it also returns the `playhead` after
+    /// the edit, at the end of the new clips.
     #[serde(rename = "edit.place_on_top")]
     EditPlaceOnTop {
         #[serde(flatten)]

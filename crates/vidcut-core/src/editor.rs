@@ -4074,6 +4074,11 @@ fn mutate(
                 ops::place_on_top_block(p, &sources, at, src.lead)
             })?;
             let mut v = clip_ids(&ids);
+            if p.track(&track).is_some_and(|t| t.kind == TrackKind::Audio)
+                && let Some(end) = ids.iter().filter_map(|id| p.clip(id)).map(Clip::end).max()
+            {
+                v["playhead"] = json!(end);
+            }
             v["track"] = json!(track);
             v
         }

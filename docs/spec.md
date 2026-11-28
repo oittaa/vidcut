@@ -942,7 +942,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Place On Top** (F12; pp. 699–700):
   - It goes to the first track above all clips at that position, whatever the target track.
   - It makes this track if necessary (D24).
-  - Sound alone goes to a new audio track after the last audio track. An empty track does not take it.
+  - Sound alone goes to a new audio track after the last audio track. An empty track does not take it. Then the playhead is at the end of the new clip (D15).
   - It never ripples.
   - It aligns by the first of these rules that applies:
     1. a timeline In with the source In;
@@ -6561,7 +6561,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With a gap on one side, the sound clip on the other side moves its edge alone. It stops at the nearest sound on the track.
   - Reason: the clips on a track do not overlap.
 - **D15. Playhead after an edit function.**
-  - After Smart Insert, Append, Overwrite, Ripple Overwrite, Place On Top, Close Up or Paste, the playhead moves to the frame after the new clips.
+  - After Smart Insert, Append, Overwrite, Ripple Overwrite, Close Up or Paste, the playhead moves to the frame after the new clips.
+  - After Place On Top of sound alone, the playhead moves to the frame after the new clip. After Place On Top of a picture, the playhead stays.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).
   - A drop does not move the playhead.
   - This is the behavior of the Edit page.
