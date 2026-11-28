@@ -547,7 +547,7 @@ The format on disk:
     - The colors are straight, as in each cache file. An OpenEXR file usually holds premultiplied colors. Why straight: `from_file` reads each cache file in the same way.
     - Why OpenEXR and not raw half floats: Matroska does not take raw RGB. NUT takes it, but NUT keeps no color tags. Thus an HDR cache in NUT loses its transfer.
     - Why vidcut writes the OpenEXR file: FFmpeg's `exr` encoder cuts half floats toward zero ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
-    - Why no compression: the codec is uncompressed (spec D98). ZIP and PIZ make smaller files, but their decode uses more cores.
+    - Why no compression: the codec is uncompressed (spec D98).
 - The `.keys` file holds the name of each frame of the video, in order (`write_keys`).
   - Each name is 16 bytes: a SHA-256, cut to 16 bytes. The file has no header.
   - One name can come more than once, for example in a freeze frame.
