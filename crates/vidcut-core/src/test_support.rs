@@ -462,6 +462,11 @@ impl Fixture {
         let r = self.ok(json!({"method": "edit.append", "params": {"media": media, "range": format!("{a}f..{b}f")}}));
         r.result["clip"].as_str().unwrap().to_string()
     }
+
+    pub fn append_on(&mut self, media: &str, track: &str, a: i64, b: i64) -> String {
+        let r = self.ok(json!({"method": "edit.append", "params": {"media": media, "track": track, "range": format!("{a}f..{b}f")}}));
+        r.result["clip"].as_str().unwrap().to_string()
+    }
 }
 
 pub fn row(id: &str, start: i64, duration: i64, source_in: i64) -> (String, i64, i64, i64) {

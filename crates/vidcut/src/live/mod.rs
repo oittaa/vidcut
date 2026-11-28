@@ -4490,7 +4490,10 @@ impl Live {
                 }
                 _ => {}
             }
-            if !r.dry_run && is_edit_function(&request) && origin != (Origin::Gui { drag: true }) {
+            if !r.dry_run
+                && moves_playhead(&request, &r.result)
+                && origin != (Origin::Gui { drag: true })
+            {
                 self.playhead_after_edit(r);
             }
         }
@@ -6323,6 +6326,13 @@ fn is_edit_function(r: &Request) -> bool {
             | Request::EditSourceOverwrite { .. }
             | Request::EditPaste { .. }
     )
+}
+
+fn moves_playhead(r: &Request, result: &Value) -> bool {
+    match r {
+        Request::EditPlaceOnTop { .. } => result.get("playhead").is_some(),
+        _ => is_edit_function(r),
+    }
 }
 
 fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {

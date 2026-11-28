@@ -1884,11 +1884,11 @@ mod tests {
         info.video = None;
         f.env = crate::test_support::FakeEnv::default().with("/media/a.wav", info);
         f.ok(req("media.add", json!({"paths": ["/media/a.wav"]})));
-        let ac = f.append("m1", 0, 30);
+        let ac = f.append_on("m1", "A1", 0, 30);
         let ah = nest(&mut f, &[&ac]);
         f.ok(req("compound.open", json!({"clip": ah[0]})));
         assert!(f.editor.project().track("V1").is_some());
-        f.append("m1", 30, 50);
+        f.append_on("m1", "A1", 30, 50);
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
         assert!(!p.compounds[0].has_picture());
@@ -2220,7 +2220,7 @@ mod tests {
         info.video = None;
         f.env = crate::test_support::FakeEnv::default().with("/media/a.wav", info);
         f.ok(req("media.add", json!({"paths": ["/media/a.wav"]})));
-        let a = f.append("m1", 0, 30);
+        let a = f.append_on("m1", "A1", 0, 30);
         let hosts = nest(&mut f, &[&a]);
         f.ok(req("compound.open", json!({"clip": hosts[0]})));
         f.ok(req("track.set", json!({"track": "A1", "volume_db": -6.0})));
@@ -2243,7 +2243,7 @@ mod tests {
         info.video = None;
         f.env = crate::test_support::FakeEnv::default().with("/media/a.wav", info);
         f.ok(req("media.add", json!({"paths": ["/media/a.wav"]})));
-        let a = f.append("m1", 0, 30);
+        let a = f.append_on("m1", "A1", 0, 30);
         let hosts = nest(&mut f, &[&a]);
         f.ok(req("compound.open", json!({"clip": hosts[0]})));
         f.ok(req(
@@ -2273,7 +2273,7 @@ mod tests {
             json!({"paths": ["/media/a1.wav", "/media/a2.wav"]}),
         ));
         f.ok(req("track.add", json!({"kind": "audio"})));
-        let a = f.append("m1", 0, 30);
+        let a = f.append_on("m1", "A1", 0, 30);
         let b = f
             .ok(req(
                 "edit.append",
@@ -3165,7 +3165,7 @@ mod tests {
     #[test]
     fn pasting_copied_audio_only_foreign_compound_into_itself_while_open_is_refused() {
         let mut f = audio_only_fixture();
-        let ac = f.append("m1", 0, 30);
+        let ac = f.append_on("m1", "A1", 0, 30);
         nest(&mut f, &[&ac]);
         let mut doc = crate::otio::export(
             f.editor.project(),
