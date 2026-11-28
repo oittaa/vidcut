@@ -836,6 +836,14 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
   - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
   - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132)).
+- **Individual clips adds frames to a clip at another frame rate.**
+  - The file of such a clip has source frames from outside the clip. Their number follows no rule.
+  - A clip at the rate of the timeline gives its own frames and no more. The render has no frame handles.
+  - On a 30 fps timeline, source frames 0 to 47 of a 24 fps file give frames 0 to 50. Source frames 0 to 119 of a 60 fps file give 0 to 122.
+  - On a 24 fps timeline, frames 0 to 119 of the 60 fps file give 0 to 122. On a 60 fps timeline, frames 0 to 47 of the 24 fps file give 0 to 50.
+  - On a 30 fps timeline, frames 10 to 57 of the 24 fps file give 4 to 59. Frames 10 to 129 of the 60 fps file give 6 to 132.
+  - The frame count in the name and the file timecode then give the first frame in the file: `…00086404` and 01:00:00:04.
+  - vidcut does not copy this fault. The file holds the frames that the clip shows, and no others ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 - **A title with only the family name Bahnschrift draws a narrow face of the font.**
   - Bahnschrift is a variable font. At weight 300, 350 and 400, the title draws Bahnschrift SemiLight SemiCondensed. At weight 200, it draws Bahnschrift Light SemiCondensed.
   - The Inspector does the same. The family Bahnschrift with the face Normal draws SemiLight SemiCondensed, the same in every pixel.

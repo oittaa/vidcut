@@ -6162,7 +6162,7 @@ The Audio page follows the Fairlight page of the manual.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
   - Each clip renders at the frame rate of its media (p. 4114). Its file has that frame rate.
     - A still, a title, a generator and a compound clip render at the frame rate of the timeline.
-    - The first frame of the file is the first source frame that the clip shows.
+    - The file holds the source frames that the clip shows, and no others ([gotchas](gotchas.md#resolves-renders)).
     - The record timecode of the file and the times of its subtitles count at that frame rate.
     - An interlaced source renders at its field rate, one frame for each field (D34).
   - The parts of a name go in this order: unique prefix, name, frame count, File Suffix, unique suffix.
