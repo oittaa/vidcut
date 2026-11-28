@@ -16,9 +16,9 @@ use crate::history::{self, HistoryDb, HistoryMeta, compress_bytes, decompress_by
 use crate::lru::Lru;
 use crate::model::{
     Clip, ClipFilter, Compound, Cue, Grade, Kept, Marker, Marks, Media, NextIds, OpenCompound,
-    PathSample, Project, RenderJob, RenderRange, Settings, Speakers, Still, SubtitleStyle,
-    SubtitleTrack, SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool, Track, TrackKind,
-    Transition, VoiceIsolation,
+    PathSample, Project, RenderJob, RenderRange, Settings, SharedNode, Speakers, Still,
+    SubtitleStyle, SubtitleTrack, SyncGroup, TapeMarks, Timeline, TimelineSettings, Tool, Track,
+    TrackKind, Transition, VoiceIsolation,
 };
 use crate::shared::SharedVec;
 
@@ -225,6 +225,7 @@ struct MetaRow<'a> {
     speakers: Cow<'a, Speakers>,
     queue: Cow<'a, [RenderJob]>,
     stills: Cow<'a, [Still]>,
+    shared_nodes: Cow<'a, [SharedNode]>,
 }
 
 impl<'a> MetaRow<'a> {
@@ -249,6 +250,7 @@ impl<'a> MetaRow<'a> {
             speakers,
             queue,
             stills,
+            shared_nodes,
         } = p;
         Self {
             settings: Cow::Borrowed(settings),
@@ -261,6 +263,7 @@ impl<'a> MetaRow<'a> {
             speakers: Cow::Borrowed(speakers),
             queue: Cow::Borrowed(queue.as_slice()),
             stills: Cow::Borrowed(stills.as_slice()),
+            shared_nodes: Cow::Borrowed(shared_nodes.as_slice()),
         }
     }
 }
@@ -1244,6 +1247,7 @@ fn load_project_from_conn(
         speakers: meta.speakers.into_owned(),
         queue: meta.queue.into_owned(),
         stills: meta.stills.into_owned(),
+        shared_nodes: meta.shared_nodes.into_owned(),
     };
     project.check_out();
     resolve_paths(&mut project, dir);

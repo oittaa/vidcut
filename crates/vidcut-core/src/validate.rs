@@ -456,6 +456,7 @@ pub fn violations(p: &Project) -> Vec<String> {
     }
     timelines(p, &mut v);
     stills(p, &mut v);
+    shared(p, &mut v);
     v
 }
 
@@ -493,6 +494,44 @@ fn stills(p: &Project, v: &mut Vec<String>) {
                 s.id
             ));
         }
+    }
+}
+
+fn shared(p: &Project, v: &mut Vec<String>) {
+    let mut numbers = HashSet::new();
+    for s in &p.shared_nodes {
+        if !numbers.insert(s.number) {
+            v.push(format!("duplicate shared node {}", s.number));
+        }
+        if s.number == 0 || s.number >= p.next_id.shared {
+            v.push(format!(
+                "shared node {} is not 1 to {}",
+                s.number,
+                p.next_id.shared.saturating_sub(1)
+            ));
+        }
+        if s.node.tool.is_mixer() || s.node != s.node.shared_part() {
+            v.push(format!("shared node {} is not a lone corrector", s.number));
+        }
+    }
+    let part = |n: u64| (p.shared_nodes.iter()).find(|s| s.number == n);
+    let clips = (p.tracks.iter()).flat_map(|t| &t.clips);
+    for c in clips {
+        let g = c.picture.as_ref().and_then(|x| x.grade.as_ref());
+        for d in g.into_iter().flat_map(crate::model::Grade::every_node) {
+            let Some(n) = d.shared else { continue };
+            match part(n) {
+                None => v.push(format!("clip {} has a copy of no shared node {n}", c.id)),
+                Some(s) if s.node != d.shared_part() => {
+                    v.push(format!("clip {} has an old copy of shared node {n}", c.id));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    let timeline = (p.timelines.iter()).filter_map(|t| t.grade.as_ref());
+    if timeline.flat_map(|g| &g.nodes).any(|d| d.shared.is_some()) {
+        v.push("a timeline grade has a shared node".into());
     }
 }
 

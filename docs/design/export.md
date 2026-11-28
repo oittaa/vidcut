@@ -919,6 +919,14 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `with_layer` removes the usual layers at the end. Thus a clip with one changed layer stores no empty layers after it.
   - A lower `node_stack_layers` count moves the layers above it to `Grade::kept_layers`, in each clip of the project (`ops::grade::count_layers`, `Grade::counted`). A higher count moves them back.
   - `ops::grade::clear_layers` resets each layer for `grade.clear` with `all_layers` (`Grade::reset_layers`). It keeps `kept_layers`.
+- A shared node (`SharedNode`) is in `Project::shared_nodes`. Each copy holds its number in `GradeNode::shared`. `ops::shared` has the requests.
+  - `GradeNode::shared_part` gives the settings that each copy shares. `GradeNode::take_shared` gives them to a copy, and keeps its links, its place and its Magic Mask.
+  - `ops::grade::edited` gives the grade before and after each change to `ops::shared::took`. A changed copy changes `SharedNode::node`.
+  - Why: a change finds its copy by its settings, not by its number. The numbers change when a node is added or removed.
+  - After each request, `ops::shared::synced` gives the settings of the shared node to each copy that differs, in each timeline and compound clip. It unlinks a copy of no shared node.
+  - Why: a copied clip, grade or still brings its copies. The copies then follow the shared node.
+  - `synced` writes only to the tracks that hold such a copy. Thus a request that changes no copy copies no track.
+  - The timeline grade has no copies: `ops::grade::store` and the import of a timeline unlink them (`Grade::unshared`).
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).

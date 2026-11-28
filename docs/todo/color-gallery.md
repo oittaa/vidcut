@@ -8,5 +8,4 @@
 - Apply Active Layer, and a drag of a still into the viewer.
 - Wipes of a still against the clip, and the split screen modes.
 - Color groups with Pre-Clip and Post-Clip grades.
-- Shared nodes.
 - Append Node Graph, Apply Grade From One or Two Clips Prior, and Ripple Node Changes.
