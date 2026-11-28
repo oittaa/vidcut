@@ -2639,7 +2639,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Position and Center are each one point. One keyframe holds X and Y (`EffectKeys`).
   - Film Grain Freeze takes keyframes from 0 to 1. Freeze is on where its curve is 0.5 or more.
     - A frozen frame has the grain of the latest Freeze keyframe at or before it.
-    - Before the first Freeze keyframe, a frozen frame has the grain of the first frame of the clip.
+    - Before the first Freeze keyframe, a frozen frame has the grain of the first frame of the clip (not measured).
     - With Freeze keyframes, the switch puts a keyframe of 0 or 1.
     - The Keyframe button of the effect also keys Freeze.
     - A Film Grain node of a composition does the same.

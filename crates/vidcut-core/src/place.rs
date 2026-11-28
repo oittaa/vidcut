@@ -1393,6 +1393,19 @@ fn matched(t: &Tracker, (w, h): (f64, f64), (start, now): (i64, f64)) -> [[f64; 
     [lookup(undone, from, to), lookup(done, to, from)]
 }
 
+fn first_reaching(last: i64, reached: impl Fn(i64) -> bool) -> i64 {
+    let (mut lo, mut hi) = (0, last.max(0));
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if reached(mid) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo
+}
+
 pub fn composed(
     c: &Composition,
     (w, h): (f64, f64),
@@ -2030,7 +2043,8 @@ impl Placing {
             .effects
             .iter()
             .filter_map(|e| {
-                let held = e.held(p.source, p.frame);
+                let held =
+                    (e.freeze_key(p.source)).map_or(0, |k| (p.frame - (p.source - k)).max(0));
                 Working::of(&e.sampled(p.source as f64), &OnFrame { held, ..on })
             })
             .collect();
@@ -2056,7 +2070,13 @@ impl Placing {
             .map_or_else(Program::default, |c| {
                 let frame = p.clock.frame(p.source);
                 let at = frame - c.start;
-                let held: Vec<i64> = c.nodes.iter().map(|n| n.held(at, p.frame)).collect();
+                let at_clip = |f: i64| p.clock.frame(p.source - p.frame + f) - c.start;
+                let held: Vec<i64> = (c.nodes.iter())
+                    .map(|n| {
+                        n.freeze_key(at)
+                            .map_or(0, |k| first_reaching(p.frame, |f| at_clip(f) >= k))
+                    })
+                    .collect();
                 let sampled = c.sampled(at as f64, frame as f64);
                 composed(&sampled, pixels, (p.frame, frame as f64), &held)
             });

@@ -595,10 +595,10 @@ pub trait Keyed: Clone {
         keys_previewed(self, baseline, edited, frame)
     }
 
-    fn held(&self, at: i64, frame: i64) -> i64 {
+    fn freeze_key(&self, at: i64) -> Option<i64> {
         (self.keys_of(EffectValue::Freeze).iter().rev())
             .find(|k| k.frame <= at)
-            .map_or(0, |k| frame - (at - k.frame))
+            .map(|k| k.frame)
     }
 
     fn has_key_at(&self, frame: i64) -> bool {
