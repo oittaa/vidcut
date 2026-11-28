@@ -5231,7 +5231,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
-  - **Solo Safe** (p. 3964):
+  - **Solo Safe** (p. 3965):
     - Ctrl+Shift+click (Cmd+Shift+click on a Mac) on a Solo button turns Solo Safe on or off. The button is blue while it is on (not measured).
     - A Solo Safe track is heard also while other tracks are soloed. This applies to the export too (not measured).
   - **Exclusive Solo** (p. 3965):
