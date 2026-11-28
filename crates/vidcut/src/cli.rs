@@ -120,6 +120,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.paste", &["node", "clips"]),
     ("grade.apply", &["from", "clips"]),
     ("grade.ripple", &["node", "clip", "clips"]),
+    ("grade.append_node", &["node", "clip", "clips"]),
     ("grade.swap", &["node", "with", "clip"]),
     ("grade.cleanup", &["clip"]),
     ("grade.keys.add", &["clip"]),
