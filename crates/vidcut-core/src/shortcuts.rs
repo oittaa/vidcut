@@ -218,6 +218,7 @@ actions! {
     ResetAllGrades "reset_all_grades",
     AddStaticKeyframe "add_static_keyframe",
     AutoColor "auto_color",
+    GrabStill "grab_still",
     SourceStart "source_start",
     SourceEnd "source_end",
     ClipIn "clip_in",
@@ -271,7 +272,8 @@ impl Action {
             | Action::ResetGradesKeepNodes
             | Action::ResetAllGrades
             | Action::AddStaticKeyframe
-            | Action::AutoColor => Panel::Color,
+            | Action::AutoColor
+            | Action::GrabStill => Panel::Color,
             _ => Panel::App,
         }
     }
@@ -1885,6 +1887,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+Shift+C"],
         "Auto Color on the current node",
         Some("Balances the blacks and the whites from the frame at the playhead."),
+    ),
+    own(
+        Color,
+        Action::GrabStill,
+        &["Ctrl+Alt+G"],
+        "Grab a still",
+        Some("The Gallery keeps the frame at the playhead and its grades."),
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

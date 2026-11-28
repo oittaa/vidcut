@@ -192,6 +192,7 @@ pub(crate) enum Act {
     Silu,
     Gelu,
     Sigmoid,
+    Relu6,
 }
 
 impl Act {
@@ -203,6 +204,7 @@ impl Act {
             Act::Silu => (3, 0.0),
             Act::Gelu => (4, 0.0),
             Act::Sigmoid => (5, 0.0),
+            Act::Relu6 => (6, 0.0),
         }
     }
 }
@@ -491,6 +493,7 @@ fn act(v: f32, code: u32, a: f32, pa: f32) -> f32 {
         case 3u: { return v / (1.0 + exp(-v)); }
         case 4u: { return 0.5 * v * (1.0 + erf(v * 0.7071067811865476)); }
         case 5u: { return 1.0 / (1.0 + exp(-v)); }
+        case 6u: { return clamp(v, 0.0, 6.0); }
         default: { return v; }
     }
 }

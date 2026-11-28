@@ -451,6 +451,7 @@ Ranges and resolution:
 | cue | q1, q2 … | `Project::alloc_cue_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 | subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
+| still | s1, s2 … | `Project::alloc_still_id` |
 
 - The counters are in `NextIds`. Each alloc call adds one.
 - Undo restores `next_id` with the project. Thus an id of an undone edit can come again.
@@ -475,6 +476,7 @@ Ranges and resolution:
   - `history_base` and `history_events` store those project-folder paths relative too, so undo and external diffs stay valid after moving the folder.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
+- The picture of a still is stored by its file name (`Still::picture`), and found in the stills folder (`Env::stills_dir`).
 - `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
 - `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::close` removes unreferenced `blobs` and empties the WAL (a `TRUNCATE` checkpoint).
 - A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
