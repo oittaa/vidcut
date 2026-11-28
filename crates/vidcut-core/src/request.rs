@@ -1264,6 +1264,10 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         lift: bool,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Delete a range on every unlocked track; ripples unless `lift`.
     #[serde(rename = "edit.delete_range")]
@@ -1287,6 +1291,10 @@ pub enum Request {
         mode: MoveMode,
         #[serde(default)]
         track: Option<String>,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Move a clip onto another, replacing it (rippling the difference).
     #[serde(rename = "edit.replace")]
@@ -1303,6 +1311,10 @@ pub enum Request {
         /// Override Ripple On for this trim.
         #[serde(default)]
         ripple: Option<bool>,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Roll the edit at a clip's edge. With a gap at that edge, only the
     /// picture edge moves and the sound stays. It stops one frame short of
@@ -1312,10 +1324,21 @@ pub enum Request {
         clip: ClipRef,
         edge: Edge,
         by: TimeSpec,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
     },
     /// Slip a clip's content.
     #[serde(rename = "edit.slip")]
-    EditSlip { clip: ClipRef, by: TimeSpec },
+    EditSlip {
+        clip: ClipRef,
+        by: TimeSpec,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
+    },
     /// New Compound Clip: the clips become one compound clip from the start
     /// of the first to the end of the last, their sound and any gaps
     /// included. Its picture stays on the lowest of their video tracks; a
@@ -1333,6 +1356,10 @@ pub enum Request {
         /// Starting timecode of the compound clip. Default: `00:00:00:00`.
         #[serde(default)]
         start_tc: Option<TimeSpec>,
+        /// Take these clips alone, not the clips linked to them (Linked
+        /// Selection off).
+        #[serde(default)]
+        alone: bool,
     },
     /// Convert In and Out to Compound Clip: cuts the clips and the subtitle
     /// cues of every track at the In mark and the Out mark. The cues stay on
@@ -1395,7 +1422,14 @@ pub enum Request {
     /// slide stops one frame short of a clip that does not touch it, and at
     /// the timeline's start.
     #[serde(rename = "edit.slide")]
-    EditSlide { clip: ClipRef, by: TimeSpec },
+    EditSlide {
+        clip: ClipRef,
+        by: TimeSpec,
+        /// Act on these clips alone, not on the clips linked to them
+        /// (Linked Selection off). The clips stay in their link groups.
+        #[serde(default)]
+        alone: bool,
+    },
     /// Ripple Delete Silence: cut the silent parts out of `clips` and close the
     /// gaps, as one undo step. `dry_run` reports the parts without cutting (the
     /// red stripes, `removed`). `parts` cuts a list of them instead, edited
@@ -1497,6 +1531,12 @@ pub enum Request {
         edge: Edge,
         by: TimeSpec,
     },
+    /// Bring a clip and the clips linked to it back into sync. A clip is out
+    /// of sync when its media plays at another time than in a linked clip of
+    /// the same media and the other kind (picture or sound). Clips with a
+    /// speed change have no sync offset. One undo step.
+    #[serde(rename = "edit.resync")]
+    EditResync { clip: ClipRef, how: Resync },
     /// Move clips' head or tail to `at` (Trim Start/End to Playhead).
     #[serde(rename = "edit.trim_to_playhead")]
     EditTrimToPlayhead {
@@ -1964,6 +2004,15 @@ pub enum Request {
         #[serde(default)]
         ripple: bool,
     },
+    /// Link clips: they become one link group and act as one clip in an
+    /// edit. A clip leaves the group that it was in. A group with one clip
+    /// left ends. One undo step.
+    #[serde(rename = "clip.link")]
+    ClipLink { clips: OneOrMany<ClipRef> },
+    /// Unlink clips: each leaves its link group and then acts alone. A
+    /// group with one clip left ends. One undo step.
+    #[serde(rename = "clip.unlink")]
+    ClipUnlink { clips: OneOrMany<ClipRef> },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
     /// that their level reaches `target`. A picture clip gives its linked
     /// sound clips. Each clip is measured over the
@@ -2986,6 +3035,71 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         strength: Option<f64>,
     },
+    /// Keep what stands out, or the thing in a box, inside the frame of
+    /// clips of footage (`c3`, or `V2@15s`), and store the move as Position
+    /// keyframes. The picture moves on an axis only where it is larger than
+    /// the frame, for example a wide picture that fills a tall frame, and
+    /// always covers the frame there. The zoom stays. The new keyframes
+    /// replace the Position keyframes of each clip, one where the move
+    /// bends, and one undo takes them off. A shot change inside a clip moves
+    /// the picture at once. Each frame of each clip is read when the clip
+    /// has no analysis yet. Returns for each clip the `keys` made, the axes
+    /// it moved (`pan`, `tilt`) and the share of its frames that showed the
+    /// thing (`seen`).
+    #[serde(rename = "picture.reframe")]
+    PictureReframe {
+        clips: OneOrMany<ClipRef>,
+        /// The box around the thing to follow, on the frame `at`, as
+        /// fractions of the frame from its top left. The thing is followed
+        /// through the clip from there. One clip only. Left out, the move
+        /// follows the part of each frame that stands out most, or the main
+        /// `subject` of each shot.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<ReframeBox>,
+        /// The frame of `reference`, inside the clip. Left out, the
+        /// playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The axes that the picture moves on: `auto`, `pan` or `tilt`.
+        /// Usual: `auto`.
+        #[serde(default)]
+        mode: ReframeMode,
+        /// The kind of thing to follow without `reference`: `person`,
+        /// `face`, `text` or `vehicle`. The move follows the main one of
+        /// each shot: the one that shows largest for the longest time. Left
+        /// out, the move follows the part of each frame that stands out
+        /// most.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<Subject>,
+        /// The neural network that finds the `subject`: `fast`, or `slow`
+        /// for `face`. Usual: `fast`.
+        #[serde(default)]
+        model: FindModel,
+        /// The longer side, in pixels, of the picture that the model of the
+        /// `subject` sees, from 320 to 3840. Left out, it is 640 for `face`,
+        /// `person` and `vehicle`, and 960 for `text`. A larger size finds
+        /// smaller things and takes more time. The picture is never larger
+        /// than its source.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<u32>,
+        /// The seconds of the source over which the move evens out the
+        /// motion of the thing, from 0 to 10. At 0 it follows each frame.
+        /// Usual: 0.5.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smooth: Option<f64>,
+        /// How far the keyframes may stray from the move, in pixels of a
+        /// frame 1920 pixels on its long side, from 0.01 to 100. A larger
+        /// value gives fewer keyframes. Usual: 7.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tolerance: Option<f64>,
+        /// Download the model when it is not on this computer, checked
+        /// against its SHA-256: with `reference` the tracking model (715
+        /// kB); with `subject` the model of the subject, as `motion.find`
+        /// tells; else the saliency model (15 MB). Without it, a missing
+        /// model is an error that tells its size.
+        #[serde(default)]
+        download: bool,
+    },
     /// Put clips' pictures back at their usual values: the `transform`
     /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
@@ -3781,6 +3895,51 @@ pub enum Request {
         /// computer, checked against its SHA-256.
         #[serde(default)]
         download: bool,
+    },
+    /// The stills of the Gallery of the Color page, the oldest first. Each
+    /// has its id, clip, timeline, frame, label and the path of its
+    /// picture. `keyframes` tells if its clip grade has keyframes, and
+    /// `timeline_keyframes` if its timeline grade has them.
+    #[serde(rename = "gallery.get")]
+    GalleryGet {},
+    /// Grab Still: save a still of the frame `at` in the Gallery. Its
+    /// picture is the frame of the timeline with all grades and the output
+    /// LUT, at the size of the timeline. Its grades are those of the
+    /// topmost clip there that takes a grade: each node stack layer of the
+    /// clip grade, and the timeline grade, with their keyframes. The
+    /// picture is a 32-bit float OpenEXR file in the `stills` folder, and
+    /// stays there after an undo. Returns the id of the still as `still`.
+    #[serde(rename = "gallery.grab")]
+    GalleryGrab {
+        /// The frame of the timeline. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
+    /// Delete stills from the Gallery. Their pictures stay in the `stills`
+    /// folder. Thus an undo gives the stills back whole.
+    #[serde(rename = "gallery.remove")]
+    GalleryRemove {
+        /// The ids of the stills (`s1`).
+        stills: OneOrMany<String>,
+    },
+    /// Apply Grade: give clips the grade of a still. With the `clip` grade,
+    /// the clip grade of the still, with each node stack layer, replaces
+    /// the whole clip grade of each clip. With the `timeline` grade, the
+    /// timeline grade of the still replaces the timeline grade of the open
+    /// timeline. A grade with keyframes is refused.
+    #[serde(rename = "gallery.apply")]
+    GalleryApply {
+        /// The id of the still (`s1`).
+        still: String,
+        /// The clips that get the clip grade. Left out: in a running GUI,
+        /// the clips selected in the Thumbnail timeline and the clip at the
+        /// playhead; else the topmost clip at the playhead that takes a
+        /// grade. Not with the `timeline` grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The grade that changes. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
     },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences, compound clips and adjustment clips.
@@ -4969,7 +5128,8 @@ pub enum Request {
         search: Option<String>,
     },
     /// The timeline clips, subtitle cues, pool media and edit points selected,
-    /// and `thumbnails`, the clips selected in the Thumbnail timeline.
+    /// `thumbnails`, the clips selected in the Thumbnail timeline, and
+    /// `stills`, the stills selected in the Gallery.
     /// `edits` lists every selected edit, left to right. `edit` is the one
     /// clicked last, which the Trim Editor shows. `first` is the clip or cue
     /// selected first, which the Keyframes tab and the keyframe tray show.
@@ -4977,7 +5137,8 @@ pub enum Request {
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips, subtitle cues, pool media, Thumbnail timeline
-    /// clips or an edit point (omitted parts stay as they are). `,` and `.`
+    /// clips, Gallery stills or an edit point (omitted parts stay as they
+    /// are). `,` and `.`
     /// and Dynamic Trim act on every selected edit, Ctrl+T on `edit`.
     #[serde(rename = "selection.set")]
     SelectionSet {
@@ -4996,6 +5157,9 @@ pub enum Request {
         /// timeline.
         #[serde(default)]
         thumbnails: Option<OneOrMany<ClipRef>>,
+        /// The stills selected in the Gallery of the Color page (`s1`).
+        #[serde(default)]
+        stills: Option<OneOrMany<String>>,
         /// Select the edit point of `track` nearest this time, as V does
         /// at the playhead (`playhead`) and a click on an edit does.
         #[serde(default)]
@@ -5065,12 +5229,14 @@ pub enum Request {
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), the
     /// viewer's `color_tool` (the switch, Auto Color and Reset of the Auto
-    /// Color tool of node 1), `tools`, the viewer's row of Transform, Crop,
-    /// Dynamic Zoom, Color and their buttons, `title_text` (the text of the
-    /// selected title, or of the topmost title at the playhead, to edit in
-    /// place in the viewer), `select_tool` (a tool to add on the effects
-    /// page), `equalizer` (the Equalizer window of `track`), or `dynamics`
-    /// (the Dynamics window of `track`). Answers what `gui.state` does.
+    /// Color tool of node 1), the viewer's `smart_reframe` box (the
+    /// `reference` that Reframe sends), `tools`, the viewer's row of
+    /// Transform, Crop, Dynamic Zoom, Color, Smart Reframe and their
+    /// buttons, `title_text` (the text of the selected title, or of the
+    /// topmost title at the playhead, to edit in place in the viewer),
+    /// `select_tool` (a tool to add on the effects page), `equalizer` (the
+    /// Equalizer window of `track`), or `dynamics` (the Dynamics window of
+    /// `track`). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow {
         panel: GuiPanel,
@@ -6130,6 +6296,41 @@ pub struct ClipPart {
     pub end: TimeSpec,
 }
 
+/// The axes that `picture.reframe` moves the picture on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReframeMode {
+    /// Each axis on which the picture is larger than the frame.
+    #[default]
+    Auto,
+    /// Across only.
+    Pan,
+    /// Up and down only.
+    Tilt,
+}
+
+impl ReframeMode {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Pan, Self::Tilt];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Pan => "Pan Only",
+            Self::Tilt => "Tilt Only",
+        }
+    }
+}
+
+/// A box on the frame, as fractions of the frame from its top left.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReframeBox {
+    /// Its middle, `[x, y]`.
+    pub center: [f64; 2],
+    /// Its width and its height, each above 0 and at most 1.
+    pub size: [f64; 2],
+}
+
 /// What Ripple Delete Silence counts as silence (deviation X47).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -6599,6 +6800,22 @@ pub fn viewer_frame_after(frame: ViewerFrame, key: ViewerFrameKey) -> ViewerFram
     }
 }
 
+/// How `edit.resync` brings clips back into sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Resync {
+    /// Slip into Place: slip the content of the clip, and keep its place.
+    Slip,
+    /// Move into Place: move the clip, over what is there.
+    Move,
+    /// Slip Others into Place: slip the content of each other clip of the
+    /// same media in its group.
+    SlipOthers,
+    /// Move Others into Place: move each other clip of the same media in its
+    /// group.
+    MoveOthers,
+}
+
 /// What a trim of an edit moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -6632,6 +6849,11 @@ pub struct TimelineOptions {
     /// the track.
     #[serde(default)]
     pub trim_to_audio: Option<bool>,
+    /// Linked Selection: a click selects a clip and the clips linked to it,
+    /// and an edit acts on them all. Off, the linked parts show apart, and
+    /// each acts alone.
+    #[serde(default)]
+    pub linked_selection: Option<bool>,
     /// Trim with Safe Edit: a trim stops at the neighboring clip.
     #[serde(default)]
     pub safe_edit: Option<bool>,
@@ -6800,8 +7022,11 @@ pub enum GuiPanel {
     /// The viewer's Color tool on the selected clip: the switch, Auto Color
     /// and Reset of the Auto Color tool of node 1.
     ColorTool,
-    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Color, the
-    /// flips, Swap, the ease, Auto Color and Reset.
+    /// The viewer's Smart Reframe box: the box on the frame that Reframe
+    /// sends as the `reference` of `picture.reframe`.
+    SmartReframe,
+    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom, Color and
+    /// Smart Reframe, the flips, Swap, the ease, Auto Color and Reset.
     Tools,
     /// The text of a title, to edit in place in the viewer, with a caret at
     /// its end: the first selected title at the playhead, else the topmost
@@ -8805,6 +9030,7 @@ impl Request {
                     | Self::KeyframesCopy { .. }
                     | Self::GradeCopy { .. }
                     | Self::GradeWindowCopy { .. }
+                    | Self::GalleryGet {}
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

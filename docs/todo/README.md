@@ -1,11 +1,9 @@
 # To do
 
-Open work, **one file per item**. The files in this folder are the list: there is no index to keep up to date.
+Each file is one item of open work: one area, and the big parts of it that vidcut does not have yet.
 
-- **New work:** add a file named after it (`render-queue.md`): what it is, why, a `**When:**` line, and anything known about how.
-- **Finished work:** delete its file in the pull request that finishes it, and describe the result where it belongs (the spec, a design page, AGENTS.md).
-- **Work in progress:** name the pull request in the item's file.
+The reason for each part: Resolve has it (AGENTS.md rule 1), unless the line names another reason.
 
-Pull requests that touch different items change different files, so they never conflict over this list.
+The pull request that finishes a part deletes its line. It deletes the file when no line is left.
 
-Resolve behavior that the spec describes and vidcut does not have is in [gaps.md](gaps.md), one line each.
+Resolve behavior that the spec describes and vidcut does not have is in [gaps.md](gaps.md).

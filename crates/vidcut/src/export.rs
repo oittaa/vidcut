@@ -2147,6 +2147,18 @@ pub fn frame(
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))
 }
 
+pub fn still(plan: &RenderPlan, out: &Path) -> Result<()> {
+    let piece =
+        (plan.video.first()).ok_or_else(|| Error::invalid("there is no picture at the frame"))?;
+    let frame = plan.range.0;
+    let decoder = crate::preferences::gpu_decoding().own_decoder();
+    let grade = (plan.timeline_grade.as_ref()).map(|g| g.at(frame as f64).into_owned());
+    let colors = (plan.colors, plan.output_lut.as_deref(), grade.as_ref());
+    let size = (plan.width, plan.height);
+    vidcut_av::export::still::write_exr(piece, plan.fps, size, colors, out, decoder.as_ref())
+        .map_err(from_av)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,19 +1,4 @@
 # macOS
 
-**When:** after the interchange and the smaller items ([roadmap](../roadmap.md)).
-
-To do:
-
-- Test ProRes proxies on a Mac with ProRes hardware and on a Mac without it.
-- Make a signed `.app` bundle that includes FFmpeg's libraries.
-
-## Work on the CPU
-
-Most frames stay on the GPU from the decoder to the viewer or the encoder. These cases use the CPU:
-
-- **VideoToolbox exports without GPU decoding.** The encoder then has no frames of its own device. Thus the planes come back to memory.
-
-To check by hand on the Mac:
-
-- An export to VideoToolbox draws into the IOSurfaces of the encoder (`fs_encode_unorm`). Compare its frames with an export to the CPU encoder.
-- The export's report has no `through_memory`.
+- A signed .app bundle with the FFmpeg libraries.
+- VideoToolbox exports that keep the frames in GPU memory.

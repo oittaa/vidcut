@@ -1156,6 +1156,33 @@ The passes:
 - The passes before it already blur the picture by more than n pixels. Thus the gaps do not show.
 - Above a sigma of 128 pixels, Black and Replicate borders thus differ a little from one pass.
 
+## The Gallery
+
+The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
+
+- `Project::stills` holds each `Still` in the project file. A still holds copies of the grades, not links to them. Thus a later change of the clip does not change the still.
+- `ops::gallery` holds the edits: `grab`, `remove`, `apply` and `get`.
+  - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
+  - `apply` puts a copy of the clip grade into each target with `put_whole`. It gives the copy the node stack layers of the project first (`Grade::counted`).
+  - `apply` refuses a grade with keyframes. Why: Apply Grades Using is not built, and a copy of the keyframes is only one of its three modes.
+- The picture of a still:
+  - `editor::still_looks` gives the plan of the frame: `render::flatten` of one frame, with no sound.
+  - `Env::still` draws it, and `AvEnv` writes it with `export::still`. This path draws as the export of a frame does, with the timeline grade and the output LUT.
+  - `still::write_exr` writes the 32-bit float planes into an OpenEXR file with lossless PIZ compression.
+  - Why OpenEXR: the file keeps each value of the float picture, also outside 0..1.
+  - The name of the file is a digest of the plan. Thus the measure step and the edit agree on the file, and the same frame and grades give the same file.
+  - The file goes into the folder of `PlaybackFiles::stills_in`, beside the proxies. `Env::stills_dir` gives that folder.
+  - An undo or a delete keeps the file. Why: a redo then needs no new picture.
+- `gallery.grab` draws before the edit, as `grade.auto_color` does.
+  - In the GUI, `Live::measuring` draws the picture on `vidcut-measure`. The edit then runs with a heard-only `AvEnv`, which only finds the file.
+  - A change of the frame or of the grades in that time gives a new plan. The edit then finds no file and gives a conflict.
+  - Without a GUI, `work_first` draws on `vidcut-stills`, outside the lock of the project file.
+- The GUI:
+  - `Workspace::gallery_panel` draws the panel. `Gallery` keeps the textures of the pictures in an `Lru` of `STILLS_KEPT` entries.
+  - `still::exr_rgba` reads a picture at the height of the tile, on `vidcut-still`. It averages the pixels into the smaller size, then clamps them to 8 bits.
+  - The live `Selection` holds the selected stills in `stills`. `selection.set` changes it, and a still that leaves the project leaves it.
+  - A `gallery.apply` with no `clips` in the Clip mode gets the clips selected in the Thumbnail timeline and the clip at the playhead (`Live::edit_at`).
+
 ## Compositions
 
 The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500), [model](model.md#compositions)):

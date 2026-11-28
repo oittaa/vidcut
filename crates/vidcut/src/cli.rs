@@ -106,6 +106,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
     ("picture.stabilize", &["clip"]),
+    ("picture.reframe", &["clips"]),
     ("grade.get", &["clip"]),
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
@@ -133,6 +134,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
+    ("gallery.remove", &["stills"]),
+    ("gallery.apply", &["still", "clips"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -169,6 +172,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.slip", &["clip"]),
     ("edit.slide", &["clip"]),
     ("edit.audio_roll", &["clip"]),
+    ("edit.resync", &["clip"]),
+    ("clip.link", &["clips"]),
+    ("clip.unlink", &["clips"]),
     ("edit.ripple_delete_silence", &["clips"]),
     ("edit.detect_scene_cuts", &["clips"]),
     ("edit.compound", &["clips"]),
@@ -254,6 +260,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Export the timeline: a video, audio, frames per clip, or OpenTimelineIO",
     ),
     ("frame", "Single frames as PNG"),
+    (
+        "gallery",
+        "Stills of the Color page: pictures of frames, with their grades",
+    ),
     ("generators", "Pictures made with no file"),
     (
         "grade",
@@ -531,6 +541,13 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut picture stabilize c3 --mode translation\n  \
          vidcut picture stabilize V1@10s --camera-lock true\n  \
          vidcut picture stabilize c3 --smooth 1 --strength 0.5 --zoom false",
+    ),
+    (
+        "picture.reframe",
+        "vidcut picture reframe c3 --download\n  \
+         vidcut picture reframe c3,c4 --mode pan\n  \
+         vidcut picture reframe c3 --subject face --smooth 1\n  \
+         vidcut picture reframe c3 --at 2s --reference '{\"center\":[0.6,0.4],\"size\":[0.2,0.5]}'",
     ),
     (
         "effects.add",
