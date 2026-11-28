@@ -150,6 +150,16 @@ pub trait Env {
         ))
     }
 
+    fn still(&self, plan: &RenderPlan, dry_run: bool) -> Result<String> {
+        let _ = (plan, dry_run);
+        Err(Error::usage("stills are drawn by the vidcut program"))
+    }
+
+    fn stills_dir(&self) -> PathBuf {
+        self.proxy_dir()
+            .with_file_name(crate::preferences::STILLS_FOLDER)
+    }
+
     fn subject_masks(
         &self,
         plan: &RenderPlan,
@@ -1967,6 +1977,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Marker(&'a crate::model::Marker),
         Cue(&'a str, &'a crate::model::Cue),
         Group(&'a crate::model::SyncGroup),
+        Still(&'a crate::model::Still),
         Timeline(
             &'a str,
             &'a str,
@@ -1979,6 +1990,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         sheet: bool,
         media: bool,
         groups: bool,
+        stills: bool,
         timelines: bool,
         markers: bool,
         tracks: HashSet<&'a str>,
@@ -1994,6 +2006,11 @@ fn diff(before: &Project, after: &Project) -> Changes {
         if !skip.groups {
             for g in &p.groups {
                 m.insert(g.id.as_str(), Named::Group(g));
+            }
+        }
+        if !skip.stills {
+            for s in &p.stills {
+                m.insert(s.id.as_str(), Named::Still(s));
             }
         }
         if !skip.timelines {
@@ -2071,6 +2088,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         sheet: same,
         media: SharedVec::ptr_eq(&before.media, &after.media),
         groups: before.groups == after.groups,
+        stills: before.stills == after.stills,
         timelines: SharedVec::ptr_eq(&before.timelines, &after.timelines),
         markers: before.markers == after.markers,
         tracks: skip_tracks,
@@ -5442,6 +5460,38 @@ fn mutate(
             let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
             ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
+        Request::GalleryGrab { at } => {
+            let t = time_or_playhead(p, at.as_ref(), playhead)?.ok_or_else(|| {
+                Error::usage("gallery.grab needs `at` (--at): there is no playhead")
+            })?;
+            need_timeline(p)?;
+            ops::gallery::open_timeline(p)?;
+            let clip = ops::gallery::graded_clip(p, t)?;
+            let plan = still_plan(p, t)?;
+            let picture = env.still(&plan, dry_run)?;
+            json!({ "still": ops::gallery::grab(p, (&clip, t), picture)? })
+        }
+        Request::GalleryRemove { stills } => {
+            ops::gallery::remove(p, &stills.to_vec())?;
+            Value::Null
+        }
+        Request::GalleryApply {
+            still,
+            clips,
+            grade,
+        } => {
+            let ids = match (clips, grade) {
+                (Some(refs), _) => resolve_clips(p, &refs.to_vec(), playhead)?,
+                (None, crate::request::GradeLevel::Timeline) => Vec::new(),
+                (None, crate::request::GradeLevel::Clip) => {
+                    let t = playhead
+                        .ok_or_else(|| Error::usage("give `clips`: there is no playhead"))?;
+                    vec![ops::gallery::graded_clip(p, t)?]
+                }
+            };
+            ops::gallery::apply(p, still, *grade, &ids)?;
+            Value::Null
+        }
         Request::GradeRemove {
             clip,
             timeline,
@@ -8752,6 +8802,24 @@ fn track_start(
 
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
+pub fn still_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
+    let Request::GalleryGrab { at } = request else {
+        return Vec::new();
+    };
+    let t = time_or_playhead(p, at.as_ref(), playhead).ok().flatten();
+    let t = t.filter(|t| ops::gallery::color_clip(p, *t).is_some());
+    let t = t.filter(|_| p.compound_path.is_empty());
+    t.and_then(|t| still_plan(p, t).ok()).into_iter().collect()
+}
+
+fn still_plan(p: &Project, t: i64) -> Result<RenderPlan> {
+    let mut plan = crate::render::flatten(p, t, t + 1)?;
+    plan.audio.clear();
+    plan.ducking.clear();
+    plan.buses.clear();
+    Ok(plan)
+}
+
 pub fn auto_color_looks(
     p: &Project,
     request: &Request,
@@ -10479,6 +10547,7 @@ pub fn query(
             let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::grade::get(p, &of, at)?
         }
+        Request::GalleryGet {} => ops::gallery::get(p, &env.stills_dir()),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?

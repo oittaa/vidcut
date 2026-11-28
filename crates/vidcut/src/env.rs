@@ -462,6 +462,34 @@ impl Env for AvEnv {
         Ok(result)
     }
 
+    fn still(&self, plan: &RenderPlan, dry_run: bool) -> Result<String> {
+        let bytes = serde_json::to_vec(plan)
+            .map_err(|e| Error::internal(format!("the plan of the still: {e}")))?;
+        let name = format!("{}.exr", vidcut_core::fingerprint::digest(&bytes));
+        let dir = self.stills_dir();
+        let path = dir.join(&name);
+        if dry_run || path.is_file() {
+            return Ok(name);
+        }
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the picture changed while the still was drawn; grab it again",
+            ));
+        }
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
+        crate::export::still(plan, &path)?;
+        Ok(name)
+    }
+
+    fn stills_dir(&self) -> PathBuf {
+        let dir = self.project_dir.clone().unwrap_or_else(paths::cache_dir);
+        crate::preferences::load()
+            .map(|p| p.playback_files)
+            .unwrap_or_default()
+            .stills_in(&dir)
+    }
+
     fn voice_isolation(&self, download: bool) -> Result<()> {
         vidcut_av::isolate::get_ready(&paths::models_dir(), download).map_err(av_error)
     }

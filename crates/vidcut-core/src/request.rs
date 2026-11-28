@@ -3847,6 +3847,51 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// The stills of the Gallery of the Color page, the oldest first. Each
+    /// has its id, clip, timeline, frame, label and the path of its
+    /// picture. `keyframes` tells if its clip grade has keyframes, and
+    /// `timeline_keyframes` if its timeline grade has them.
+    #[serde(rename = "gallery.get")]
+    GalleryGet {},
+    /// Grab Still: save a still of the frame `at` in the Gallery. Its
+    /// picture is the frame of the timeline with all grades and the output
+    /// LUT, at the size of the timeline. Its grades are those of the
+    /// topmost clip there that takes a grade: each node stack layer of the
+    /// clip grade, and the timeline grade, with their keyframes. The
+    /// picture is a 32-bit float OpenEXR file in the `stills` folder, and
+    /// stays there after an undo. Returns the id of the still as `still`.
+    #[serde(rename = "gallery.grab")]
+    GalleryGrab {
+        /// The frame of the timeline. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
+    /// Delete stills from the Gallery. Their pictures stay in the `stills`
+    /// folder. Thus an undo gives the stills back whole.
+    #[serde(rename = "gallery.remove")]
+    GalleryRemove {
+        /// The ids of the stills (`s1`).
+        stills: OneOrMany<String>,
+    },
+    /// Apply Grade: give clips the grade of a still. With the `clip` grade,
+    /// the clip grade of the still, with each node stack layer, replaces
+    /// the whole clip grade of each clip. With the `timeline` grade, the
+    /// timeline grade of the still replaces the timeline grade of the open
+    /// timeline. A grade with keyframes is refused.
+    #[serde(rename = "gallery.apply")]
+    GalleryApply {
+        /// The id of the still (`s1`).
+        still: String,
+        /// The clips that get the clip grade. Left out: in a running GUI,
+        /// the clips selected in the Thumbnail timeline and the clip at the
+        /// playhead; else the topmost clip at the playhead that takes a
+        /// grade. Not with the `timeline` grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The grade that changes. Left out: `clip`.
+        #[serde(default)]
+        grade: GradeLevel,
+    },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences, compound clips and adjustment clips.
     /// A generator takes no effects. The effects work in their order, on the
@@ -5034,7 +5079,8 @@ pub enum Request {
         search: Option<String>,
     },
     /// The timeline clips, subtitle cues, pool media and edit points selected,
-    /// and `thumbnails`, the clips selected in the Thumbnail timeline.
+    /// `thumbnails`, the clips selected in the Thumbnail timeline, and
+    /// `stills`, the stills selected in the Gallery.
     /// `edits` lists every selected edit, left to right. `edit` is the one
     /// clicked last, which the Trim Editor shows. `first` is the clip or cue
     /// selected first, which the Keyframes tab and the keyframe tray show.
@@ -5042,7 +5088,8 @@ pub enum Request {
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips, subtitle cues, pool media, Thumbnail timeline
-    /// clips or an edit point (omitted parts stay as they are). `,` and `.`
+    /// clips, Gallery stills or an edit point (omitted parts stay as they
+    /// are). `,` and `.`
     /// and Dynamic Trim act on every selected edit, Ctrl+T on `edit`.
     #[serde(rename = "selection.set")]
     SelectionSet {
@@ -5061,6 +5108,9 @@ pub enum Request {
         /// timeline.
         #[serde(default)]
         thumbnails: Option<OneOrMany<ClipRef>>,
+        /// The stills selected in the Gallery of the Color page (`s1`).
+        #[serde(default)]
+        stills: Option<OneOrMany<String>>,
         /// Select the edit point of `track` nearest this time, as V does
         /// at the playhead (`playhead`) and a click on an edit does.
         #[serde(default)]
@@ -8899,6 +8949,7 @@ impl Request {
                     | Self::KeyframesCopy { .. }
                     | Self::GradeCopy { .. }
                     | Self::GradeWindowCopy { .. }
+                    | Self::GalleryGet {}
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

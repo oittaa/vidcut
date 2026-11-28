@@ -156,6 +156,7 @@ pub struct Workspace {
     pub(super) key_editor: super::keyframe_editor::Editor,
     pub(super) sync_bin: super::sync_bin::SyncBin,
     pub(super) sync_clips: super::sync_clips::SyncClips,
+    pub(super) gallery: super::gallery::Gallery,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -268,6 +269,7 @@ impl Workspace {
             key_editor: Default::default(),
             sync_bin: Default::default(),
             sync_clips: Default::default(),
+            gallery: Default::default(),
         }
     }
 
@@ -2459,6 +2461,16 @@ impl Workspace {
                 .response
                 .rect
         });
+        if color {
+            egui::Panel::left("color-gallery")
+                .resizable(true)
+                .default_size(260.0)
+                .min_size(140.0)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.gallery_panel(ui))
+                });
+        }
         if left.is_none() {
             egui::Panel::top("left-tabs")
                 .resizable(false)
