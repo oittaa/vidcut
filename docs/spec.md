@@ -6223,7 +6223,7 @@ The Audio page follows the Fairlight page of the manual.
 - **In vidcut:**
   - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube, Vimeo and TikTok.
   - TikTok is one preset, 1080×1920, with no menu (deviation X2).
-  - vidcut has no HyperDeck, Presentations, Dropbox or Replay preset, and it does not upload ([todo](todo/quick-export.md)).
+  - vidcut has no HyperDeck, Presentations, Dropbox or Replay preset, and it does not upload.
   - In a running GUI, an export is a job ([design/export.md](design/export.md#the-guis-exports)). No progress dialog opens.
   - Jobs shows the progress of each job, and can cancel it ([design/live.md](design/live.md#jobs)).
   - The suggested file name is the name of the project.
