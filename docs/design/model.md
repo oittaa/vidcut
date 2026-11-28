@@ -412,7 +412,7 @@ Ranges and resolution:
 
 - `origin` turns `MediaInfo.timecode` into frames of the open timeline with `StartTimecode::frames_at`. A file with no tag counts as 0.
   - `origin` and `shown` choose the reference clip.
-- `Grid` and `Spot` line up the files on the frame grid of the project ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+- `Grid` and `Spot` line up the files on the frame grid of the project ([spec §7.4](../spec.md#74-sync-bin-pp-708710)).
   - `Grid::place` gives the project frame of a timeline frame: the first project frame that is not before it.
     - Its time is the exact source time of the reference clip.
   - `Spot` holds the start of a file as a whole project frame, rounded down. With a group, it is the place of the file in the group.
@@ -665,7 +665,7 @@ Writing:
 
 ## Adjustment clips
 
-- `Clip::adjustment` marks an adjustment clip ([spec §8.24](../spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)): no media, no audio, no speed, no motion paths, on a video track.
+- `Clip::adjustment` marks an adjustment clip ([spec §8.24](../spec.md#824-adjustment-clips-pp-1145-1154-33753376)): no media, no audio, no speed, no motion paths, on a video track.
 - `Clip::ADJUSTMENT_CLIP` is its display name and OTIO generator kind (`otio::generators::adjustment_reference`). `Project::clip_name` returns it when `Clip::name` is absent.
 - `ops::titles::add_adjustment` shares `ops::titles::add_block` and `ops::block_clip` with titles and generators, backing `adjustment.add` and `edit.*` adjustment sources.
 - `ops::picture::has_picture` and `ops::picture::takes_effects` accept it, while `ops::speed` and `ops::motion::takes` refuse it.
@@ -715,7 +715,7 @@ Writing:
   - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus `Level.back` is a projective map. Without a lean, it is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 - The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
-- `ops::attributes` holds Paste Attributes and Remove Attributes ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
+- `ops::attributes` holds Paste Attributes and Remove Attributes ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156)).
   - `paste` moves the keyframes of the copied picture to the clip with `Picture::scale_times`. Then it takes each chosen value with `Picture::take_channel`.
   - `Picture::take_axis` takes one axis of the zoom. It keeps the keyframes of the other axis.
     - It keeps only the keyframes that change an axis. When no axis changes, the zoom has no keyframes.
