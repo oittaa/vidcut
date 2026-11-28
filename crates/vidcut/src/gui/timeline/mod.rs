@@ -2606,8 +2606,8 @@ impl Workspace {
             return None;
         }
         let r = rows.at(pos.y)?;
-        let t = rows.bands.apart(p.track(&r.track)?);
-        geometry::fade_target(&t, scale, &r.rect, pos)
+        let t = p.track(&r.track)?;
+        geometry::fade_target(t, scale, &r.rect, pos)
     }
 
     fn edits_gesture(&mut self, p: &Project, what: &Hit) -> Option<Gesture> {
