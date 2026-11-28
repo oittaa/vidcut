@@ -110,20 +110,19 @@ pub fn append(p: &mut Project, id: &str, to: &[GradeOf]) -> Result<()> {
         return Err(Error::usage("give the clips that get the nodes"));
     }
     for of in to {
-        let (graph, which) = match of {
+        let graph = match of {
             GradeOf::Clip(_, layer) => {
                 let g = still.grade.as_ref();
-                let g = g.map_or_else(|| Grade::usual(size), |g| g.layer(*layer, size));
-                (g, "clip grade")
+                g.map_or_else(|| Grade::usual(size), |g| g.layer(*layer, size))
             }
             GradeOf::Timeline => {
                 let g = (still.timeline_grade.clone()).unwrap_or_else(|| Grade::usual(size));
-                (g, "timeline grade")
+                if keyed(&g) {
+                    return Err(refused(id, "timeline grade", "Append Node Graph"));
+                }
+                g
             }
         };
-        if keyed(&graph) {
-            return Err(refused(id, which, "Append Node Graph"));
-        }
         grade::append_graph(p, of, &graph)?;
     }
     Ok(())

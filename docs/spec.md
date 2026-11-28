@@ -4192,6 +4192,14 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Color > Ripple Node Changes to Selected Clips sends `grade.ripple`. The clip at the playhead gives the changes to the selected clips of the Thumbnail timeline.
     - The changes are those since the corrector became the current node, or since the last ripple (not measured).
     - The item is greyed when no other clip is selected.
+- **Append Node to Selected Clips** (p. 3373):
+  - Color > Append Node to Selected Clips adds the selected node of the current clip to each selected clip. It goes at the end of the node tree (p. 3373).
+  - The node becomes the last serial node of each clip. It goes after a Parallel Mixer too.
+  - The other nodes of the clips stay, with their keyframes. The current clip keeps its nodes.
+  - vidcut: `grade.append_node` adds a copy of a corrector to the grades of other clips. The copy takes the picture that each grade gave out. It is one undo step.
+    - The copy has the settings of the corrector. Its keyframes keep their frames, as in Append Node Graph (not measured).
+    - Color > Append Node to Selected Clips sends it, with the current node of the clip at the playhead. The targets are the selected clips of the Thumbnail timeline.
+    - The item is greyed when no other clip is selected, or when the current node is a mixer.
 - **Mixers**:
   - Serial: node 2 works on the output of node 1.
   - Parallel Mixer: out = x + Σ (nᵢ − x).
@@ -5174,6 +5182,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The mode of the Node Editor selects the grade that changes: Clip or Timeline (pp. 3362, 3405).
   - The grade replaces the grade of each target clip (p. 3365).
   - Append Node Graph in the menu of a still adds its node graph after the end of the node tree of the current clip. The grade of the clip stays (p. 3366).
+  - The nodes of the still go in series after the last node of the clip. They go after a Layer Mixer too.
+  - The keyframes of the added nodes keep the frames of the still, in each mode of Apply Grades Using.
   - A drop of a still onto a link adds its nodes at that link. A Command-drag adds them as one compound node (pp. 3366–3367).
   - Apply Grades Using decides the keyframes of the added nodes (p. 3367).
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
@@ -5199,7 +5209,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Then all nodes get their numbers again, as after each new node.
     - In the Clip mode, the clip takes the nodes of the same node stack layer of the still (not measured).
     - In the Timeline mode, the timeline grade takes the nodes of the timeline grade of the still (not measured).
-    - A still whose grade has keyframes does not append. The request gives an error.
+    - The keyframes of a clip grade keep their frames.
+    - A timeline grade with keyframes does not append. The request gives an error.
     - It is one undo step.
   - `gallery.get` gives each still, with the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
@@ -5213,6 +5224,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Color > Apply Grade From One Clip Prior (=) copies the grade of the clip before the current clip (p. 3364).
   - Color > Apply Grade From Two Clips Prior (−) copies the grade of the clip two places before it (p. 3364).
   - From a clip, the keyframes of the grade go on the same source timecode (p. 3464).
+  - The clips before the current clip are in the order of the Thumbnail timeline: the start frame, then the track. Clips on upper tracks count.
+  - The clip filter of the Thumbnail timeline hides clips. A hidden clip, or a clip on a disabled track, is skipped.
+  - On the first clip, the commands give no change.
 - vidcut:
   - `grade.apply` gives clips the whole clip grade of another clip, with each node stack layer. It is one undo step.
     - The grade replaces the whole grade of each target, as with `gallery.apply` ([§8.31](#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)).
@@ -5220,8 +5234,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With no `clips`, the target is the clip at the playhead.
   - Each keyframe stays on its source frame. Thus on another clip of the same media, it is on the same source timecode.
   - With `prior`, the clip at the playhead takes the grade of the clip one or two places before it in the Thumbnail timeline.
-    - The order is the order of the strip, with its clip filter.
-    - With no clip at that place, the request gives an error.
+    - The order is the order of the strip, with its clip filter. Clips on disabled tracks are not in the strip.
+    - With no clip at that place, the request gives an error. The clip keeps its grade.
   - `grade.copy` without `node` copies the whole clip grade. It gives the grade as `grade`, and the GUI keeps it on its clipboard.
   - On the Color page, a press in the Thumbnail timeline gives it the focus. A press in another place takes the focus away.
     - With the focus there, Ctrl+C copies the whole grade of the clip at the playhead. Ctrl+V gives it to that clip and the selected clips.

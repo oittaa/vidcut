@@ -3533,6 +3533,22 @@ pub enum Request {
         /// The clips that take the changes.
         clips: OneOrMany<ClipRef>,
     },
+    /// Append Node to Selected Clips: add a copy of a corrector of the
+    /// grade of a clip to the grades of other clips. The copy takes the
+    /// picture that each grade gave out, and gives the picture out. Its
+    /// keyframes keep their frames.
+    #[serde(rename = "grade.append_node")]
+    GradeAppendNode {
+        /// The clip whose corrector goes.
+        clip: ClipRef,
+        /// The node stack layer of the grades, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+        /// The clips that take the copy.
+        clips: OneOrMany<ClipRef>,
+    },
     /// Place the nodes of the grade of a clip, or with `timeline` of the
     /// timeline grade, in an even grid. Each node goes in the column of its
     /// longest path from the source. A chain stays on one row, and the
@@ -4073,8 +4089,8 @@ pub enum Request {
     /// picture out. With the `clip` grade, the nodes of the same node stack
     /// layer of the clip grade of the still go to clips. With the
     /// `timeline` grade, the nodes of the timeline grade of the still go to
-    /// the timeline grade of the open timeline. A grade with keyframes is
-    /// refused.
+    /// the timeline grade of the open timeline. The keyframes of a clip
+    /// grade keep their frames. A timeline grade with keyframes is refused.
     #[serde(rename = "gallery.append")]
     GalleryAppend {
         /// The id of the still (`s1`).

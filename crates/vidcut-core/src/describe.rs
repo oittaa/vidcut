@@ -510,6 +510,7 @@ pub fn describe_at(
         "grade.paste" if d.flag("timeline") => "Paste a node into the timeline grade".into(),
         "grade.paste" => format!("Paste a node into the grade of {}", d.clips("clips")),
         "grade.ripple" => format!("Ripple Node Changes to {}", d.clips("clips")),
+        "grade.append_node" => format!("Append Node to {}", d.clips("clips")),
         "grade.apply" if d.params["prior"] == 1 => "Apply Grade From One Clip Prior".into(),
         "grade.apply" if d.params["prior"] == 2 => "Apply Grade From Two Clips Prior".into(),
         "grade.apply" if d.params["clips"].is_null() => "Apply Grade".into(),
