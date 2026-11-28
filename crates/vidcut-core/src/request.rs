@@ -10,7 +10,7 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     AdaptiveMode, Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter,
     Border, BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease,
-    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
+    EbuLevel, EffectType, EffectValue, FillMethod, FindModel, FindValues, GeneratorKind, GlowAlpha,
     GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MaskChannel, MergeEdges,
     MergeOperator, Node, NoiseColoring, PaintMode, PathSample, PatternChannel, PictureTool,
@@ -4230,7 +4230,9 @@ pub enum Request {
     /// looks at each frame of the file in the clip. A thing that is not
     /// found for up to a second, and then shows near the same place, stays
     /// on its path. A shot change inside the clip ends each path, and a thing
-    /// of the next shot gets a new one.
+    /// of the next shot gets a new one. A value that the request leaves out
+    /// comes from the `find` values of the tracker, or else it is the usual
+    /// value of the subject.
     /// A face found for under half a second gets no path. A person or a
     /// vehicle gets a path when it is found for a second. Text gets a path
     /// when it is found for a second, on four of each five frames. Less time
@@ -4254,12 +4256,13 @@ pub enum Request {
         node: String,
         /// The kind of thing to find: `face`, `text`, `person` or `vehicle`.
         /// Usual: `face`.
-        #[serde(default)]
-        subject: Subject,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<Subject>,
         /// The neural network that finds the things: `fast`, or `slow` for
-        /// `face`. Usual: `fast`.
-        #[serde(default)]
-        model: FindModel,
+        /// `face`. Usual: `fast`. The `slow` model of the tracker finds only
+        /// faces, and the other subjects take `fast`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<FindModel>,
         /// Find again in a tracker that has patterns of this subject. Without
         /// it, such a tracker is an error. A thing that such a pattern
         /// follows gets no second pattern: its new samples go into the path
@@ -7904,6 +7907,11 @@ pub struct NodeChange {
     /// for `best_match` to take it again, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_tolerance: Option<f64>,
+    /// The values of Find of a tracker, in place of those it has, as
+    /// `{"subject": "person", "start": 0.6}`. `motion.find` takes each value
+    /// that its request leaves out from them. `{}` gives the usual values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<FindValues>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern
