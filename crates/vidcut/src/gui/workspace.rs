@@ -4,6 +4,7 @@ use std::sync::Arc;
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{FindModel, Marker, PictureTool, Project, RenderCache, Subject};
+use vidcut_core::ops::beside::{Toward, clip_beside};
 use vidcut_core::preferences::Scope;
 use vidcut_core::request::{GradeLevel, Page, Request, ViewerMode};
 use vidcut_core::shortcuts::{Action, Panel};
@@ -123,6 +124,7 @@ pub struct Workspace {
     pub(super) two_up: Option<TwoUp>,
     pub(super) export: super::export::ExportUi,
     pub(super) show_mixer: bool,
+    pub(super) audio_page: super::audio_page::AudioPage,
     pub(super) key_tray: bool,
     pub(super) asked: bool,
     pub(super) effects_page: super::effects_page::EffectsPage,
@@ -262,6 +264,7 @@ impl Workspace {
             two_up: None,
             export: Default::default(),
             show_mixer: false,
+            audio_page: Default::default(),
             key_tray: false,
             asked: false,
             effects_page: Default::default(),
@@ -319,6 +322,12 @@ impl Workspace {
         {
             return;
         }
+        if self.effects_page.page == Page::Audio
+            && let Some(on) = self.audio_page.panel(panel)
+        {
+            *on = true;
+            return;
+        }
         match panel {
             GuiPanel::QuickExport => self.open_quick_export(ctx),
             GuiPanel::Jobs => self.export.show_jobs = true,
@@ -363,7 +372,7 @@ impl Workspace {
             }
             GuiPanel::SelectTool => self.open_select_tool(),
             GuiPanel::EffectsSearch => self.open_effects_search(),
-            GuiPanel::Equalizer | GuiPanel::Dynamics | GuiPanel::Pan => {}
+            GuiPanel::Equalizer | GuiPanel::Dynamics | GuiPanel::Pan | GuiPanel::Meters => {}
         }
     }
 
@@ -392,13 +401,19 @@ impl Workspace {
                 {
                     return Err("Open a project first".into());
                 }
+                live::GuiChange::Show(GuiPanel::Meters)
+                | live::GuiChange::Close(GuiPanel::Meters)
+                    if self.effects_page.page != Page::Audio =>
+                {
+                    return Err("The meters are on the Audio page".into());
+                }
                 live::GuiChange::Show(GuiPanel::TitleText) => self.type_title_text()?,
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Equalizer(track) => self.open_track_equalizer(&track)?,
                 live::GuiChange::Dynamics(track) => self.open_track_dynamics(&track)?,
                 live::GuiChange::Pan(track) => self.open_track_pan(&track)?,
                 live::GuiChange::Close(panel) => self.close_panel(panel),
-                live::GuiChange::Page(Page::Effects | Page::Color | Page::Export)
+                live::GuiChange::Page(Page::Effects | Page::Color | Page::Export | Page::Audio)
                     if self.project().is_none() =>
                 {
                     return Err("Open a project first".into());
@@ -436,6 +451,12 @@ impl Workspace {
 
     pub fn close_panel(&mut self, panel: vidcut_core::request::GuiPanel) {
         use vidcut_core::request::GuiPanel;
+        if self.effects_page.page == Page::Audio
+            && let Some(on) = self.audio_page.panel(panel)
+        {
+            *on = false;
+            return;
+        }
         match panel {
             GuiPanel::QuickExport => self.export.close_quick(),
             GuiPanel::Jobs => self.export.show_jobs = false,
@@ -498,6 +519,7 @@ impl Workspace {
             GuiPanel::Equalizer => self.close_track_equalizer(),
             GuiPanel::Dynamics => self.close_track_dynamics(),
             GuiPanel::Pan => self.close_track_pan(),
+            GuiPanel::Meters => {}
         }
     }
 
@@ -505,17 +527,21 @@ impl Workspace {
         use vidcut_core::request::GuiPanel;
         let quick = self.export.quick_open();
         let tool = self.timeline.picture_grab.tool;
+        let audio = (self.effects_page.page == Page::Audio).then_some(self.audio_page);
         let open = [
             (GuiPanel::QuickExport, quick),
             (GuiPanel::Jobs, self.export.show_jobs),
-            (GuiPanel::Mixer, self.show_mixer),
+            (GuiPanel::Mixer, audio.map_or(self.show_mixer, |a| a.mixer)),
             (GuiPanel::KeyframeTray, self.key_tray),
             (GuiPanel::Preferences, self.preferences.open),
             (GuiPanel::KeyboardCustomization, self.preferences.keys_open),
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
-            (GuiPanel::Media, self.left == LeftTab::Pool),
+            (
+                GuiPanel::Media,
+                audio.map_or(self.left == LeftTab::Pool, |a| a.media),
+            ),
             (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
             (GuiPanel::SyncClips, self.sync_clips.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
@@ -528,7 +554,10 @@ impl Workspace {
                 GuiPanel::Generators,
                 self.left == LeftTab::Effects && self.effects_tab == EffectsTab::Generators,
             ),
-            (GuiPanel::Inspector, self.left == LeftTab::Inspector),
+            (
+                GuiPanel::Inspector,
+                audio.map_or(self.left == LeftTab::Inspector, |a| a.inspector),
+            ),
             (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
             (GuiPanel::Metadata, self.metadata_strip),
             (GuiPanel::ClipInfo, self.clip_info.open),
@@ -551,6 +580,7 @@ impl Workspace {
             (GuiPanel::Equalizer, self.track_equalizer_open()),
             (GuiPanel::Dynamics, self.track_dynamics_open()),
             (GuiPanel::Pan, self.track_pan_open()),
+            (GuiPanel::Meters, audio.is_some_and(|a| a.meters)),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
@@ -564,18 +594,19 @@ impl Workspace {
             clip: match (page, self.effects_page.grading) {
                 (Page::Effects, _) => self.effects_clip(),
                 (Page::Color, GradeLevel::Clip) => self.color_clip(),
-                (Page::Color, GradeLevel::Timeline) | (Page::Cut | Page::Export, _) => None,
+                (Page::Color, GradeLevel::Timeline)
+                | (Page::Cut | Page::Export | Page::Audio, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
             node: self.effects_page.picked().map(str::to_owned),
             element: self.effects_page.element,
             grade_nodes: match page {
                 Page::Color => self.effects_page.picked_grade().to_vec(),
-                Page::Effects | Page::Cut | Page::Export => Vec::new(),
+                Page::Effects | Page::Cut | Page::Export | Page::Audio => Vec::new(),
             },
             grade_node: match page {
                 Page::Color => self.effects_page.grade_nodes.last().copied(),
-                Page::Effects | Page::Cut | Page::Export => None,
+                Page::Effects | Page::Cut | Page::Export | Page::Audio => None,
             },
             node_zoom: self.node_zoom(),
             node_list: self.effects_page.grade_list,
@@ -1433,6 +1464,7 @@ impl Workspace {
                             (Page::Cut, "Cut"),
                             (Page::Effects, "Effects"),
                             (Page::Color, "Color"),
+                            (Page::Audio, "Audio"),
                             (Page::Export, "Export"),
                         ] {
                             let on = ws.effects_page.page == page;
@@ -1855,7 +1887,9 @@ impl Workspace {
                 }
             }
         }
-        if fired.pressed(Action::TimelineOrSource) && self.effects_page.page != Page::Export {
+        if fired.pressed(Action::TimelineOrSource)
+            && !matches!(self.effects_page.page, Page::Export | Page::Audio)
+        {
             let mode = if viewer == ViewerMode::Timeline {
                 self.snap.last_source
             } else {
@@ -2048,6 +2082,29 @@ impl Workspace {
             });
             let clips: Vec<String> = clip.into_iter().collect();
             self.send("selection.set", json!({ "clips": clips }));
+        }
+        let steps = [
+            (Action::SelectPrevious, Toward::Previous),
+            (Action::SelectNext, Toward::Next),
+            (Action::SelectAbove, Toward::Above),
+            (Action::SelectBelow, Toward::Below),
+        ];
+        for (action, toward) in steps {
+            if !fired.pressed(action) {
+                continue;
+            }
+            let at = self.snap.timeline.position;
+            let from = self.snap.selection.clips.last();
+            let clip = self.project().and_then(|p| match from {
+                Some(from) => clip_beside(p, from, toward),
+                None => p
+                    .tracks
+                    .iter()
+                    .find_map(|t| t.clip_at(at).map(|i| t.clips[i].id.clone())),
+            });
+            if let Some(clip) = clip {
+                self.send("selection.set", json!({ "clips": [clip], "cues": [] }));
+            }
         }
 
         let typed = [
@@ -2420,6 +2477,13 @@ impl Workspace {
             }
             return;
         }
+        if self.effects_page.page == Page::Audio {
+            self.audio_page_ui(ui);
+            if let Some(tiles) = &mut self.tiles {
+                tiles.end_frame();
+            }
+            return;
+        }
         let frame = theme::card(panel);
         let spacing = ctx.global_style().spacing.clone();
         let chrome =
@@ -2589,7 +2653,7 @@ impl Workspace {
         }
     }
 
-    fn pool_gone(&mut self) {
+    pub(super) fn pool_gone(&mut self) {
         self.hover = None;
         self.bins.targets.clear();
         self.bins.area = None;

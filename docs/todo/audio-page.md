@@ -1,6 +1,5 @@
 # Audio page
 
-- The Audio page: the tall track view, the Mixer and the meters on one page.
 - A lane and a sound clip for each channel of a multichannel track.
 - Audio track layers, Range mode and sample editing.
 - Elastic Wave.
