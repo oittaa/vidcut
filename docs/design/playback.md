@@ -275,6 +275,7 @@ The audio device:
     - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
       - It does not open it for a crop on any side, for a Crop Softness below 0, or for a lean. Then each bar shows at its exact width.
+      - `Mixes::of` opens the `edge` of a compound clip's level only when the one picture inside keeps its place (`kept`).
     - The `outset` of a leaned level moves each edge out along its normal, as measured. `fs` and `Placing::at` add it to the distance of the edge.
     - A Pitch or Yaw under `LEAST_LEAN` does not lean the picture, and gives no `outset`. It still stops the limit, as measured.
     - The Inspector counts a crop and Anchor Point X in source pixels times the fit factor, with no pixel aspect ratio (`place::crop_unit`).
@@ -387,6 +388,16 @@ Ducking in the preview:
 - `Msg::DuckHeard` brings the results to the core, and loads the timeline again.
 - A measurement that failed shows as a notice. That source is not tried again until the next `track.set` with `duck`.
 - The job keeps a measured source in `duck_kept`.
+
+The loudness meter ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)):
+
+- The session's `Player` keeps one `loudness::Meter` (`LoudnessMeter`). It gives the meter to the engine while the engine plays the timeline (`Player::measure`).
+- `audio::run` keeps each chunk that goes into the `Ring`, before the mute. It gives a chunk to the meter when `Heard` passes the end of the chunk.
+  - Why: the meter then shows the sound that the user hears now.
+- A seek, a pause or a new plan gives the meter the chunks that were heard, and drops the rest.
+- The first chunk of a new play cuts the meter first (`Meter::cut`). Its windows start again, and what it gathered stays.
+- The meter follows the rate and the channels of the engine (`Meter::fit`, `loudness_weights`).
+- The GUI reads the meter from the snapshot each frame (`Snapshot::loudness`). `loudness.get`, `loudness.set` and `loudness.reset` act on the same meter.
 
 Faders:
 

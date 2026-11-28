@@ -1,22 +1,86 @@
 use crate::compute::Gpu;
 use crate::compute::ops::{Act, Conv, HEADER, Ops, Res, SHARED, View, tensor};
 
-const LANES: u32 = 64;
+const KEYS: u32 = 16;
 
-fn attend_source(d: u32, kt: u32) -> String {
+fn attend_layout(d: u32, bq: u32) -> (u32, u32, u32) {
+    let (ko, vo, g) = (bq * 9, bq * 5, d / 4);
+    let values = (KEYS - 1) * g + 4 * g.div_ceil(4);
+    (ko, vo, (ko + KEYS * 9).max(vo + values))
+}
+
+pub(super) fn attend_fits(d: u32) -> bool {
+    let (_, _, size) = attend_layout(d, 64);
+    d.is_multiple_of(4) && size * 16 + 64 * 4 * 4 <= SHARED
+}
+
+fn attend_source(d: u32, bq: u32) -> String {
+    let g = d / 4;
+    let parts = g.div_ceil(4);
+    let threads = 4 * bq;
+    let (ko, vo, mx) = attend_layout(d, bq);
+    let mut decl = String::new();
+    let mut rescale = String::new();
+    let mut store = String::new();
+    for j in 0..parts {
+        decl.push_str(&format!("    var a{j} = vec4<f32>(0.0);\n"));
+        rescale.push_str(&format!("        a{j} *= corr;\n"));
+        store.push_str(&format!(
+            r#"        if (part + {o}u < G) {{
+            let o = a{j} * inv;
+            let at = ob + (part + {o}u) * 4u;
+            os[at] = o.x;
+            os[at + 1u] = o.y;
+            os[at + 2u] = o.z;
+            os[at + 3u] = o.w;
+        }}
+"#,
+            o = 4 * j
+        ));
+    }
+    let mut scores = String::new();
+    for i in 0..8 {
+        scores.push_str(&format!("            let x{i} = sh[r * 9u + {i}u];\n"));
+        for c in 0..4 {
+            scores.push_str(&format!(
+                "            s{c} += dot(x{i}, sh[KO + (part + {o}u) * 9u + {i}u]);\n",
+                o = 4 * c
+            ));
+        }
+    }
+    let mut mix = String::new();
+    for c in 0..KEYS / 4 {
+        mix.push_str(&format!("        let w{c} = sh[r * 5u + {c}u];\n"));
+    }
+    for (e, comp) in (0..).zip(["x", "y", "z", "w"]) {
+        for c in 0..KEYS / 4 {
+            let kk = 4 * e + c;
+            for j in 0..parts {
+                mix.push_str(&format!(
+                    "        a{j} = fma(vec4<f32>(w{c}.{comp}), sh[VO + {kk}u * G + part + {o}u], a{j});\n",
+                    o = 4 * j
+                ));
+            }
+        }
+    }
     format!(
         r#"{HEADER}
 const D: u32 = {d}u;
-const KT: u32 = {kt}u;
+const G: u32 = {g}u;
+const BQ: u32 = {bq}u;
+const T: u32 = {threads}u;
+const BK: u32 = {KEYS}u;
+const KO: u32 = {ko}u;
+const VO: u32 = {vo}u;
 @group(0) @binding(1) var<storage, read> qs: array<f32>;
 @group(0) @binding(2) var<storage, read> ks: array<f32>;
 @group(0) @binding(3) var<storage, read> vs: array<f32>;
 @group(0) @binding(4) var<storage, read_write> os: array<f32>;
 
-var<workgroup> kt: array<f32, {tile}>;
-var<workgroup> vt: array<f32, {tile}>;
+var<workgroup> sh: array<vec4<f32>, {mx}>;
+var<workgroup> red: array<f32, {threads}>;
 
-@compute @workgroup_size({LANES})
+@compute @workgroup_size({threads})
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {{
     let batches = u(0u); let lq = u(1u); let lk = u(2u); let heads = u(3u); let scale = f(4u); let tiles = u(5u);
     let g = gid(wg, nw);
@@ -26,73 +90,84 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     let tile = g % tiles;
     let h = (g / tiles) % heads;
     let b = g / (tiles * heads);
-    let qi = tile * {LANES}u + li;
-    let live = qi < lq;
-    var q: array<f32, {d}>;
-    var acc: array<f32, {d}>;
-    var s: array<f32, {kt}>;
-    if (live) {{
-        let at = u(6u) + b * u(7u) + qi * u(8u) + u(9u) + h * D;
-        for (var d = 0u; d < D; d++) {{
-            q[d] = qs[at + d] * scale;
-            acc[d] = 0.0;
-        }}
-    }}
-    var m = -3.0e38;
-    var l = 0.0;
+    let r = li / 4u;
+    let part = li % 4u;
+    let q0 = tile * BQ;
+    let qb = u(6u) + b * u(7u) + u(9u) + h * D;
     let kb = u(10u) + b * u(11u) + u(13u) + h * D;
     let vb = u(14u) + b * u(15u) + u(17u) + h * D;
-    for (var k0 = 0u; k0 < lk; k0 += KT) {{
-        for (var i = li; i < KT * D; i += {LANES}u) {{
-            let j = k0 + i / D;
-            let d = i % D;
-            var kv = 0.0;
-            var vv = 0.0;
-            if (j < lk) {{
-                kv = ks[kb + j * u(12u) + d];
-                vv = vs[vb + j * u(16u) + d];
+    var m = -3.0e38;
+    var l = 0.0;
+{decl}    for (var k0 = 0u; k0 < lk; k0 += BK) {{
+        var s0 = 0.0;
+        var s1 = 0.0;
+        var s2 = 0.0;
+        var s3 = 0.0;
+        for (var c = 0u; c < D; c += 32u) {{
+            for (var e = li; e < BQ * 8u; e += T) {{
+                let row = e / 8u;
+                let at = c + (e % 8u) * 4u;
+                var x = vec4<f32>(0.0);
+                if (q0 + row < lq && at < D) {{
+                    let i = qb + (q0 + row) * u(8u) + at;
+                    x = vec4<f32>(qs[i], qs[i + 1u], qs[i + 2u], qs[i + 3u]) * scale;
+                }}
+                sh[row * 9u + e % 8u] = x;
             }}
-            kt[i] = kv;
-            vt[i] = vv;
+            for (var e = li; e < BK * 8u; e += T) {{
+                let row = e / 8u;
+                let at = c + (e % 8u) * 4u;
+                var x = vec4<f32>(0.0);
+                if (k0 + row < lk && at < D) {{
+                    let i = kb + (k0 + row) * u(12u) + at;
+                    x = vec4<f32>(ks[i], ks[i + 1u], ks[i + 2u], ks[i + 3u]);
+                }}
+                sh[KO + row * 9u + e % 8u] = x;
+            }}
+            workgroupBarrier();
+{scores}            workgroupBarrier();
+        }}
+        let v0 = k0 + part < lk;
+        let v1 = k0 + part + 4u < lk;
+        let v2 = k0 + part + 8u < lk;
+        let v3 = k0 + part + 12u < lk;
+        s0 = select(-3.0e38, s0, v0);
+        s1 = select(-3.0e38, s1, v1);
+        s2 = select(-3.0e38, s2, v2);
+        s3 = select(-3.0e38, s3, v3);
+        red[li] = max(max(s0, s1), max(s2, s3));
+        workgroupBarrier();
+        let mv = max(max(red[r * 4u], red[r * 4u + 1u]), max(red[r * 4u + 2u], red[r * 4u + 3u]));
+        let mn = max(m, mv);
+        let corr = exp(m - mn);
+        let p0 = select(0.0, exp(s0 - mn), v0);
+        let p1 = select(0.0, exp(s1 - mn), v1);
+        let p2 = select(0.0, exp(s2 - mn), v2);
+        let p3 = select(0.0, exp(s3 - mn), v3);
+        l = l * corr + p0 + p1 + p2 + p3;
+{rescale}        m = mn;
+        sh[r * 5u + part] = vec4<f32>(p0, p1, p2, p3);
+        for (var e = li; e < BK * G; e += T) {{
+            let row = e / G;
+            var x = vec4<f32>(0.0);
+            if (k0 + row < lk) {{
+                let i = vb + (k0 + row) * u(16u) + (e % G) * 4u;
+                x = vec4<f32>(vs[i], vs[i + 1u], vs[i + 2u], vs[i + 3u]);
+            }}
+            sh[VO + e] = x;
         }}
         workgroupBarrier();
-        if (live) {{
-            let n = min(KT, lk - k0);
-            var mx = m;
-            for (var j = 0u; j < n; j++) {{
-                var dot = 0.0;
-                for (var d = 0u; d < D; d++) {{
-                    dot = fma(q[d], kt[j * D + d], dot);
-                }}
-                s[j] = dot;
-                mx = max(mx, dot);
-            }}
-            let corr = exp(m - mx);
-            l *= corr;
-            for (var d = 0u; d < D; d++) {{
-                acc[d] *= corr;
-            }}
-            for (var j = 0u; j < n; j++) {{
-                let p = exp(s[j] - mx);
-                l += p;
-                for (var d = 0u; d < D; d++) {{
-                    acc[d] = fma(p, vt[j * D + d], acc[d]);
-                }}
-            }}
-            m = mx;
-        }}
-        workgroupBarrier();
+{mix}        workgroupBarrier();
     }}
-    if (live) {{
-        let at = u(18u) + b * u(19u) + qi * u(20u) + u(21u) + h * D;
-        let inv = 1.0 / l;
-        for (var d = 0u; d < D; d++) {{
-            os[at + d] = acc[d] * inv;
-        }}
-    }}
+    red[li] = l;
+    workgroupBarrier();
+    let inv = 1.0 / (red[r * 4u] + red[r * 4u + 1u] + red[r * 4u + 2u] + red[r * 4u + 3u]);
+    let row = q0 + r;
+    if (row < lq) {{
+        let ob = u(18u) + b * u(19u) + row * u(20u) + u(21u) + h * D;
+{store}    }}
 }}
 "#,
-        tile = kt * d,
     )
 }
 
@@ -388,11 +463,14 @@ pub(super) struct Heads {
 
 pub(super) fn attend(ops: &mut Ops, h: &Heads, q: Rows, k: Rows, v: Rows, out: Rows) {
     let d = h.dim;
-    let kt = (SHARED / 8 / d).clamp(1, 32);
+    let bq = match h.lq >= 64 {
+        true => 64,
+        false => 16,
+    };
     let pipe = ops
         .gpu
-        .pipe(&format!("mask-attend-{d}-{kt}"), || attend_source(d, kt));
-    let tiles = h.lq.div_ceil(LANES);
+        .pipe(&format!("mask-attend-{d}-{bq}"), || attend_source(d, bq));
+    let tiles = h.lq.div_ceil(bq);
     let scale = 1.0 / (d as f32).sqrt();
     let rows = |r: &Rows| [r.view.base, r.each, r.view.stride, r.view.at];
     let mut p = vec![h.batches, h.lq, h.lk, h.heads, scale.to_bits(), tiles];

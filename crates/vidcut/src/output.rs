@@ -536,9 +536,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 None => "silent".into(),
             };
             println!(
-                "{} integrated, range {:.1} LU, true peak {}, sample peak {} ({} -> {})",
+                "{} integrated, range {:.1} LU, momentary max {}, short max {}, true peak {}, sample peak {} ({} -> {})",
                 db("integrated", "LUFS"),
                 v["range"].as_f64().unwrap_or(0.0),
+                db("momentary_max", "LUFS"),
+                db("short_max", "LUFS"),
                 db("true_peak", "dBTP"),
                 db("sample_peak", "dBFS"),
                 v["from_tc"].as_str().unwrap_or_default(),
@@ -1472,6 +1474,37 @@ fn sharpen_values(e: &Value) -> String {
     )
 }
 
+fn loudness_line(v: &Value) -> String {
+    let absolute = v["absolute"] == true;
+    let target = v["target"]
+        .as_f64()
+        .unwrap_or(vidcut_core::loudness::TARGET);
+    let unit = if absolute { "LUFS" } else { "LU" };
+    let shown = |k: &str| match v[k].as_f64() {
+        Some(x) if absolute => format!("{x:.1}"),
+        Some(x) => format!("{:+.1}", x - target),
+        None => "--".into(),
+    };
+    let peak = match v["true_peak"].as_f64() {
+        Some(x) => format!("{x:.1} dBTP"),
+        None => "--".into(),
+    };
+    format!(
+        "{} ({unit}, 0 LU = {target:.1} LUFS): M {} (max {}), short {} (max {}), range {:.1} LU, integrated {}, true peak {peak}",
+        if v["running"] == true {
+            "running"
+        } else {
+            "paused"
+        },
+        shown("momentary"),
+        shown("momentary_max"),
+        shown("short"),
+        shown("short_max"),
+        v["range"].as_f64().unwrap_or(0.0),
+        shown("integrated"),
+    )
+}
+
 fn live(method: &str, r: &Response) -> Option<()> {
     let v = &r.result;
     match method {
@@ -1504,6 +1537,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 println!("{}", state_line(v));
             }
         }
+        "loudness.get" | "loudness.set" | "loudness.reset" => println!("{}", loudness_line(v)),
         "player.stats" => {
             println!("{}", state_line(v));
             let stats =
@@ -1641,11 +1675,12 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("edits {}", edit_points(&v["edits"]));
             println!("target {}", v["target"].as_str().unwrap_or("-"));
             println!(
-                "timeline zoom {} px/frame, fixed playhead {}, snap {}, trim to audio {}, safe edit {}",
+                "timeline zoom {} px/frame, fixed playhead {}, snap {}, trim to audio {}, linked selection {}, safe edit {}",
                 t["zoom"],
                 on("fixed_playhead"),
                 on("snap"),
                 on("trim_to_audio"),
+                on("linked_selection"),
                 on("safe_edit")
             );
             println!(
@@ -1892,6 +1927,10 @@ fn clip_line(c: &Value) -> String {
         (Value::Null, Some(l)) => format!("link {l}"),
         (_, None) => "audio".to_string(),
         (_, Some(l)) => format!("audio, link {l}"),
+    };
+    let audio = match c["sync"].as_i64() {
+        Some(d) => format!("{audio}, sync {d:+}f"),
+        None => audio,
     };
     let speed = match c["speed"].as_f64() {
         Some(0.0) => ", freeze".to_string(),

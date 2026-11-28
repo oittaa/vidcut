@@ -757,6 +757,9 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 - **A filtered strip does not update after a script clears a clip color.**
   - Under Clip Color > Teal, the strip showed the one teal clip. `ClearClipColor` then cleared its color, and the clip stayed in the strip.
   - vidcut does not copy this fault. The strip follows each change of the project.
+- **After a pick of All Filtered Clips, the Render menu shows Entire Timeline.**
+  - The In and the Out are then at the span of the filtered clips. The job renders only these clips.
+  - vidcut does not copy this fault. The menu shows All Filtered Clips ([spec §10.1](spec.md#101-export-page-pp-41034132)).
 
 ## Resolve's scopes
 

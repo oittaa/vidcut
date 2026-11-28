@@ -166,6 +166,8 @@ pub struct Glide {
     pub at: Instant,
 }
 
+pub type LoudnessMeter = Arc<Mutex<vidcut_core::loudness::Meter>>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Levels {
     pub mix: Vec<f32>,
@@ -324,6 +326,7 @@ pub(crate) struct Shared {
     copies: Arc<crate::copies::Copies>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
+    loudness: Mutex<Option<LoudnessMeter>>,
     pub(crate) subtitles: subtitles::Subtitles,
     placing: Mutex<Vec<(String, vidcut_core::model::Picture)>>,
     grading: Mutex<Option<vidcut_core::model::Grade>>,
@@ -758,6 +761,10 @@ impl Shared {
         lock(&self.levels).clear();
     }
 
+    pub(crate) fn loudness_meter(&self) -> Option<LoudnessMeter> {
+        lock(&self.loudness).clone()
+    }
+
     pub(crate) fn gpu_found(&self, gpu: &crate::gpus::Gpu) {
         if GPU_MEMORY.get().is_none()
             && let Some(mb) = gpu.memory_mb
@@ -844,6 +851,7 @@ impl Player {
             copies: Arc::default(),
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
             levels: Mutex::new(std::collections::VecDeque::new()),
+            loudness: Mutex::new(None),
             subtitles: subtitles::Subtitles::default(),
             placing: Mutex::new(Vec::new()),
             grading: Mutex::new(None),
@@ -1058,6 +1066,10 @@ impl Player {
             return;
         }
         self.shared.change(true, |ctl, _, _| ctl.hardware = on);
+    }
+
+    pub fn measure(&self, meter: Option<LoudnessMeter>) {
+        *lock(&self.shared.loudness) = meter;
     }
 
     pub fn set_muted(&self, muted: bool) {

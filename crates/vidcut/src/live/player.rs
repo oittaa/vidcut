@@ -64,6 +64,7 @@ pub struct Player {
     plays_on: PlaysOn,
     pub audio_error: Option<String>,
     subtitles: Option<engine::SubtitleView>,
+    loudness: engine::LoudnessMeter,
 }
 
 impl Player {
@@ -102,6 +103,21 @@ impl Player {
             plays_on: PlaysOn::Default,
             audio_error: None,
             subtitles: None,
+            loudness: Arc::new(std::sync::Mutex::new(vidcut_core::loudness::Meter::new(
+                48_000,
+                vec![1.0, 1.0],
+            ))),
+        }
+    }
+
+    pub fn loudness(&self) -> &engine::LoudnessMeter {
+        &self.loudness
+    }
+
+    fn measure_shown(&self) {
+        if let Some(e) = &self.engine {
+            let timeline = self.plays == Some(PlayerId::Timeline);
+            e.measure(timeline.then(|| self.loudness.clone()));
         }
     }
 
@@ -266,6 +282,7 @@ impl Player {
             self.plays = Some(id);
             self.renderer.attach(self.engine.clone());
         }
+        self.measure_shown();
         self.show_subtitles();
         if let Some(e) = &self.engine {
             for (&lane, &db) in &self.contents[id.index()].faders {
@@ -408,6 +425,7 @@ impl Player {
         }
         self.plays = None;
         self.renderer.attach(None);
+        self.measure_shown();
         self.prepare_other();
         self.target = self.contents[id.index()].position;
         Some(self.instant())
@@ -430,6 +448,7 @@ impl Player {
             }
             self.plays = None;
             self.renderer.attach(None);
+            self.measure_shown();
         } else {
             self.prepare_other();
             return;

@@ -149,6 +149,7 @@ pub struct Workspace {
     pub(super) ducking: super::ducking::DuckingUi,
     pub(super) track_dynamics: super::track_dynamics::TrackDynamicsUi,
     pub(super) track_equalizer: super::track_equalizer::TrackEqualizerUi,
+    pub(super) track_pan: super::track_pan::TrackPanUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
     pub(super) cache_manager: super::cache_manager::CacheManager,
@@ -157,6 +158,29 @@ pub struct Workspace {
     pub(super) sync_bin: super::sync_bin::SyncBin,
     pub(super) sync_clips: super::sync_clips::SyncClips,
     pub(super) gallery: super::gallery::Gallery,
+}
+
+const ALONE: [&str; 7] = [
+    "edit.compound",
+    "edit.move",
+    "edit.trim",
+    "edit.roll",
+    "edit.slip",
+    "edit.slide",
+    "edit.delete",
+];
+
+fn alone(method: &str, params: &mut Value) {
+    if ALONE.contains(&method) {
+        params["alone"] = Value::Bool(true);
+    } else if method == "apply"
+        && let Some(list) = params["commands"].as_array_mut()
+    {
+        for c in list {
+            let m = c["method"].as_str().unwrap_or_default().to_string();
+            alone(&m, &mut c["params"]);
+        }
+    }
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -262,6 +286,7 @@ impl Workspace {
             ducking: Default::default(),
             track_dynamics: Default::default(),
             track_equalizer: Default::default(),
+            track_pan: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
             cache_manager: Default::default(),
@@ -338,7 +363,7 @@ impl Workspace {
             }
             GuiPanel::SelectTool => self.open_select_tool(),
             GuiPanel::EffectsSearch => self.open_effects_search(),
-            GuiPanel::Equalizer | GuiPanel::Dynamics => {}
+            GuiPanel::Equalizer | GuiPanel::Dynamics | GuiPanel::Pan => {}
         }
     }
 
@@ -371,6 +396,7 @@ impl Workspace {
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Equalizer(track) => self.open_track_equalizer(&track)?,
                 live::GuiChange::Dynamics(track) => self.open_track_dynamics(&track)?,
+                live::GuiChange::Pan(track) => self.open_track_pan(&track)?,
                 live::GuiChange::Close(panel) => self.close_panel(panel),
                 live::GuiChange::Page(Page::Effects | Page::Color | Page::Export)
                     if self.project().is_none() =>
@@ -471,6 +497,7 @@ impl Workspace {
             GuiPanel::EffectsSearch => self.close_effects_search(),
             GuiPanel::Equalizer => self.close_track_equalizer(),
             GuiPanel::Dynamics => self.close_track_dynamics(),
+            GuiPanel::Pan => self.close_track_pan(),
         }
     }
 
@@ -523,6 +550,7 @@ impl Workspace {
             (GuiPanel::EffectsSearch, self.effects_search_open()),
             (GuiPanel::Equalizer, self.track_equalizer_open()),
             (GuiPanel::Dynamics, self.track_dynamics_open()),
+            (GuiPanel::Pan, self.track_pan_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
@@ -650,7 +678,14 @@ impl Workspace {
     }
 
     pub(super) fn send(&self, method: &str, params: Value) {
-        self.live.request(method, params);
+        self.live.request(method, self.linked(method, params));
+    }
+
+    fn linked(&self, method: &str, mut params: Value) -> Value {
+        if !self.timeline.options.linked_selection {
+            alone(method, &mut params);
+        }
+        params
     }
 
     pub(super) fn show_timeline(&self) {
@@ -660,7 +695,7 @@ impl Workspace {
     }
 
     pub(super) fn send_drag(&self, method: &str, params: Value) {
-        self.live.request_drag(method, params);
+        self.live.request_drag(method, self.linked(method, params));
     }
 
     pub(super) fn project(&self) -> Option<&Project> {
@@ -2320,6 +2355,7 @@ impl Workspace {
         self.ducking_windows(&ctx);
         self.track_dynamics_window(&ctx);
         self.track_equalizer_window(&ctx);
+        self.track_pan_window(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);
         self.cache_manager_window(&ctx);

@@ -322,6 +322,9 @@ pub fn timeline(
     if let Some(message) = otio::unheard_track_equalizer(p, span) {
         notes.push(json!({ "code": "track_equalizer_kept", "message": message }));
     }
+    if let Some(message) = otio::unheard_track_pan(p, span) {
+        notes.push(json!({ "code": "track_pan_kept", "message": message }));
+    }
     let Some(writing) = write else {
         return Ok(json!({
             "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,
@@ -928,6 +931,34 @@ fn more_outputs(
     Ok(out)
 }
 
+fn chosen_clips(
+    p: &Project,
+    params: &ExportParams,
+    range: (i64, i64),
+) -> Result<Option<Vec<String>>> {
+    let some = params.clip_filter.is_some() || !params.clips.is_empty();
+    if some && !params.per_clip {
+        return Err(Error::usage("clips and clip_filter need per_clip"));
+    }
+    if params.clip_filter.is_some() && !params.clips.is_empty() {
+        return Err(Error::usage("give clips or clip_filter, not both"));
+    }
+    if let Some(f) = &params.clip_filter {
+        return vidcut_core::ops::clip_filter::met(p, f, range).map(Some);
+    }
+    for id in &params.clips {
+        let c = p
+            .clip(id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        if c.start >= range.1 || c.end() <= range.0 {
+            return Err(Error::invalid(format!(
+                "clip {id} has no frame in the range"
+            )));
+        }
+    }
+    Ok((!params.clips.is_empty()).then(|| params.clips.clone()))
+}
+
 pub fn prepare(
     p: &Project,
     params: &ExportParams,
@@ -1021,6 +1052,7 @@ pub fn prepare(
     let drop_frame = p.counts_drop_frame();
     let mut outputs = Vec::new();
     let offline;
+    let only = chosen_clips(p, params, (a, b))?;
     if params.per_clip {
         let marked = [
             (params.source_names, "source_names"),
@@ -1041,6 +1073,7 @@ pub fn prepare(
             .iter()
             .flat_map(|t| t.clips.iter().enumerate().map(move |(k, c)| (t, k, c)))
             .filter(|(_, _, c)| c.start < b && c.end() > a && !c.is_block())
+            .filter(|(_, _, c)| only.as_ref().is_none_or(|ids| ids.contains(&c.id)))
             .map(|(t, k, c)| {
                 let at = padded_frame(k as u64 + 1, 4);
                 let place = format!("{}-{at}", t.id);

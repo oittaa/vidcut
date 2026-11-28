@@ -172,6 +172,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.slip", &["clip"]),
     ("edit.slide", &["clip"]),
     ("edit.audio_roll", &["clip"]),
+    ("edit.resync", &["clip"]),
+    ("clip.link", &["clips"]),
+    ("clip.unlink", &["clips"]),
     ("edit.ripple_delete_silence", &["clips"]),
     ("edit.detect_scene_cuts", &["clips"]),
     ("edit.compound", &["clips"]),
@@ -290,6 +293,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "looks",
         "Looks: named styles for subtitle tracks and titles, built-in and your own",
+    ),
+    (
+        "loudness",
+        "The loudness meter of the mix (running GUI): read, start, pause, reset",
     ),
     (
         "luts",
@@ -489,7 +496,9 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut track set A2 --duck '{\"on\":false}'\n  \
          vidcut track set A2 --duck null\n  \
          vidcut track set A1 --equalizer '{\"type\":\"fire\",\"bands\":[{\"band\":3,\"gain\":4}]}'\n  \
-         vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'",
+         vidcut track set A1 --dynamics '{\"compressor\":{\"on\":true,\"ratio\":3},\"makeup_db\":2}'\n  \
+         vidcut track set A1 --pan -50\n  \
+         vidcut track set A1 --pan-on false",
     ),
     (
         "titles.add",

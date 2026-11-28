@@ -21,6 +21,8 @@ const MIN_ROOM_SECS: f64 = 0.1;
 
 const BLOCK_SECS: f64 = 0.2;
 
+const MEASURED_KEPT: usize = 400;
+
 struct Piece {
     samples: Vec<f32>,
     mark: Option<(f64, f64)>,
@@ -68,6 +70,9 @@ struct Producer {
     looping: Option<(i64, i64)>,
     bounds: Option<(i64, i64)>,
     waiting: Waiting,
+    measured: VecDeque<(u64, Vec<f32>)>,
+    fresh: bool,
+    weights: Vec<f64>,
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
@@ -87,6 +92,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
         looping: None,
         bounds: None,
         waiting: Waiting::default(),
+        measured: VecDeque::new(),
+        fresh: false,
+        weights: crate::export::audio::loudness_weights(plan.channels),
         shared,
     };
     while let Some(snap) = p.shared.audio_snap() {
@@ -98,7 +106,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
         } else {
             SILENT_WAIT
         };
-        match p.produce() {
+        let produced = p.produce();
+        p.measure();
+        match produced {
             Ok(true) => {}
             Ok(false) => p.shared.wait_changes(snap.changes, wait),
             Err(e) => {
@@ -128,6 +138,8 @@ impl Producer {
         match snap.mode {
             Mode::Paused { .. } => {
                 if self.run.take().is_some() {
+                    self.measure();
+                    self.measured.clear();
                     self.shared.ring.discard_all();
                 }
             }
@@ -208,9 +220,44 @@ impl Producer {
             metered: VecDeque::new(),
         });
         self.restart(from);
+        self.fresh = true;
+    }
+
+    fn measure(&mut self) {
+        if self.measured.is_empty() {
+            return;
+        }
+        let Some(meter) = self.shared.loudness_meter() else {
+            self.measured.clear();
+            return;
+        };
+        let ring = &self.shared.ring;
+        let upto = (self.shared.heard)
+            .counter_at(std::time::Instant::now())
+            .unwrap_or_else(|| ring.read_position());
+        let channels = self.weights.len().max(1);
+        let heard = (self.measured.iter())
+            .take_while(|(at, s)| at + (s.len() / channels) as u64 <= upto)
+            .count();
+        if heard == 0 {
+            return;
+        }
+        let mut m = super::lock(&meter);
+        m.fit(self.plan.rate(), &self.weights);
+        if std::mem::take(&mut self.fresh) {
+            m.cut();
+        }
+        for (_, samples) in self.measured.drain(..heard) {
+            m.push(&samples);
+        }
     }
 
     fn restart(&mut self, at: i64) {
+        if self.run.is_none() {
+            return;
+        }
+        self.measure();
+        self.measured.clear();
         let Some(run) = self.run.as_mut() else {
             return;
         };
@@ -310,6 +357,7 @@ impl Producer {
                 *m = m.max(s.abs());
             }
         }
+        let heard = (self.shared.loudness_meter().is_some()).then(|| piece.samples.clone());
         if self.muted {
             piece.samples.fill(0.0);
         }
@@ -324,6 +372,12 @@ impl Producer {
         }
         let at = ring.written();
         let pushed = ring.push(&piece.samples) * channels;
+        if let Some(samples) = heard {
+            self.measured.push_back((at, samples));
+            if self.measured.len() > MEASURED_KEPT {
+                self.measured.pop_front();
+            }
+        }
         self.shared.level(super::Level {
             at,
             frames: (pushed / channels.max(1)) as u64,

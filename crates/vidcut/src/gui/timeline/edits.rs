@@ -46,14 +46,19 @@ impl Cut {
         matches!(self, Self::Roll(_) | Self::Audio(_) | Self::AudioHead(_))
     }
 
-    pub fn apply(&self, p: &mut Project, by: i64) -> vidcut_core::Result<()> {
-        match self {
+    pub fn apply(&self, p: &mut Project, by: i64, alone: bool) -> vidcut_core::Result<()> {
+        let freed = match self {
+            Self::Roll(id) => ops::linked::touching(p, id),
+            Self::Tail(id) | Self::Head(id) => vec![id.clone()],
+            Self::Audio(_) | Self::AudioHead(_) => Vec::new(),
+        };
+        ops::linked::apart(p, alone, &freed, |p| match self {
             Self::Roll(id) => ops::roll(p, id, Edge::Tail, by),
             Self::Audio(id) => ops::audio_roll(p, id, Edge::Tail, by),
             Self::AudioHead(id) => ops::audio_roll(p, id, Edge::Head, by),
             Self::Tail(id) => ops::trim(p, id, Edge::Tail, by, None),
             Self::Head(id) => ops::trim(p, id, Edge::Head, by, None),
-        }
+        })
     }
 
     pub fn command(&self, by: i64) -> Value {
@@ -90,7 +95,12 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub fn new(p: &Project, edits: &[EditSel], lead: EditSel) -> vidcut_core::Result<Self> {
+    pub fn new(
+        p: &Project,
+        edits: &[EditSel],
+        lead: EditSel,
+        alone: bool,
+    ) -> vidcut_core::Result<Self> {
         let resolved = |e: &EditSel| {
             Cut::of(p, e).ok_or_else(|| vidcut_core::Error::not_found("no clip at the edit"))
         };
@@ -104,7 +114,7 @@ impl Plan {
                 ));
             }
             let part_of = |x: &Cut| p.tied(x.clip()).iter().any(|o| o == c.clip());
-            if cuts.iter().any(|(_, x, _)| part_of(x)) {
+            if !alone && cuts.iter().any(|(_, x, _)| part_of(x)) {
                 continue;
             }
             let facing = matches!(
@@ -169,10 +179,10 @@ impl Plan {
     }
 }
 
-pub fn applied(p: &Project, trims: &[Trim]) -> vidcut_core::Result<Project> {
+pub fn applied(p: &Project, trims: &[Trim], alone: bool) -> vidcut_core::Result<Project> {
     let mut q = p.clone();
     for (_, c, by) in trims {
-        c.apply(&mut q, *by)?;
+        c.apply(&mut q, *by, alone)?;
     }
     Ok(q)
 }
