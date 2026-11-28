@@ -838,7 +838,7 @@ impl Workspace {
         };
         let mut p = Project::clone(&p);
         let pending = self.timeline.dynamic.as_ref().map_or(0, |d| d.pending);
-        let mode = self.timeline.options.dynamic_mode;
+        let mode = self.dynamic_way();
         let Ok(at) = dynamic_preview(&mut p, &target, mode, pending) else {
             return;
         };

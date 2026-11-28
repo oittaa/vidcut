@@ -888,10 +888,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Off, a clip is selected and edited alone. The clips stay in their group.
     - vidcut: the switch is in the timeline options. Off, the picture and the sound of an item show apart, each on its own track, as on the Edit page.
     - vidcut: each edit request that acts on clips by id takes `alone`, the same switch for one request.
+    - vidcut: the selection holds the clicked clip. With the switch on, the timeline draws its linked clips as selected too.
+    - vidcut: off, the linked clips of an edited clip stay where they are. They do not follow Track 1 (D21).
   - **Out of sync** (p. 915): a clip that moves or slips apart from its linked clips shows a red indicator at the left of its name bar. The indicator gives the offset.
     - The menu of the indicator has Slip into place, Move into place, Slip others into place and Move others into place.
     - Slip into place slips the content of the clip. Move into place moves the clip. The two others do this to the other clips of the group.
-    - vidcut: the indicator gives the offset in frames. The clip menu has the four commands. A clip with a speed change shows no offset.
+    - vidcut: the indicator gives the offset in frames. The clip menu of a clip with an offset has the four commands. A clip with a speed change shows no offset.
   - **Resync Clip** (p. 646, Edit Actions on the Cut page) brings a clip that slipped sync back. What it changes is not measured yet: batch 1 saw no change in one case.
 
 ## 7. Edit functions (pp. 696–701)

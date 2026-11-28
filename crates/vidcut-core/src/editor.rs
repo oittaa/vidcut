@@ -479,19 +479,6 @@ pub struct Editor {
     blocked: Option<(String, String)>,
 }
 
-fn apart<T>(
-    p: &mut Project,
-    alone: bool,
-    ids: &[String],
-    edit: impl FnOnce(&mut Project) -> Result<T>,
-) -> Result<T> {
-    if alone {
-        ops::linked::alone(p, ids, edit)
-    } else {
-        edit(p)
-    }
-}
-
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -895,6 +882,7 @@ impl Editor {
             )?,
             _ => mutate(&mut working, &request, env, playhead, dry_run)?,
         };
+        ops::linked::end_lone(&mut working);
         need_timeline(&mut working)?;
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
@@ -4088,7 +4076,7 @@ fn mutate(
         }
         Request::EditDelete { clips, lift, alone } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            apart(p, *alone, &ids, |p| ops::delete(p, &ids, *lift))?;
+            ops::linked::apart(p, *alone, &ids, |p| ops::delete(p, &ids, *lift))?;
             Value::Null
         }
         Request::EditDeleteRange { range, lift } => {
@@ -4110,7 +4098,7 @@ fn mutate(
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let to = resolve(p, to, playhead)?;
-            apart(p, *alone, &ids, |p| {
+            ops::linked::apart(p, *alone, &ids, |p| {
                 ops::move_clips(p, &ids, to, *mode, track.as_deref())
             })?;
             Value::Null
@@ -4141,7 +4129,7 @@ fn mutate(
                 _ => return Err(Error::usage("edit.trim needs exactly one of `by` and `to`")),
             };
             let one = [id.clone()];
-            apart(p, *alone, &one, |p| {
+            ops::linked::apart(p, *alone, &one, |p| {
                 ops::trim(p, &id, *edge, delta, *ripple)
             })?;
             Value::Null
@@ -4154,22 +4142,22 @@ fn mutate(
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
-            let one = [id.clone()];
-            apart(p, *alone, &one, |p| ops::roll(p, &id, *edge, delta))?;
+            let near = ops::linked::touching(p, &id);
+            ops::linked::apart(p, *alone, &near, |p| ops::roll(p, &id, *edge, delta))?;
             Value::Null
         }
         Request::EditSlip { clip, by, alone } => {
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
             let one = [id.clone()];
-            apart(p, *alone, &one, |p| ops::slip(p, &id, delta))?;
+            ops::linked::apart(p, *alone, &one, |p| ops::slip(p, &id, delta))?;
             Value::Null
         }
         Request::EditSlide { clip, by, alone } => {
             let id = resolve_clip(p, clip, playhead)?;
             let delta = length(p, by)?;
-            let one = [id.clone()];
-            apart(p, *alone, &one, |p| ops::slide(p, &id, delta))?;
+            let near = ops::linked::touching(p, &id);
+            ops::linked::apart(p, *alone, &near, |p| ops::slide(p, &id, delta))?;
             Value::Null
         }
         Request::EditRippleDeleteSilence {
@@ -6229,7 +6217,7 @@ fn mutate(
                 Some(tc) => p.flat_settings().start_frames(tc)?,
                 None => 0,
             };
-            let nested = apart(p, *alone, &ids, |p| {
+            let nested = ops::linked::apart(p, *alone, &ids, |p| {
                 ops::compound::nest(
                     p,
                     &ids,

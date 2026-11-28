@@ -976,13 +976,11 @@ impl Workspace {
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
-        let selected: HashSet<&str> = self
-            .snap
-            .selection
-            .clips
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let chosen = match self.timeline.options.linked_selection {
+            true => ops::linked::with_ties(drawn, &self.snap.selection.clips),
+            false => self.snap.selection.clips.clone(),
+        };
+        let selected: HashSet<&str> = chosen.iter().map(String::as_str).collect();
         let picked_cues: HashSet<&str> = self
             .snap
             .selection
@@ -2242,6 +2240,7 @@ impl Workspace {
             rows: if upper { &layout.upper } else { &layout.lower },
             snap: snap.filter(|_| self.snapping()),
             safe_edit: self.timeline.options.safe_edit,
+            alone: !self.timeline.options.linked_selection,
             selected,
         }
     }
@@ -2445,7 +2444,9 @@ impl Workspace {
             self.timeline.set_edit(None);
             return None;
         };
-        let clips = edits::Plan::new(p, &edits, lead).map_or_else(|_| Vec::new(), |x| x.clips(p));
+        let alone = !self.timeline.options.linked_selection;
+        let plan = edits::Plan::new(p, &edits, lead, alone);
+        let clips = plan.map_or_else(|_| Vec::new(), |x| x.clips(p));
         Some(Gesture::Edits { edits, lead, clips })
     }
 
@@ -3842,14 +3843,15 @@ impl Workspace {
         let (Some(&lead), Some(p)) = (all.last(), self.shown_project()) else {
             return;
         };
-        let Ok(plan) = edits::Plan::new(&p, all, lead) else {
+        let alone = !self.timeline.options.linked_selection;
+        let Ok(plan) = edits::Plan::new(&p, all, lead, alone) else {
             return;
         };
         let trims = plan.each(by);
         let Some(r) = edits::request(&trims) else {
             return;
         };
-        let tried = edits::applied(&p, &trims);
+        let tried = edits::applied(&p, &trims, alone);
         self.send(
             r["method"].as_str().unwrap_or_default(),
             r["params"].clone(),

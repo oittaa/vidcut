@@ -441,7 +441,7 @@ pub fn nearer_end(at: i64, start: i64, end: i64) -> bool {
 pub fn heard(
     p: &Project,
     target: &DynamicTarget,
-    mode: DynamicMode,
+    mode: (DynamicMode, bool),
     end_edge: bool,
     pending: i64,
     speed: f64,
@@ -478,7 +478,7 @@ pub fn heard(
         (DynamicTarget::Edits(_), None) => return None,
         (DynamicTarget::Clips(ids), None) => {
             let c = first_clip(&now, ids)?;
-            if mode == DynamicMode::Slip {
+            if mode.0 == DynamicMode::Slip {
                 return slip_heard(&now, c, end_edge, speed);
             }
             let t = now
@@ -574,7 +574,7 @@ fn slip_heard(
 pub fn dynamic_preview(
     p: &mut Project,
     target: &DynamicTarget,
-    mode: DynamicMode,
+    (mode, alone): (DynamicMode, bool),
     by: i64,
 ) -> vidcut_core::Result<i64> {
     match target {
@@ -582,9 +582,9 @@ pub fn dynamic_preview(
             let lead = *all
                 .last()
                 .ok_or_else(|| vidcut_core::Error::not_found("no edit"))?;
-            let trims = super::edits::Plan::new(p, all, lead)?.each(by);
+            let trims = super::edits::Plan::new(p, all, lead, alone)?.each(by);
             for (_, c, b) in &trims {
-                c.apply(p, *b)?;
+                c.apply(p, *b, alone)?;
             }
             Ok(trims
                 .iter()
@@ -594,10 +594,14 @@ pub fn dynamic_preview(
         }
         DynamicTarget::Clips(ids) => {
             for id in ids {
-                match mode {
-                    DynamicMode::Slip => ops::slip(p, id, -by)?,
-                    DynamicMode::Slide => ops::slide(p, id, by)?,
-                }
+                let near = match mode {
+                    DynamicMode::Slip => vec![id.clone()],
+                    DynamicMode::Slide => ops::linked::touching(p, id),
+                };
+                ops::linked::apart(p, alone, &near, |p| match mode {
+                    DynamicMode::Slip => ops::slip(p, id, -by),
+                    DynamicMode::Slide => ops::slide(p, id, by),
+                })?;
             }
             first_clip(p, ids)
                 .map(|c| c.start)
@@ -1112,6 +1116,11 @@ impl Workspace {
         }
     }
 
+    pub(crate) fn dynamic_way(&self) -> (DynamicMode, bool) {
+        let o = &self.timeline.options;
+        (o.dynamic_mode, !o.linked_selection)
+    }
+
     pub(crate) fn dynamic_target(&self) -> Option<DynamicTarget> {
         let edits = self.timeline.selected_edits();
         if !edits.is_empty() {
@@ -1119,8 +1128,8 @@ impl Workspace {
         }
         let clips = &self.snap.selection.clips;
         let clips = match self.project() {
-            Some(p) => ops::linked::leads(p, clips),
-            None => clips.clone(),
+            Some(p) if self.timeline.options.linked_selection => ops::linked::leads(p, clips),
+            _ => clips.clone(),
         };
         (!clips.is_empty()).then_some(DynamicTarget::Clips(clips))
     }
@@ -1212,7 +1221,7 @@ impl Workspace {
             return None;
         }
         let mut trimmed = p.clone();
-        let mode = self.timeline.options.dynamic_mode;
+        let mode = self.dynamic_way();
         let at = dynamic_preview(&mut trimmed, &DynamicTarget::Edits(vec![e]), mode, by).ok()?;
         Some((trimmed, at))
     }
@@ -1224,13 +1233,7 @@ impl Workspace {
         }
         let target = self.dynamic_target()?;
         let mut trimmed = p.clone();
-        let at = dynamic_preview(
-            &mut trimmed,
-            &target,
-            self.timeline.options.dynamic_mode,
-            pending,
-        )
-        .ok()?;
+        let at = dynamic_preview(&mut trimmed, &target, self.dynamic_way(), pending).ok()?;
         let at = match &target {
             DynamicTarget::Clips(ids) if self.dynamic_end_edge() => {
                 first_clip(&trimmed, ids).map_or(at, |c| c.end())
@@ -1298,7 +1301,7 @@ impl Workspace {
         ) else {
             return;
         };
-        let mode = self.timeline.options.dynamic_mode;
+        let mode = self.dynamic_way();
         let a = heard(&p, &target, mode, d.end_edge, d.pending, speed);
         self.timeline.heard = a.is_some();
         self.live.audition(a);
@@ -1438,7 +1441,8 @@ impl Workspace {
             && let Some(d) = &mut self.timeline.dynamic
             && let Some((speed, t0, base)) = d.run
         {
-            let mode = self.timeline.options.dynamic_mode;
+            let o = &self.timeline.options;
+            let mode = (o.dynamic_mode, !o.linked_selection);
             let tried = |by: i64| dynamic_preview(&mut Project::clone(&p), &target, mode, by);
             let want = base + (speed * fps * (now - t0)).round() as i64;
             if want != d.pending
