@@ -2501,6 +2501,15 @@ pub fn fills(m: &Media, frame: (u32, u32)) -> bool {
         })
 }
 
+pub fn whole_frame(placed: &[Vec<Placed>], frame: (f64, f64)) -> bool {
+    placed.iter().flatten().any(|p| {
+        Placing::whole(std::slice::from_ref(&*p.for_effects()), frame)
+            .effects
+            .iter()
+            .any(Working::at_frame_size)
+    })
+}
+
 pub fn detail(placed: &[Placed]) -> f64 {
     placed.first().map_or(1.0, |p| {
         let near = p.picture.dynamic_zoom.map_or(1.0, |z| z.closest());

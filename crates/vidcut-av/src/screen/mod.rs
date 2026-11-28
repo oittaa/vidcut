@@ -1071,7 +1071,8 @@ pub struct Screen {
     writing: out::Writing,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
-    framed: Option<blur::Blurred>,
+    full: Option<Box<Screen>>,
+    part: bool,
     adj: Option<blur::Texture>,
     adj_shot: Option<(String, blur::Texture)>,
     output_lut: Option<Lut>,
@@ -1873,15 +1874,22 @@ impl Screen {
     }
 
     pub fn shared(&self) -> bool {
-        self.slots.first().is_some_and(|s| s.last_shared)
+        match &self.full {
+            Some(f) => f.shared(),
+            None => self.slots.first().is_some_and(|s| s.last_shared),
+        }
     }
 
     pub fn held_shared(&self) -> bool {
-        self.slots.first().is_some_and(|s| s.held_shared)
+        match &self.full {
+            Some(f) => f.held_shared(),
+            None => self.slots.first().is_some_and(|s| s.held_shared),
+        }
     }
 
     pub fn imports(&self) -> u64 {
-        self.imports_before + self.slots.iter().map(Slot::all_imports).sum::<u64>()
+        let inner = self.full.as_ref().map_or(0, |f| f.imports());
+        inner + self.imports_before + self.slots.iter().map(Slot::all_imports).sum::<u64>()
     }
 
     pub fn set_output_lut(&mut self, lut: Option<Lut>) {
@@ -1970,6 +1978,27 @@ impl Screen {
             }))
             .collect();
         let placed = &within(&layers, given);
+        let in_frame = self.frame.unwrap_or(size);
+        let colored = layers
+            .iter()
+            .any(|(p, _)| matches!(p.sampling(), Sampling::Colors { .. }));
+        let sized = (f64::from(in_frame.0), f64::from(in_frame.1));
+        if (size.0 < in_frame.0 || size.1 < in_frame.1)
+            && !colored
+            && vidcut_core::place::whole_frame(placed, sized)
+        {
+            let layers = (given, kernels, colors);
+            return self.draw_whole(gpu, picture, titles, layers, (size, in_frame), drawn);
+        }
+        if !colored
+            && !self.exported
+            && let Some(full) = self.full.take()
+        {
+            self.imports_before += full.imports();
+            let (a, b) = full.spent();
+            self.spent.0 += a;
+            self.spent.1 += b;
+        }
         if self.slots.len() < layers.len() {
             self.slots.resize_with(layers.len(), Slot::default);
         }
@@ -2029,20 +2058,13 @@ impl Screen {
         let exported = self.exported;
         let alpha = self.alpha;
         let clock = std::time::Instant::now();
-        let whole = self.frame.unwrap_or(size);
-        let fewer = size.0 < whole.0 || size.1 < whole.1;
-        self.blurred.sized(size, whole, n);
+        self.blurred.sized(size, self.frame.unwrap_or(size), n);
         let blurred = &mut self.blurred;
-        let mut framed = self.framed.take();
-        let mut kept = false;
         let binds: Vec<Bound> = layers
             .iter()
             .zip(&mut self.slots)
             .enumerate()
             .map(|(i, (&(picture, level, ..), slot))| {
-                if let Some(f) = framed.as_mut() {
-                    f.drop_layer(i);
-                }
                 if adj[i] {
                     blurred.drop_layer(i);
                     let chain = placed.get(i).expect("adjustment layer has placement");
@@ -2066,23 +2088,11 @@ impl Screen {
                     _ => None,
                 };
                 let full = placed.get(i).map(Vec::as_slice);
-                let placing_in = |at: (u32, u32)| {
-                    made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
-                        let (frame, fitted, pixels) = picture.placed_in(at);
-                        (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
-                    })
-                };
-                let mut placing = placing_in(size);
+                let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
+                    let (frame, fitted, pixels) = picture.placed_in(size);
+                    (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
+                });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
-                let at_frame = fewer
-                    && made_with.is_none()
-                    && !colors_only
-                    && placing
-                        .as_ref()
-                        .is_some_and(|(p, _)| p.effects.iter().any(Working::at_frame_size));
-                if at_frame {
-                    placing = placing_in(whole);
-                }
                 let (effects, factor) = placing
                     .as_mut()
                     .map_or((Vec::new(), 1.0), |(p, l)| bared(p, l));
@@ -2113,8 +2123,7 @@ impl Screen {
                     false => OVER_ALL,
                 };
                 let how = (open.as_ref().or(placing.as_ref()), kernel, colors, adds);
-                let drawn = if at_frame { whole } else { size };
-                let bind = slot.prepare(gpu, picture, drawn, how, &mut encoder);
+                let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
                 let shown = [1.0, factor, f64::from(mode), adds];
                 let bind = match (blurs, made) {
                     (false, _) => {
@@ -2126,14 +2135,6 @@ impl Screen {
                         let (a, b, how) = blurred.made(gpu, i, (&bind, p), blurs, &mut encoder);
                         blur::shown_bind(gpu, (a, b), shown, [how, 0.0, 0.0, 0.0])
                     }
-                    (true, None) if at_frame => {
-                        let big = framed.get_or_insert_with(blur::Blurred::default);
-                        big.sized(whole, whole, n);
-                        kept = true;
-                        let from = big.layer(gpu, i, &bind, &effects, &mut encoder);
-                        let view = blurred.scaled(gpu, i, (from, whole), kernel, &mut encoder);
-                        blur::shown_bind(gpu, (view, view), shown, [3.0, 0.0, 0.0, 0.0])
-                    }
                     (true, None) => {
                         let view = blurred.layer(gpu, i, &bind, &effects, &mut encoder);
                         let only = f64::from(u8::from(colors_only));
@@ -2143,19 +2144,9 @@ impl Screen {
                 (LayerBind::Ready(bind), level, placing.is_some(), mode)
             })
             .collect();
-        self.framed = framed.filter(|_| kept);
         self.spent.0 += clock.elapsed();
-        self.letters.retain(|l| titles.iter().any(|t| l.shows(t)));
-        for t in titles {
-            if !self.letters.iter().any(|l| l.shows(t)) {
-                self.letters.push(Letters::new(gpu, &t.picture, t.nth));
-            }
-        }
-        for l in &self.letters {
-            if let Some(t) = titles.iter().find(|t| l.shows(t)) {
-                l.place(gpu, size, t, colors);
-            }
-        }
+        self.lettered(gpu, titles, size, colors);
+        self.keep_after(gpu, size, colors);
         self.moves.retain(|m| m.size == size);
         while self.moves.len() < nests.moved {
             self.moves.push(Moves::new(gpu, size));
@@ -2198,7 +2189,8 @@ impl Screen {
             || !nests.outer.is_empty()
             || self.output_lut.is_some()
             || self.display_lut.is_some()
-            || graded.is_some();
+            || graded.is_some()
+            || self.part;
         if !floats {
             self.wide = None;
         } else if self
@@ -2268,16 +2260,6 @@ impl Screen {
         {
             self.adj_shot = Some((id.to_string(), blur::Texture::new(gpu, size)));
         }
-        if self.output_lut.is_none() {
-            self.looked_up = None;
-        } else if self.looked_up.as_ref().is_none_or(|l| l.size != size) {
-            self.looked_up = Some(lut::LookedUp::new(gpu, size));
-        }
-        let displaying = self.display_lut.is_some() && !self.exported;
-        keep_canvas(&mut self.displayed, displaying, gpu, (size, colors));
-        let shares = displaying && self.scopes_lut == self.display_lut;
-        let scoping = self.scopes_lut.is_some() && self.scoping && !self.exported && !shares;
-        keep_canvas(&mut self.scoped, scoping, gpu, (size, colors));
         let target = self.target.as_ref().expect("made above");
         let wide = self.wide.as_ref();
         let canvas = wide.map_or(&target.view, |w| &w.view);
@@ -2511,34 +2493,8 @@ impl Screen {
                 lettered_over(&mut pass, lettering, &self.letters, t);
             }
         }
-        if let (Some(w), Some(table), Some(out), true) =
-            (wide, &self.output_lut, &self.looked_up, n > 0)
-        {
-            looked_up(gpu, &mut encoder, (&w.bind, table), &out.view);
-            encoder.copy_texture_to_texture(
-                out.texture.as_image_copy(),
-                w.texture.as_image_copy(),
-                whole,
-            );
-        }
-        if let Some(w) = wide
-            && n > 0
-            && !self.exported
-        {
-            if let (Some(table), Some(s)) = (&self.scopes_lut, &self.scoped) {
-                looked_up(gpu, &mut encoder, (&w.bind, table), &s.view);
-            }
-            let shown = match (&self.display_lut, &self.displayed) {
-                (Some(table), Some(d)) => {
-                    looked_up(gpu, &mut encoder, (&w.bind, table), &d.view);
-                    &d.bind
-                }
-                _ => &w.bind,
-            };
-            let mut pass = begin(&mut encoder, &target.view, Some(wgpu::Color::BLACK));
-            pass.set_pipeline(&gpu.screen);
-            pass.set_bind_group(0, shown, &[]);
-            pass.draw(0..3, 0..1);
+        if n > 0 {
+            self.after_timeline(gpu, &mut encoder);
         }
         let acquired: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
             .iter_mut()
@@ -2565,6 +2521,157 @@ impl Screen {
             .map(Slot::all_imports)
             .sum::<u64>();
         self.slots.truncate(keep);
+        self.remember(picture, titles, (given, kernels, colors));
+        drawn
+    }
+
+    fn draw_whole(
+        &mut self,
+        gpu: &Gpu,
+        picture: Option<&Arc<Picture>>,
+        titles: &[TitleOver],
+        (given, kernels, colors): Layers<'_>,
+        (size, whole): ((u32, u32), (u32, u32)),
+        drawn: Drawn,
+    ) -> Drawn {
+        let exported = self.exported;
+        let alpha = self.alpha;
+        let full = self.full.get_or_insert_with(|| {
+            Box::new(Screen {
+                part: true,
+                ..Screen::default()
+            })
+        });
+        full.exported = exported;
+        full.alpha = alpha;
+        full.timeline_grade = self.timeline_grade.clone();
+        full.set_frame_size(Some(whole));
+        std::mem::swap(&mut self.shots, &mut full.shots);
+        full.draw(
+            gpu,
+            picture,
+            &[],
+            (given, kernels, colors),
+            whole.0,
+            whole.1,
+        );
+        std::mem::swap(&mut self.shots, &mut full.shots);
+        self.imports_before += self.slots.iter().map(Slot::all_imports).sum::<u64>();
+        self.slots.clear();
+        if self
+            .wide
+            .as_ref()
+            .is_none_or(|w| w.size != size || w.hdr != colors)
+        {
+            self.wide = Some(Wide::new(gpu, size, colors));
+        }
+        self.lettered(gpu, titles, size, colors);
+        self.keep_after(gpu, size, colors);
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("vidcut whole frame"),
+            });
+        let kernel = match exported {
+            true => RESIZE | WIDENS,
+            false => 0,
+        } | if alpha { ALPHA } else { 0 };
+        let clear = match alpha {
+            true => wgpu::Color::TRANSPARENT,
+            false => wgpu::Color::BLACK,
+        };
+        let from = self.full.as_ref().and_then(|f| f.wide.as_ref());
+        let wide = self.wide.as_ref().expect("made above");
+        if let Some(from) = from {
+            self.blurred.sized(size, whole, 1);
+            let view = self
+                .blurred
+                .scaled(gpu, 0, (&from.view, whole), kernel, &mut encoder);
+            let shown = [1.0, 1.0, 0.0, OVER_ALL];
+            let bind = blur::shown_bind(gpu, (view, view), shown, [3.0, 0.0, 0.0, 0.0]);
+            let mut pass = begin(&mut encoder, &wide.view, Some(clear));
+            pass.set_pipeline(&gpu.wide_drawing.placed);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        } else {
+            drop(begin(&mut encoder, &wide.view, Some(clear)));
+        }
+        if !titles.is_empty() {
+            let mut pass = begin(&mut encoder, &wide.view, None);
+            for t in titles {
+                lettered_over(&mut pass, &gpu.lettering_wide, &self.letters, t);
+            }
+        }
+        self.after_timeline(gpu, &mut encoder);
+        gpu.submit([encoder.finish()]);
+        self.remember(picture, titles, (given, kernels, colors));
+        drawn
+    }
+
+    fn lettered(&mut self, gpu: &Gpu, titles: &[TitleOver], size: (u32, u32), colors: Option<Hdr>) {
+        self.letters.retain(|l| titles.iter().any(|t| l.shows(t)));
+        for t in titles {
+            if !self.letters.iter().any(|l| l.shows(t)) {
+                self.letters.push(Letters::new(gpu, &t.picture, t.nth));
+            }
+        }
+        for l in &self.letters {
+            if let Some(t) = titles.iter().find(|t| l.shows(t)) {
+                l.place(gpu, size, t, colors);
+            }
+        }
+    }
+
+    fn keep_after(&mut self, gpu: &Gpu, size: (u32, u32), colors: Option<Hdr>) {
+        if self.output_lut.is_none() {
+            self.looked_up = None;
+        } else if self.looked_up.as_ref().is_none_or(|l| l.size != size) {
+            self.looked_up = Some(lut::LookedUp::new(gpu, size));
+        }
+        let displaying = self.display_lut.is_some() && !self.exported;
+        keep_canvas(&mut self.displayed, displaying, gpu, (size, colors));
+        let shares = displaying && self.scopes_lut == self.display_lut;
+        let scoping = self.scopes_lut.is_some() && self.scoping && !self.exported && !shares;
+        keep_canvas(&mut self.scoped, scoping, gpu, (size, colors));
+    }
+
+    fn after_timeline(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder) {
+        let (Some(w), Some(target)) = (self.wide.as_ref(), self.target.as_ref()) else {
+            return;
+        };
+        if let (Some(table), Some(out)) = (&self.output_lut, &self.looked_up) {
+            looked_up(gpu, encoder, (&w.bind, table), &out.view);
+            encoder.copy_texture_to_texture(
+                out.texture.as_image_copy(),
+                w.texture.as_image_copy(),
+                w.texture.size(),
+            );
+        }
+        if self.exported || self.part {
+            return;
+        }
+        if let (Some(table), Some(s)) = (&self.scopes_lut, &self.scoped) {
+            looked_up(gpu, encoder, (&w.bind, table), &s.view);
+        }
+        let shown = match (&self.display_lut, &self.displayed) {
+            (Some(table), Some(d)) => {
+                looked_up(gpu, encoder, (&w.bind, table), &d.view);
+                &d.bind
+            }
+            _ => &w.bind,
+        };
+        let mut pass = begin(encoder, &target.view, Some(wgpu::Color::BLACK));
+        pass.set_pipeline(&gpu.screen);
+        pass.set_bind_group(0, shown, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    fn remember(
+        &mut self,
+        picture: Option<&Arc<Picture>>,
+        titles: &[TitleOver],
+        (given, kernels, colors): Layers<'_>,
+    ) {
         self.drawn = Some(picture.cloned());
         self.drawn_titles = titles.to_vec();
         self.drawn_placed = given.to_vec();
@@ -2576,7 +2683,6 @@ impl Screen {
         self.drawn_timeline_grade = self.timeline_grade.clone();
         self.drawn_scoping = self.scoping;
         self.draws += 1;
-        drawn
     }
 }
 

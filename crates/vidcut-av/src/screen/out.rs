@@ -503,7 +503,14 @@ impl Screen {
     }
 
     pub(crate) fn spent(&self) -> (Duration, Duration) {
-        self.spent
+        let (a, b) = self.spent;
+        match &self.full {
+            Some(f) => {
+                let (c, d) = f.spent();
+                (a + c, b + d)
+            }
+            None => (a, b),
+        }
     }
 
     pub fn encoded(
