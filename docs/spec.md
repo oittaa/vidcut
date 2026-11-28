@@ -3768,8 +3768,11 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
-  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
-  - vidcut: a model tracks each pattern. The patterns are Pattern 1, Pattern 2 and so on. Add Pattern adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
+  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns (p. 2845).
+  - vidcut: a model tracks the patterns that Add Pattern adds. Their names are Pattern and a number.
+  - Add Point adds a Point pattern (p. 2841). Measured: the first Add Point of a new Tracker gives Point 2.
+    - vidcut: the number of a new pattern is the first number that no pattern has.
+  - Measured: a new Point pattern is 0.05 of the width and 0.05 of the height of the picture. Its search area is 0.125 of the width and 0.125 of the height.
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - The box of a Point pattern has a small handle at the top left. A drag of it moves the box, with a zoomed view (pp. 1783–1784).
     - The path does not change.
@@ -3777,8 +3780,25 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - A drag of an edge resizes the box from its middle (p. 1783).
   - The middle of the box is a point of the path. On a frame of the path, a drag of this point changes the path on that frame only.
   - Before the path and after it, the drag changes the first or the last frame of the path. It adds no frame to the path.
-  - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
+  - The search area of a Point pattern is a dashed box around its box. It shows when the pointer is over the box (pp. 1783, 2842).
+    - A drag of an edge of the search area, or Search Width and Search Height in the Inspector, change its size (p. 2847).
+    - vidcut: a drag resizes the search area from its middle, as for the box. Each side is from 0.001 to 1.
   - vidcut: a found path has no box before its first frame and after its last frame. There, the viewer shows no box for its pattern. Its masks have no effect there.
+- A track of a Point pattern looks for the pixels of its box (pp. 1785–1787, 2842–2847):
+  - On the next frame, the track looks for the pattern only in the search area (p. 2842). A larger area follows a faster move, and it takes longer.
+  - The Tracker picks the channel from the contrast, the clarity and the reliability of each channel (pp. 1785, 2846). The user can pick a color channel, the luminance or the alpha instead (p. 1785).
+    - vidcut: Channel Auto picks the channel with the most variance in the box on the first frame of the track. On a tie, it picks the luminance.
+    - The luminance is 0.2126 red, 0.7152 green and 0.0722 blue.
+  - Adaptive Mode has three choices (pp. 1787, 2845). It acts on each Point pattern of a track.
+    - None: the track looks for the pattern of the first frame on each frame.
+    - Every Frame: the track takes the pattern again on each frame, where it found it. This follows slow changes of the pattern, and it can drift.
+    - Best Match: as Every Frame. But when the new pattern differs from the first one by more than Match Tolerance, the track keeps the last pattern.
+  - vidcut: the track compares the pattern with each place of the search area by normalized cross-correlation, in the channel.
+    - A parabola through the scores next to the best place gives the place between pixels.
+    - On a frame where no place matches, the pattern keeps its last place.
+    - The change of Best Match is 1 minus the correlation of the new pattern with the first one, from 0 to 1.
+    - Match Tolerance is from 0 to 1. Its usual value is 0.5.
+  - A Point pattern keeps its size, and it follows no turn.
 - The track buttons are at the top of the Inspector (pp. 1784–1785). The rows below are measured in Resolve Studio 21.2. The 21.1 manual lists Track Reverse From Current Time and Track Forward From Current Time instead (p. 2844).
   - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.
   - Track Reverse tracks backward from the playhead. Track Forward tracks forward from the playhead to the end of the render range.

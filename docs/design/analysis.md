@@ -200,7 +200,7 @@ flowchart TD
   - The masks on the effect mask of the Tracker are not in it. Why: they do not change the track ([spec](../spec.md#the-tracker)).
   - The plan has one frame for each frame of the file, at the rate of the file.
   - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
-- `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
+- `tracking::track` in vidcut-av measures. A `model` pattern uses the VitTrack model on the CPU:
   - `Reader` reads the frames of the plan as one stream, at a working size.
   - `working` chooses that size: the search area of the model then has about its own size, within `SIDES`.
   - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
@@ -211,6 +211,18 @@ flowchart TD
     - Why: a track holds only one part in memory, however long the shot is.
   - `Shown` reports the progress of both ways.
   - `Follow` holds the first frame, the frames of the track, the box and the ways.
+- A `point` pattern has a `Pointed` in `Follow::point`: its search area, its channel, the Adaptive Mode and the Match Tolerance of the Tracker.
+  - `tracking::track` then follows it with `point::Point` on the CPU, and needs no model. `walked` goes through the frames for both kinds.
+  - `Reader` reads RGBA frames (`point::Rgba`). The long side is at most `LONGEST` pixels (`point::working`).
+  - `Point::start` cuts the pattern from the first frame (`Patch`). With `auto`, `picked` takes the channel with the most variance in the box.
+  - `Point::step` looks for the pattern at each place of the search area around the last place (`search`). The score is the normalized cross-correlation.
+    - Why: the score does not change with the brightness and the contrast of the pattern.
+    - A pattern of `COARSE` pixels or more is looked for at half size first, then near that place at full size. Why: the search is then about 16 times as fast.
+    - A parabola through the scores next to the best place gives the place between pixels.
+    - A place where the picture has almost no variance scores 0 (`FLAT`). Why: the correlation divides by that variance, and rounding then gives false high scores.
+    - When no place scores above 0, the pattern keeps its last place.
+  - `Point::adapt` takes the pattern again for `every_frame`, and for `best_match` when it differs from the first pattern by at most the Match Tolerance (`Patch::like`).
+  - The box keeps its size. The cache key has `point::NAME` and the values of the `Pointed`.
 - The result is a `Tracked`: its first frame and one box for each frame.
   - A cancelled track gives the boxes that it found, with `whole` off.
   - `AvEnv::track` keeps a whole track in the disk cache. The key has `tracking::name`, the digest of the plan and the `Follow`.

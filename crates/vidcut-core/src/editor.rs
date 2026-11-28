@@ -8730,6 +8730,7 @@ fn track_start(
         area: start.bounds.map(|v| v as f32),
         backward: way.backward(),
         forward: way.forward(),
+        point: start.point,
     };
     Ok((media, start, plan, follow))
 }
