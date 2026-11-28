@@ -74,6 +74,8 @@ const EQ_ROW: f32 = 24.0;
 
 const DYNAMICS_ROW: f32 = 24.0;
 
+const PAN_ROW: f32 = 24.0;
+
 fn ducking_room(p: &Project) -> f32 {
     let ducked = p
         .tracks
@@ -391,9 +393,12 @@ impl Workspace {
         });
         ui.separator();
         let meters = self.timeline_levels();
-        let height =
-            (ui.available_height().clamp(160.0, 320.0) - ducking_room(&p) - DYNAMICS_ROW - EQ_ROW)
-                .max(STRIP_ROOM + 40.0);
+        let height = (ui.available_height().clamp(160.0, 320.0)
+            - ducking_room(&p)
+            - DYNAMICS_ROW
+            - EQ_ROW
+            - PAN_ROW)
+            .max(STRIP_ROOM + 40.0);
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 for t in p.tracks.iter() {
@@ -410,6 +415,8 @@ impl Workspace {
                     ui.separator();
                 }
                 self.master_strip(ui, &meters.mix, height);
+                ui.separator();
+                self.loudness_meter(ui, height - STRIP_ROOM);
             });
         });
         if self.meters_live(&meters.mix, self.snap.timeline.playing) {
@@ -498,6 +505,7 @@ impl Workspace {
             self.ducking_controls(ui, p, t);
             self.dynamics_controls(ui, t);
             self.equalizer_controls(ui, p, t);
+            self.pan_controls(ui, t);
         });
     }
 

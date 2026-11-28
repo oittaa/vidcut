@@ -1,7 +1,7 @@
 use eframe::egui::{self, RichText};
 use egui_phosphor::regular::PENCIL_SIMPLE;
 use serde_json::json;
-use vidcut_core::model::{RenderJob, RenderRange, RenderStatus, TrackKind};
+use vidcut_core::model::{ClipFilter, RenderJob, RenderRange, RenderStatus, TrackKind};
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{RangeEnd, TimeSpec};
 
@@ -23,6 +23,7 @@ impl Workspace {
 
     pub(super) fn leave_export_page(&mut self) {
         self.export.edit_wanted = None;
+        self.export.filter_asked = None;
         if let Some(mode) = self.export.viewer_before.take() {
             self.send("viewer.set", json!({ "mode": mode }));
         }
@@ -85,10 +86,17 @@ impl Workspace {
         self.settle_picture_wheel(&ctx);
     }
 
+    pub(super) fn render_mode(&self) -> RenderRange {
+        (self.project().and_then(|p| p.timeline())).map_or(RenderRange::Entire, |t| t.render)
+    }
+
     pub(super) fn render_whole(&self) -> bool {
-        self.project()
-            .and_then(|p| p.timeline())
-            .is_none_or(|t| t.render == RenderRange::Entire)
+        self.render_mode() == RenderRange::Entire
+    }
+
+    fn clip_filter(&self) -> Option<ClipFilter> {
+        let t = self.project().and_then(|p| p.timeline())?;
+        (!t.clip_filter.is_all()).then(|| t.clip_filter.clone())
     }
 
     pub(super) fn render_span(&self) -> (i64, i64) {
@@ -147,7 +155,7 @@ impl Workspace {
     }
 
     pub(super) fn mark_in_out(&self, key: &str, value: i64) {
-        if !self.render_whole() {
+        if self.render_mode() == RenderRange::InOut {
             self.send("marks.set", json!({ key: value }));
             return;
         }
@@ -167,28 +175,42 @@ impl Workspace {
     }
 
     pub(super) fn render_range_menu(&mut self, ui: &mut egui::Ui) -> egui::Response {
-        let whole = self.render_whole();
         let text = |r: RenderRange| match r {
             RenderRange::Entire => "Entire Timeline",
             RenderRange::InOut => "In/Out Range",
+            RenderRange::Filtered => "All Filtered Clips",
         };
-        let now = match whole {
-            true => RenderRange::Entire,
-            false => RenderRange::InOut,
+        let now = self.render_mode();
+        let items = match self.clip_filter().is_some() {
+            true => [RenderRange::InOut, RenderRange::Filtered],
+            false => [RenderRange::Entire, RenderRange::InOut],
         };
-        ui.horizontal(|ui| {
-            ui.label(dim("Render"));
-            egui::ComboBox::from_id_salt("export-render-range")
-                .selected_text(text(now))
-                .show_ui(ui, |ui| {
-                    for r in [RenderRange::Entire, RenderRange::InOut] {
-                        if ui.selectable_label(now == r, text(r)).clicked() && now != r {
-                            self.send("timeline.set", json!({ "render": r }));
+        let mut picked = None;
+        let response = ui
+            .horizontal(|ui| {
+                ui.label(dim("Render"));
+                egui::ComboBox::from_id_salt("export-render-range")
+                    .selected_text(text(now))
+                    .show_ui(ui, |ui| {
+                        for r in items {
+                            let again = r == RenderRange::Filtered;
+                            let clicked = ui.selectable_label(now == r, text(r)).clicked();
+                            if clicked && (now != r || again) {
+                                picked = Some(r);
+                            }
                         }
-                    }
-                });
-        })
-        .response
+                    });
+            })
+            .response;
+        if let Some(r) = picked {
+            self.send("timeline.set", json!({ "render": r }));
+            if r == RenderRange::Filtered
+                && let Some(d) = self.export.render.as_mut()
+            {
+                d.per_clip = true;
+            }
+        }
+        response
     }
 
     pub(super) fn render_range_row(&self, ui: &mut egui::Ui) {
@@ -214,6 +236,7 @@ impl Workspace {
             return;
         };
         d.range = self.render_range_spec();
+        d.filter = self.clip_filter();
         d.output_tab = d.output_tab.min(d.more.len());
         if self.queue_rendering() {
             ui.disable();
@@ -307,6 +330,7 @@ impl Workspace {
         });
         let can = self.export.encodable.clone();
         let mut browse = false;
+        let mut single_asked = false;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -390,7 +414,13 @@ impl Workspace {
                     if d.output_tab == 0 {
                         super::dialog::row(ui, "Render", |ui| {
                             super::dialog::switch(ui, |ui| {
-                                ui.selectable_value(&mut d.per_clip, false, "Single Clip");
+                                let single = ui.selectable_label(!d.per_clip, "Single Clip");
+                                if single.clicked() && d.per_clip {
+                                    match d.filter.is_some() {
+                                        true => single_asked = true,
+                                        false => d.per_clip = false,
+                                    }
+                                }
                                 ui.selectable_value(&mut d.per_clip, true, "Individual Clips");
                             })
                         });
@@ -426,6 +456,10 @@ impl Workspace {
                 dialogs.pick_folder("Render Location", &folder)
             }));
         }
+        if single_asked {
+            self.export.filter_prompt = Some(FilterPrompt::SingleClip);
+        }
+        self.filter_prompts(&ctx, &mut d);
         self.refresh_plan(&ctx, &mut d);
         if add {
             self.start_render(&ctx, &mut d, None);
@@ -554,6 +588,39 @@ impl Workspace {
         }
         self.export.edit_wanted = Some(id);
         Ok(())
+    }
+
+    fn filter_prompts(&mut self, ctx: &egui::Context, d: &mut export::Render) {
+        let key = (self.project().and_then(|p| p.timeline()))
+            .map(|t| (t.id.clone(), t.clip_filter.clone()));
+        if self.export.filter_prompt.is_none()
+            && !d.per_clip
+            && d.filter.is_some()
+            && self.export.filter_asked != key
+            && !self.queue_rendering()
+        {
+            self.export.filter_prompt = Some(FilterPrompt::Apply);
+        }
+        let Some(prompt) = self.export.filter_prompt else {
+            return;
+        };
+        let answer = match prompt {
+            FilterPrompt::Apply => ask_apply_filter(ctx),
+            FilterPrompt::SingleClip => ask_clear_filter(ctx),
+        };
+        let Some(yes) = answer else {
+            return;
+        };
+        self.export.filter_prompt = None;
+        match (prompt, yes) {
+            (FilterPrompt::Apply, true) => d.per_clip = true,
+            (FilterPrompt::Apply, false) => self.export.filter_asked = key,
+            (FilterPrompt::SingleClip, true) => {
+                self.export.filter_asked = key;
+                d.per_clip = false;
+            }
+            (FilterPrompt::SingleClip, false) => {}
+        }
     }
 
     fn leave_edit_prompt(&mut self, ctx: &egui::Context) {
@@ -1120,6 +1187,12 @@ fn job_name(i: usize, j: &RenderJob) -> String {
     j.name.clone().unwrap_or_else(|| format!("Job {}", i + 1))
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum FilterPrompt {
+    Apply,
+    SingleClip,
+}
+
 pub(super) struct LeaveEdit {
     next: String,
 }
@@ -1199,6 +1272,51 @@ fn hms(secs: f64) -> String {
 
 fn escaped(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.key_pressed(egui::Key::Escape))
+}
+
+fn ask_apply_filter(ctx: &egui::Context) -> Option<bool> {
+    ask_filter(
+        ctx,
+        "Unable to Apply Filter",
+        "Clip filters need Individual Clips. Apply the filter and switch?",
+        "Apply Filter",
+    )
+}
+
+fn ask_clear_filter(ctx: &egui::Context) -> Option<bool> {
+    ask_filter(
+        ctx,
+        "Cannot Render Single Clip",
+        "To render a single clip, clear the clip filter.",
+        "Clear Filter",
+    )
+}
+
+fn ask_filter(ctx: &egui::Context, title: &str, text: &str, main: &str) -> Option<bool> {
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique("render-filter")).show(ctx, |ui| {
+        ui.set_width(super::dialog::WIDTH);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.heading(title);
+        ui.label(text);
+        super::dialog::footer(ui, |ui| {
+            if super::dialog::main_button(ui, main, true) {
+                answer = Some(true);
+            }
+            let cancel = ui.button("Cancel");
+            focus_once(ui.ctx(), "render-filter-focus", &cancel);
+            if cancel.clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    if escape_cancels(ctx, &modal) {
+        answer = Some(false);
+    }
+    if answer.is_some() {
+        focus_reset(ctx, "render-filter-focus");
+    }
+    answer
 }
 
 fn ask_rerender(ctx: &egui::Context) -> Option<bool> {

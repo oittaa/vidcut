@@ -124,6 +124,8 @@ pub struct TrackProps {
     pub duck: Option<Option<crate::model::Duck>>,
     pub dynamics: Option<Option<Box<crate::request::TrackDynamicsSet>>>,
     pub equalizer: Option<Option<crate::request::TrackEqualizerSet>>,
+    pub pan: Option<f64>,
+    pub pan_on: Option<bool>,
     pub video_enabled: Option<bool>,
     pub render_cache: Option<bool>,
     pub name: Option<Option<String>>,
@@ -134,6 +136,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
         && !crate::validate::FADER.contains(&v)
     {
         return Err(Error::invalid(format!("volume {v} dB outside -100..10 dB")));
+    }
+    if let Some(v) = props.pan {
+        crate::keyframes::checked_pan(v)?;
     }
     if let Some(Some(d)) = &props.duck {
         crate::duck::checked(p, id, d)?;
@@ -158,7 +163,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
         || props.voice_isolation_on.is_some()
         || props.duck.is_some()
         || props.dynamics.is_some()
-        || props.equalizer.is_some();
+        || props.equalizer.is_some()
+        || props.pan.is_some()
+        || props.pan_on.is_some();
     if sound && t.kind == TrackKind::Video {
         return Err(Error::invalid(format!(
             "{id} is a video track: it has no sound"
@@ -195,6 +202,12 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
             .as_ref()
             .map(|set| crate::equalizer::track::patched(t.equalizer.as_ref(), set))
             .transpose()?;
+    }
+    if let Some(v) = props.pan {
+        t.pan = v;
+    }
+    if let Some(on) = props.pan_on {
+        t.pan_on = on;
     }
     if let Some(v) = props.video_enabled {
         t.video_enabled = v;

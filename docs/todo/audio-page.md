@@ -5,13 +5,13 @@
 - Audio track layers, Range mode and sample editing.
 - Elastic Wave.
 - Fade handles on clips, and Batch Fades.
-- The Mixer strip of a track: arm, the solo modes, pan, inserts and the Dialogue Leveler.
+- The Mixer strip of a track: arm, the solo modes, inserts and the Dialogue Leveler.
 - Buses, sends and VCAs.
 - Presets and Sidechain of the track equalizer and Dynamics.
 - Automation of the fader, the pan, the mute and the effects.
 - The audio effects of the Effects Library.
 - VST and AU plugins.
-- A live loudness meter, bus meters and Loudness History.
+- Bus meters and Loudness History.
 - Recording and ADR.
 - The Sound Library.
 - Dolby Atmos, Ambisonics and MPEG-H.

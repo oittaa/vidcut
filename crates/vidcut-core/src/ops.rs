@@ -2412,6 +2412,12 @@ pub fn set_marks(
         return Err(Error::invalid("marks must be on the timeline"));
     }
     p.marks = marks;
+    if p.compound_path.is_empty()
+        && let Some(t) = p.timeline_mut()
+        && t.render == crate::model::RenderRange::Filtered
+    {
+        t.render = crate::model::RenderRange::InOut;
+    }
     Ok(())
 }
 

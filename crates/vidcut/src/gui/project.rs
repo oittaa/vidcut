@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use vidcut_core::Project;
 use vidcut_core::luts::LutList;
 use vidcut_core::model::{
-    DynamicsProfile, Hdr, MonitorLut, ProjectRetime, ProjectUpscaler, Scaling, TimelineColors,
-    TimelineSettings,
+    DynamicsProfile, Hdr, LoudnessScale, MonitorLut, ProjectRetime, ProjectUpscaler, Scaling,
+    TimelineColors, TimelineSettings,
 };
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
@@ -50,6 +50,8 @@ pub(super) struct Format {
     scopes_lut: MonitorLut,
     dynamics: DynamicsProfile,
     layers: Vec<String>,
+    target_loudness: f64,
+    loudness_scale: LoudnessScale,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +97,8 @@ impl Default for Format {
             scopes_lut: MonitorLut::None,
             dynamics: DynamicsProfile::default(),
             layers: vidcut_core::model::Settings::one_layer(),
+            target_loudness: vidcut_core::loudness::TARGET,
+            loudness_scale: LoudnessScale::Ebu9,
         }
     }
 }
@@ -135,6 +139,8 @@ impl Format {
             scopes_lut: p.settings.scopes_lut.clone(),
             dynamics: p.settings.dynamics_profile,
             layers: p.settings.node_stack_layers.clone(),
+            target_loudness: p.settings.target_loudness,
+            loudness_scale: p.settings.loudness_scale,
         }
     }
 
@@ -272,6 +278,31 @@ impl Format {
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::SpinButton, true, name)
                         });
+                    }
+                });
+                ui.end_row();
+            });
+    }
+
+    fn edit_loudness(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new(ui.scope_id().with("loudness"))
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                let label = ui.label("Target Loudness Level");
+                ui.add(
+                    egui::DragValue::new(&mut self.target_loudness)
+                        .range(vidcut_core::ops::normalize::LOUDNESS)
+                        .speed(0.1)
+                        .fixed_decimals(1)
+                        .suffix(" LUFS"),
+                )
+                .labelled_by(label.id);
+                ui.end_row();
+                ui.label("Loudness Scale");
+                super::dialog::switch(ui, |ui| {
+                    for scale in [LoudnessScale::Ebu9, LoudnessScale::Ebu18] {
+                        ui.selectable_value(&mut self.loudness_scale, scale, scale.title());
                     }
                 });
                 ui.end_row();
@@ -875,6 +906,7 @@ impl Workspace {
                 format.edit_ai(ui);
                 format.edit_dynamics(ui);
                 format.edit_layers(ui);
+                format.edit_loudness(ui);
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let changes = changes(&format, &was);
@@ -963,6 +995,12 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.layers != was.layers {
         set.insert("node_stack_layers".into(), json!(now.layers));
+    }
+    if now.target_loudness != was.target_loudness {
+        set.insert("target_loudness".into(), json!(now.target_loudness));
+    }
+    if now.loudness_scale != was.loudness_scale {
+        set.insert("loudness_scale".into(), json!(now.loudness_scale));
     }
     Value::Object(set)
 }

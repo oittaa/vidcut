@@ -5348,7 +5348,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
-  - Track pan, and FX other than the Ducker: out.
+  - FX other than the Ducker: out.
 - **Voice Isolation** (p. 774; measured in Resolve Studio 21.1.2, on a clip):
   - It has a switch and an Amount from 0 to 100.
   - A fresh clip turned on gives Amount 100.
@@ -5521,9 +5521,88 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: the equalizer of a track works on the mix of its clips, after their ducking and with their fades.
   - vidcut: the equalizer of a track that holds a compound clip also works on the sound of the compound clip.
   - vidcut: an OTIO file keeps the track equalizer in the metadata of vidcut. Its export tells that other editors do not hear it.
+- **Track pan** (pp. 3938, 3954–3955):
+  - The Pan section of each channel strip has an indicator. A drag in it moves the pan. A double click opens the Pan window (p. 3954).
+  - A single click on the indicator does not bypass the pan. The manual says that it does (p. 3954).
+  - The pan comes after the equalizer and before the fader (p. 3938).
+  - The Pan window has these controls:
+    - The Pan switch and the 3D button.
+    - Left/Right, from 100L to 100R. C, the middle, is the default.
+    - Front/Back (100F), Rotate (0 to 360), Spread (PNT to FULL, FULL) and Divergence (0 to 100, 0).
+    - Boom, from −∞ to +10 dB, with On and Pre.
+    - A track of type mono has no Spread.
+  - Typed Left/Right text such as `50R`, `100L` or `C` sets the pan:
+    - `150R` gives 100R.
+    - `150`, `50`, `-50`, `R50` and `L50` change nothing.
+  - On a stereo track, Left/Right has the law of the clip Pan. Each channel stays on its own side.
+  - On a mono track, C gives −3 dB on each side. 100L gives 0 dB on the left and silence on the right.
+  - On a mono track, the law has these values between C and 100L. 100R and the values to the right are their mirror image.
+
+    | Left/Right | Left | Right |
+    |---|---|---|
+    | 10L | −2.1 dB | −4.0 dB |
+    | 25L | −1.2 dB | −6.1 dB |
+    | 50L | −0.4 dB | −11.8 dB |
+    | 75L | −0.1 dB | −22.9 dB |
+
+  - The pan of a clip adds to the pan of its track. The law applies to the sum:
+    - A clip at −50 on a track at 50R plays as at C.
+    - A clip at −100 on a track at 50R plays as at 50L.
+  - vidcut: each audio track has a pan from −100 to 100, and a switch. `track.set` sets `pan` and `pan_on`.
+  - vidcut: the switch off keeps the pan, and the sound plays as at 0.
+  - vidcut: a track pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: the pan of a clip adds to the pan of its track. A sum past 100 plays as at 100.
+  - vidcut: `track.set` refuses a pan outside −100 to 100, as `clip.set` does.
+  - vidcut: the strip of a track in the Mixer has a Pan indicator. A drag moves the pan, and a double click opens the Pan window.
+  - vidcut: a single click on the indicator does nothing.
+  - vidcut: `gui.show` with `pan` and a `track` opens the Pan window of that track.
+  - vidcut: the window has the switch, and Left/Right as a slider and a field. The field takes typed text as above.
+    - A change applies at once. A drag on the slider makes one change when it stops.
+    - Reset and Close are at the bottom of the window.
+  - vidcut: the pan of a track works on the mix of its clips, after its equalizer and before its fader.
+  - vidcut: the pan of a track that holds a compound clip also works on the sound of the compound clip.
+  - vidcut: an OTIO file keeps the track pan in the metadata of vidcut. Its export tells that other editors do not hear it.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
+- **Loudness meter** (pp. 4054–4058):
+  - It measures the mix that the timeline plays. The output mute, the output level and DIM do not change it.
+  - The options menu selects a standard. BS.1770-1 is the default. BS.1770-4 governs the other standards (p. 4055).
+  - The meter gates the loudness with each standard, also with BS.1770-1.
+  - The true peak is the highest peak between the samples, by BS.1770-4 (p. 4055).
+  - The bar M has a part for each channel, without LFE. A second bar shows the sum (p. 4056).
+  - The number over the second bar is the highest M since the reset (p. 4056).
+  - The readouts are Short, Short Max, Range and Integrated (p. 4056). The Control Room meter shows the true peak (p. 4054).
+  - M is the loudness of the last 400 ms. It changes each 100 ms (p. 4056).
+  - Short is the loudness of the last 3 s (p. 4058). Page 4056 gives 30 s, but the meter uses 3 s.
+  - Short Max is the highest Short (p. 4056).
+  - Range is the loudness range of EBU Tech 3342. It leaves out the lowest 10% and the highest 5% (p. 4056).
+  - Integrated is the gated loudness of all that played since the reset (p. 4056).
+  - The buttons are Pause and Reset (p. 4057).
+    - The meter runs at first. Reset clears all values and stops the meter. Then the first button reads Start.
+    - After a Pause, the first button reads Resume (p. 4057).
+    - A stopped meter changes M, Short and the true peak only.
+    - A running meter changes all values. All values stay when the play stops.
+  - The meter shows LU from the target. Absolute Scale in its options menu shows LUFS (p. 4056). It is off at first.
+  - A value under the bottom of the scale shows `--`.
+  - Colors:
+    - Integrated is blue under the tolerance of the standard, yellow within it, and red over it (p. 4055).
+    - Short and Short Max are blue, and red over +3 LU.
+    - The M bar is steel blue, and yellow over 0 LU.
+  - vidcut: the meter measures by ITU-R BS.1770-4, with its gates. The tolerance of Integrated is ±1 LU.
+  - vidcut: the meter is at the right of the Mix strip of the Mixer. The true peak shows under the readouts, as vidcut has no Control Room meter.
+  - vidcut: the windows of M and Short start again at each play. The time before the start of a play counts as silence.
+  - vidcut: Short ends at the last sound heard.
+  - vidcut: `loudness.get` reads the meter. `loudness.set` starts or pauses it and sets LU or LUFS. `loudness.reset` resets it.
+  - vidcut: `analyze.loudness` gives the same measurement for a range, as the Offline Loudness Analyzer does (p. 4057).
+  - vidcut does not have the standards of the options menu, Lock Metering to Transport and the Loudness History (pp. 4055–4058).
+- **Target Loudness Level** (pp. 4055, 4060):
+  - It is the loudness that the meter shows as 0 LU. A new project has −23 LUFS (p. 4055).
+  - vidcut: Project Settings has the field. `project.set` sets `target_loudness`, from −30 to 0 LUFS, the range of the Normalize target (D80).
+- **Loudness Scale** (p. 4055):
+  - EBU +9 goes from −18 to +9 LU. It is the default (p. 4055).
+  - EBU +18 goes from −36 to +18 LU.
+  - vidcut: Project Settings has the switch. `project.set` sets `loudness_scale` (`ebu9` or `ebu18`).
 - **Clip volume** (pp. 743, 1109–1110, 1112):
   - Each clip has a gain, and a mute.
   - The Inspector has the Volume of the clip, in its Audio panel. This is the value of the volume overlay of the clip (p. 743).
@@ -8883,6 +8962,11 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - A Pitch or Yaw under 0.0005 does not lean the picture. The measured change is between 0.0003 and 0.0005.
   - It draws each edge of a leaned picture 0.5 px farther out than the projective lean gives, along its normal. The picture inside follows the lean.
   - This includes a cut edge and the edges of a turned picture, as measured.
-  - It uses the rule on each level of a compound clip by itself ([todo](todo/picture-fit.md)).
+  - A clip in a compound clip uses the rule for its own bars.
+  - The level of a compound clip uses the rule only when the one picture in it keeps its place there.
+    - The picture keeps its place when it has no transform, no crop, no Dynamic Zoom and no motion of a transition.
+    - Thus a Zoom X other than 1 inside makes each bar of the compound clip show at its exact width.
+    - With two or more tracks inside, each bar of the compound clip also shows at its exact width.
+    - So does a compound clip that holds a compound clip that does not use the rule.
   - It does not use the limit in the fit for an encoder.
   - On pixels that are not square, a Rotation leaves the gaps of the turn of those pixels. Thus the limit acts at W / 2 × θ / p under 0.2, as measured.
