@@ -2646,9 +2646,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The color bars picture with hard color edges, at the defaults, Blend 0.5, Fine Details 3 and Sharpen Chroma 1.01, 1.5 and 2, within 0.00001.
   - A picture with fewer pixels than the frame is the full-size Sharpen, scaled down.
     - Measured in Resolve Studio 21.2 with float renders of a 1920×1080 timeline at 960×540 and 640×360, on the spots and the color bars pictures.
-    - vidcut draws such a clip and its effects at the frame size, then scales the result down with the clip's filter. It gives the renders within 0.0003.
-    - A picture with alpha at Zoom 1 and 0.6, at 960×540 and 640×360, is the scaled full-size result in vidcut, alpha too, within 0.0001.
-    - In vidcut, an adjustment clip, a compound clip and a frame that a retime makes sharpen at the size of the picture ([todo](todo/effects-library.md)).
+    - vidcut draws a frame with a Sharpen at the frame size, then scales the whole frame down once.
+    - This is so for a Sharpen on a clip, an adjustment clip, a compound clip and a retimed clip.
 - **Keyframes of effect values** (pp. 747, 1250–1251):
   - Each group of an applied effect in the Effects panel of the Inspector has a Keyframe button with Previous and Next buttons (p. 747).
   - The button adds or removes a keyframe at the playhead, on each parameter of the group (p. 747).
