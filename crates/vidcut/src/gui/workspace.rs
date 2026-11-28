@@ -2004,6 +2004,17 @@ impl Workspace {
                 json!({ "clips": self.snap.selection.clips, "enabled": !enabled }),
             );
         }
+        for (action, fade) in [
+            (Action::FadeInToPlayhead, "in"),
+            (Action::FadeOutToPlayhead, "out"),
+        ] {
+            if fired.pressed(action) && !self.snap.selection.clips.is_empty() {
+                self.send(
+                    "clip.fade_to_playhead",
+                    json!({ "clips": self.snap.selection.clips, "fade": fade }),
+                );
+            }
+        }
         if fired.pressed(Action::VoiceIsolation) {
             let clips = self.snap.selection.clips.clone();
             let current = self

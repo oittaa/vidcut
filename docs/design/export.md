@@ -777,6 +777,8 @@ A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compoun
 - The sides of such a `place::Mix` take no composite mode (`MixDraw::lay`).
 - `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`Project::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
+- `clip_fades` gives the fades of a clip ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)). Their curve is `Curve::Power`. They go in `edges` too. Thus the player and the export play the same fades.
+- A clip fade gives the gain 0 outside its clip, for example in the handle of a cross fade.
 
 Dynamic Zoom and keyframes (D75):
 

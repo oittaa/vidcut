@@ -438,6 +438,17 @@ The bar and the Jobs button:
 - The drags are `Gesture::Volume`, `Gesture::Key` and `Gesture::KeyHandle`. They send `keyframes.set` and `keyframes.move`, in one `apply`.
 - `Preview::gains` draws the dragged gains. On release, `Workspace::trim_sent` shows them until the project has them.
 
+**Clip fades** ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+
+- On the Audio page, `paint::fade_ramps` shades each fade and draws its curve (`SoundFade::along`). `paint::fade_handles` draws the handles.
+- `Look::fades` and `Rows::audio_page` turn them on. The Cut page shows no fades.
+- `geometry::fade_target` finds the length handle or the curve handle under the pointer (`OnFade`). It comes before `geometry::volume_target`.
+- The drags are `Gesture::FadeLength` and `Gesture::FadeCurve`. Each sends one `clip.set` with `fade_in` or `fade_out`.
+- `Preview::fades` draws the dragged fades. On release, `Workspace::trim_sent` shows them until the project has them.
+- A double-click on a handle sends `clip.set`: null for a length handle, and the linear point for a curve handle.
+- The Batch Fades window is `batch_fades::BatchDialog`. `TimelineView::batch_last` keeps its last `Settings` for the next window.
+- `shape_button` draws each shape of `fades::SHAPES`. Apply sends `clip.batch_fades` and waits for the result (`Ask`).
+
 **Speed keyframes** ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `paint::speed_marks` draws the strip of a clip with speed keyframes (`geometry::speed_strip`): a line at each speed keyframe and the speed of each section.

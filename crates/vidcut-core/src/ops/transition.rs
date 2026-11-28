@@ -70,22 +70,7 @@ fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
         return zero_db();
     }
     if sound {
-        return json!({
-            "OTIO_SCHEMA": "Transition.1",
-            "name": "Cross Fade +3 dB",
-            "transition_type": "Custom_Transition",
-            "metadata": {"Resolve_OTIO": {
-                "Effects": {
-                    "Display Type": 1,
-                    "Effect Name": "Cross Fade +3 dB",
-                    "Enabled": true,
-                    "Name": "Cross Fade",
-                    "Parameters": [],
-                    "Type": 41
-                },
-                "Transition Type": "Cross Fade +3DB"
-            }}
-        });
+        return plus_3_db();
     }
     let mut keys = serde_json::Map::new();
     keys.insert("0".into(), json!({"Value": 0.0, "Variant Type": "Double"}));
@@ -408,6 +393,55 @@ pub fn cross_fade_joins(p: &mut Project, joins: &[(usize, i64)]) -> Vec<Made> {
         made.push(m);
     }
     made
+}
+
+fn plus_3_db() -> Value {
+    json!({
+        "OTIO_SCHEMA": "Transition.1",
+        "name": "Cross Fade +3 dB",
+        "transition_type": "Custom_Transition",
+        "metadata": {"Resolve_OTIO": {
+            "Effects": {
+                "Display Type": 1,
+                "Effect Name": "Cross Fade +3 dB",
+                "Enabled": true,
+                "Name": "Cross Fade",
+                "Parameters": [],
+                "Type": 41
+            },
+            "Transition Type": "Cross Fade +3DB"
+        }}
+    })
+}
+
+pub fn has_transition(p: &Project, ti: usize, e: i64) -> bool {
+    let cuts = Cuts::of(p, &p.tracks[ti]);
+    p.tracks[ti]
+        .transitions
+        .iter()
+        .any(|x| cuts.place(p, x) == Some(e))
+}
+
+pub fn batch_cross_fade(
+    p: &mut Project,
+    ti: usize,
+    e: i64,
+    frames: i64,
+    gain: bool,
+) -> Option<Made> {
+    if !is_sound(p, ti) {
+        return None;
+    }
+    let shape = Shape::Length(frames, Align::Center);
+    let (_, _, before, after) = plan(p, ti, e, shape)?;
+    if before + after != frames {
+        return None;
+    }
+    let m = put(p, ti, e, shape, &PictureTransition::Dissolve)?;
+    if let Some(t) = p.tracks[ti].transitions.iter_mut().find(|t| t.id == m.id) {
+        t.otio = if gain { zero_db() } else { plus_3_db() }.into();
+    }
+    Some(m)
 }
 
 fn zero_db() -> Value {

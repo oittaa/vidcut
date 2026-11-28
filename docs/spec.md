@@ -5655,6 +5655,47 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
   - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (D77).
   - The scale of the line and the step of Shift are in D77.
+- **Clip fades** (pp. 3875–3876, 3892–3894):
+  - Each clip with sound has a fade in and a fade out. A fade has a length in frames and a curve point [X-Point, X-Level].
+  - The default curve is linear. The gain is t / T. It goes from 0 at the clip edge to 1 after T frames.
+  - The fade out is the mirror image of the fade in. A fade multiplies the clip volume.
+  - A fade length can have a part of a frame.
+  - The two fades of a clip are not longer than the clip together.
+  - A fade does not make two clips overlap. At a cut with a fade on each side, the level goes to 0.
+  - X-Level goes from −120 to −10. X-Point goes from 1 to 99. The default point is [50, −60]. It gives the linear curve.
+  - At X-Point 50, the gain is t to the power of −X-Level/60. Thus −120 gives t², and −10 gives t^(1/6).
+  - At another X-Point, the curve goes near the point (X-Point/100, 0.5^(−X-Level/60)).
+  - The fade out uses the mirror point. Thus [18, −55] on a fade in is [82, −55] on a fade out.
+  - The Edit page shows the fade ramps and the handles. The Cut page shows no fades and no handles.
+  - The Fairlight page shows the handles under the pointer. The length handle is at the top of the fade end. The round curve handle is on the fade line.
+  - A drag on one lane of a clip changes all its lanes.
+  - **Fade In to Playhead** (Alt+Shift+D) makes a linear fade in from the clip start to the playhead.
+  - **Fade Out to Playhead** (Alt+Shift+G) makes a linear fade out from the playhead to the clip end. With no clip selected, the two keys do nothing.
+  - **Batch Fades** (Fairlight > Batch Fade Settings, then Apply Batch Fades):
+    - The window has Fade In, Crossfade and Fade Out. Each has a switch, a shape, a length and Overwrite Existing.
+    - By default, all three are off. Fade In and Fade Out are linear, with 1 frame. Crossfade is Equal Power, with 2 frames.
+    - The window keeps the last settings.
+    - The six shapes are the points [32818, −60], [18, −55], [34, −57], none, [50, −90] and [50, −105]. 32818 is 32768 + 50: a flag on X-Point 50.
+    - Crossfade puts a cross fade, centered, on each edit between two selected clips.
+    - Equal Power gives a Cross Fade +3 dB. Equal Gain gives a Cross Fade 0 dB with an S-curve. Unlinked takes a shape for each side.
+    - An edit with too few frames past it gets no cross fade. The message is "Insufficient Handle".
+  - OpenTimelineIO keeps the lengths as `faderIn` and `faderOut` in the effect "Fairlight Clip Volume and Fades".
+    - It keeps a curve other than linear as `fadeInCurvePoint` and `fadeOutCurvePoint`, of the type POINT.
+    - It keeps Equal Gain and Unlinked cross fades as "Cross Fade 0DB", without their shapes.
+  - A fade is not a transition. It is a part of the clip. A cross fade at an edit is a transition ([§8.11](#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
+  - vidcut: `clip.set` sets `fade_in` and `fade_out`, each with `frames`, `x_level` and `x_point`. Null removes a fade.
+    - `clip.set` refuses two fades that are longer than the clip together, and a value outside a range.
+  - vidcut: `clip.fade_to_playhead` does Fade In and Fade Out to Playhead. `clip.batch_fades` does Batch Fades.
+    - The clip menu has the three commands under Audio Operations.
+  - vidcut: at an X-Point other than 50, the gain is a power of t that goes through the point.
+  - vidcut: Batch Fades has the five shapes other than the first. Its Crossfade has Equal Power and Equal Gain.
+    - Equal Gain makes a Cross Fade 0 dB, as the OpenTimelineIO export keeps it.
+  - vidcut: a split keeps the fade in on the left part and the fade out on the right part.
+  - vidcut: a join of two parts needs no fade where they meet.
+  - vidcut: the player and the export play the same curve.
+  - vidcut: the Audio page (§9.1) shows the fade ramps and the handles. The Cut page shows no fades and no handles.
+    - A drag on a length handle sets the length in whole frames. A drag on the curve handle sets X-Point and X-Level.
+    - A double-click on a length handle removes the fade. A double-click on the curve handle makes the curve linear.
 - **Clip pan** (pp. 743, 3909):
   - Resolve Studio 21.2 gave these results, with renders of a clip to 24-bit WAV files at 48 kHz.
   - The Pan of a clip goes from −100 to 100. Its default is 0.
@@ -6554,6 +6595,7 @@ The Audio page follows the Fairlight page of the manual.
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Alt+V | Paste Attributes (§8.26) |
 | Alt+A | Voice Isolation of the selected clips on or off (§9) |
+| Alt+Shift+D / Alt+Shift+G | Fade In / Fade Out to Playhead on the selected clips (§9) |
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |

@@ -307,6 +307,11 @@ pub fn describe_at(
             "slip_others" => format!("Slip the clips linked to {} into place", d.clips("clip")),
             _ => format!("Move the clips linked to {} into place", d.clips("clip")),
         },
+        "clip.fade_to_playhead" if d.text("fade") == "out" => {
+            format!("Fade Out to Playhead on {}", d.clips("clips"))
+        }
+        "clip.fade_to_playhead" => format!("Fade In to Playhead on {}", d.clips("clips")),
+        "clip.batch_fades" => format!("Batch Fades on {}", d.clips("clips")),
         "clip.paste_attributes" => format!("Paste Attributes to {}", d.clips("clips")),
         "clip.remove_attributes" => format!("Remove Attributes of {}", d.clips("clips")),
         "keyframes.add" => format!(

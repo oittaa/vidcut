@@ -6,6 +6,7 @@ pub mod comp;
 pub mod compound;
 pub mod conform;
 pub mod effect;
+pub mod fades;
 pub mod filmstrip;
 mod follow;
 pub mod gallery;
@@ -161,8 +162,8 @@ fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     right.move_head(offset);
     left.duration = offset;
     if let (Some(la), Some(ra)) = (left.audio.as_mut(), right.audio.as_mut()) {
-        cut(&mut la.effects, false, true);
-        cut(&mut ra.effects, true, false);
+        la.cut(false, true);
+        ra.cut(true, false);
     }
     cut(&mut left.effects, false, true);
     cut(&mut right.effects, true, false);
@@ -899,7 +900,9 @@ fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
     }
     let effects = effects::join(&a.effects, &b.effects)?;
     let sound = match (&a.audio, &b.audio) {
-        (Some(x), Some(y)) => Some(effects::join(&x.effects, &y.effects)?),
+        (Some(x), Some(y)) if x.fade_out.is_none() && y.fade_in.is_none() => {
+            Some(effects::join(&x.effects, &y.effects)?)
+        }
         (None, None) => None,
         _ => return None,
     };
@@ -912,6 +915,8 @@ fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
     rest.effects.clone_from(&b.effects);
     if let (Some(r), Some(y)) = (rest.audio.as_mut(), &b.audio) {
         r.effects.clone_from(&y.effects);
+        r.fade_in = y.fade_in;
+        r.fade_out = y.fade_out;
     }
     if rest != *b {
         return None;
@@ -919,6 +924,7 @@ fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
     whole.effects = effects;
     if let (Some(w), Some(e)) = (whole.audio.as_mut(), sound) {
         w.effects = e;
+        w.fade_out = b.audio.as_ref().and_then(|y| y.fade_out);
     }
     Some(whole)
 }
@@ -2210,6 +2216,8 @@ pub struct ClipProps {
     pub dialogue_leveler: Option<Option<crate::request::DialogueLevelerSet>>,
     pub compressor: Option<Option<crate::request::CompressorSet>>,
     pub noise_reduction: Option<Option<crate::request::NoiseReductionSet>>,
+    pub fade_in: Option<Option<crate::request::SoundFadeSet>>,
+    pub fade_out: Option<Option<crate::request::SoundFadeSet>>,
     pub at: Option<i64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
@@ -2287,6 +2295,8 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         || props.dialogue_leveler.is_some()
         || props.compressor.is_some()
         || props.noise_reduction.is_some()
+        || props.fade_in.is_some()
+        || props.fade_out.is_some()
         || props.voice_isolation.is_some()
         || props.voice_isolation_on.is_some();
     let heard = match sound {
@@ -2328,6 +2338,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         let (ti, ci) = locate(p, id)?;
         let c = &mut p.tracks[ti].clips[ci];
         let at = props.at.map(|t| c.content_at(t));
+        let duration = c.duration;
         {
             let a = c
                 .audio
@@ -2384,6 +2395,21 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 props.voice_isolation_on,
                 props.voice_isolation,
             );
+            if let Some(change) = &props.fade_in {
+                a.fade_in = change
+                    .as_ref()
+                    .map(|set| crate::fades::patched(a.fade_in, set))
+                    .transpose()?;
+            }
+            if let Some(change) = &props.fade_out {
+                a.fade_out = change
+                    .as_ref()
+                    .map(|set| crate::fades::patched(a.fade_out, set))
+                    .transpose()?;
+            }
+            if props.fade_in.is_some() || props.fade_out.is_some() {
+                crate::fades::fitted(id, a, duration)?;
+            }
         }
     }
     Ok(())
@@ -3288,7 +3314,7 @@ pub fn cut_to(clips: &[TrackClip], len: i64) -> Vec<TrackClip> {
             if c.clip.end() > end {
                 c.clip.duration = end - c.clip.start;
                 if let Some(a) = c.clip.audio.as_mut() {
-                    cut(&mut a.effects, false, true);
+                    a.cut(false, true);
                 }
                 cut(&mut c.clip.effects, false, true);
             }

@@ -1286,8 +1286,9 @@ impl Keyed {
     }
 }
 
-/// A sound's gain through a cross fade (decision D50): rising from silence
-/// to all of it along its curve, or falling when `falling`.
+/// A sound's gain through a cross fade (decision D50) or a clip's fade:
+/// rising from silence to all of it along its curve, or falling when
+/// `falling`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Fade {
     /// Samples of the fade before the piece's first.
@@ -1299,8 +1300,8 @@ pub struct Fade {
     pub curve: Curve,
 }
 
-/// How a cross fade's gain goes with its share `x` of the way (0 to 1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// How a fade's gain goes with its share `x` of the way (0 to 1).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum Curve {
     /// Cross Fade +3 dB: the square root of `x`, so the two sounds keep
     /// their power together.
@@ -1312,6 +1313,9 @@ pub enum Curve {
     /// Cross Fade -3 dB: `x` to the power of 1.5.
     #[serde(rename = "-3 dB")]
     Minus3Db,
+    /// A clip's fade: `x` to this power.
+    #[serde(rename = "power")]
+    Power(f64),
 }
 
 impl Curve {
@@ -1320,8 +1324,34 @@ impl Curve {
             Self::Plus3Db => x.sqrt(),
             Self::ZeroDb => x,
             Self::Minus3Db => x * x.sqrt(),
+            Self::Power(_) if x >= 1.0 => 1.0,
+            Self::Power(_) if x <= 0.0 => 0.0,
+            Self::Power(k) => x.powf(k),
         }
     }
+}
+
+fn clip_fades(c: &Clip, fps: Rational, rate: u32) -> Vec<(i64, i64, bool, Curve)> {
+    let Some(a) = c.audio.as_ref() else {
+        return Vec::new();
+    };
+    let (into, out) = a.fade_lengths(c.duration);
+    let per_frame = f64::from(rate) / fps.as_f64();
+    let samples = |frames: f64| (frames * per_frame).round() as i64;
+    let (first, last) = (
+        fps.frame_to_sample(c.start, rate),
+        fps.frame_to_sample(c.end(), rate),
+    );
+    let mut fades = Vec::new();
+    if let Some(f) = a.fade_in.filter(|_| into > 0.0) {
+        fades.push((first, samples(into), false, Curve::Power(f.power(false))));
+    }
+    if let Some(f) = a.fade_out.filter(|_| out > 0.0) {
+        let of = samples(out);
+        fades.push((last - of, of, true, Curve::Power(f.power(true))));
+    }
+    fades.retain(|f| f.1 > 0);
+    fades
 }
 
 impl Fade {
@@ -3996,6 +4026,7 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                     curve: transitions::cross_fade(f.transition).expect("plays"),
                 })
             };
+            let own = clip_fades(c, s.fps, s.sample_rate);
             let (lane, t) = &mut two[on];
             for (x, y, f, falling) in [
                 (start, head, into, false),
@@ -4046,6 +4077,12 @@ fn planned_audio(p: &Project, within: Option<&Within>, (a, b): (i64, i64)) -> Re
                                     falling: f.falling,
                                     curve: f.curve,
                                 })
+                                .chain(own.iter().map(|&(from, of, falling, curve)| Fade {
+                                    at: abs(a) + sample(x) - from,
+                                    of,
+                                    falling,
+                                    curve,
+                                }))
                                 .collect();
                             *isolation = audio
                                 .voice_isolation

@@ -518,10 +518,11 @@ const EDGE: f32 = 10.0;
 const AUDIO_EDIT: f32 = 12.0;
 const SLIP: f32 = 9.0;
 const FADE_EDGE: f32 = 5.0;
-const VOLUME_BAND: f32 = 20.0;
+pub const VOLUME_BAND: f32 = 20.0;
 const VOLUME_INSET: f32 = 2.0;
 const VOLUME_GRAB: f32 = 4.0;
 const KEY_GRAB: f32 = 5.0;
+pub const FADE_HANDLE: f32 = 4.0;
 
 pub fn clips_in(track: &Track, a: i64, b: i64) -> std::ops::Range<usize> {
     let first = track.clips.partition_point(|c| c.end() <= a);
@@ -857,6 +858,88 @@ pub fn volume_target(
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, id, band, on)| (id, band, on))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OnFade {
+    Length(bool),
+    Curve(bool),
+}
+
+pub fn fade_y(band: Rect, gain: f64) -> f32 {
+    band.bottom() - band.height() * gain.clamp(0.0, 1.0) as f32
+}
+
+pub fn fade_gain(band: Rect, y: f32) -> f64 {
+    f64::from((band.bottom() - y) / band.height().max(1.0)).clamp(0.0, 1.0)
+}
+
+pub fn fade_span(scale: &Scale, c: &Clip, falling: bool) -> (f64, f64) {
+    let (into, out) = c
+        .audio
+        .as_ref()
+        .map_or((0.0, 0.0), |a| a.fade_lengths(c.duration));
+    let (start, end) = (c.start as f64, c.end() as f64);
+    let (a, b) = if falling {
+        (end - out, end)
+    } else {
+        (start, start + into)
+    };
+    (f64::from(scale.x(a)), f64::from(scale.x(b)))
+}
+
+pub fn fade_handle(band: Rect, scale: &Scale, c: &Clip, falling: bool) -> Pos2 {
+    let (a, b) = fade_span(scale, c, falling);
+    let x = if falling { a } else { b };
+    pos2(x as f32, band.top() + FADE_HANDLE)
+}
+
+pub fn fade_point(band: Rect, scale: &Scale, c: &Clip, falling: bool) -> Option<Pos2> {
+    let a = c.audio.as_ref()?;
+    let f = if falling { a.fade_out } else { a.fade_in }?;
+    let (x0, x1) = fade_span(scale, c, falling);
+    let x = x0 + (x1 - x0) * f.x_point / 100.0;
+    Some(pos2(x as f32, fade_y(band, f.level())))
+}
+
+pub fn fade_target(
+    track: &Track,
+    scale: &Scale,
+    tr: &TrackRect,
+    pos: Pos2,
+) -> Option<(String, OnFade)> {
+    if track.locked {
+        return None;
+    }
+    let frame = scale.under(pos.x);
+    let range = clips_in(track, frame - 1, frame + 2);
+    let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
+    let near = |q: Pos2| (q - pos).length() <= KEY_GRAB;
+    let mut best: Option<(f32, String, OnFade)> = None;
+    for c in &track.clips[range] {
+        let Some(band) = sound_band(tr, scale, c).filter(|b| b.height() >= VOLUME_BAND) else {
+            continue;
+        };
+        if !band.expand(KEY_GRAB).contains(pos) {
+            continue;
+        }
+        for falling in [false, true] {
+            let points = [
+                fade_point(band, scale, c, falling).map(|q| (q, OnFade::Curve(falling))),
+                Some((
+                    fade_handle(band, scale, c, falling),
+                    OnFade::Length(falling),
+                )),
+            ];
+            for (q, on) in points.into_iter().flatten().filter(|(q, _)| near(*q)) {
+                let d = (q - pos).length();
+                if best.as_ref().is_none_or(|b| d < b.0) {
+                    best = Some((d, c.id.clone(), on));
+                }
+            }
+        }
+    }
+    best.map(|(_, id, on)| (id, on))
 }
 
 pub fn picture_transition<'a>(p: &Project, track: &'a Track, at: i64) -> Option<&'a Transition> {
