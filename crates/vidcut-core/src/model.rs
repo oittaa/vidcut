@@ -1982,10 +1982,14 @@ pub struct Track {
     /// The sound of this audio track is silent. Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub muted: bool,
-    /// While any audio track is soloed, only soloed tracks are heard (the
-    /// mixer). Left out when off.
+    /// While any audio track is soloed, only the soloed tracks and the Solo
+    /// Safe tracks are heard (the mixer). Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
+    /// Solo Safe: the track is heard also while other tracks are soloed.
+    /// Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub solo_safe: bool,
     /// The mixer fader of an audio track, in dB, from -100 to 10. -100
     /// stands for the fader's bottom, minus infinity: the track is silent.
     /// Left out at 0.
@@ -2047,8 +2051,8 @@ pub struct Duck {
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub on: bool,
     /// The audio tracks whose sound dips it (`A2`), never its own. A source
-    /// counts only where it is heard: not muted, and soloed while any
-    /// track is.
+    /// counts only where it is heard: not muted, and soloed or Solo Safe
+    /// while any track is soloed.
     #[serde(default)]
     pub sources: Vec<String>,
     /// The Duck Amount: how far it dips, in dB, from 0 to 18. 2.7 unless
@@ -11504,6 +11508,7 @@ impl Track {
             locked: false,
             muted: false,
             solo: false,
+            solo_safe: false,
             volume_db: 0.0,
             voice_isolation: None,
             duck: None,
@@ -11531,7 +11536,7 @@ impl Track {
     }
 
     pub fn in_mix(&self, any_solo: bool) -> bool {
-        !self.muted && (self.solo || !any_solo)
+        !self.muted && (self.solo || self.solo_safe || !any_solo)
     }
 
     pub fn audible(&self, any_solo: bool) -> bool {

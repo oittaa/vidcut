@@ -120,6 +120,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.paste", &["node", "clips"]),
     ("grade.apply", &["from", "clips"]),
     ("grade.ripple", &["node", "clip", "clips"]),
+    ("grade.append_node", &["node", "clip", "clips"]),
     ("grade.swap", &["node", "with", "clip"]),
     ("grade.cleanup", &["clip"]),
     ("grade.keys.add", &["clip"]),
@@ -498,7 +499,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "track.set",
-        "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true\n  vidcut track set A1 --voice-isolation 75\n  \
+        "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true\n  vidcut track set A2 --solo true --exclusive\n  \
+         vidcut track set A3 --solo-safe true\n  vidcut track set A1 --voice-isolation 75\n  \
          vidcut track set A2 --duck '{}' --download\n  \
          vidcut track set A2 --duck '{\"sources\":[\"A1\"],\"amount_db\":6,\"detect\":\"level\"}'\n  \
          vidcut track set A2 --duck '{\"on\":false}'\n  \

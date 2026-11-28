@@ -5049,6 +5049,8 @@ fn mutate(
             look,
             muted: None,
             solo: None,
+            solo_safe: None,
+            exclusive: false,
             volume_db: None,
             voice_isolation: None,
             voice_isolation_on: None,
@@ -5106,6 +5108,8 @@ fn mutate(
             locked,
             muted,
             solo,
+            solo_safe,
+            exclusive,
             volume_db,
             voice_isolation,
             voice_isolation_on,
@@ -5139,6 +5143,8 @@ fn mutate(
                 locked: *locked,
                 muted: *muted,
                 solo: *solo,
+                solo_safe: *solo_safe,
+                exclusive: *exclusive,
                 volume_db: *volume_db,
                 voice_isolation,
                 voice_isolation_on: *voice_isolation_on,
@@ -5683,6 +5689,21 @@ fn mutate(
                 .map(|id| GradeOf::Clip(id, layer))
                 .collect();
             json!({ "clips": ops::ripple::ripple(p, &from, *node, before, &to)? })
+        }
+        Request::GradeAppendNode {
+            clip,
+            layer,
+            node,
+            clips,
+        } => {
+            use ops::grade::GradeOf;
+            let layer = layer.unwrap_or(1);
+            let from = GradeOf::Clip(resolve_clip(p, clip, playhead)?, layer);
+            let to: Vec<GradeOf> = (resolve_clips(p, &clips.to_vec(), playhead)?.into_iter())
+                .map(|id| GradeOf::Clip(id, layer))
+                .collect();
+            ops::grade::append_node(p, &from, *node, &to)?;
+            Value::Null
         }
         Request::GradeApply {
             from,
@@ -8686,6 +8707,7 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.locked = s.locked;
                 track.muted = s.muted;
                 track.solo = s.solo;
+                track.solo_safe = s.solo_safe;
                 track.volume_db = s.volume_db.clamp(
                     *crate::validate::FADER.start(),
                     *crate::validate::FADER.end(),
@@ -10724,6 +10746,7 @@ pub fn query(
                         v["video_enabled"] = json!(t.video_enabled);
                         v["render_cache"] = json!(t.render_cache);
                     } else {
+                        v["solo_safe"] = json!(t.solo_safe);
                         v["pan"] = json!(t.pan);
                         v["pan_on"] = json!(t.pan_on);
                     }
@@ -12462,6 +12485,9 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
             v["items"] = Value::Array(items);
             if t.solo {
                 v["solo"] = json!(true);
+            }
+            if t.solo_safe {
+                v["solo_safe"] = json!(true);
             }
             if t.volume_db != 0.0 {
                 v["volume_db"] = json!(t.volume_db);

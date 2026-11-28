@@ -1782,6 +1782,14 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
+        /// Solo Safe: the track is heard also while other tracks are
+        /// soloed.
+        #[serde(default)]
+        solo_safe: Option<bool>,
+        /// Exclusive Solo: with `solo: true`, each other track that is not
+        /// Solo Safe loses its solo.
+        #[serde(default)]
+        exclusive: bool,
         /// The fader, in dB, from -100 to 10. -100 stands for the fader's
         /// bottom, minus infinity: the track is silent in playback and
         /// export.
@@ -3533,6 +3541,22 @@ pub enum Request {
         /// The clips that take the changes.
         clips: OneOrMany<ClipRef>,
     },
+    /// Append Node to Selected Clips: add a copy of a corrector of the
+    /// grade of a clip to the grades of other clips. The copy takes the
+    /// picture that each grade gave out, and gives the picture out. Its
+    /// keyframes keep their frames.
+    #[serde(rename = "grade.append_node")]
+    GradeAppendNode {
+        /// The clip whose corrector goes.
+        clip: ClipRef,
+        /// The node stack layer of the grades, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+        /// The clips that take the copy.
+        clips: OneOrMany<ClipRef>,
+    },
     /// Place the nodes of the grade of a clip, or with `timeline` of the
     /// timeline grade, in an even grid. Each node goes in the column of its
     /// longest path from the source. A chain stays on one row, and the
@@ -4123,8 +4147,8 @@ pub enum Request {
     /// picture out. With the `clip` grade, the nodes of the same node stack
     /// layer of the clip grade of the still go to clips. With the
     /// `timeline` grade, the nodes of the timeline grade of the still go to
-    /// the timeline grade of the open timeline. A grade with keyframes is
-    /// refused.
+    /// the timeline grade of the open timeline. The keyframes of a clip
+    /// grade keep their frames. A timeline grade with keyframes is refused.
     #[serde(rename = "gallery.append")]
     GalleryAppend {
         /// The id of the still (`s1`).
@@ -5642,8 +5666,8 @@ pub enum Request {
     /// does.
     #[serde(rename = "gui.target")]
     GuiTarget { track: String },
-    /// The timeline's zoom and Timeline Options, kept between runs.
-    /// Answers what `gui.state` does.
+    /// The timeline's zoom, Timeline Options and Exclusive Solo, kept
+    /// between runs. Answers what `gui.state` does.
     #[serde(rename = "gui.timeline")]
     GuiTimeline(TimelineOptions),
     /// The Trim Editor (spec §8.6): while an edit is selected and the
@@ -7126,6 +7150,10 @@ pub struct TimelineOptions {
     /// Minimize Subtitle Track: the subtitle tracks drawn shorter.
     #[serde(default)]
     pub minimize_subtitles: Option<bool>,
+    /// Exclusive Solo: a click on the Solo of a track takes the solo off
+    /// each other track that is not Solo Safe.
+    #[serde(default)]
+    pub exclusive_solo: Option<bool>,
 }
 
 /// What Dynamic Trim does with selected clips.
