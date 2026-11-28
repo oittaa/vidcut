@@ -844,6 +844,14 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - On a 30 fps timeline, frames 10 to 57 of the 24 fps file give 4 to 59. Frames 10 to 129 of the 60 fps file give 6 to 132.
   - The frame count in the name and the file timecode then give the first frame in the file: `…00086404` and 01:00:00:04.
   - vidcut does not copy this fault. The file holds the frames that the clip shows, and no others ([spec §10.1](spec.md#101-export-page-pp-41034132)).
+- **Individual clips doubles the rows of each field of an interlaced clip.**
+  - The clip is `interlaced-tff.mov`: 1080i 25, top field first, 2 s, with Enable Deinterlacing on, as at import.
+  - The project has field processing off and deinterlace quality Normal. The timeline is 24 fps, 1920x1080.
+  - The render is Individual clips, EXR RGB float ZIP. It gives 100 files at 50 fps, one for each field.
+  - In each file, row 2k and row 2k + 1 are the same. Thus Resolve does not deinterlace the field.
+  - Each horizontal edge then moves by one row in every second file.
+  - vidcut does not copy this fault. It makes the missing rows with `bwdif` ([D34](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The largest differences between the two renders are in those rows at horizontal edges, up to 153 of 255.
 - **A title with only the family name Bahnschrift draws a narrow face of the font.**
   - Bahnschrift is a variable font. At weight 300, 350 and 400, the title draws Bahnschrift SemiLight SemiCondensed. At weight 200, it draws Bahnschrift Light SemiCondensed.
   - The Inspector does the same. The family Bahnschrift with the face Normal draws SemiLight SemiCondensed, the same in every pixel.

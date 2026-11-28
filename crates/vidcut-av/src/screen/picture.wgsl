@@ -262,22 +262,50 @@ fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
     return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4));
 }
 
-fn rgb(s: vec3<f32>) -> vec3<f32> {
-    var c = s;
+fn coded(s: vec3<f32>) -> vec3<f32> {
     if p.flags.z == 4u {
-        c = s.zxy;
-    } else if p.flags.z != 3u {
-        let y = (s.x - p.range.x) * p.range.y;
-        let cb = (s.y - p.range.z) * p.range.w;
-        let cr = (s.z - p.range.z) * p.range.w;
-        let kr = p.matrix.x;
-        let kb = p.matrix.y;
-        let kg = p.matrix.z;
-        let r = y + (2.0 - 2.0 * kr) * cr;
-        let b = y + (2.0 - 2.0 * kb) * cb;
-        let g = (y - kr * r - kb * b) / kg;
-        c = vec3<f32>(r, g, b);
+        return s.zxy;
     }
+    if p.flags.z == 3u {
+        return s;
+    }
+    let y = (s.x - p.range.x) * p.range.y;
+    let cb = (s.y - p.range.z) * p.range.w;
+    let cr = (s.z - p.range.z) * p.range.w;
+    let kr = p.matrix.x;
+    let kb = p.matrix.y;
+    let kg = p.matrix.z;
+    let r = y + (2.0 - 2.0 * kr) * cr;
+    let b = y + (2.0 - 2.0 * kb) * cb;
+    let g = (y - kr * r - kb * b) / kg;
+    return vec3<f32>(r, g, b);
+}
+
+fn uncoded(c: vec3<f32>) -> vec3<f32> {
+    if p.flags.z == 4u {
+        return c.yzx;
+    }
+    if p.flags.z == 3u {
+        return c;
+    }
+    let kr = p.matrix.x;
+    let kb = p.matrix.y;
+    let y = kr * c.x + p.matrix.z * c.y + kb * c.z;
+    let cb = (c.z - y) / (2.0 - 2.0 * kb);
+    let cr = (c.x - y) / (2.0 - 2.0 * kr);
+    return vec3<f32>(y / p.range.y + p.range.x, vec2<f32>(cb, cr) / p.range.w + p.range.z);
+}
+
+fn top_code() -> f32 {
+    return p.gamut0.w;
+}
+
+fn in_codes(c: vec3<f32>) -> vec3<f32> {
+    return coded(clamp(uncoded(c), vec3<f32>(0.0), vec3<f32>(top_code())));
+}
+
+fn rgb(s: vec3<f32>) -> vec3<f32> {
+    var c = coded(s);
     if p.per.z != 0u {
         if p.flags.x != 0u {
             c = to_linear(c);
@@ -610,7 +638,7 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
         let up3 = select(1, -3, y > 2);
         let down3 = select(-1, 3, y + 3 < h);
         let far = line_of(middle, x, y + up3) + line_of(middle, x, y + down3);
-        return vec4<f32>(ALONE.x * (c + e) - ALONE.y * far, 1.0);
+        return vec4<f32>(in_codes(ALONE.x * (c + e) - ALONE.y * far), 1.0);
     }
     let p0 = select(line_of(before, x, y), line_of(middle, x, y), second);
     let n0 = select(line_of(middle, x, y), line_of(after, x, y), second);
@@ -637,7 +665,7 @@ fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
         made = select(still, moving, abs(c - e) > t0);
     }
     let held = clamp(made, d - diff, d + diff);
-    return vec4<f32>(select(held, d, diff == vec3<f32>(0.0)), 1.0);
+    return vec4<f32>(in_codes(select(held, d, diff == vec3<f32>(0.0))), 1.0);
 }
 
 @fragment

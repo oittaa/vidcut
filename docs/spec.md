@@ -6638,10 +6638,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
   - Frames with the flag are deinterlaced everywhere by the method of `bwdif`. Each frame gives one frame, except in the field render below.
   - The deinterlacer keeps the first field.
+  - The rows that the deinterlacer makes stay in the code range of the source, as in `bwdif`.
   - An interlaced clip comes in with deinterlacing on.
   - Resolve's Clip Attributes has no switch that turns it off.
   - Output is never interlaced.
   - An Individual clips render of an interlaced clip is at its field rate (§10.1). Each field is a frame of the file.
+    - Resolve doubles the rows of each field there. vidcut makes the missing rows with the deinterlacer ([gotchas](gotchas.md#resolves-renders)).
     - The first frame of each pair keeps the first field. The second frame keeps the second field, as `bwdif` does in its field mode.
   - Other output is at the frame rate of the timeline, not at the field rate.
 - **D35. HDR and color** (pp. 230–239).

@@ -351,6 +351,10 @@ The viewer, the exports and the AI stages deinterlace in the draw, after the con
     - With no frame after it, it takes only the rows of its own field.
     - With no frame before it, it takes itself in the place of that frame.
   - An export with `RenderPlan.fields` sets it in the later half of each source frame (`VideoPiece::late_half`).
+  - Each row that `fs_bwdif` makes stays in the code range of the source, as `bwdif` clips its samples.
+    - `uncoded` takes the value back through the matrix of the conversion. `in_codes` clamps it to the codes of the source, and `coded` converts it again.
+    - The top code is in `gamut0.w` of the parameters.
+    - A conversion after the matrix, as for HDR or a LUT, is not undone. There the clamp only limits the overshoot.
 - After a seek, the reader keeps the last frame that it drops before the target (`VideoReader::take_skipped`). That frame is the frame before.
 - The AI upscalers get each interlaced frame one frame late, with the frame after it (`Source::feed`).
 - Thus the frames of every decoder stay on the GPU. Why: FFmpeg's GPU deinterlacers fail the check below ([gotchas](../gotchas.md)).

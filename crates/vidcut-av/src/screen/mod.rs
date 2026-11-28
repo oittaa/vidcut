@@ -4676,7 +4676,7 @@ fn params_of(
         range,
         [colors.kr, colors.kb, kg, colors.linear_scale],
         colors.tone,
-        [g[0][0], g[0][1], g[0][2], 0.0],
+        [g[0][0], g[0][1], g[0][2], max / code],
         [g[1][0], g[1][1], g[1][2], 0.0],
         [g[2][0], g[2][1], g[2][2], 0.0],
     ];
