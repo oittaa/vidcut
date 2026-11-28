@@ -5166,10 +5166,22 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Append Node Graph in the menu of a still adds its node graph after the end of the node tree of the current clip. The grade of the clip stays (p. 3366).
   - A drop of a still onto a link adds its nodes at that link. A Command-drag adds them as one compound node (pp. 3366–3367).
   - Apply Grades Using decides the keyframes of the added nodes (p. 3367).
+  - Albums (p. 3341):
+    - A grab puts the still into the open album. A new project has one album, Stills 1.
+    - The Album button at the top left of the Gallery shows or hides the Albums list.
+    - Add Still Album in the menu of the Albums list adds an album. Its name has the next number.
+    - A click on an album opens it. A double-click on an album renames it.
+    - A drag of a still onto an album moves the still into that album.
+    - Remove Current Album in the menu of an album deletes the album and its stills, after a Delete prompt.
+- **The Albums list**:
+  - Add Still Album opens the new album. The second album of a project is Stills 2 (p. 3341).
+  - With the sort Date Created and Ascending, the Albums list keeps the order in which the albums were made. A rename does not change it.
+  - With one album left, Remove Current Album is not greyed.
 - [The todo](todo/color-gallery.md) lists the parts of the Gallery that vidcut does not have yet.
 - vidcut:
-  - The Gallery panel is at the left of the viewer on the Color page. It shows each still of the project, the oldest first.
+  - The Gallery panel is at the left of the viewer on the Color page. It shows the stills of the open album, the oldest first.
   - `gallery.grab` grabs a still of the topmost clip at a frame that takes a grade. Left out, the frame is at the playhead.
+    - The still goes into `album`. Left out, it goes into the open album of a running GUI. Without a GUI, it goes into the first album (not measured).
     - Color > Grab Still, Ctrl+Alt+G and Grab Still in the menu of the viewer grab at the playhead.
     - The still holds the clip grade with all layers and keyframes, the timeline grade, the clip, the timeline and the frame.
     - The picture is the frame of the timeline with all grades and the output LUT, at the size of the timeline.
@@ -5191,9 +5203,25 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - In the Timeline mode, the timeline grade takes the nodes of the timeline grade of the still (not measured).
     - A still whose grade has keyframes does not append. The request gives an error.
     - It is one undo step.
-  - `gallery.get` gives each still, with the path of its picture.
+  - `gallery.get` gives each still, with its album and the path of its picture.
   - Each grab, delete and apply is one undo step ([gotchas](gotchas.md#resolves-edits)). The picture file stays after an undo or a delete.
+  - Albums:
+    - A new project has one album, Stills 1, with the ID `a1`.
+    - The Albums button at the top left of the Gallery shows or hides the Albums list. `gui.gallery` with `albums` does the same.
+    - The list shows the albums in the order in which they were made.
+    - A click on an album opens it. A right-click opens it and shows its menu (not measured). `gui.gallery` with `album` opens an album.
+    - `gui.state` gives the open `album` and whether the list shows (`albums`).
+    - `gallery.album.add` adds an album after the others. Add Still Album in the menu of the Albums list does it and opens the new album.
+    - Left out, the name is Stills and the next number. The number goes up by one with each album and is not used again (not measured).
+    - `gallery.album.rename` renames an album. A double-click on an album does it: type the name, then press Enter. An empty name gives an error.
+    - `gallery.move` moves stills into an album. A drag of a still onto an album does it.
+    - A drag of a selected still moves all the selected stills of the open album (not measured).
+    - `gallery.album.remove` deletes an album and each still in it. Remove Current Album does it, after a Delete prompt.
+    - The last album stays. Its removal gives an error (not measured).
+    - `gallery.album.list` gives each album, with its count of stills.
+    - Each add, rename, move and removal is one undo step.
   - Still IDs of the form Track.Shot.Version, labels, keyframe modes and the drag into the viewer come later ([todo](todo/color-gallery.md)).
+  - PowerGrade albums and the sort menu of the Albums list come later ([todo](todo/color-gallery.md)).
 
 ### 8.32 Copying grades between clips (pp. 3361–3364, 3464)
 

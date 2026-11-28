@@ -4023,7 +4023,7 @@ pub enum Request {
         download: bool,
     },
     /// The stills of the Gallery of the Color page, the oldest first. Each
-    /// has its id, clip, timeline, frame, label and the path of its
+    /// has its id, album, clip, timeline, frame, label and the path of its
     /// picture. `keyframes` tells if its clip grade has keyframes, and
     /// `timeline_keyframes` if its timeline grade has them.
     #[serde(rename = "gallery.get")]
@@ -4040,6 +4040,10 @@ pub enum Request {
         /// The frame of the timeline. Left out: the playhead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
+        /// The album that gets the still (`a1`). Left out: in a running
+        /// GUI, the album that the Gallery shows; else the first album.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        album: Option<String>,
     },
     /// Delete stills from the Gallery. Their pictures stay in the `stills`
     /// folder. Thus an undo gives the stills back whole.
@@ -4047,6 +4051,41 @@ pub enum Request {
     GalleryRemove {
         /// The ids of the stills (`s1`).
         stills: OneOrMany<String>,
+    },
+    /// Move stills to another album of the Gallery.
+    #[serde(rename = "gallery.move")]
+    GalleryMove {
+        /// The ids of the stills (`s1`).
+        stills: OneOrMany<String>,
+        /// The id of the album (`a1`).
+        album: String,
+    },
+    /// The still albums of the Gallery, in the order they were made. Each
+    /// has its id, its name and its count of stills.
+    #[serde(rename = "gallery.album.list")]
+    GalleryAlbumList {},
+    /// Add Still Album: add an empty album after the others. Left out, the
+    /// name is Stills and the number of the album. Returns the id of the
+    /// album as `album`.
+    #[serde(rename = "gallery.album.add")]
+    GalleryAlbumAdd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Rename an album of the Gallery.
+    #[serde(rename = "gallery.album.rename")]
+    GalleryAlbumRename {
+        /// The id of the album (`a1`).
+        album: String,
+        name: String,
+    },
+    /// Remove Current Album: delete an album and each still in it. The
+    /// pictures stay in the `stills` folder. Thus an undo gives the album
+    /// back whole. The last album stays.
+    #[serde(rename = "gallery.album.remove")]
+    GalleryAlbumRemove {
+        /// The id of the album (`a1`).
+        album: String,
     },
     /// Apply Grade: give clips the grade of a still. With the `clip` grade,
     /// the clip grade of the still, with each node stack layer, replaces
@@ -5509,6 +5548,16 @@ pub enum Request {
         /// The node editor of the color page in the place of the viewer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wide: Option<bool>,
+    },
+    /// The Gallery of the Color page. `album` shows that album (`a1`), and
+    /// `albums` shows or hides the list of albums. Each value left out
+    /// stays. Answers what `gui.state` does.
+    #[serde(rename = "gui.gallery")]
+    GuiGallery {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        album: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        albums: Option<bool>,
     },
     /// The two viewers of the effects page. `left` and `right` name the
     /// node that each viewer shows. An empty name empties the viewer.
@@ -9222,6 +9271,7 @@ impl Request {
                 | Self::GuiNodes { .. }
                 | Self::GuiGradeNodes { .. }
                 | Self::GuiNodeView { .. }
+                | Self::GuiGallery { .. }
                 | Self::GuiViewers { .. }
                 | Self::GuiPageTime { .. }
                 | Self::GuiState {}
@@ -9310,6 +9360,7 @@ impl Request {
                     | Self::GradeCopy { .. }
                     | Self::GradeWindowCopy { .. }
                     | Self::GalleryGet {}
+                    | Self::GalleryAlbumList {}
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }
