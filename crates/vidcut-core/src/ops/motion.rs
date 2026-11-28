@@ -4,7 +4,9 @@ use serde_json::{Value, json};
 
 use crate::composition::Frames;
 use crate::error::{Error, Result};
-use crate::model::{Clip, FindValues, MotionPath, PathSample, Pattern, Project, Subject, Tracker};
+use crate::model::{
+    Clip, FindValues, MotionPath, PathSample, Pattern, PatternKind, Project, Subject, Tracker,
+};
 use crate::motion::{self, Area};
 use crate::render::FileClock;
 
@@ -382,6 +384,7 @@ pub struct Start {
     pub frame: i64,
     pub own: Area,
     pub bounds: [f64; 4],
+    pub point: Option<crate::analysis::Pointed>,
 }
 
 pub fn start(
@@ -417,9 +420,16 @@ pub fn start(
     });
     let at = f.file(frame);
     unlocked(c, tracker)?;
-    let pattern = pattern_of(c, tracker, k)?;
+    let t = tracker_of(c, tracker)?;
+    let pattern = &t.patterns[index(t, tracker, k)?];
     let own = pattern.area_at(at as f64);
     let own = own.unwrap_or_else(|| pattern.own());
+    let point = (pattern.kind() == PatternKind::Point).then(|| crate::analysis::Pointed {
+        search: pattern.search().map(|v| v as f32),
+        channel: pattern.channel(),
+        adaptive: t.adaptive(),
+        tolerance: t.tolerance() as f32,
+    });
     Ok(Start {
         frames,
         reach,
@@ -427,6 +437,7 @@ pub fn start(
         frame: at,
         own,
         bounds: [own.center[0], own.center[1], own.size[0], own.size[1]],
+        point,
     })
 }
 

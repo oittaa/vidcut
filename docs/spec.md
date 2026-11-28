@@ -3768,8 +3768,11 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
-  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
-  - vidcut: a model tracks each pattern. The patterns are Pattern 1, Pattern 2 and so on. Add Pattern adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
+  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns (p. 2845).
+  - vidcut: a model tracks the patterns that Add Pattern adds. Their names are Pattern and a number.
+  - Add Point adds a Point pattern (p. 2841). Measured: the first Add Point of a new Tracker gives Point 2.
+    - vidcut: the number of a new pattern is the first number that no pattern has.
+  - Measured: a new Point pattern is 0.05 of the width and 0.05 of the height of the picture. Its search area is 0.125 of the width and 0.125 of the height.
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - The box of a Point pattern has a small handle at the top left. A drag of it moves the box, with a zoomed view (pp. 1783–1784).
     - The path does not change.
@@ -3777,8 +3780,25 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - A drag of an edge resizes the box from its middle (p. 1783).
   - The middle of the box is a point of the path. On a frame of the path, a drag of this point changes the path on that frame only.
   - Before the path and after it, the drag changes the first or the last frame of the path. It adds no frame to the path.
-  - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
+  - The search area of a Point pattern is a dashed box around its box. It shows when the pointer is over the box (pp. 1783, 2842).
+    - A drag of an edge of the search area, or Search Width and Search Height in the Inspector, change its size (p. 2847).
+    - vidcut: a drag resizes the search area from its middle, as for the box. Each side is from 0.001 to 1.
   - vidcut: a found path has no box before its first frame and after its last frame. There, the viewer shows no box for its pattern. Its masks have no effect there.
+- A track of a Point pattern looks for the pixels of its box (pp. 1785–1787, 2842–2847):
+  - On the next frame, the track looks for the pattern only in the search area (p. 2842). A larger area follows a faster move, and it takes longer.
+  - The Tracker picks the channel from the contrast, the clarity and the reliability of each channel (pp. 1785, 2846). The user can pick a color channel, the luminance or the alpha instead (p. 1785).
+    - vidcut: Channel Auto picks the channel with the most variance in the box on the first frame of the track. On a tie, it picks the luminance.
+    - The luminance is 0.2126 red, 0.7152 green and 0.0722 blue.
+  - Adaptive Mode has three choices (pp. 1787, 2845). It acts on each Point pattern of a track.
+    - None: the track looks for the pattern of the first frame on each frame.
+    - Every Frame: the track takes the pattern again on each frame, where it found it. This follows slow changes of the pattern, and it can drift.
+    - Best Match: as Every Frame. But when the new pattern differs from the first one by more than Match Tolerance, the track keeps the last pattern.
+  - vidcut: the track compares the pattern with each place of the search area by normalized cross-correlation, in the channel.
+    - A parabola through the scores next to the best place gives the place between pixels.
+    - On a frame where no place matches, the pattern keeps its last place.
+    - The change of Best Match is 1 minus the correlation of the new pattern with the first one, from 0 to 1.
+    - Match Tolerance is from 0 to 1. Its usual value is 0.5.
+  - A Point pattern keeps its size, and it follows no turn.
 - The track buttons are at the top of the Inspector (pp. 1784–1785). The rows below are measured in Resolve Studio 21.2. The 21.1 manual lists Track Reverse From Current Time and Track Forward From Current Time instead (p. 2844).
   - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.
   - Track Reverse tracks backward from the playhead. Track Forward tracks forward from the playhead to the end of the render range.
@@ -5855,9 +5875,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: All Filtered Clips sets the In and the Out at the span of the filtered clips. The job renders each filtered clip, whole, to a file of its own.
   - Measured: after a pick of All Filtered Clips, the Render button shows "Entire Timeline". This was seen 3 times.
   - Measured: with a filter on and Single clip set, the Deliver page opens the prompt "Unable to Apply Filter". Apply Filter sets Individual clips.
+  - Measured: its text is "Clip filters can't be applied to single clips. Do you want to apply your clip filter and switch to individual clips?"
+  - Measured: Cancel keeps Single clip, and the strip of the Deliver page shows all clips. Apply Filter shows only the filtered clips there.
   - Measured: with a filter on, a click on Single clip opens "Cannot Render Single Clip", with Cancel and Clear Filter. Cancel keeps Individual clips and the filter.
+  - Measured: its text is "To render selection as a single clip, please clear your clip filter."
+  - Measured: Clear Filter sets Single clip, and the strip of the Deliver page shows all clips. The Color page keeps its filter, also after Cancel of the other prompt.
+  - Measured: when a filter leaves no clip, the Deliver page shows no strip. Add to Render Queue is greyed, and Estimated File Size shows 0.00 MB.
   - Measured: Unrendered Clips looks at each timeline clip. An Individual clips render marks the clips that it renders. A Single clip render marks no clip.
-  - Measured: in two runs, Individual clips with In/Out rendered only the clips wholly inside the range.
+  - Measured: a grade change makes a rendered clip unrendered. A trim, a move and the removal of the job do not.
+  - Measured: a job that was stopped after all its files were complete marks its clips.
+  - Measured: Selected Clips shows the clips selected in the strip at the pick. A later selection on the Edit page does not change it.
+  - Measured: in one run, a Ctrl+click in the strip did not add a clip to the selection.
+  - Measured: Modified Clips counted a Lift change. A trim on the Edit page and a Zoom set by a script did not count.
+  - Measured: Common Media Pool Source shows the clips of the media of the current clip. A move of the playhead on the ruler does not change the current clip.
+  - Measured: Tracked counts a window track, the Stabilizer of the Tracker palette and Stabilize of the Inspector. A Tracker node of a composition does not count.
+  - Measured: a pick of a filter is not an undo step ([gotchas](gotchas.md#resolves-edits)).
+  - Measured: with one video track, Individual clips renders each clip with a frame in the In/Out range. Each file holds the whole clip.
+  - Measured: with two video tracks, some ranges gave no file, or the clip of one track only. The runs show no rule ([gotchas](gotchas.md#resolves-renders)).
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -5920,6 +5954,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: each output has the audio of output 1, with its codec and its bit rate. A QuickTime output also has the AAC of an MP4 output 1.
   - Measured: each output has the Quality of output 1, and its own encoder applies it. In the run, Auto used NVIDIA (High profile), and output 1 used Native (Main profile).
   - Measured: with Best, output 1 had 118 kb/s and the others 332 kb/s each. With Least, output 1 had 104 kb/s and the others 88 kb/s each.
+  - Measured: with a bit rate on output 1, the other outputs do not take it. An additional output has no rate setting.
   - Measured: two outputs with the same path stop Add. The prompt is "Duplicate Render Paths", with one button, OK. No job is added.
   - Measured: its text is "Please enter unique sub-folder names for each additional output in the render settings".
   - Measured: the queue has one job, and one render writes all outputs. The row of the job shows the path and the details of output 1.
@@ -5988,7 +6023,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Type shows for each format with fixed profiles: ProRes, DNxHR, TIFF and OpenEXR. Only ProRes is measured.
   - With additional outputs, the Format menu of tab 1 has only the formats that hold video. The Preset menu greys the presets with no video.
   - An additional output gets the audio of output 1 when its format takes that codec, else no audio.
-  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, its codec gives its default quality. That case is not measured.
+  - An additional output gets the `quality` of output 1. With a `bitrate` on output 1, it gets no bit rate, as measured.
+  - Its codec then gives its default quality. The quality that Resolve gives it then is not measured.
   - An additional output gets the subtitle streams of output 1. Burned-in subtitles are in the picture of each output.
   - `render.add`, `render.update` and `export.start` refuse two outputs with the same path. `export.plan` gives the note `written_twice`.
   - The text of the prompt has no "Please", because GUI text has 12 words at most.
@@ -6026,7 +6062,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A graded clip has a grade that is not the usual grade. A clip with a composition has a node other than MediaIn and MediaOut.
   - Marked Clips looks at the markers of the media in the part that the clip shows. Edit Sizing looks at the transform and the crop.
   - The other filters are greyed. Those of features that vidcut does not have are in [gaps](todo/gaps.md).
-  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source wait for measurements ([todo](todo/clip-filter.md)).
+  - Selected Clips, Modified Clips, Unrendered Clips, Tracked and Common Media Pool Source are greyed ([todo](todo/clip-filter.md)).
+  - Individual clips renders each clip with a frame in the range, on each track. Each file holds the whole clip.
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts

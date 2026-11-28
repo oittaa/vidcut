@@ -506,6 +506,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 || left.pattern_width.is_some()
                 || left.pattern_height.is_some()
                 || left.pattern_offset.is_some()
+                || left.search_width.is_some()
+                || left.search_height.is_some()
+                || left.pattern_channel.is_some()
                 || left.remove_pattern;
             if touched {
                 let i = (k as usize)
@@ -521,6 +524,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 given(&mut left.pattern_width, &mut pattern.width);
                 given(&mut left.pattern_height, &mut pattern.height);
                 given(&mut left.pattern_offset, &mut pattern.offset);
+                given(&mut left.search_width, &mut pattern.search_width);
+                given(&mut left.search_height, &mut pattern.search_height);
+                given(&mut left.pattern_channel, &mut pattern.channel);
                 if left.remove_pattern {
                     t.patterns.remove(i);
                     t.pivot_tracker = match t.pivot_pattern().cmp(&k) {
@@ -536,6 +542,10 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             if left.add_pattern {
                 t.patterns.push(Pattern::new(t.free_name()));
                 left.add_pattern = false;
+            }
+            if left.add_point {
+                t.patterns.push(Pattern::point(t.free_point()));
+                left.add_point = false;
             }
             given(&mut left.operation, &mut t.operation);
             given(&mut left.merge, &mut t.merge);
@@ -553,6 +563,8 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.custom_time, &mut t.custom_time);
             given(&mut left.intermediate_points, &mut t.intermediate_points);
             given(&mut left.fade_frames, &mut t.fade_frames);
+            given(&mut left.adaptive_mode, &mut t.adaptive_mode);
+            given(&mut left.match_tolerance, &mut t.match_tolerance);
             given(&mut left.find, &mut t.find);
         }
         Tool::Merge(m) => {

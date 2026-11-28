@@ -2,12 +2,12 @@ use std::collections::HashSet;
 
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
-    Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
-    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, MaskChannel, Merge, MergeEdges,
-    MergeOperator, MotionPath, Node, NoiseColoring, PaintMode, Pattern, PivotType, Project,
-    ReferenceTime, ShadingElement, SubPixel, TextPlus, Tool, ToolType, Tracker, TrackerMerge,
-    TrackerOperation,
+    AdaptiveMode, Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping,
+    BlurFilter, BorderLevel, Clip, Composition, Connect, EffectKind, EffectType, EffectValue,
+    FastNoise, GradientRepeat, GradientStop, GradientType, ImageFormat, JoinStyle, Mask,
+    MaskChannel, Merge, MergeEdges, MergeOperator, MotionPath, Node, NoiseColoring, PaintMode,
+    Pattern, PatternChannel, PatternKind, PivotType, Project, ReferenceTime, ShadingElement,
+    SubPixel, TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -198,6 +198,9 @@ impl Pattern {
     pub const WIDTH: f64 = 0.03;
     pub const HEIGHT: f64 = 0.0534;
     pub const SIDES: (f64, f64) = (0.001, 0.5);
+    pub const POINT_SIDE: f64 = 0.05;
+    pub const SEARCH: f64 = 0.125;
+    pub const SEARCHES: (f64, f64) = (0.001, 1.0);
     pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
 
     pub fn new(name: String) -> Self {
@@ -209,7 +212,35 @@ impl Pattern {
             width: None,
             height: None,
             offset: None,
+            kind: None,
+            search_width: None,
+            search_height: None,
+            channel: None,
         }
+    }
+
+    pub fn point(name: String) -> Self {
+        Self {
+            kind: Some(PatternKind::Point),
+            width: Some(Self::POINT_SIDE),
+            height: Some(Self::POINT_SIDE),
+            ..Self::new(name)
+        }
+    }
+
+    pub fn kind(&self) -> PatternKind {
+        self.kind.unwrap_or_default()
+    }
+
+    pub fn search(&self) -> [f64; 2] {
+        [
+            self.search_width.unwrap_or(Self::SEARCH),
+            self.search_height.unwrap_or(Self::SEARCH),
+        ]
+    }
+
+    pub fn channel(&self) -> PatternChannel {
+        self.channel.unwrap_or_default()
     }
 
     pub fn middle(&self) -> [f64; 2] {
@@ -255,11 +286,31 @@ impl Tracker {
     pub const PATTERNS_KEPT: usize = 256;
     pub const NAME: &'static str = "Pattern";
 
+    pub const POINT: &'static str = "Point";
+    pub const TOLERANCE: f64 = 0.5;
+
     pub fn free_name(&self) -> String {
-        (1..)
-            .map(|n| format!("{} {n}", Self::NAME))
-            .find(|name| !self.patterns.iter().any(|p| p.name == *name))
-            .unwrap_or_default()
+        format!("{} {}", Self::NAME, self.free_number())
+    }
+
+    pub fn free_point(&self) -> String {
+        format!("{} {}", Self::POINT, self.free_number())
+    }
+
+    fn free_number(&self) -> usize {
+        let taken = |n: usize| {
+            let names = [Self::NAME, Self::POINT].map(|kind| format!("{kind} {n}"));
+            self.patterns.iter().any(|p| names.contains(&p.name))
+        };
+        (1..).find(|n| !taken(*n)).unwrap_or(1)
+    }
+
+    pub fn adaptive(&self) -> AdaptiveMode {
+        self.adaptive_mode.unwrap_or_default()
+    }
+
+    pub fn tolerance(&self) -> f64 {
+        self.match_tolerance.unwrap_or(Self::TOLERANCE)
     }
 
     pub const PIVOT: [f64; 2] = [0.5, 0.5];
@@ -287,6 +338,8 @@ impl Tracker {
             custom_time: None,
             intermediate_points: None,
             fade_frames: None,
+            adaptive_mode: None,
+            match_tolerance: None,
             find: None,
         }
     }
@@ -1240,6 +1293,44 @@ impl TrackerMerge {
 
     pub fn sums(self) -> bool {
         matches!(self, TrackerMerge::FgOverBg | TrackerMerge::BgOverFg)
+    }
+}
+
+impl AdaptiveMode {
+    pub const ALL: [AdaptiveMode; 3] = [
+        AdaptiveMode::None,
+        AdaptiveMode::EveryFrame,
+        AdaptiveMode::BestMatch,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AdaptiveMode::None => "None",
+            AdaptiveMode::EveryFrame => "Every Frame",
+            AdaptiveMode::BestMatch => "Best Match",
+        }
+    }
+}
+
+impl PatternChannel {
+    pub const ALL: [PatternChannel; 6] = [
+        PatternChannel::Auto,
+        PatternChannel::Red,
+        PatternChannel::Green,
+        PatternChannel::Blue,
+        PatternChannel::Luminance,
+        PatternChannel::Alpha,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PatternChannel::Auto => "Auto",
+            PatternChannel::Red => "Red",
+            PatternChannel::Green => "Green",
+            PatternChannel::Blue => "Blue",
+            PatternChannel::Luminance => "Luminance",
+            PatternChannel::Alpha => "Alpha",
+        }
     }
 }
 

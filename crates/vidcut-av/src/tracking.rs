@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tract_onnx::prelude::*;
-use vidcut_core::analysis::{Follow, Found, Tracked};
+use vidcut_core::analysis::{Follow, Found, Pointed, Tracked};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::error::{Error, Result};
@@ -13,6 +13,8 @@ use crate::ffmpeg::{format, frame};
 use crate::models::{self, Fetch, Need};
 
 pub use vidcut_core::catalog::VITTRACK_ONNX as FILE;
+
+mod point;
 
 const TEMPLATE: usize = 128;
 const SEARCH: usize = 256;
@@ -25,9 +27,21 @@ const SIDES: (f64, f64) = (320.0, 1280.0);
 const EDGE: f64 = 10.0;
 const PART_BYTES: usize = 64 << 20;
 
-pub fn name() -> String {
-    let weights: String = FILE.sha256.chars().take(8).collect();
-    format!("vittrack-{weights}")
+pub fn name(point: Option<&Pointed>) -> String {
+    let Some(p) = point else {
+        let weights: String = FILE.sha256.chars().take(8).collect();
+        return format!("vittrack-{weights}");
+    };
+    let at = |v: f32| (f64::from(v) * 1e5).round() as i64;
+    format!(
+        "{}-{}x{}-{:?}-{:?}-{}",
+        point::NAME,
+        at(p.search[0]),
+        at(p.search[1]),
+        p.channel,
+        p.adaptive,
+        at(p.tolerance)
+    )
 }
 
 pub fn needed(dir: &Path) -> Vec<Need> {
@@ -297,20 +311,24 @@ pub(crate) struct Reader<'a> {
     pub(crate) plan: &'a RenderPlan,
     pub(crate) size: (u32, u32),
     pub(crate) gpu: Option<&'a crate::hw::GpuDecoder>,
+    pub(crate) pixel: format::Pixel,
 }
 
 impl Reader<'_> {
     pub(crate) fn run(&self, from: i64, to: i64) -> Result<VideoFrames> {
         let colors = (self.plan.colors, None, None);
-        let pixel = format::Pixel::RGB24;
-        let frames =
-            crate::export::renderer::stream(self.plan.fps, self.size, pixel, colors, self.gpu)?;
+        let (fps, size, pixel) = (self.plan.fps, self.size, self.pixel);
+        let frames = crate::export::renderer::stream(fps, size, pixel, colors, self.gpu)?;
         let mut frames = frames.in_frame((self.plan.width, self.plan.height));
         frames.read_pieces(&pieces(self.plan, from, to));
         Ok(frames)
     }
 
-    fn part(&self, from: i64, to: i64) -> Result<Option<Vec<Picture>>> {
+    fn part<P>(
+        &self,
+        (from, to): (i64, i64),
+        seen: fn(&frame::Video) -> P,
+    ) -> Result<Option<Vec<P>>> {
         let Some(mut run) = going(self.run(from, to))? else {
             return Ok(None);
         };
@@ -319,7 +337,7 @@ impl Reader<'_> {
             match going(run.next_frame())? {
                 None => return Ok(None),
                 Some(None) => return Err(ended(from + part.len() as i64)),
-                Some(Some(f)) => part.push(picture(&f)),
+                Some(Some(f)) => part.push(seen(&f)),
             }
         }
         Ok(Some(part))
@@ -352,6 +370,28 @@ impl Shown<'_> {
     }
 }
 
+trait Follower<P> {
+    fn next(&mut self, picture: &P) -> Result<Found>;
+}
+
+impl Follower<Picture> for Tracker<'_> {
+    fn next(&mut self, picture: &Picture) -> Result<Found> {
+        self.step(picture)
+    }
+}
+
+impl Follower<point::Rgba> for point::Point {
+    fn next(&mut self, picture: &point::Rgba) -> Result<Found> {
+        Ok(self.step(picture))
+    }
+}
+
+struct Walk<'a, P> {
+    reader: Reader<'a>,
+    seen: fn(&frame::Video) -> P,
+    size: fn(&P) -> (usize, usize),
+}
+
 pub fn track(
     plan: &RenderPlan,
     follow: &Follow,
@@ -359,21 +399,63 @@ pub fn track(
     source: &Path,
 ) -> Result<Tracked> {
     crate::cancel::stop()?;
+    if let Some(look) = follow.point {
+        let _turn = crate::turns::cpu_analysis()?;
+        let walk = Walk {
+            reader: Reader {
+                plan,
+                size: point::working((plan.width, plan.height)),
+                gpu,
+                pixel: format::Pixel::RGBA,
+            },
+            seen: point::Rgba::of,
+            size: |p: &point::Rgba| p.size,
+        };
+        return walked(&walk, follow, source, |first, area| {
+            point::Point::start(first, area, &look)
+        });
+    }
     get_ready(dir, false)?;
     let model = Model::load(&dir.join(FILE.name))?;
     let _turn = crate::turns::cpu_analysis()?;
-    let size = working((plan.width, plan.height), follow.area);
-    let reader = Reader { plan, size, gpu };
-    let (lo, hi) = (follow.frames.0.max(0), follow.frames.1.min(plan.frames));
+    let walk = Walk {
+        reader: Reader {
+            plan,
+            size: working((plan.width, plan.height), follow.area),
+            gpu,
+            pixel: format::Pixel::RGB24,
+        },
+        seen: picture,
+        size: |p: &Picture| p.size,
+    };
+    walked(&walk, follow, source, |first, area| {
+        Tracker::start(&model, first, area)
+    })
+}
+
+fn walked<P, F: Follower<P>>(
+    walk: &Walk<'_, P>,
+    follow: &Follow,
+    source: &Path,
+    start: impl Fn(&P, [f64; 4]) -> F,
+) -> Result<Tracked> {
+    let reader = &walk.reader;
+    let (lo, hi) = (
+        follow.frames.0.max(0),
+        follow.frames.1.min(reader.plan.frames),
+    );
     if hi <= lo {
         return Err(Error::Invalid("the track has no frame".into()));
     }
     let at = follow.at.clamp(lo, hi - 1);
-    let Some(first) = reader.part(at, at + 1)?.and_then(|mut p| p.pop()) else {
+    let Some(first) = reader
+        .part((at, at + 1), walk.seen)?
+        .and_then(|mut p| p.pop())
+    else {
         crate::cancel::stop()?;
         return Err(ended(at));
     };
-    let size = first.size;
+    let size = (walk.size)(&first);
     let (w, h) = (size.0 as f64, size.1 as f64);
     let [cx, cy, bw, bh] = follow.area.map(f64::from);
     let area = clipped([cx * w, cy * h, bw * w, bh * h], size);
@@ -387,7 +469,7 @@ pub fn track(
     let mut whole = true;
     let mut after = Vec::new();
     if ahead > 0 {
-        let mut tracker = Tracker::start(&model, &first, area);
+        let mut tracker = start(&first, area);
         match going(reader.run(at + 1, hi))? {
             None => whole = false,
             Some(mut run) => {
@@ -404,7 +486,7 @@ pub fn track(
                         Some(None) => return Err(ended(at + 1 + after.len() as i64)),
                         Some(Some(frame)) => frame,
                     };
-                    after.push(tracker.step(&picture(&frame))?);
+                    after.push(tracker.next(&(walk.seen)(&frame))?);
                     shown.report(after.len());
                 }
             }
@@ -412,12 +494,12 @@ pub fn track(
     }
     let mut before = Vec::new();
     if whole && behind > 0 {
-        let mut tracker = Tracker::start(&model, &first, area);
-        let most = (PART_BYTES / (size.0 * size.1 * 3).max(1)).max(1) as i64;
+        let mut tracker = start(&first, area);
+        let most = (PART_BYTES / (size.0 * size.1 * 4).max(1)).max(1) as i64;
         let mut end = at;
         'parts: while end > lo {
             let start = (end - most).max(lo);
-            let Some(part) = reader.part(start, end)? else {
+            let Some(part) = reader.part((start, end), walk.seen)? else {
                 whole = false;
                 break;
             };
@@ -426,7 +508,7 @@ pub fn track(
                     whole = false;
                     break 'parts;
                 }
-                before.push(tracker.step(p)?);
+                before.push(tracker.next(p)?);
                 shown.report(after.len() + before.len());
             }
             end = start;

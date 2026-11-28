@@ -740,6 +740,9 @@ Writing:
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - `Tool::takes_from` adds one case: the effect mask of a tool takes a picture too (`Tool::takes_picture_mask`). `Node.mask_channel`, `Node.mask_range` and `Node.mask_clip` then make the mask from it.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
+    - Its `PatternKind` tells how a track follows it. A `point` pattern also has a search area and a `PatternChannel` ([analysis](analysis.md#tracks)).
+    - `Tracker::free_name` and `Tracker::free_point` name a new pattern with the first number that no pattern has.
+    - The `AdaptiveMode` and the Match Tolerance of the `Tracker` act on its `point` patterns.
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
     - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.
