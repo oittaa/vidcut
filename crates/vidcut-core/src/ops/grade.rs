@@ -1495,8 +1495,10 @@ pub fn append_node(p: &mut Project, from: &GradeOf, n: u32, to: &[GradeOf]) -> R
 }
 
 pub fn append_graph(p: &mut Project, of: &GradeOf, add: &Grade) -> Result<()> {
+    let mut add = add.clone();
+    super::shared::current(p, &mut add);
     edited(p, of, |g| {
-        appended(g, add);
+        appended(g, &add);
         Ok(())
     })
 }
