@@ -4332,7 +4332,17 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.clips.retain(|x| parts.contains(&x.id));
         t.transitions.clear();
     }
-    let mut plan = flatten(&alone, c.start, c.end())?;
+    let rates = own_rates(p, &c);
+    if let Some(r) = rates {
+        at_own_rate(p, &mut alone, &c, r);
+    }
+    let (a, b) = alone
+        .clip(&c.id)
+        .map_or((c.start, c.end()), |x| (x.start, x.end()));
+    let mut plan = flatten(&alone, a, b)?;
+    if let (Some(r), Some(g)) = (rates, plan.timeline_grade.as_mut()) {
+        g.map_key_frames(|f| r.frame(f));
+    }
     plan.colors = timeline_colors(p);
     plan.name = c
         .name
@@ -4340,6 +4350,26 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         .or_else(|| p.media(&c.media).map(|m| stem(&m.name)))
         .unwrap_or_else(|| c.id.clone());
     Ok(plan)
+}
+
+fn own_rates(p: &Project, c: &Clip) -> Option<crate::ops::conform::Rates> {
+    let m = p.media(&c.media).filter(|m| !m.is_still())?;
+    m.info.video.as_ref()?;
+    crate::ops::conform::Rates::new(p.fps(), m.rate(p.settings.fps))
+}
+
+fn at_own_rate(p: &Project, alone: &mut Project, c: &Clip, r: crate::ops::conform::Rates) {
+    let per = r.to.over(r.from);
+    let x = c.source_in as f64 + c.phase;
+    let lead = x - shown_frame(per, x) as f64 / per.as_f64();
+    alone.set_open_fps(r.to);
+    for t in &mut alone.tracks {
+        for q in &mut t.clips {
+            let at = (q.source_in as f64 + q.phase - lead).max(0.0);
+            (q.source_in, q.phase) = (at.floor() as i64, at - at.floor());
+        }
+        crate::ops::conform::track(p, t, r);
+    }
 }
 
 pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Result<RenderPlan> {

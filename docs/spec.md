@@ -6260,7 +6260,11 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A source at a rate that is not the rate of the timeline gets the count of its first frame too.
   - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
-  - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
+  - Each clip renders at the frame rate of its media (p. 4114). Its file has that frame rate.
+    - A still, a title, a generator and a compound clip render at the frame rate of the timeline.
+    - The first frame of the file is the first source frame that the clip shows.
+    - The record timecode of the file and the times of its subtitles count at that frame rate.
+    - An interlaced source renders at its frame rate, not at its field rate (D34).
   - The parts of a name go in the measured order: unique prefix, name, frame count, File Suffix, unique suffix.
   - Separate Folders puts each file in a folder of its own, as measured. An audio track counts by its own number: A2 and V2 both give `0002`.
   - The folders go in the measured order: the Source Folder Levels, the folder of Separate Folders, then the File Subfolder.

@@ -1,7 +1,6 @@
 # Export page: File tab
 
 - vidcut does not name the files of an interlaced source, or of an EXR sequence, as Resolve does.
-- Individual clips render at the frame rate of the timeline, not at the frame rate of each clip.
 - Render timeline effects and Render at source resolution for Individual clips.
 - The Preserved Path row.
 - Use commercial workflow.
