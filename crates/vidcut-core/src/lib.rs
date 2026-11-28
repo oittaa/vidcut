@@ -15,6 +15,7 @@ pub mod effect_keys;
 pub mod equalizer;
 pub mod error;
 pub mod export;
+pub mod fades;
 pub mod fingerprint;
 pub mod folder;
 pub mod generators;

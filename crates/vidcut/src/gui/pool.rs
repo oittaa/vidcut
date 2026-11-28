@@ -517,8 +517,11 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 impl Workspace {
     pub(super) fn pool_takes_keys(&self) -> bool {
         self.pool_focus
-            && self.left == LeftTab::Pool
-            && !matches!(self.effects_page.page, Page::Effects | Page::Export)
+            && match self.effects_page.page {
+                Page::Audio => self.audio_page.media,
+                Page::Effects | Page::Export => false,
+                Page::Cut | Page::Color => self.left == LeftTab::Pool,
+            }
     }
 
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {

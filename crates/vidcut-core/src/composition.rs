@@ -340,6 +340,7 @@ impl Tracker {
             fade_frames: None,
             adaptive_mode: None,
             match_tolerance: None,
+            find: None,
         }
     }
 
@@ -2142,6 +2143,7 @@ impl Composition {
         self.nodes.iter().any(|n| match &n.tool {
             Tool::Effect(kind) => crate::model::Effect {
                 kind: kind.clone(),
+                keys: n.keys.clone(),
                 ..EffectType::of(kind).made()
             }
             .moves_by_itself(),

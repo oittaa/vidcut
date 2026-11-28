@@ -4074,6 +4074,11 @@ fn mutate(
                 ops::place_on_top_block(p, &sources, at, src.lead)
             })?;
             let mut v = clip_ids(&ids);
+            if p.track(&track).is_some_and(|t| t.kind == TrackKind::Audio)
+                && let Some(end) = ids.iter().filter_map(|id| p.clip(id)).map(Clip::end).max()
+            {
+                v["playhead"] = json!(end);
+            }
             v["track"] = json!(track);
             v
         }
@@ -4590,6 +4595,8 @@ fn mutate(
             dialogue_leveler,
             compressor,
             noise_reduction,
+            fade_in,
+            fade_out,
             at,
             name,
             color,
@@ -4620,6 +4627,8 @@ fn mutate(
                 dialogue_leveler: dialogue_leveler.clone(),
                 compressor: compressor.clone(),
                 noise_reduction: noise_reduction.clone(),
+                fade_in: *fade_in,
+                fade_out: *fade_out,
                 at,
                 name: or_none(name),
                 color: or_none(color),
@@ -4633,6 +4642,29 @@ fn mutate(
                 ready_retimes(env, p, &ids)?;
             }
             Value::Null
+        }
+        Request::ClipFadeToPlayhead { clips, fade, at } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => playhead.ok_or_else(|| Error::usage("clip.fade_to_playhead needs `at`"))?,
+            };
+            json!({ "clips": ops::fades::to_playhead(p, &ids, *fade, at)? })
+        }
+        Request::ClipBatchFades {
+            clips,
+            fade_in,
+            fade_out,
+            cross_fade,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            json!(ops::fades::batch(
+                p,
+                &ids,
+                *fade_in,
+                *fade_out,
+                *cross_fade
+            )?)
         }
         Request::ClipPasteAttributes {
             clips,
@@ -5578,6 +5610,42 @@ fn mutate(
             ops::grade::paste(p, &of, *node, settings)?;
             Value::Null
         }
+        Request::GradeApply {
+            from,
+            prior,
+            grade,
+            clips,
+        } => {
+            let at = || playhead.ok_or_else(|| Error::usage("give `clips`: there is no playhead"));
+            let (given, to) = match (prior, clips) {
+                (Some(_), Some(_)) => {
+                    return Err(Error::usage("give `prior` or `clips`, not both"));
+                }
+                (Some(back @ 1..=2), None) => {
+                    let (from, to) = ops::clip_filter::prior(p, at()?, *back)?;
+                    (Some(ops::grade::copy_whole(p, &from)?), vec![to])
+                }
+                (Some(_), None) => return Err(Error::usage("give `prior` 1 or 2")),
+                (None, Some(refs)) => (None, resolve_clips(p, &refs.to_vec(), playhead)?),
+                (None, None) => (None, vec![ops::gallery::graded_clip(p, at()?)?]),
+            };
+            let grade = match (given, from, grade) {
+                (Some(g), None, None) => g,
+                (None, Some(r), None) => {
+                    let id = resolve_clip(p, r, playhead)?;
+                    ops::grade::copy_whole(p, &id)?
+                }
+                (None, None, Some(g)) => g.clone(),
+                (None, None, None) => {
+                    return Err(Error::usage(
+                        "give `from`, `prior` or `grade`: the clipboard has no grade",
+                    ));
+                }
+                _ => return Err(Error::usage("give one of `from`, `prior` and `grade`")),
+            };
+            ops::grade::apply(p, &grade, &to)?;
+            json!({ "clips": to })
+        }
         Request::GradeCleanup {
             clip,
             timeline,
@@ -5977,18 +6045,13 @@ fn mutate(
             ops::motion::remove(p, &id, node, patterns.as_deref())?;
             Value::Null
         }
-        Request::MotionFind {
-            node,
-            subject,
-            download,
-            ..
-        } => {
+        Request::MotionFind { node, download, .. } => {
             let f = find_plan(p, request, playhead)?;
-            let found = env.subjects(&f.media, *subject, f.look, *download)?;
+            let found = env.subjects(&f.media, f.subject, f.look, *download)?;
             let tracks =
                 crate::motion::joined(&found, f.media.origin(), f.rate, f.frames, &f.rules);
-            let mut out = ops::motion::found(p, &f.id, (*subject, node), tracks)?;
-            out["subject"] = json!(subject);
+            let mut out = ops::motion::found(p, &f.id, (f.subject, node), tracks)?;
+            out["subject"] = json!(f.subject);
             out
         }
         Request::MotionTrack {
@@ -7723,6 +7786,8 @@ fn place_imported(
             voice_isolation: c
                 .voice_isolation
                 .filter(|v| ops::ISOLATION.contains(&v.amount)),
+            fade_in: c.fade_in.filter(|f| crate::fades::problem(f).is_none()),
+            fade_out: c.fade_out.filter(|f| crate::fades::problem(f).is_none()),
         });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(
@@ -9553,6 +9618,7 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
 struct FindPlan {
     id: String,
     media: Media,
+    subject: Subject,
     rules: crate::motion::Join,
     frames: (i64, i64),
     rate: f64,
@@ -9578,33 +9644,44 @@ fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Fi
     else {
         return Err(Error::invalid("not a motion.find request"));
     };
-    let usual = crate::motion::Join::of(*subject);
-    let rules = crate::motion::Join {
-        start: start.unwrap_or(usual.start),
-        keep: keep.unwrap_or(usual.keep),
-        overlap: overlap.unwrap_or(usual.overlap),
-        wait_secs: wait.unwrap_or(usual.wait_secs),
-        shortest_secs: shortest.unwrap_or(usual.shortest_secs),
-        steady: steady.unwrap_or(usual.steady),
+    let asked = crate::model::FindValues {
+        subject: *subject,
+        model: *model,
+        size: *size,
+        start: *start,
+        keep: *keep,
+        overlap: *overlap,
+        wait: *wait,
+        shortest: *shortest,
+        steady: *steady,
     };
+    let id = resolve_clip(p, clip, playhead)?;
+    let kept = ops::motion::find_values(p, &id, node).unwrap_or_default();
+    let values = asked.over(kept);
+    let subject = values.subject.unwrap_or_default();
+    let rules = crate::motion::Join::of(subject).with(&values);
     if let Some(why) = rules.problem() {
         return Err(Error::usage(why));
     }
-    finder_checked(*model, *subject, *size)?;
-    let id = resolve_clip(p, clip, playhead)?;
-    ops::motion::findable(p, &id, node, *subject, *replace)?;
+    let model = match model {
+        Some(m) => *m,
+        None => kept.model.unwrap_or_default().for_subject(subject),
+    };
+    finder_checked(model, subject, values.size)?;
+    ops::motion::findable(p, &id, node, subject, *replace)?;
     let c = p.clip(&id);
     let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
     let (media, c) = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
     let (frames, rate) = ops::motion::file_frames(p, c);
     let look = Look {
-        side: *size,
-        model: *model,
+        side: values.size,
+        model,
         ..subject_look(&media, rate, frames)
     };
     Ok(FindPlan {
         id,
         media,
+        subject,
         rules,
         frames,
         rate,
@@ -9613,16 +9690,17 @@ fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<Fi
 }
 
 pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
-    let Request::MotionFind {
-        subject, download, ..
-    } = request
-    else {
+    let Request::MotionFind { download, .. } = request else {
         return Vec::new();
     };
     let plan = find_plan(p, request, playhead).ok();
-    plan.map(|f| (f.media, *subject, f.look, *download))
+    plan.map(|f| (f.media, f.subject, f.look, *download))
         .into_iter()
         .collect()
+}
+
+pub fn find_subject(p: &Project, request: &Request, playhead: Option<i64>) -> Option<Subject> {
+    find_plan(p, request, playhead).ok().map(|f| f.subject)
 }
 
 struct StabilizePlan {
@@ -10580,10 +10658,24 @@ pub fn query(
             timeline,
             layer,
             node,
-        } => {
-            let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
-            json!({ "settings": ops::grade::copy(p, &of, *node)? })
-        }
+        } => match node {
+            Some(n) => {
+                let of = grade_of(p, clip, (*timeline, *layer), playhead)?;
+                json!({ "settings": ops::grade::copy(p, &of, *n)? })
+            }
+            None => {
+                let r = match (clip, timeline, layer) {
+                    (Some(r), false, None) => r,
+                    _ => {
+                        return Err(Error::usage(
+                            "give `node`, or only `clip` to copy the whole clip grade",
+                        ));
+                    }
+                };
+                let id = resolve_clip(p, r, playhead)?;
+                json!({ "clip": id, "grade": ops::grade::copy_whole(p, &id)? })
+            }
+        },
         Request::GradeWindowCopy {
             clip,
             timeline,

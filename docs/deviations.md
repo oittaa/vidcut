@@ -1375,12 +1375,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The OpenEXR writer of vidcut writes this attribute for each level that it gets.
   - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.
 
-## X152. Film Grain Freeze has no keyframes
-
-- **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
-- **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md)).
-
 ## X153. Every clip pans as on a stereo track
 
 - **Resolve:**
@@ -1462,7 +1456,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 ## X163. A compound clip takes its clips whole
 
-- **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
+- **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126))
   - A selected item on a locked track stays out, and the other items go in.
   - A range with no clips does nothing, and shows no message.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
@@ -1475,23 +1469,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
-
-## X164. A mode inside a compound clip always mixes with the tracks below
-
-- **Resolve:** (measured in Resolve Studio 21.2.0)
-  - One picture in a compound clip mixes its composite mode with the tracks below ([spec](spec.md#12-decisions-on-gaps-and-contradictions)).
-  - In one case the mode mixes with black. The compound clip has its usual values, and the picture has an opacity of 100%.
-  - In that case Multiply gives a black frame. Screen, Add and Difference give the picture with no change.
-  - Each of these changes brings back the rule of the spec:
-    - An opacity of 99% on the compound clip.
-    - A pan of 1 pixel, a zoom of 0.99, a crop of 1 pixel or a rotation of 0.1°.
-    - An opacity of 50% on the picture inside.
-  - A title alone does not act in this way. Its mode mixes with the tracks below.
-  - A Vignette on the compound clip also brings back the rule. A Sharpen alone does not.
-- **vidcut:**
-  - The mode of one picture always mixes with the tracks below.
-- **Why:**
-  - A move of 1 pixel must not change a black frame to the correct picture. This behavior of Resolve is a fault.
 
 ## X167. vidcut finds the faces and the text of a clip
 
@@ -1534,7 +1511,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With Object of Interest Auto, the Neural Engine analyzes the clip and chooses its most representative object (pp. 735, 920).
   - The manual does not name the model. The model is not published.
 - **vidcut:**
-  - Without `reference` and `subject`, `picture.reframe` follows a point of the map of the UNISAL saliency model, with its weights for DHF1K ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - Without `reference` and `subject`, `picture.reframe` follows a point of the map of the UNISAL saliency model, with its weights for DHF1K ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208)).
   - The shots are 42 shots of nine files and of 9:16 and 4:3 clips made from them. The timelines are 1080×1920, 1920×1080 and 1080×1080.
   - On their frames, the position of vidcut is a median of 65 pixels and a mean of 166 pixels from that of Resolve.
   - The pixels are those of a frame 1080 pixels on its short side.

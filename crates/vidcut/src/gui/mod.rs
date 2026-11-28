@@ -1,6 +1,8 @@
 mod app;
 mod attributes;
+mod audio_page;
 mod bar;
+mod batch_fades;
 mod cache_manager;
 mod cells;
 mod clip_filter;

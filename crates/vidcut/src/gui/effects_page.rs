@@ -941,9 +941,20 @@ impl Workspace {
         if page != Page::Effects {
             self.effects_page.leave();
         }
-        match page == Page::Export {
-            true => self.enter_export_page(),
-            false => self.leave_export_page(),
+        if self.effects_page.page == Page::Export {
+            self.export.edit_wanted = None;
+            self.export.filter_asked = None;
+        }
+        let fixed = |p: Page| matches!(p, Page::Export | Page::Audio);
+        match (fixed(self.effects_page.page), fixed(page)) {
+            (false, true) => self.hold_timeline_viewer(),
+            (true, false) => self.free_viewer(),
+            _ => {}
+        }
+        match (self.effects_page.page == Page::Audio, page == Page::Audio) {
+            (false, true) => self.timeline.rows_lift = f32::MAX,
+            (true, false) => self.timeline.rows_lift = 0.0,
+            _ => {}
         }
         self.effects_page.graded = None;
         self.effects_page.window_name = None;

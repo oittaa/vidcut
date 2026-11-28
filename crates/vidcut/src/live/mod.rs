@@ -623,6 +623,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         copied_clip: None,
         key_clipboard: 0,
         node_clipboard: false,
+        grade_clipboard: false,
         window_clipboard: None,
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashSet::new()),
@@ -731,6 +732,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         compound_clipboard: Vec::new(),
         key_clipboard: Vec::new(),
         node_clipboard: None,
+        grade_clipboard: None,
         window_clipboard: None,
         cue_clipboard: Vec::new(),
         clipboard_fps: None,
@@ -1045,6 +1047,7 @@ struct Live {
     compound_clipboard: Vec<vidcut_core::model::Compound>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
     node_clipboard: Option<vidcut_core::request::CopiedNode>,
+    grade_clipboard: Option<vidcut_core::model::Grade>,
     window_clipboard: Option<vidcut_core::model::GradeWindow>,
     cue_clipboard: Vec<vidcut_core::model::TrackCue>,
     clipboard_fps: Option<vidcut_core::time::Rational>,
@@ -1748,6 +1751,7 @@ impl Live {
             copied_clip: self.copied_clip.clone(),
             key_clipboard: self.key_clipboard.len(),
             node_clipboard: self.node_clipboard.is_some(),
+            grade_clipboard: self.grade_clipboard.is_some(),
             window_clipboard: (self.window_clipboard.as_ref()).map(|w| w.shape.kind()),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
@@ -4023,8 +4027,13 @@ impl Live {
                 Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
-            Request::MotionFind { subject, .. } if !envelope.dry_run => {
-                let title = format!("Find {}", subject.many());
+            Request::MotionFind { .. } if !envelope.dry_run => {
+                let p = self.project.as_ref().map(|o| o.project());
+                let playhead = Some(self.player.position(TIMELINE));
+                let found = p.and_then(|p| {
+                    vidcut_core::editor::find_subject(p, &envelope.request, playhead)
+                });
+                let title = format!("Find {}", found.unwrap_or_default().many());
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Encode(measure, Box::new(envelope), title, "find"),
                     None => Step::Now(self.edit(envelope, job.origin)),
@@ -4340,6 +4349,17 @@ impl Live {
                 }
                 *settings = self.node_clipboard.clone();
             }
+            Request::GradeApply {
+                from: None,
+                prior: None,
+                grade,
+                ..
+            } if grade.is_none() => {
+                if self.grade_clipboard.is_none() {
+                    return Err(Error::usage("the clipboard has no grade"));
+                }
+                *grade = self.grade_clipboard.clone();
+            }
             Request::GradeWindowPaste { settings, .. } if settings.is_none() => {
                 if self.window_clipboard.is_none() {
                     return Err(Error::usage("the clipboard has no window"));
@@ -4468,6 +4488,9 @@ impl Live {
                     if let Ok(node) = serde_json::from_value(r.result["settings"].clone()) {
                         self.node_clipboard = Some(node);
                     }
+                    if let Ok(grade) = serde_json::from_value(r.result["grade"].clone()) {
+                        self.grade_clipboard = Some(grade);
+                    }
                 }
                 Request::GradeWindowCopy { .. } => {
                     if let Ok(w) = serde_json::from_value(r.result["settings"].clone()) {
@@ -4485,7 +4508,10 @@ impl Live {
                 }
                 _ => {}
             }
-            if !r.dry_run && is_edit_function(&request) && origin != (Origin::Gui { drag: true }) {
+            if !r.dry_run
+                && moves_playhead(&request, &r.result)
+                && origin != (Origin::Gui { drag: true })
+            {
                 self.playhead_after_edit(r);
             }
         }
@@ -6076,6 +6102,7 @@ impl Live {
             "clipboard": self.clipboard.len(),
             "keyframe_clipboard": self.key_clipboard.len(),
             "node_clipboard": self.node_clipboard.is_some(),
+            "grade_clipboard": self.grade_clipboard.is_some(),
             "window_clipboard": (self.window_clipboard.as_ref()).map(|w| w.shape.kind()),
             "cue_clipboard": self.cue_clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
@@ -6318,6 +6345,13 @@ fn is_edit_function(r: &Request) -> bool {
             | Request::EditSourceOverwrite { .. }
             | Request::EditPaste { .. }
     )
+}
+
+fn moves_playhead(r: &Request, result: &Value) -> bool {
+    match r {
+        Request::EditPlaceOnTop { .. } => result.get("playhead").is_some(),
+        _ => is_edit_function(r),
+    }
 }
 
 fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {

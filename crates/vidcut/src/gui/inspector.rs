@@ -17,12 +17,12 @@ use vidcut_core::model::{
     AdaptiveMode, Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping,
     BlurFilter, Border, BorderLevel, CellShape, Clip, ClipRetime, ClipScaling, CompositeMode,
     Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
-    FastNoise, FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha,
-    GlowFraming, GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite,
-    GrainPreset, JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges, MergeOperator,
-    MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture,
-    PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement, Sharpen, Speed,
-    SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    FastNoise, FillMethod, FilmGrain, FindModel, FindValues, GaussianBlur, Generator, Glow,
+    GlowAlpha, GlowFraming, GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType,
+    GrainComposite, GrainPreset, JoinStyle, Keyframe, Mask, MaskChannel, Merge, MergeEdges,
+    MergeOperator, MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, PatternChannel,
+    PatternKind, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
+    Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
     TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -46,45 +46,39 @@ const TEXT_SIZE_SPEED: f64 = 0.0005;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
 const BETTER_SIDE: u32 = 1920;
-const FIND_VALUES: [(&str, &str, &str, &str); 7] = [
+const FIND_SAME: f64 = 1e-6;
+const FIND_VALUES: [(&str, &str, &str); 7] = [
     (
-        "size",
         "Search Picture Size (px)",
         "The model looks at the picture scaled to this size.",
         "Larger finds smaller things and takes much longer.",
     ),
     (
-        "start",
         "Min Score To Start (0-1)",
         "How sure the model must be to start following a thing.",
         "Lower finds more things, and more wrong ones.",
     ),
     (
-        "keep",
         "Min Score To Follow (0-1)",
         "How sure the model must be on the other frames.",
         "Lower follows a thing through blur, turns and its first frames.",
     ),
     (
-        "overlap",
         "Min Box Overlap (0-1)",
         "How much a box must overlap the box of the frame before.",
         "Lower follows faster things, and can mix up neighbors.",
     ),
     (
-        "wait",
         "Max Time Hidden (s)",
         "A thing hidden for longer than this counts as a new thing.",
         "Longer follows a thing behind trees and people.",
     ),
     (
-        "shortest",
         "Min Time Followed (s)",
         "A thing followed for less time than this is dropped.",
         "Longer removes more wrong finds, and more short ones.",
     ),
     (
-        "steady",
         "Min Share Of Frames Seen (0-1)",
         "The share of its frames on which a thing must be seen.",
         "Higher removes things that flicker on and off.",
@@ -1429,8 +1423,21 @@ fn number_row(
     (now, usual): (f64, f64),
     ((lo, hi), speed): ((f64, f64), f64),
 ) -> Option<f64> {
+    numbered(ui, (id, text, None), (now, usual), ((lo, hi), speed))
+}
+
+fn numbered(
+    ui: &mut egui::Ui,
+    (id, text, tip): (egui::Id, &str, Option<&str>),
+    (now, usual): (f64, f64),
+    ((lo, hi), speed): ((f64, f64), f64),
+) -> Option<f64> {
     let set = now != usual;
-    label(ui, text, set);
+    let c = theme::colors();
+    let shown = ui.label(RichText::new(text).color(if set { c.accent } else { c.text_dim }));
+    if let Some(tip) = tip {
+        shown.on_hover_text(tip);
+    }
     let mut v = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(now);
     let r = ui.add(
         egui::DragValue::new(&mut v)
@@ -2834,14 +2841,13 @@ impl Workspace {
         };
         let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
         let mut naming = self.inspector.naming.take();
-        let mut subject = self.inspector.subject;
-        let mut values = std::mem::take(&mut self.inspector.find_values);
+        let kept = t.find.unwrap_or_default();
+        let subject = kept.subject.unwrap_or_default();
+        let model = kept.model.unwrap_or_default().for_subject(subject);
+        let side = vidcut_av::subjects::side(subject, model);
+        let better = kept.size.is_some_and(|s| s > side);
+        let mut find = kept;
         let mut open = self.inspector.find_open;
-        let mut better = self.inspector.find_better;
-        let mut model = self.inspector.find_model;
-        let wrong = self.inspector.find_error;
-        let extra = find_extra(&values);
-        let mut tried = false;
         let mut sends: Vec<(&'static str, Value)> = Vec::new();
         let mut tracks: Vec<(&'static str, Value)> = Vec::new();
         let mut stop = false;
@@ -3057,21 +3063,19 @@ impl Workspace {
             let picked = subject != Subject::default();
             label(ui, "Subject", picked);
             ui.horizontal(|ui| {
+                let mut to = subject;
                 egui::ComboBox::from_id_salt(("inspector-motion-subject", &node.name))
                     .selected_text(subject.many())
                     .show_ui(ui, |ui| {
                         for s in Subject::ALL {
-                            ui.selectable_value(&mut subject, s, s.many());
+                            ui.selectable_value(&mut to, s, s.many());
                         }
                     });
-                let mut given = extra.clone().unwrap_or(Value::Null);
-                if better && given.is_object() && given.get("size").is_none() {
-                    given["size"] = json!(BETTER_SIDE);
+                if to != subject {
+                    find.subject = Some(to).filter(|s| *s != Subject::default());
                 }
                 if ui.button("Find").clicked() {
-                    tried = true;
-                    let pick = (subject, model.for_subject(subject));
-                    asked = Some(find_request(clip, node, pick, &given));
+                    asked = Some(find_request(clip, node, subject));
                 }
                 let blur = page_blur(clip, comp, node);
                 let button = egui::Button::new("Blur");
@@ -3083,19 +3087,23 @@ impl Workspace {
                 }
             });
             if reset(ui, picked) {
-                subject = Subject::default();
+                find.subject = None;
             }
             ui.end_row();
             if subject == Subject::Face {
                 let changed = model != FindModel::default();
                 label(ui, "Model", changed);
+                let mut to = model;
                 dialog::switch(ui, |ui| {
                     for m in FindModel::ALL {
-                        ui.selectable_value(&mut model, m, m.title());
+                        ui.selectable_value(&mut to, m, m.title());
                     }
                 });
+                if to != model {
+                    find.model = Some(to).filter(|m| *m != FindModel::default());
+                }
                 if reset(ui, changed) {
-                    model = FindModel::default();
+                    find.model = None;
                 }
                 ui.end_row();
             }
@@ -3106,7 +3114,7 @@ impl Workspace {
                     .on_hover_text("The model looks at a small picture. It is quick.")
                     .clicked()
                 {
-                    better = false;
+                    find.size = None;
                 }
                 let slow = ui.selectable_label(better, "Better");
                 let tip = [
@@ -3115,64 +3123,24 @@ impl Workspace {
                 ]
                 .join("\n");
                 if slow.on_hover_text(tip.as_str()).clicked() {
-                    better = true;
+                    find.size = Some(BETTER_SIDE);
                 }
             });
             if reset(ui, better) {
-                better = false;
+                find.size = None;
             }
             ui.end_row();
-            if !open {
-                return;
-            }
-            let usual = vidcut_core::motion::Join::of(subject);
-            let side = match better {
-                true => BETTER_SIDE,
-                false => vidcut_av::subjects::side(subject, model.for_subject(subject)),
-            };
-            let hints = [
-                side.to_string(),
-                usual.start.to_string(),
-                usual.keep.to_string(),
-                usual.overlap.to_string(),
-                usual.wait_secs.to_string(),
-                usual.shortest_secs.to_string(),
-                usual.steady.to_string(),
-            ];
-            for (i, (_, name, what, effect)) in FIND_VALUES.iter().enumerate() {
-                let tip = format!("{what}\n{effect}");
-                let set = !values[i].trim().is_empty();
-                let c = theme::colors();
-                let color = if set { c.accent } else { c.text_dim };
-                ui.label(RichText::new(*name).color(color))
-                    .on_hover_text(tip.as_str());
-                ui.add(
-                    egui::TextEdit::singleline(&mut values[i])
-                        .hint_text(hints[i].as_str())
-                        .desired_width(NAME_WIDTH),
-                )
-                .on_hover_text(tip.as_str());
-                if reset(ui, set) {
-                    values[i].clear();
-                }
-                ui.end_row();
-            }
-            if wrong {
-                label(ui, "", false);
-                label(ui, "A Value Is Not A Number", true);
-                ui.end_row();
+            if open {
+                find_rows(ui, (&clip.id, &node.name), (subject, side), &mut find);
             }
         });
+        let find = find.fitted();
+        if find != kept {
+            acts.push(node_set(slot, "find", json!(find)));
+        }
         self.inspector.naming = naming;
         self.inspector.pattern_picked = Some((clip.id.clone(), node.name.clone(), pick));
-        self.inspector.subject = subject;
-        self.inspector.find_values = values;
         self.inspector.find_open = open;
-        self.inspector.find_better = better;
-        self.inspector.find_model = model;
-        if tried || extra.is_some() {
-            self.inspector.find_error = extra.is_none();
-        }
         for (method, params) in sends {
             self.send(method, params);
         }
@@ -3200,8 +3168,7 @@ impl Workspace {
                 self.page_ask(json!({ "at": at }));
             }
         }
-        if let Some(found) = asked.filter(|_| extra.is_some()) {
-            let model = model.for_subject(subject);
+        if let Some(found) = asked {
             self.ask(vec![found], Wanted::Finder(subject, model));
         }
     }
@@ -3601,12 +3568,7 @@ pub struct Inspector {
     recolored: Option<Recolored>,
     tinted: Option<Tinted>,
     naming: Option<Naming>,
-    subject: Subject,
-    find_values: [String; 7],
     find_open: bool,
-    find_better: bool,
-    find_model: FindModel,
-    find_error: bool,
     finding: Option<Finding>,
     pub(super) reframing: super::reframe::Reframing,
     pub(super) stopping: Option<bool>,
@@ -5214,28 +5176,58 @@ fn sharpen_folds(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), act
     });
 }
 
-fn find_extra(values: &[String; 7]) -> Option<Value> {
-    let mut out = serde_json::Map::new();
-    for ((key, _, _, _), text) in FIND_VALUES.iter().zip(values) {
-        let text = text.trim();
-        if text.is_empty() {
+fn find_rows(
+    ui: &mut egui::Ui,
+    (clip, node): (&str, &str),
+    (subject, side): (Subject, u32),
+    find: &mut FindValues,
+) {
+    let usual = vidcut_core::motion::Join::of(subject);
+    let sides = vidcut_core::analysis::SIDES;
+    let pixels = (f64::from(sides.0), f64::from(sides.1));
+    let secs = (0.0, vidcut_core::motion::Join::MOST_SECS);
+    let share = (0.0, 1.0);
+    let scores = usual.with(find);
+    let (start, keep) = (f64::from(scores.start), f64::from(scores.keep));
+    let rows = [
+        (find.size.map(f64::from), f64::from(side), pixels, 10.0),
+        (
+            find.start.map(f64::from),
+            f64::from(usual.start),
+            (keep, 1.0),
+            0.01,
+        ),
+        (
+            find.keep.map(f64::from),
+            f64::from(usual.keep),
+            (0.0, start),
+            0.01,
+        ),
+        (find.overlap, usual.overlap, share, 0.01),
+        (find.wait, usual.wait_secs, secs, 0.05),
+        (find.shortest, usual.shortest_secs, secs, 0.05),
+        (find.steady, usual.steady, share, 0.01),
+    ];
+    for (i, ((name, what, effect), (now, usual, range, speed))) in
+        FIND_VALUES.iter().zip(rows).enumerate()
+    {
+        let tip = format!("{what}\n{effect}");
+        let id = ui.scope_id().with(("find-value", clip, node, i));
+        let row = (id, *name, Some(tip.as_str()));
+        let Some(v) = numbered(ui, row, (now.unwrap_or(usual), usual), (range, speed)) else {
             continue;
-        }
-        let number: f64 = text.replace(',', ".").parse().ok()?;
-        let value = match *key {
-            "size" => json!(number.round() as u32),
-            _ => json!(number),
         };
-        out.insert((*key).to_string(), value);
+        let to = ((v - usual).abs() > FIND_SAME).then_some(v);
+        match i {
+            0 => find.size = to.map(|v| v.round() as u32),
+            1 => find.start = to.map(|v| v as f32),
+            2 => find.keep = to.map(|v| v as f32),
+            3 => find.overlap = to,
+            4 => find.wait = to,
+            5 => find.shortest = to,
+            _ => find.steady = to,
+        }
     }
-    Some(Value::Object(out))
-}
-
-fn with_extra(mut params: Value, extra: &Value) -> Value {
-    for (key, value) in extra.as_object().into_iter().flatten() {
-        params[key.as_str()] = value.clone();
-    }
-    params
 }
 
 fn boxed(subject: Subject) -> bool {
@@ -5251,24 +5243,14 @@ fn with_model(method: &str, params: &mut Value) {
     }
 }
 
-fn find_request(
-    clip: &Clip,
-    tracker: &Node,
-    (subject, model): (Subject, FindModel),
-    extra: &Value,
-) -> (&'static str, Value) {
-    let mut params = json!({
-        "clip": clip.id,
-        "node": tracker.name,
-        "subject": subject,
-        "model": model,
-    });
+fn find_request(clip: &Clip, tracker: &Node, subject: Subject) -> (&'static str, Value) {
+    let mut params = json!({ "clip": clip.id, "node": tracker.name });
     let patterns = tracker.tool.tracker().map_or(&[][..], |t| &t.patterns[..]);
     let paths = patterns.iter().filter_map(|p| p.path.as_ref());
     if paths.clone().any(|m| m.subject == Some(subject)) {
         params["replace"] = json!(true);
     }
-    ("motion.find", with_extra(params, extra))
+    ("motion.find", params)
 }
 
 fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'static str, Value)> {
