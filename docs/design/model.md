@@ -451,6 +451,7 @@ Ranges and resolution:
 | cue | q1, q2 … | `Project::alloc_cue_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 | subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
+| still | s1, s2 … | `Project::alloc_still_id` |
 
 - The counters are in `NextIds`. Each alloc call adds one.
 - Undo restores `next_id` with the project. Thus an id of an undone edit can come again.
@@ -475,6 +476,7 @@ Ranges and resolution:
   - `history_base` and `history_events` store those project-folder paths relative too, so undo and external diffs stay valid after moving the folder.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
+- The picture of a still is stored by its file name (`Still::picture`), and found in the stills folder (`Env::stills_dir`).
 - `Store::create` and `Store::replace` write a checkpointed database through `temp::file` and rename it over the target.
 - `Store::transact`, `Store::save`, `Store::compact`, and `OpenProject::apply` serialize writers through SQLite `BEGIN IMMEDIATE` transactions. `Store::close` removes unreferenced `blobs` and empties the WAL (a `TRUNCATE` checkpoint).
 - A load verifies the database header and runs `validate::violations`. It refuses another file type or an inconsistent project.
@@ -738,6 +740,9 @@ Writing:
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - `Tool::takes_from` adds one case: the effect mask of a tool takes a picture too (`Tool::takes_picture_mask`). `Node.mask_channel`, `Node.mask_range` and `Node.mask_clip` then make the mask from it.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
+    - Its `PatternKind` tells how a track follows it. A `point` pattern also has a search area and a `PatternChannel` ([analysis](analysis.md#tracks)).
+    - `Tracker::free_name` and `Tracker::free_point` name a new pattern with the first number that no pattern has.
+    - The `AdaptiveMode` and the Match Tolerance of the `Tracker` act on its `point` patterns.
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
     - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.
@@ -949,9 +954,28 @@ Import:
   - `linked::put` writes them back. Each part moves and changes by the same amount as the lead.
   - `linked::split_main` splits each part before an insert on V1, so that the sound keeps its place under the picture.
   - The GUI sends one lead for a selection that holds two parts (`linked::leads`, `edits::Plan::new`), because each part acts on the other parts.
+    - With Linked Selection off, it sends each selected clip, because each clip acts alone.
   - `linked::with_sound` puts the sound of each placed picture on the audio track of the same number, and each next stream on the next audio track. It writes over what is there, and links the clips.
   - `linked::sounds` gives the linked sound clips of a picture clip. The sound requests, the Inspector and the clip menu use it. Why: a picture clip has no sound of its own.
   - `follow::follow` moves a clip that is linked to a V1 clip by the change of the start of that clip. Thus a J/L cut keeps its offset.
+  - `linked::link` gives the clips one new link number. `linked::unlink` takes the link of each clip away.
+  - `linked::end_lone` ends each group with one clip left. The editor calls it after each request. Thus an edit that cuts one clip of a group leaves no group of one clip.
+  - `linked::alone` takes the named clips out of their groups for one edit, then gives the links back.
+    - The requests with `alone` use it (`linked::apart`). Thus each edit acts on the named clips only, and no edit function needs a second form.
+    - The other clips of those groups off Track 1 leave the timeline for the edit. Then they go back to their places.
+    - Why: they must not follow Track 1 ([spec D21](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus a picture on Track 1 moves or slides apart from its sound.
+    - A clip that goes back onto another clip goes to the next free track of its kind (`follow::settle`).
+    - `edit.roll` and `edit.slide` also name the clips beside the clip (`linked::touching`). Thus their sound does not change either.
+  - `linked::offset` gives the sync offset of a clip. It compares the clip with the first linked clip of the same media and the other kind.
+    - The offset is the frames between the start of each clip, less the frames between their source starts. A clip with a speed change has none.
+    - `linked::offsets` gives the offset of each clip of the timeline in one pass. `clip_json` writes it as `sync`.
+  - `linked::resync` slips or moves the clip, or its other linked clips of the same media, by their offsets. Each part acts alone.
+    - `linked::others` gives the other clips only for a clip with an offset. Thus the four commands go with the offset.
+- `clear_range` keeps the link groups of the clips that it cuts:
+  - A clip that loses its head keeps its group.
+  - The right piece of a middle cut can match a piece on another track: the same media, start and source start. It then takes the group of that piece (`piece_link`).
+  - A right piece that matches no piece is alone in its group. `linked::end_lone` then ends that group.
+  - Why: an overwrite over the tracks of a linked pair keeps the pieces of the pair together.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).

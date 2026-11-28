@@ -106,6 +106,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
     ("picture.stabilize", &["clip"]),
+    ("picture.reframe", &["clips"]),
     ("grade.get", &["clip"]),
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
@@ -133,6 +134,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.convert", &["window", "clip"]),
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
+    ("gallery.remove", &["stills"]),
+    ("gallery.apply", &["still", "clips"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -169,6 +172,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.slip", &["clip"]),
     ("edit.slide", &["clip"]),
     ("edit.audio_roll", &["clip"]),
+    ("edit.resync", &["clip"]),
+    ("clip.link", &["clips"]),
+    ("clip.unlink", &["clips"]),
     ("edit.ripple_delete_silence", &["clips"]),
     ("edit.detect_scene_cuts", &["clips"]),
     ("edit.compound", &["clips"]),
@@ -254,6 +260,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Export the timeline: a video, audio, frames per clip, or OpenTimelineIO",
     ),
     ("frame", "Single frames as PNG"),
+    (
+        "gallery",
+        "Stills of the Color page: pictures of frames, with their grades",
+    ),
     ("generators", "Pictures made with no file"),
     (
         "grade",
@@ -533,6 +543,13 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut picture stabilize c3 --smooth 1 --strength 0.5 --zoom false",
     ),
     (
+        "picture.reframe",
+        "vidcut picture reframe c3 --download\n  \
+         vidcut picture reframe c3,c4 --mode pan\n  \
+         vidcut picture reframe c3 --subject face --smooth 1\n  \
+         vidcut picture reframe c3 --at 2s --reference '{\"center\":[0.6,0.4],\"size\":[0.2,0.5]}'",
+    ),
+    (
         "effects.add",
         "vidcut effects add c3 gaussian_blur\n  vidcut effects add V2@10s gaussian_blur\n  \
          vidcut effects add c3 mosaic_blur\n  vidcut effects add c3 vignette\n  \
@@ -574,6 +591,9 @@ const EXAMPLES: &[(&str, &str)] = &[
            vidcut comp set c3 Blur1 --pass-through true
            vidcut comp set c3 Blur1 --size 8 --frame 60
            vidcut comp set c3 Tracker1 --add-pattern
+           vidcut comp set c3 Tracker1 --add-point
+           vidcut comp set c3 Tracker1 --pattern 2 --search-width 0.2 --pattern-channel green
+           vidcut comp set c3 Tracker1 --adaptive-mode best_match --match-tolerance 0.3
            vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --pattern-offset 0,0.05
            vidcut comp set c3 Tracker1 --operation match_move --merge fg_only --reference-time end
            vidcut comp set c3 Ellipse1 --connect '{\"tracker\":\"Tracker1\",\"pattern\":1,\"size\":true}'",

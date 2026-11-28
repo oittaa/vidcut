@@ -11,7 +11,7 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
     Background, BackgroundFill, Clip, Composition, EffectValue, Mask, Merge, Node, Pattern,
-    Project, Tool, ToolType,
+    PatternKind, Project, Tool, ToolType,
 };
 use vidcut_core::motion::Area;
 use vidcut_core::ops::grade::GradeOf;
@@ -347,6 +347,7 @@ struct Boxed {
     pattern: usize,
     edge: Edge,
     area: Area,
+    search: Option<[f64; 2]>,
     grab: [f64; 2],
     sent: Option<(u64, Instant)>,
 }
@@ -383,6 +384,21 @@ fn edge_at(r: Rect, press: Pos2) -> Option<Edge> {
     ];
     let side = sides.into_iter().find(|(_, on)| *on).map(|(e, _)| e);
     side.or_else(|| (r.center().distance(press) <= GRIP).then_some(Edge::Middle))
+}
+
+fn search_edge(r: Rect, press: Pos2) -> Option<Edge> {
+    edge_at(r, press).filter(|e| *e != Edge::Middle)
+}
+
+fn searched_to(b: &Boxed, around: [f64; 2], to: [f64; 2]) -> [f64; 2] {
+    let (lo, hi) = Pattern::SEARCHES;
+    let mut s = around;
+    match b.edge {
+        Edge::Left | Edge::Right => s[0] = (2.0 * (to[0] - b.area.center[0]).abs()).clamp(lo, hi),
+        Edge::Top | Edge::Bottom => s[1] = (2.0 * (to[1] - b.area.center[1]).abs()).clamp(lo, hi),
+        Edge::Middle => {}
+    }
+    s
 }
 
 fn boxed_to(b: &Boxed, to: [f64; 2]) -> Area {
@@ -1852,7 +1868,9 @@ impl Workspace {
         let painter = ui.painter_at(resp.rect);
         let colors = theme::colors();
         let picked = self.inspector.pattern_picked.clone();
+        let hover = ui.input(|i| i.pointer.hover_pos());
         let mut spots: Vec<(String, usize, Rect, Area)> = Vec::new();
+        let mut searches: Vec<(String, usize, Rect, Area, [f64; 2])> = Vec::new();
         for name in &self.effects_page.nodes {
             let Some(t) = comp.node(name).and_then(|n| n.tool.tracker()) else {
                 continue;
@@ -1892,6 +1910,30 @@ impl Workspace {
                     FontId::proportional(11.0),
                     color,
                 );
+                if pattern.kind() == PatternKind::Point {
+                    let search = match held.and_then(|b| b.search) {
+                        Some(s) => s,
+                        None => pattern.search(),
+                    };
+                    let half = [search[0] / 2.0, search[1] / 2.0];
+                    let outer = Rect::from_min_max(
+                        screen([area.center[0] - half[0], area.center[1] - half[1]]),
+                        screen([area.center[0] + half[0], area.center[1] + half[1]]),
+                    );
+                    let near = hover.is_some_and(|h| outer.expand(GRIP).contains(h));
+                    if near || held.is_some() {
+                        let corners = [
+                            outer.left_top(),
+                            outer.right_top(),
+                            outer.right_bottom(),
+                            outer.left_bottom(),
+                            outer.left_top(),
+                        ];
+                        let stroke = Stroke::new(1.0, color);
+                        painter.extend(egui::Shape::dashed_line(&corners, stroke, DASH, DASH));
+                        searches.push((name.clone(), k, outer, area, search));
+                    }
+                }
                 let [x, y] = pattern.shift();
                 if x != 0.0 || y != 0.0 {
                     let to = screen([area.center[0] + x, area.center[1] - y]);
@@ -1907,12 +1949,18 @@ impl Workspace {
             && self.effects_page.held.is_none()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
-            let hit = spots
-                .iter()
-                .rev()
-                .filter(|(name, ..)| !comp.node(name).is_some_and(|n| n.locked))
-                .find_map(|(name, k, r, area)| Some((name, *k, edge_at(*r, press)?, *area)));
-            if let Some((name, k, edge, area)) = hit {
+            let open = |name: &String| !comp.node(name).is_some_and(|n| n.locked);
+            let hit =
+                spots.iter().rev().filter(|(name, ..)| open(name)).find_map(
+                    |(name, k, r, area)| Some((name, *k, edge_at(*r, press)?, *area, None)),
+                );
+            let hit = hit.or_else(|| {
+                let mut found = searches.iter().rev().filter(|(name, ..)| open(name));
+                found.find_map(|(name, k, r, area, s)| {
+                    Some((name, *k, search_edge(*r, press)?, *area, Some(*s)))
+                })
+            });
+            if let Some((name, k, edge, area, search)) = hit {
                 let start = place(press);
                 let corner = [
                     area.center[0] - area.size[0] / 2.0,
@@ -1924,6 +1972,7 @@ impl Workspace {
                     pattern: k,
                     edge,
                     area,
+                    search,
                     grab: [start[0] - corner[0], start[1] - corner[1]],
                     sent: None,
                 });
@@ -1941,12 +1990,26 @@ impl Workspace {
         if resp.dragged()
             && let Some(to) = ui.input(|i| i.pointer.interact_pos())
         {
-            b.area = boxed_to(b, place(to));
+            match b.search {
+                Some(s) => b.search = Some(searched_to(b, s, place(to))),
+                None => b.area = boxed_to(b, place(to)),
+            }
         }
         if !resp.drag_stopped() {
             return;
         }
         b.sent = Some((rev, Instant::now()));
+        if let Some([w, h]) = b.search {
+            let params = json!({
+                "clip": clip.id,
+                "node": b.node,
+                "pattern": b.pattern + 1,
+                "search_width": w,
+                "search_height": h,
+            });
+            self.send("comp.set", params);
+            return;
+        }
         let a = b.area;
         let params = json!({
             "clip": clip.id,

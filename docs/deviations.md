@@ -1280,10 +1280,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X142. A Glow keeps the tracks below around a smaller picture
 
 - **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
+  - These are measurements in Resolve Studio 21.1.2 and 21.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
   - The output of a Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.
   - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
+  - The float renders of 21.2 on two pictures with alpha bands and rings have an alpha of 1 in each pixel. Over white they give the same picture as over black.
 - **vidcut:**
+  - The colors of the output are those of Resolve. Thus over black, vidcut gives the same picture.
   - The alpha of the output is the larger of the picture's alpha and the brightest color of the output.
   - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
 - **Why:**
@@ -1377,7 +1379,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
 - **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md)).
 
 ## X153. Every clip pans as on a stereo track
 
@@ -1461,18 +1463,15 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X163. A compound clip takes its clips whole
 
 - **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
-  - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
   - A range with no clips does nothing, and shows no message.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
 - **vidcut:**
-  - A clip goes in with the clips that are linked to it.
   - A clip on a locked track refuses the request.
   - A range with no clips refuses the request, with a message.
   - A dissolve goes inside when its clips go inside. It plays there.
   - `edit.decompose` brings such a dissolve back.
 - **Why:**
-  - vidcut has no Linked Selection switch. The clips of a link group act as one clip in each edit.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
@@ -1541,3 +1540,16 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
 - **Why:**
   - Not built yet ([todo](todo/export-file-tab.md)).
+
+## X176. Auto Smart Reframe follows the published UNISAL saliency model
+
+- **Resolve:**
+  - With Object of Interest Auto, the Neural Engine analyzes the clip and chooses its most representative object (pp. 735, 920).
+  - The manual does not name the model. The model is not published.
+- **vidcut:**
+  - Without `reference` and `subject`, `picture.reframe` follows a point of the map of the UNISAL saliency model, with its weights for DHF1K ([spec §8.30](spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+  - The shots are 42 shots of nine files and of 9:16 and 4:3 clips made from them. The timelines are 1080×1920, 1920×1080 and 1080×1080.
+  - On their frames, the position of vidcut is a median of 65 pixels and a mean of 166 pixels from that of Resolve.
+  - The pixels are those of a frame 1080 pixels on its short side.
+- **Why:**
+  - The owner chose the published UNISAL model. A published model cannot give the move of the model of Resolve.

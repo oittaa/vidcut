@@ -299,6 +299,14 @@ pub fn describe_at(
         "track.set" => d.track_set(),
         "clip.set" => d.clip_set(),
         "clip.normalize" => format!("Normalize the audio levels of {}", d.clips("clips")),
+        "clip.link" => format!("Link {}", d.clips("clips")),
+        "clip.unlink" => format!("Unlink {}", d.clips("clips")),
+        "edit.resync" => match d.text("how").as_str() {
+            "slip" => format!("Slip {} into place", d.clips("clip")),
+            "move" => format!("Move {} into place", d.clips("clip")),
+            "slip_others" => format!("Slip the clips linked to {} into place", d.clips("clip")),
+            _ => format!("Move the clips linked to {} into place", d.clips("clip")),
+        },
         "clip.paste_attributes" => format!("Paste Attributes to {}", d.clips("clips")),
         "clip.remove_attributes" => format!("Remove Attributes of {}", d.clips("clips")),
         "keyframes.add" => format!(
@@ -449,6 +457,7 @@ pub fn describe_at(
             d.clips("clip")
         ),
         "picture.stabilize" => format!("Stabilize {}", d.clips("clip")),
+        "picture.reframe" => format!("Smart Reframe {}", d.clips("clips")),
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
@@ -471,6 +480,19 @@ pub fn describe_at(
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
+        "gallery.grab" => format!("Grab Still at {}", d.time("at")),
+        "gallery.remove" => match d.list("stills").as_slice() {
+            [one] => format!("Delete still {one}"),
+            many => format!("Delete {} stills", many.len()),
+        },
+        "gallery.apply" if d.text("grade") == "timeline" => {
+            format!("Apply the timeline grade of still {}", d.text("still"))
+        }
+        "gallery.apply" => format!(
+            "Apply the grade of still {} to {}",
+            d.text("still"),
+            d.clips("clips")
+        ),
         "grade.paste" if d.flag("timeline") => "Paste a node into the timeline grade".into(),
         "grade.paste" => format!("Paste a node into the grade of {}", d.clips("clips")),
         "grade.add"
@@ -689,13 +711,24 @@ pub fn describe_at(
         }
         "selection.set"
             if !params["thumbnails"].is_null()
-                && ["clips", "cues", "media"]
+                && ["clips", "cues", "media", "stills"]
                     .iter()
                     .all(|k| params[*k].is_null()) =>
         {
             match d.list("thumbnails").is_empty() {
                 true => "Select only the current thumbnail".into(),
                 false => format!("Select thumbnails {}", d.clips("thumbnails")),
+            }
+        }
+        "selection.set"
+            if !params["stills"].is_null()
+                && ["clips", "cues", "media", "thumbnails"]
+                    .iter()
+                    .all(|k| params[*k].is_null()) =>
+        {
+            match d.list("stills").as_slice() {
+                [] => "Deselect the stills".into(),
+                ids => format!("Select stills {}", ids.join(", ")),
             }
         }
         "selection.set" => {

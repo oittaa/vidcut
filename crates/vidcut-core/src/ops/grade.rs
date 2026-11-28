@@ -599,7 +599,7 @@ pub fn whole(p: &Project, id: &str) -> Result<Option<Grade>> {
     Ok(c.picture.as_ref().and_then(|pic| pic.grade.clone()))
 }
 
-fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
+pub(super) fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
     checked(grade)?;
     let frame = p.frame_size();
     match of {
@@ -627,7 +627,7 @@ fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
     Ok(())
 }
 
-fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
+pub(super) fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
     checked(&grade)?;
     let grade = (!grade.is_usual(p.frame_size())).then_some(grade);
     let (ti, ci) = locate(p, id)?;

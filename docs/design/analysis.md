@@ -33,6 +33,7 @@ flowchart TD
 | `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
 | `motion.track` | `Env::tracked`: the box of one thing on each picture of the track, with a score | `motion::followed`; the edit then calls `ops::motion::tracked` |
 | `picture.stabilize` | `Env::shake`: the motion of the camera from each frame of the clip to the next | `stabilize::steadied`; the edit then calls `ops::picture::stabilized` |
+| `picture.reframe` | `Env::subjects` of the subject, or `Env::tracked` of the box | `reframe::moved`; the edit then calls `ops::picture::reframed` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing. It checks that each part is inside its clip and apart from the other parts, and cuts them.
 
@@ -189,6 +190,31 @@ flowchart TD
 - `models.check` finds the subject and the model of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
   - It loads the model as a find does, with the GPU setting of the preferences. Its `loaded` is `vidcut` for a model in the GPU layers of vidcut, and `tract` for a model in tract.
 
+## Saliency
+
+- `salience::find` in vidcut-av finds the part of each frame that stands out most. `picture.reframe` follows it when the request has no `subject` ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- It reads the frames as `subjects::find` does. `subjects::looked` decodes, seeks and measures the scene scores and the `SEED` pictures for both.
+  - The `Looker` trait is the part that is different. `Looking` finds boxes. `Seeing` makes saliency maps.
+- The model is UNISAL (`unisal`), with its weights for DHF1K.
+  - With `gpu.acceleration` on, it runs in the GPU kernels of vidcut (`compute::ops`).
+  - With `gpu.acceleration` off, `unisal::cpu` runs the same steps on the CPU, one row of each output on each slice of the pool (`pool::run`). Why: the GPU works only where the user lets it ([AGENTS.md](../../AGENTS.md), rule 9).
+  - One reader gives the weights to both paths. A `Make` gives the layers of each path.
+  - Its picture has from 100 to 120 cells of 32 pixels. Of these sizes, it has the one with the aspect nearest to the source (`unisal::sized`). Why: the code of the authors selects its size so.
+  - `Seeing::picture` scales with a Lanczos filter. `unisal::input` then normalizes red, green and blue by the mean and the spread of ImageNet.
+  - The model keeps a hidden state from picture to picture (a convolutional GRU). It has five states, and picture n uses state n mod 5 (`unisal::FRAMES`).
+    - Why: the model learned on each fifth frame of DHF1K, and the code of the authors runs so.
+  - `unisal::Model::maps` runs five pictures in one pass, and gives the five maps.
+  - `unisal::centroid` gives the point: the mean of the places of the map, weighted by the softmax of `SHARP` times the map. Its `Found` has that point as its center, a size of 0 and the highest value of the map as its score.
+    - The model learned the map as the log of the share of the looks at each place. Thus each weight is that share to the power `SHARP`.
+    - Why a power: a map can have two peaks, for example a face and the hands. The plain mean falls between them, on neither thing.
+    - Why not the highest place: when two peaks are near in height, the highest place jumps from one to the other. The power moves the point between them smoothly.
+- `weights::Torch` reads the weights from the PyTorch file of the authors, also in the legacy form of that file. `unisal::Model::load` then puts each batch norm into its convolution.
+- `AvEnv` keeps the `Detections` in the disk cache, as for subjects. The name of the file holds the weights, the frames of each step and `SHARP` (`salience::name`), and the `Look`.
+  - Why `SHARP`: a new power gives other points, so the cache must not give the points of the old power.
+- The model file is `catalog::UNISAL_WEIGHTS`, at one commit of the repository of the authors. `salience::get_ready` fetches it when the request has `download`.
+- `VIDCUT_SALIENCY_DUMP` and `scripts/saliency-check.py` compare the maps with the code of the authors ([tools](../tools.md)).
+- `models.check` loads UNISAL with the GPU setting of the preferences. Its `loaded` names the device.
+
 ## Tracks
 
 - `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
@@ -200,7 +226,7 @@ flowchart TD
   - The masks on the effect mask of the Tracker are not in it. Why: they do not change the track ([spec](../spec.md#the-tracker)).
   - The plan has one frame for each frame of the file, at the rate of the file.
   - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
-- `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
+- `tracking::track` in vidcut-av measures. A `model` pattern uses the VitTrack model on the CPU:
   - `Reader` reads the frames of the plan as one stream, at a working size.
   - `working` chooses that size: the search area of the model then has about its own size, within `SIDES`.
   - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
@@ -211,6 +237,18 @@ flowchart TD
     - Why: a track holds only one part in memory, however long the shot is.
   - `Shown` reports the progress of both ways.
   - `Follow` holds the first frame, the frames of the track, the box and the ways.
+- A `point` pattern has a `Pointed` in `Follow::point`: its search area, its channel, the Adaptive Mode and the Match Tolerance of the Tracker.
+  - `tracking::track` then follows it with `point::Point` on the CPU, and needs no model. `walked` goes through the frames for both kinds.
+  - `Reader` reads RGBA frames (`point::Rgba`). The long side is at most `LONGEST` pixels (`point::working`).
+  - `Point::start` cuts the pattern from the first frame (`Patch`). With `auto`, `picked` takes the channel with the most variance in the box.
+  - `Point::step` looks for the pattern at each place of the search area around the last place (`search`). The score is the normalized cross-correlation.
+    - Why: the score does not change with the brightness and the contrast of the pattern.
+    - A pattern of `COARSE` pixels or more is looked for at half size first, then near that place at full size. Why: the search is then about 16 times as fast.
+    - A parabola through the scores next to the best place gives the place between pixels.
+    - A place where the picture has almost no variance scores 0 (`FLAT`). Why: the correlation divides by that variance, and rounding then gives false high scores.
+    - When no place scores above 0, the pattern keeps its last place.
+  - `Point::adapt` takes the pattern again for `every_frame`, and for `best_match` when it differs from the first pattern by at most the Match Tolerance (`Patch::like`).
+  - The box keeps its size. The cache key has `point::NAME` and the values of the `Pointed`.
 - The result is a `Tracked`: its first frame and one box for each frame.
   - A cancelled track gives the boxes that it found, with `whole` off.
   - `AvEnv::track` keeps a whole track in the disk cache. The key has `tracking::name`, the digest of the plan and the `Follow`.
@@ -297,6 +335,43 @@ flowchart TD
   - A made frame of a Retime Process keeps its placement. Thus its `Id` holds the keyframe position when the clip is stabilized (`placed_now`, [playback](playback.md)).
 - In a GUI, `Live::measuring` measures first (`editor::stabilize_looks`), as a job of kind `stabilize`. Headless, `work_first` measures on `vidcut-stabilize`.
 
+## Smart Reframe
+
+- `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208-measured-in-resolve-studio-212)).
+- `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
+  - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
+    - It also gives the time of the source of each frame (`Pace::exact`).
+    - It also gives the zoom, the anchor point, the rotation, the box of the Dynamic Zoom (`DynamicZoom::at`) and the position of each frame.
+  - `reframe_shape` gives the size of the picture in the frame, by the scaling of the clip (`place::mapped`), and the flips.
+- Without `reference` and `subject`, `Env::salience` finds the point that stands out most on each frame ([saliency](#saliency)). `reframe::salient` takes the point of each frame.
+  - The shot changes come from the scene scores of the `Detections` (`Detections::cut`).
+- With `subject`, `Env::subjects` finds the things on each frame of the file, as for `motion.find`. `motion::joined` makes their paths, by the `Join` of the subject.
+  - `reframe::found` takes the main path of each shot: the largest sum of the box areas over the frames of the shot. A frame where that path has no box takes the next path in that order.
+  - The shot changes come from the scene scores of the `Detections` (`Detections::cut`).
+  - Why the sum of the areas: the main thing shows large and long. A person far behind it shows small.
+- With `reference`, `reframe_reference` turns the box on the frame into a box on the picture (`Shape::picked`). `Env::tracked` follows it, forward and backward, on the own picture of the clip (`render::own_picture`), as for `motion.track`.
+  - `reframe::tracked` takes the box of each frame.
+- `reframe::moved` decides:
+  - On each axis, the goal is the point of the picture to show at the middle of the frame (`Shape::goal`).
+  - A frame with no box takes the goal of the nearest frame with one in the shot. A shot with no box takes the point that the frame shows now (`Shape::view`).
+  - `reframe::evened` smooths the goals of each shot: a straight line through the near frames, with Gaussian weights on the times of their source. Its sigma is `smooth` seconds of the source.
+    - Why a line: at the ends of a shot, the near frames are on one side only. Their mean lags behind a move.
+    - Why the source: Resolve gives about twice the keyframes at 200 % speed, and about half at 50 %. Thus its move follows the source, not the timeline.
+  - `Shape::held` then keeps the picture over the frame on each axis. On an axis with no room, it gives the point that a position of 0 shows (`Shape::middle`).
+    - The room is on the axes of the picture. On each axis, the frame takes its extent along that axis after the rotation (`Shape::half`).
+    - Why: with a rotation of 90°, Resolve moves a 16:9 picture across a 9:16 frame too. With 10° and −30°, the turned frame is taller than the picture. There, Resolve gives only the turned move.
+  - `Shape::place` turns the point into the position of the picture, as `place::level` draws it. It uses the zoom, the anchor point, the rotation and the box of the Dynamic Zoom of the frame.
+    - It first finds the offset of the picture with no rotation. Then `place::turned` turns that offset by the rotation.
+    - A box of the Dynamic Zoom acts as a zoom of one over its size, about its middle.
+  - `reframe::axes` gives the axes that move, by the `ReframeMode`. Auto places both axes. Pan and Tilt place both axes too. Then they keep the other axis of the position at its value on that frame.
+    - Why the axes of the position: with a rotation of 10° or 90°, Pan Only of Resolve changes only Position X (4 files). Tilt Only changes only Position Y (4 files).
+  - `moved` splits the frames into runs at each shot change where the move jumps by more than `tolerance` pixels. `kept` keeps the first and the last frame of each run. It also keeps each frame where the line between the kept frames misses the move by more than `tolerance` pixels.
+    - Why runs, not shots: on a picture with no room, each shot change gave two keyframes at the same place.
+    - The pixels are those of a frame whose long side is `LONG` pixels. Why: Resolve gives the same keyframes at two sizes of each shape of the frame.
+    - Why the long side: in 9:16 and 16:9 timelines, the two sides give the same keyframes. In a 1:1 timeline, only the long side gives as many keyframes as Resolve.
+- `ops::picture::reframed` puts the keyframes in `Picture.position_keys` and `Picture.position_y`.
+- In a GUI, `Live::measuring` measures first, as a job of kind `reframe`. Headless, `work_first` measures on `vidcut-subjects`.
+
 ## Subject masks
 
 The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292-32963297)) has three parts:
@@ -368,7 +443,8 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
   - With a negative object score, the memory gets an empty mask and the no-object pointer.
 - Attention with many keys is two matrix multiplies and a softmax (`kernels::attend_gemm`).
   - The memory attention and the global blocks of the image encoder use it.
-  - Why: the attention of one query in one thread is too slow for nearly 29,000 keys.
+  - Why: in the global blocks, two matrix multiplies are faster than `kernels::attend`.
+  - A head of the memory attention has 256 channels. The values of 16 keys fill all the workgroup memory of `ops::SHARED`.
 - `tracking::Shown` reports the frames done. A cancel stops the track between two frames.
 
 **The store.** `masks::put` writes a map to the memory cache and to the `masks` folder of the disk cache (`disk_cache::Kind::Masks`).
@@ -403,7 +479,7 @@ The Magic Mask of a corrector ([spec](../spec.md#829-magic-mask-pp-32813289-3292
 - Two positive clicks, a negative click and a click at the edge of the frame give the masks of Meta's network: overlap 0.9999 or more.
 - One frame each of five clips from 720 × 480 to 3840 × 2160 gives the masks of Meta's network: overlap 1.0000.
 - On the software adapter, the masks match the GPU within 8e-5.
-- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run ([todo](../todo/subject-masks.md#measurements)).
+- The J&F of vidcut's tracks on the 30 videos is near the J&F of Meta's run.
 
 ## In a GUI
 

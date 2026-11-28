@@ -40,6 +40,7 @@ pub struct Assets<'a> {
     pub titles: &'a HashMap<String, egui::TextureId>,
     pub keys: &'a [(String, i64)],
     pub audio_trim: &'a [String],
+    pub sync: &'a HashMap<String, i64>,
 }
 
 pub type Placed = HashMap<String, Vec<(i64, usize)>>;
@@ -284,7 +285,10 @@ pub fn track(
         .collect();
     let span = |c: &Clip| (c.start, c.end());
     let picked = |c: &Clip| selected.contains(c.id.as_str());
-    let banded = band(p, t);
+    let banded: Vec<Banded> = band(p, t)
+        .into_iter()
+        .filter(|x| bands.has(&x.sound.id))
+        .collect();
     let heard: HashSet<&str> = banded.iter().map(|x| x.picture.id.as_str()).collect();
     if tr.audio_top > rect.top() {
         sound_band_of(painter, tr, scale, p, &banded, assets, look, (a, b));
@@ -579,6 +583,20 @@ fn clip(
             Stroke::new(1.0, Color32::from_black_alpha(180)),
         ));
     }
+    let mut left = x0.max(painter.clip_rect().left()) + if keyed { 12.0 } else { 0.0 };
+    let top = strip.map_or(video.top().min(tr.audio_top), |s| s.bottom());
+    if look.status
+        && width > 30.0
+        && let Some(d) = assets.sync.get(c.id.as_str())
+    {
+        let galley =
+            painter.layout_no_wrap(format!("{d:+}"), FontId::proportional(10.0), Color32::WHITE);
+        let badge =
+            Rect::from_min_size(pos2(left + 2.0, top + 2.0), galley.size() + vec2(4.0, 1.0));
+        painter.rect_filled(badge, CornerRadius::same(2), theme::colors().error);
+        painter.galley(badge.min + vec2(2.0, 0.0), galley, Color32::WHITE);
+        left = badge.right();
+    }
     if look.names && width > 30.0 {
         let name = p
             .clip_name(c)
@@ -590,14 +608,12 @@ fn clip(
             })
             .or_else(|| p.clip_compound(c).map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
-        let left = x0.max(painter.clip_rect().left()) + if keyed { 12.0 } else { 0.0 };
         let told = c.audio.is_some() && assets.transcribed.contains(&c.media);
         let room = x1 - left - if told { 16.0 } else { 0.0 };
         let mut label = elide(&name, ((room - 8.0) / 6.5).max(3.0) as usize);
         if told {
             label = format!("{} {label}", egui_phosphor::regular::CHAT_TEXT);
         }
-        let top = strip.map_or(video.top().min(tr.audio_top), |s| s.bottom());
         let pos = pos2(left + 4.0, top + 2.0);
         let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
         painter.rect_filled(
