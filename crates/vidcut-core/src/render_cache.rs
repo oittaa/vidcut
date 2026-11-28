@@ -177,7 +177,7 @@ impl Setup<'_> {
     fn keeps_alpha(&self, layer: &VideoPiece) -> bool {
         let alpha = matches!(
             self.prefs.codec,
-            CacheCodec::Prores4444 | CacheCodec::Prores4444Xq
+            CacheCodec::Float16 | CacheCodec::Prores4444 | CacheCodec::Prores4444Xq
         );
         let holds = !matches!(
             layer,

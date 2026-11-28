@@ -116,6 +116,54 @@ impl Writer {
     }
 }
 
+pub(crate) fn halves(planes: &[u8], (width, height): (usize, usize)) -> Result<Vec<u8>> {
+    let plane = width * height * 2;
+    let names: &[&str] = match planes.len() / plane.max(1) {
+        3 => &COLORS,
+        _ => &COLORS_ALPHA,
+    };
+    if planes.len() != plane * names.len() {
+        return Err(Error::Invalid(format!(
+            "a frame of {} bytes, not {}",
+            planes.len(),
+            plane * names.len()
+        )));
+    }
+    let channels: SmallVec<[AnyChannel<FlatSamples>; 4]> = names
+        .iter()
+        .zip(planes.chunks_exact(plane))
+        .map(|(&name, bytes)| AnyChannel {
+            name: name.into(),
+            sample_data: FlatSamples::F16(
+                bytes
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|b| f16::from_bits(u16::from_le_bytes(*b)))
+                    .collect(),
+            ),
+            quantize_linearly: false,
+            sampling: Vec2(1, 1),
+        })
+        .collect();
+    let layer = Layer::new(
+        (width, height),
+        LayerAttributes::default(),
+        Encoding {
+            compression: Compression::Uncompressed,
+            blocks: Blocks::ScanLines,
+            line_order: LineOrder::Increasing,
+        },
+        AnyChannels::sort(channels),
+    );
+    let mut bytes = Vec::new();
+    Image::from_layer(layer)
+        .write()
+        .to_buffered(std::io::Cursor::new(&mut bytes))
+        .map_err(|e| Error::Invalid(format!("writing an OpenEXR frame: {e}")))?;
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

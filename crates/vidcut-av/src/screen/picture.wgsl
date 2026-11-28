@@ -1170,7 +1170,7 @@ struct Encoding {
 fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
     let coded = encoding.how.x;
     let wanted = encoding.how.y;
-    if coded == wanted && encoding.how.z == 32u {
+    if coded == wanted && encoding.plane.x >= 7u {
         return code;
     }
     if coded == wanted {
@@ -1282,15 +1282,26 @@ fn fs_encode_unorm(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(encoded_at(vec2<i32>(in.position.xy))) / f32(encoding.plane.w);
 }
 
+fn half_rounded(v: f32) -> f32 {
+    if encoding.how.z != 16u || !(abs(v) < 65504.0) {
+        return v;
+    }
+    if abs(v) < 6.103515625e-5 {
+        return round(v * 16777216.0) / 16777216.0;
+    }
+    let bits = bitcast<u32>(v);
+    return bitcast<f32>((bits + 0xfffu + ((bits >> 13u) & 1u)) & 0xffffe000u);
+}
+
 @fragment
 fn fs_encode_float(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let kind = encoding.plane.x;
     if kind == 10u {
-        return vec4<f32>(kept_alpha(px), 0.0, 0.0, 1.0);
+        return vec4<f32>(half_rounded(kept_alpha(px)), 0.0, 0.0, 1.0);
     }
     let c = pixel_at(px.x, px.y);
-    return vec4<f32>(c[kind - 7u], 0.0, 0.0, 1.0);
+    return vec4<f32>(half_rounded(c[kind - 7u]), 0.0, 0.0, 1.0);
 }
 
 struct Blur {

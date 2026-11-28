@@ -8519,9 +8519,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Upscale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
+    - Media with an alpha channel is at the clip level only with Uncompressed 16-bit Float, ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
       - With an Alpha Mode of None, it counts as media with no alpha channel.
-      - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color above its alpha.
+      - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color at an alpha of 0. An integer file also cannot hold a color above its alpha.
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
@@ -8546,9 +8546,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
     - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).
     - The other choices:
+      - Uncompressed 16-bit Float
       - ProRes 422 Proxy, LT, 422 and HQ, and ProRes 4444 and 4444 XQ
       - DNxHR LB, SQ, HQ, HQX and 444
       - HEVC and AV1
+    - Uncompressed 16-bit Float keeps each value of the picture, also below 0 and above 1, as half floats (pp. 201, 203). It also keeps the alpha channel (p. 201).
     - A chosen codec goes to the encoder as it is. No other codec takes its place.
     - When no encoder on this computer makes it, the cache stays empty. Preferences then says so under Codec, and `cache.status` gives the error.
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
