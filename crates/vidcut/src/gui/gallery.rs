@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui::{self, ColorImage, Rect, RichText, Sense, TextureOptions, pos2, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 use vidcut_av::thumbs::Image;
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Project, Still};
-use vidcut_core::ops::grade::GradeOf;
+use vidcut_core::model::{ApplyKeys, Project, Settings, Still};
+use vidcut_core::ops::grade::{GradeOf, PRESERVED_NODES};
 
 use super::dialog;
 use super::theme;
@@ -146,6 +146,13 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return;
         };
+        let area = ui.available_rect_before_wrap();
+        let back = ui.interact(area, ui.make_persistent_id("gallery-area"), Sense::click());
+        let mut set = None;
+        back.context_menu(|ui| set = gallery_menu(ui, &p.settings));
+        if let Some(params) = set {
+            self.send("project.set", params);
+        }
         self.gallery.take_loaded(ui.ctx());
         let shown = self.shown_album();
         ui.horizontal_top(|ui| {
@@ -412,6 +419,35 @@ impl Workspace {
         }
         self.send("gallery.grab", params);
     }
+}
+
+fn gallery_menu(ui: &mut egui::Ui, s: &Settings) -> Option<Value> {
+    let mut set = None;
+    ui.menu_button("Apply Grades Using", |ui| {
+        let modes = [
+            (ApplyKeys::None, "No Keyframes"),
+            (
+                ApplyKeys::SourceTimecode,
+                "Keyframes Aligning Source Timecode",
+            ),
+            (ApplyKeys::StartFrames, "Keyframes Aligning Start Frames"),
+        ];
+        for (keys, name) in modes {
+            if ui.radio(s.apply_keys == keys, name).clicked() {
+                set = Some(json!({ "apply_keys": keys }));
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button("Preserve Number Of Nodes", |ui| {
+        for n in 0..=PRESERVED_NODES {
+            if ui.radio(s.preserve_nodes == n, n.to_string()).clicked() {
+                set = Some(json!({ "preserve_nodes": n }));
+                ui.close();
+            }
+        }
+    });
+    set
 }
 
 fn fit(size: egui::Vec2) -> egui::Vec2 {
