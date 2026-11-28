@@ -7,13 +7,13 @@ use crate::keyframes::PictureValue;
 use crate::model::{
     AdaptiveMode, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
     Border, CellShape, Clip, ClipScaling, CompositeMode, Composition, Crop, DynamicZoom, Effect,
-    EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow,
-    GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite,
-    ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture, PictureTool,
-    PivotType, Project, ReferenceTime, ShadingElement, Sharpen, Stabilization, Stabilizing,
-    SubPixel, TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette,
-    VignetteMode, VignetteShape, ZoomBox,
+    EffectKeys, EffectKind, EffectValue, FastNoise, FillMethod, FilmGrain, FindValues,
+    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
+    GradientType, GrainComposite, ImageFormat, Mask, MaskChannel, Merge, MergeEdges, MergeOperator,
+    MosaicBlur, Node, NoiseColoring, PaintMode, Pattern, PatternChannel, PatternKind, Picture,
+    PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, Stabilization,
+    Stabilizing, SubPixel, TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation,
+    Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput, StabilizationSet};
 
@@ -970,6 +970,9 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
     within(t.custom_time, Tracker::TIMES, why)?;
     let why = "a tracker's fade frames are from 0 to 1000000";
     within(t.fade_frames, Tracker::FADES, why)?;
+    if let Some(why) = t.find.as_ref().and_then(FindValues::problem) {
+        return Err(Error::invalid(format!("a tracker's find values: {why}")));
+    }
     let why = "a tracker's match tolerance is from 0 to 1";
     within(t.match_tolerance, (0.0, 1.0), why)?;
     if t.intermediate_points
@@ -1005,6 +1008,7 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
         fade_frames: t.fade_frames.filter(|v| *v != Tracker::FADE),
         adaptive_mode: t.adaptive_mode.filter(|a| *a != AdaptiveMode::default()),
         match_tolerance: t.match_tolerance.filter(|v| *v != Tracker::TOLERANCE),
+        find: t.find.filter(|f| *f != FindValues::default()),
         ..t.clone()
     })
 }

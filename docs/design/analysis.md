@@ -183,6 +183,7 @@ flowchart TD
     - The growth does not change which paths stay.
       - Why: a short path of a thing that is not a face can have more low boxes before it. They must not make it long enough to stay.
   - `motion.find` takes each of these values: `start`, `keep`, `overlap`, `wait`, `shortest` and `steady`. `Join::of` gives the usual values of a subject, and `Join::problem` checks the given values.
+    - A value that the request leaves out comes from the find values of the Tracker (`Join::with`, [model](model.md#compositions)). Else it is the usual value.
     - The boxes of a find stay in the disk cache. Thus a find with other values takes the boxes from there, and the model does not run again.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.

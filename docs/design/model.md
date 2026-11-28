@@ -725,6 +725,8 @@ Writing:
   - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values and its Operation (`TrackerOperation`).
     - Match Move takes a `TrackerMerge`, the edges, mode, operator and slider of a Merge, three switches, a `PivotType`, a `ReferenceTime` and the fade.
     - `pivot_tracker` names a pattern by its number. A removal of an earlier pattern makes the number one less. A removal of that pattern sets it back to 1.
+    - `Tracker.find` holds the values of Find (`FindValues`). `motion.find` takes each value that its request leaves out from them (`FindValues::over`).
+    - `comp.set` with `find` replaces all of them. It keeps each given value, also one at its usual value.
   - `Tool::Merge` holds a `Merge`: the transform of its foreground, its `MergeEdges`, its `ApplyMode`, its `MergeOperator` and its sliders.
     - It also holds the values of its depth merge (`Merge::depth_merge`). No picture has a depth channel. Thus `place::Merging` does not take them.
     - Its reference size (`Merge::reference`) gives the units that the Inspector shows its Center in. `place::Merging` does not take it. With `Merge::auto_resolution` on, it is the size that `composition_size` gives.

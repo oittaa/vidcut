@@ -340,6 +340,7 @@ impl Tracker {
             fade_frames: None,
             adaptive_mode: None,
             match_tolerance: None,
+            find: None,
         }
     }
 

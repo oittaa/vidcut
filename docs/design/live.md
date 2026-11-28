@@ -291,6 +291,20 @@ The bar and the Jobs button:
 - The keys that a separate window does not use go to the main window in the next frame (`dialog::take_forwarded_keys`). Thus the shortcuts work there too.
   - Held keys do not go. Thus K with J or L works only in the main window.
 
+**The Audio page** ([spec §9.1](../spec.md#91-audio-page-pp-37483753-37673772)).
+
+- `audio_page_ui` draws the panels of the page. `AudioPage` holds the switches of its Mixer, meters, Media tab and Inspector.
+  - While the page shows, `gui.show` and `gui.close` set these switches (`AudioPage::panel`). On the other pages, they act on the panels of those pages.
+- The rows are the lower timeline of the Cut page, with no upper timeline (`timeline_panel`). Thus the clicks, the drags and the keys of the Cut page work on them.
+  - `Rows::audio_page` gives a row to each audio track, from the top. Each sound clip is on its own row, with no band (`Bands`).
+  - On these rows, a drag on the edge of a linked sound clip is a trim, not a J/L roll (`hit_clips`).
+- `audio_headers` draws the headers. The fader value (`fader_field`) sends what the fader of the Mixer sends.
+- `meter_row` draws the meters of the meter panel, and the loudness meter (`loudness_meter`) at their right.
+  - While the meter panel shows, `mixer_panel` leaves out the loudness meter. Thus the page shows it once.
+  - The headers, the meter panel and the Mixer read their levels from `timeline_levels`.
+  - They share one peak hold for each track.
+- The Export page and the Audio page hold the viewer on the timeline (`hold_timeline_viewer`). A switch to another page sets the earlier mode again (`free_viewer`).
+
 **The Effects page** ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
 
 - `EffectsPage` holds the page that shows, the selected nodes and the nodes of the two viewers of each clip (`viewed`). It also holds the state of the Node Editor and of a mask drag.
@@ -386,9 +400,15 @@ The bar and the Jobs button:
 
 **Sound bands** ([spec §5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718)).
 
-- `geometry::Bands` holds each sound clip that is linked to a picture clip, with the video track of that picture. `Rows::layout` makes it.
-- `Rows::layout` leaves out an audio track whose clips are all in bands. Why: the row of the picture shows them.
-- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the first linked sound clip of each picture, at its own place. Thus a J/L cut shows.
+- With Linked Selection on, `Rows::layout` gives a row to each video track.
+  - It gives a row to an audio track only when the track is above the label track of the main track (`own_rows`).
+  - That track also holds a clip with no linked picture, and no clip linked to a picture.
+- `geometry::over` gives the audio track of the label of a video row: the lowest track in `geometry::heard_on`. `track_label` writes it under the name of the track.
+  - When `geometry::heard_on` of the main track is empty, `geometry::over` gives the lowest audio track.
+- `geometry::Bands` holds each sound clip that a band shows, with the video track of its row. `Rows::layout` makes it.
+- A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the linked sound clip on the highest audio track of each picture, at its own place. Thus a J/L cut shows.
+  - `audio_edge` takes the same sound clip.
+- The band also draws each clip with no linked picture on the track that `geometry::over` gives. These clips take no clicks.
 - The band draws the sound transitions between its sound clips. It draws no volume line.
 - A sound block is a compound clip or a generator without picture. It fills its place in the band (`paint::clip_fill`).
 - The row draws the band first and the picture clips over it. Thus the frame of a selected item is on top of the band.
@@ -396,18 +416,20 @@ The bar and the Jobs button:
 - `geometry::band_hit` finds the edge of a band sound under the pointer. It gives `Hit::AudioEdit` with the picture clip.
   - `edit.audio_roll` on a picture clip rolls each of its linked sound clips. Thus the band acts on the whole item.
   - `audio_edge`, `audio_edit_at` and `audio_points` find the sound edge of a picture clip. Thus the selected audio edit and the comma and period keys work on the band.
-- An audio row draws and hits only the clips that are not in a band (`Bands::apart`, `Bands::joins`).
 - `Assets::sync` holds `linked::offsets` for each frame that is drawn. A clip that is out of sync shows its offset in a red badge before its name.
 - The clip menu gives Link Clips or Unlink Clips (`link_action`). With Linked Selection on, it takes the linked clips of the selection too.
   - It gives the four commands of the offset when the clip has an offset.
 - `Options::linked_selection` is the Linked Selection switch.
   - On, the timeline draws the linked clips of each selected clip as selected (`linked::with_ties`). The selection itself holds the clicked clip.
-  - Off, `Rows::layout` makes no `Bands`, and a video row has no band. Thus each sound clip shows on its audio row.
+  - Off, `Rows::layout` makes no `Bands`, each audio track has a row, and a video row has no band. Thus each sound clip shows on its audio row.
   - `Workspace::send` and `Workspace::send_drag` then add `alone` to the clip edits in `ALONE`, also inside an `apply`.
   - The previews then act alone too: `Ctx::alone` and `Preview::alone` for the drags, `Cut::apply` and `edits::applied` for the selected edits, and `dynamic_preview` for Dynamic Trim.
   - Then `edits::Plan::new` keeps the edits of linked clips, and the slip drag and `dynamic_target` keep each selected clip.
   - The header of a main track then has no Mute.
-- The Mute of a main track header sets `muted` on each audio track that holds the linked sound of its clips (`geometry::heard_on`). One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+- The Mute of a main track header shows `muted` of the track that `geometry::over` gives. With no such track, it is not lit.
+  - A click sets `muted` on each track in `geometry::heard_on` to the other state. One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
+  - With no track in `geometry::heard_on`, a click sends nothing.
+- The row of an audio track keeps its own Mute, which sets only that track.
 
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
@@ -687,12 +709,17 @@ The bar and the Jobs button:
   - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
   - Name, X Offset and Y Offset are of the picked pattern.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+    - The Subject menu, Model, Quality and the Advanced rows change the find values of the Tracker (`FindValues`). Each change sends `comp.set` with `find`.
+    - Why: the values stay in the project and have undo. A find from the CLI or MCP takes them too.
     - For Faces, Model is Fast or Slow (`FindModel::ALL`). For the other subjects, Find always uses Fast (`FindModel::for_subject`).
-    - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
-    - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
-    - Each field tells on hover what it sets, and what a lower or a higher number does.
-    - Find sends the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
-  - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject.
+    - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better sets the size `BETTER_SIDE`. Faster removes the size.
+    - Advanced shows a number row for the size of the picture and for each value of the path rules (`FIND_VALUES`). The reset of a row gives the usual value.
+    - A row at its usual value (`FIND_SAME`) keeps no value. Thus the usual value of a new subject applies.
+    - Min Score To Start does not go below Min Score To Follow. Min Score To Follow does not go above Min Score To Start.
+    - A change of Subject or a reset can put the score to follow over the score to start. Then the Inspector removes both scores (`FindValues::fitted`), and the usual scores of the subject apply.
+    - Why: `comp.set` refuses such values. Thus a change of Subject is never refused.
+    - Each row tells on hover what it sets, and what a lower or a higher number does.
+  - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject. `motion.find` takes the other values from the Tracker.
   - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
     - Each pattern with a path gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
     - A pattern without a path gets no mask. Such a pattern does not move. A mask on it blurs the same box on each frame.

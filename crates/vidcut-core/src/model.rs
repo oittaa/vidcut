@@ -5990,6 +5990,11 @@ pub struct Tracker {
     /// change, and at 1 it takes each. Usual: 0.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_tolerance: Option<f64>,
+    /// The values of Find of the tracker. `motion.find` takes each value
+    /// that its request leaves out from them. Usual: none, which gives the
+    /// usual values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<FindValues>,
 }
 
 /// How a track takes the picture of a `point` pattern again.
@@ -6042,6 +6047,47 @@ pub enum PatternChannel {
     Luminance,
     /// The alpha channel.
     Alpha,
+}
+
+/// The values of Find of a tracker, as `motion.find` takes them. A value
+/// left out is at its usual value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FindValues {
+    /// The kind of thing to find. Usual: `face`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Subject>,
+    /// The neural network that finds the things: `fast`, or `slow` for
+    /// `face`. Usual: `fast`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<FindModel>,
+    /// The longer side, in pixels, of the picture that the model sees,
+    /// from 320 to 3840. Usual: as `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
+    /// The score, from 0 to 1, at which a box starts a path. Usual: as
+    /// `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<f32>,
+    /// The score, from 0 to `start`, at which a box continues a path.
+    /// Usual: as `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep: Option<f32>,
+    /// How much a box must overlap the last box of a path to join that
+    /// path, from 0 to 1. Usual: 0.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap: Option<f64>,
+    /// The seconds that a path waits for its thing while no box joins it,
+    /// from 0 to 60. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<f64>,
+    /// The seconds that a path must last, from 0 to 60. Usual: as
+    /// `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortest: Option<f64>,
+    /// The share of its frames on which a path must have a box, from 0 to
+    /// 1. Usual: as `motion.find` tells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steady: Option<f64>,
 }
 
 /// What a `tracker` does with its pictures.
