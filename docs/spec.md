@@ -921,7 +921,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - On a picture with two or more sound clips, Slip into place and Move into place are off.
     - On a picture with one sound clip, the fix that moves a clip later is off. A later sound turns off Move into place. An earlier sound turns off Move others into place.
     - vidcut: the clip menu of a clip with an offset has the four fixes. `edit.resync` refuses a fix that is off.
-  - **Resync Clip** (p. 646, Edit Actions on the Cut page) changes nothing. vidcut has no Resync Clip.
+  - **Resync Clip** (p. 646, Edit Actions on the Cut page) puts a clip that slipped from the rest of the program back in sync.
+    - It does not change a linked clip that has an offset to its group. The four fixes change it.
+    - vidcut has no Resync Clip.
 
 ## 7. Edit functions (pp. 696–701)
 

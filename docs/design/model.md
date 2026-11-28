@@ -979,6 +979,7 @@ Import:
     - A sound clip compares with the first picture. A picture compares with the first sound clip that is out of sync with it.
     - The offset is the frames between the start of each clip, less the frames between their source starts. With `linked_at`, the same difference at the time of the link is taken away. Why: the offset counts from the moment of the link.
     - Without `linked_at`, only clips of the same media have an offset. A clip with a speed change has none.
+    - `conform::clip` changes the frame rate of a clip. It also writes `linked_at` at the new rate, and keeps the time that the clip moved since the link. Thus a clip in sync stays in sync.
     - `linked::offsets` gives the offset of each clip of the timeline in one pass. `clip_json` writes it as `sync`.
   - `linked::resync` slips or moves the clip, or the other clips of its group that are out of sync with it, by their offsets. Each part acts alone.
     - `linked::others` gives the other clips only for a clip with an offset. Thus the four fixes go with the offset.
