@@ -10193,6 +10193,20 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
         }
         p.settings.node_stack_layers = names.iter().map(|n| n.trim().to_owned()).collect();
     }
+    if let Some(target) = set.target_loudness {
+        let range = ops::normalize::LOUDNESS;
+        if !range.contains(&target) {
+            return Err(Error::invalid(format!(
+                "target_loudness {target} LUFS is outside {}..{}",
+                range.start(),
+                range.end()
+            )));
+        }
+        p.settings.target_loudness = target;
+    }
+    if let Some(scale) = set.loudness_scale {
+        p.settings.loudness_scale = scale;
+    }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
     }
@@ -11161,6 +11175,7 @@ pub fn query(
             let l = env.loudness(&plan)?;
             json!({
                 "integrated": finite(l.integrated), "range": l.range,
+                "momentary_max": finite(l.momentary_max), "short_max": finite(l.short_max),
                 "true_peak": finite(l.true_peak), "sample_peak": finite(l.sample_peak),
                 "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
             })

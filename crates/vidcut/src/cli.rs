@@ -295,6 +295,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Looks: named styles for subtitle tracks and titles, built-in and your own",
     ),
     (
+        "loudness",
+        "The loudness meter of the mix (running GUI): read, start, pause, reset",
+    ),
+    (
         "luts",
         "LUTs: the .cube files in vidcut's LUT folder and in the folders of the preferences",
     ),

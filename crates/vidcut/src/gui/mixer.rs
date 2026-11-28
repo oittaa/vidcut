@@ -410,6 +410,8 @@ impl Workspace {
                     ui.separator();
                 }
                 self.master_strip(ui, &meters.mix, height);
+                ui.separator();
+                self.loudness_meter(ui, height - STRIP_ROOM);
             });
         });
         if self.meters_live(&meters.mix, self.snap.timeline.playing) {

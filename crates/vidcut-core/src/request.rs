@@ -807,9 +807,10 @@ pub enum Request {
         #[serde(default = "black_min")]
         min: TimeSpec,
     },
-    /// Loudness of the timeline's mix (EBU R128): integrated LUFS, range,
-    /// true peak (dBTP) and sample peak (dBFS), over `range` (default: In–Out
-    /// if set, else everything).
+    /// Loudness of the timeline's mix (ITU-R BS.1770-4, EBU R128), as the
+    /// loudness meter measures it: integrated LUFS, range (LU), the highest
+    /// momentary and short-term loudness (LUFS), true peak (dBTP) and sample
+    /// peak (dBFS), over `range` (default: In–Out if set, else everything).
     #[serde(rename = "analyze.loudness")]
     AnalyzeLoudness {
         #[serde(default)]
@@ -5109,6 +5110,32 @@ pub enum Request {
     /// timeline's mix (muted, left out by solo, or empty) is an error.
     #[serde(rename = "mixer.preview")]
     MixerPreview { track: String, volume_db: f64 },
+    /// The loudness meter of the mix (ITU-R BS.1770-4, as
+    /// `analyze.loudness`): what the timeline plays, before the monitoring
+    /// mute. Loudness is in LUFS, and null where there is no level (-70
+    /// LUFS or less). `momentary` (400 ms) and `short` (3 s) end at the
+    /// sound heard last, and `channels` has the momentary loudness of each
+    /// channel, without LFE. `true_peak` (dBTP) is the highest since the
+    /// reset. `momentary_max`, `short_max`, `range` (LU) and `integrated`
+    /// gather only while `running`. `target` and `scale` come from the
+    /// project; LU is a value less `target`. `absolute`: the meter shows
+    /// LUFS, not LU.
+    #[serde(rename = "loudness.get")]
+    LoudnessGet {},
+    /// Start (`running: true`) or pause (`running: false`) what the
+    /// loudness meter gathers, and show it in LUFS (`absolute: true`) or in
+    /// LU from the target. Not saved. Answers what `loudness.get` does.
+    #[serde(rename = "loudness.set")]
+    LoudnessSet {
+        #[serde(default)]
+        running: Option<bool>,
+        #[serde(default)]
+        absolute: Option<bool>,
+    },
+    /// Clear the loudness meter and stop what it gathers until
+    /// `loudness.set` starts it. Answers what `loudness.get` does.
+    #[serde(rename = "loudness.reset")]
+    LoudnessReset {},
     /// The Media tab: the bin shown, the sort order and how it shows
     /// its items. Source Tape strings together that bin's media, and its
     /// bins', in that order.
@@ -7452,6 +7479,14 @@ pub struct ProjectSet {
     /// until a longer list gives them back. Usual: `["L1"]`.
     #[serde(default)]
     pub node_stack_layers: Option<Vec<String>>,
+    /// The Target Loudness Level in LUFS, from -30 to 0: the loudness that
+    /// the loudness meter shows as 0 LU. Usual: -23.
+    #[serde(default)]
+    pub target_loudness: Option<f64>,
+    /// The scale of the loudness meter: `ebu9` (the usual: 18 LU under the
+    /// target to 9 LU over it) or `ebu18` (36 LU under to 18 LU over).
+    #[serde(default)]
+    pub loudness_scale: Option<crate::model::LoudnessScale>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -8919,6 +8954,9 @@ impl Request {
                 | Self::PlayerBounds { .. }
                 | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
+                | Self::LoudnessGet {}
+                | Self::LoudnessSet { .. }
+                | Self::LoudnessReset {}
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}
                 | Self::SelectionSet { .. }

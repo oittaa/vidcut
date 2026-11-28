@@ -108,6 +108,12 @@ Ducking:
 - Alt+D turns ducking on or off for the track of the selected clip (`Workspace::toggle_duck`).
 - Before a change that needs the speech detector, the GUI asks to download it (`Workspace::duck`).
 
+Loudness meter:
+
+- `Workspace::loudness_meter` draws the loudness meter at the right of the Mix strip. It reads `Snapshot::loudness` each frame ([playback](playback.md#sound)).
+- The meter shows LU from the `target_loudness` of the project, or LUFS with `Snapshot::loudness_absolute`. Its bars span the `loudness_scale` of the project.
+- Start, Pause and Resume send `loudness.set` with `running`. Reset sends `loudness.reset`. Absolute Scale sends `loudness.set` with `absolute`.
+
 AI models:
 
 - Before a change that makes the timeline use an AI model that this computer does not have, the GUI asks to download it (`Workspace::send_asking`).
@@ -1039,7 +1045,7 @@ sequenceDiagram
 - `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`
 - `crates/vidcut/src/gui/subtitles.rs`, `crates/vidcut/src/gui/titles.rs`
 - `crates/vidcut/src/gui/speech.rs`, `crates/vidcut/src/gui/retime.rs`
-- `crates/vidcut/src/gui/mixer.rs`, `crates/vidcut/src/gui/ducking.rs`
+- `crates/vidcut/src/gui/mixer.rs`, `crates/vidcut/src/gui/ducking.rs`, `crates/vidcut/src/gui/loudness.rs`
 - `crates/vidcut/src/gui/dialog.rs`, `crates/vidcut/src/gui/look_tiles.rs`
 - `crates/vidcut/src/gui/placing.rs`, `crates/vidcut/src/gui/inspector.rs`, `crates/vidcut/src/gui/equalizer.rs`, `crates/vidcut/src/gui/window.rs`
 - `crates/vidcut/src/live/`
