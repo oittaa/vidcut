@@ -9,4 +9,4 @@
 - Wipes of a still against the clip, and the split screen modes.
 - Color groups with Pre-Clip and Post-Clip grades.
 - Shared nodes.
-- Append Node Graph and Ripple Node Changes.
+- Append Node Graph by a drop onto a link, and as a compound node. Ripple Node Changes to Current Group.

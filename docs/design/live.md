@@ -606,6 +606,7 @@ The bar and the Jobs button:
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
   - Ctrl+C with the Thumbnail timeline in focus sends `grade.copy` without a node. The live core keeps the whole grade (`grade_clipboard`) for `grade.apply`.
+  - `EffectsPage::ripple_base` keeps the settings of the current corrector from when it became current (`Workspace::keep_ripple_base`). Ripple Node Changes to Selected Clips sends them as `before`, then clears them.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
   - The Nodes submenu of the Color menu (`Workspace::nodes_menu`) runs the same actions (`Workspace::grade_keys_struck`). Its Delete Current Node and Label Selected Node act on the current node.

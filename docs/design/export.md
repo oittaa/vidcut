@@ -929,6 +929,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
   - `grade.apply` puts a whole clip grade in other clips (`ops::grade::apply`). The keyframes keep their source frames, because a clip grade keeps its keyframes on source frames.
+  - `grade.ripple` (`ops::ripple::ripple`) compares the JSON of two `CopiedNode` values, part by part. Why: one comparison covers each setting of a corrector, also a new one.
+    - A part that only one side has goes whole. Why: a part at its usual value is left out of the JSON, and a part of it could be incomplete.
+    - Each target then takes the changed parts on a copy of its own settings, and `grade.paste` stores it.
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
   - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
   - A serial node takes the picture of the node before it. The oldest link that took that picture then takes the picture of the new node (`oldest_taker`).
@@ -1188,10 +1191,11 @@ The passes:
 The stills of the Color page ([spec §8.31](../spec.md#831-gallery-and-apply-grade-pp-3050-33323341-33613366-3400-3405)):
 
 - `Project::stills` holds each `Still` in the project file. A still holds copies of the grades, not links to them. Thus a later change of the clip does not change the still.
-- `ops::gallery` holds the edits: `grab`, `remove`, `apply` and `get`.
+- `ops::gallery` holds the edits: `grab`, `remove`, `apply`, `append` and `get`.
   - `ops::gallery::color_clip` gives the topmost clip at a frame that takes a grade. The Color page uses it for the clip at the playhead too.
   - `apply` puts a copy of the clip grade into each target with `put_whole`. It gives the copy the node stack layers of the project first (`Grade::counted`).
   - `apply` refuses a grade with keyframes. Why: Apply Grades Using is not built, and a copy of the keyframes is only one of its three modes.
+  - `append` adds the nodes of one layer of the still to each target with `ops::grade::append_graph`. A link from the picture that comes in moves to the output of the target. `append` refuses a grade with keyframes too.
 - The picture of a still:
   - `editor::still_looks` gives the plan of the frame: `render::flatten` of one frame, with no sound.
   - `Env::still` draws it, and `AvEnv` writes it with `export::still`. This path draws as the export of a frame does, with the timeline grade and the output LUT.
