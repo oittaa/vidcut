@@ -10933,6 +10933,22 @@ impl Project {
         });
     }
 
+    pub fn set_open_fps(&mut self, fps: Rational) {
+        if let Some(id) = self.checked_out_compound().map(str::to_owned)
+            && let Some(k) = self.compound_mut(&id)
+        {
+            k.fps = fps;
+            return;
+        }
+        let mut f = self.format();
+        f.fps = fps;
+        f.drop_frame &= fps.has_drop_frame();
+        match self.timeline_mut() {
+            Some(t) => t.own = Some(f),
+            None => self.settings.set_fps(fps),
+        }
+    }
+
     pub fn flat_settings(&self) -> Settings {
         let f = self.format();
         Settings {

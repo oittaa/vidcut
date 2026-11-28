@@ -6325,7 +6325,11 @@ The Audio page follows the Fairlight page of the manual.
   - A source at a rate that is not the rate of the timeline gets the count of its first frame too.
   - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
-  - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
+  - Each clip renders at the frame rate of its media (p. 4114). Its file has that frame rate.
+    - A still, a title, a generator and a compound clip render at the frame rate of the timeline.
+    - The file holds the source frames that the clip shows, and no others ([gotchas](gotchas.md#resolves-renders)).
+    - The record timecode of the file and the times of its subtitles count at that frame rate.
+    - An interlaced source renders at its field rate, one frame for each field (D34).
   - The parts of a name go in this order: unique prefix, name, frame count, File Suffix, unique suffix.
   - Separate Folders puts each file in a folder of its own. An audio track counts by its own number: A2 and V2 both give `0002`.
   - The folders go in this order: the Source Folder Levels, the folder of Separate Folders, then the File Subfolder.
@@ -6797,11 +6801,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Mirrored matrices count only as rotations.
 - **D34. Interlaced sources** (p. 741).
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
-  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame.
+  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`. Each frame gives one frame, except in the field render below.
   - The deinterlacer keeps the first field.
+  - The rows that the deinterlacer makes stay in the code range of the source, as in `bwdif`.
   - An interlaced clip comes in with deinterlacing on.
   - Resolve's Clip Attributes has no switch that turns it off.
-  - Output is never interlaced, and never at the field rate.
+  - Output is never interlaced.
+  - An Individual clips render of an interlaced clip is at its field rate (§10.1). Each field is a frame of the file.
+    - Resolve doubles the rows of each field there. vidcut makes the missing rows with the deinterlacer ([gotchas](gotchas.md#resolves-renders)).
+    - The first frame of each pair keeps the first field. The second frame keeps the second field, as `bwdif` does in its field mode.
+  - Other output is at the frame rate of the timeline, not at the field rate.
 - **D35. HDR and color** (pp. 230–239).
   - A clip is HDR when its transfer is PQ or HLG.
   - SDR output tone-maps it to BT.709.

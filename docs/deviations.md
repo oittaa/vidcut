@@ -1505,19 +1505,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A face that comes into the picture shows for some frames before the model finds it. The held box blurs it there.
   - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 
-## X175. Individual clips render at the frame rate of the timeline
-
-- **Resolve:**
-  - With Individual clips, each clip renders at its own frame rate (p. 4114).
-  - Measured in Resolve Studio 21.2, on a 24 fps timeline, with `interlaced-tff.mov` (1080i 25, 2 s):
-    - The file name is `interlaced-tff00000001.mp4`.
-    - An EXR render gives 100 frames, numbered 1 to 100.
-- **vidcut:**
-  - Each clip renders at the frame rate of the timeline.
-  - The same clip gives the name `interlaced-tff00000000`, and an EXR render gives 48 frames, numbered 0 to 47.
-- **Why:**
-  - Not built yet ([todo](todo/export-file-tab.md)).
-
 ## X176. Auto Smart Reframe follows the published UNISAL saliency model
 
 - **Resolve:**

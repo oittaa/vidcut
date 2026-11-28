@@ -191,6 +191,7 @@ pub struct Cached {
 #[derive(Clone)]
 pub struct Woven {
     pub top_first: bool,
+    pub second: bool,
     pub before: Option<Arc<Picture>>,
     pub after: Option<Arc<Picture>>,
 }
@@ -434,6 +435,7 @@ impl Picture {
         };
         Ok(alone.with_woven(Woven {
             top_first: w.top_first,
+            second: w.second,
             before: down(&w.before)?,
             after: down(&w.after)?,
         }))

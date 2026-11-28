@@ -2,7 +2,7 @@ use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, VideoCodec};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: make_fixture CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES]";
+    let usage = "usage: make_fixture CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES] [tff|bff]";
     let [codec, container, size, fps, frames, rest @ ..] = args.as_slice() else {
         panic!("{usage}")
     };
@@ -50,6 +50,12 @@ fn main() {
     }
     if let Some(b) = rest.iter().find_map(|a| a.strip_prefix("b=")) {
         spec = spec.bframes(b.parse().expect(usage));
+    }
+    if rest.iter().any(|a| a == "tff") {
+        spec = spec.interlaced(true);
+    }
+    if rest.iter().any(|a| a == "bff") {
+        spec = spec.interlaced(false);
     }
     let started = std::time::Instant::now();
     let path = fixture::ensure(&spec).expect("generating fixture");
