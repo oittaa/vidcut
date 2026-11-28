@@ -1,5 +1,5 @@
-use crate::error::Result;
-use crate::model::{Clip, ClipFilter, PictureTool, Project, Tool};
+use crate::error::{Error, Result};
+use crate::model::{Clip, ClipFilter, PictureTool, Project, Tool, Track, TrackKind};
 
 pub fn check(f: &ClipFilter) -> Result<()> {
     match f {
@@ -7,6 +7,38 @@ pub fn check(f: &ClipFilter) -> Result<()> {
         ClipFilter::Marked { color: Some(c) } => super::check_color(c),
         _ => Ok(()),
     }
+}
+
+pub fn strip<'a>(p: &'a Project, f: Option<&ClipFilter>) -> Vec<(&'a Track, &'a Clip)> {
+    let mut clips: Vec<_> = (p.tracks.iter())
+        .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
+        .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
+        .filter(|(_, c)| !c.is_generator() && f.is_none_or(|f| admits(p, c, f)))
+        .collect();
+    clips.sort_by_key(|(t, c)| (c.start, c.end(), t.number()));
+    clips
+}
+
+pub fn met(p: &Project, f: &ClipFilter, (a, b): (i64, i64)) -> Result<Vec<String>> {
+    let ids: Vec<String> = (strip(p, Some(f)).into_iter())
+        .filter(|(_, c)| c.start < b && c.end() > a)
+        .map(|(_, c)| c.id.clone())
+        .collect();
+    match ids.is_empty() {
+        true => Err(Error::invalid("no clip in the range meets the clip filter")),
+        false => Ok(ids),
+    }
+}
+
+pub fn span(p: &Project, f: &ClipFilter) -> Result<(i64, i64)> {
+    if f.is_all() {
+        return Err(Error::usage("render filtered needs a clip filter"));
+    }
+    let clips = strip(p, Some(f));
+    let a = clips.iter().map(|(_, c)| c.start).min();
+    let b = clips.iter().map(|(_, c)| c.end()).max();
+    a.zip(b)
+        .ok_or_else(|| Error::invalid("no clip meets the clip filter"))
 }
 
 pub fn admits(p: &Project, c: &Clip, f: &ClipFilter) -> bool {

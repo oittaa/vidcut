@@ -238,6 +238,10 @@ pub enum RenderRange {
     /// From the In to the Out of the timeline. Without an In, from its
     /// start. Without an Out, to its end.
     InOut,
+    /// The clips that meet its clip filter. The pick sets the In at the
+    /// first frame of the first of them, and the Out at the last frame of
+    /// the last. Only with a clip filter.
+    Filtered,
 }
 
 impl RenderRange {
@@ -253,9 +257,10 @@ pub enum ClipFilter {
     /// Every clip.
     #[default]
     All,
-    /// The clips with a grade that is not the usual grade.
+    /// The clips with a grade that changes their picture, or a grade with
+    /// keyframes.
     Graded,
-    /// The clips with the usual grade.
+    /// The clips with no such grade.
     Ungraded,
     /// The clips with a composition that has more nodes than its MediaIn
     /// and its MediaOut.
