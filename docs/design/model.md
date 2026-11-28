@@ -760,7 +760,10 @@ Writing:
   - `Tool::takes_from` adds one case: the effect mask of a tool takes a picture too (`Tool::takes_picture_mask`). `Node.mask_channel`, `Node.mask_range` and `Node.mask_clip` then make the mask from it.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
     - Its `PatternKind` tells how a track follows it. A `point` pattern also has a search area and a `PatternChannel` ([analysis](analysis.md#tracks)).
-    - `Tracker::free_name` and `Tracker::free_point` name a new pattern with the first number that no pattern has.
+    - `Tracker.made` counts the patterns that the Tracker made, also the deleted ones. `Tracker::made_count` gives the count.
+    - `Tracker::next_pattern` names a new pattern with the next number of the count, and puts it in the place of that number (`Tracker::CORNERS`, `Tracker::LATER`).
+    - `Tracker::push_pattern` and `Tracker::remove_pattern` keep the count. Each op that adds or removes a pattern uses them.
+    - `Tracker.made` is left out while it is the number of patterns.
     - The `AdaptiveMode` and the Match Tolerance of the `Tracker` act on its `point` patterns.
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.

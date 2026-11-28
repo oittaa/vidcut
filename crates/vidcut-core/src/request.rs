@@ -4689,7 +4689,8 @@ pub enum Request {
         clip: ClipRef,
         node: String,
         /// The name of the pattern, for example `Face 1`. Left out, it is
-        /// the first free name of the tracker.
+        /// `Pattern` and the count of the patterns that the tracker has made,
+        /// also the deleted ones.
         #[serde(default)]
         name: Option<String>,
         /// The area on frames of the file: at least one sample, one for a
@@ -8410,7 +8411,8 @@ pub struct NodeChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_height: Option<f64>,
     /// How far the point that a node follows is from the middle of the
-    /// pattern, `[x, y]` as fractions of the picture, up.
+    /// pattern, `[x, y]` as fractions of the picture, up. Each from -1000000
+    /// to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_offset: Option<[f64; 2]>,
     /// The width of the search area of a `point` pattern, from 0.001 to 1.
@@ -8422,12 +8424,16 @@ pub struct NodeChange {
     /// The channel in which a track of a `point` pattern looks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_channel: Option<PatternChannel>,
-    /// On, a tracker gets a new `model` pattern at the end of its list,
-    /// with the first free name.
+    /// On, a tracker gets a new `model` pattern at the end of its list. Its
+    /// name is `Pattern` and the count of the patterns that the tracker has
+    /// made, also the deleted ones. Thus a deleted number does not come
+    /// again. Its place follows the same count.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub add_pattern: bool,
-    /// On, a tracker gets a new `point` pattern at the end of its list,
-    /// with the first free name.
+    /// On, a tracker gets a new `point` pattern at the end of its list. Its
+    /// name is `Point` and the count of the patterns that the tracker has
+    /// made, also the deleted ones. Thus a deleted number does not come
+    /// again. Its place follows the same count.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub add_point: bool,
     /// On, the pattern goes from the tracker. A node that follows it then

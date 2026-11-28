@@ -735,8 +735,11 @@ The bar and the Jobs button:
     - Stop Tracking asks first (`Workspace::stop_tracks_window`).
     - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).
   - The Trim row sends `comp.set` with `pattern_trim` for the picked pattern, and the `frame` of the playhead.
-  - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
+  - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern and Add Point. A click on a name picks the pattern.
+    - Add Pattern and Add Point pick the new pattern. A delete of the picked pattern picks the row above.
+    - `pattern_picked` can be one row after the last row. Thus the pick of a new pattern stays until the new pattern comes.
   - Name, X Offset and Y Offset are of the picked pattern.
+  - A Point pattern also has Pattern Width, Pattern Height, Search Width, Search Height and Channel.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - The Subject menu, Model, Quality and the Advanced rows change the find values of the Tracker (`FindValues`). Each change sends `comp.set` with `find`.
     - Why: the values stay in the project and have undo. A find from the CLI or MCP takes them too.

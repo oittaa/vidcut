@@ -6522,7 +6522,7 @@ pub struct Tracker {
     pub adaptive_mode: Option<AdaptiveMode>,
     /// The most that the picture of a `point` pattern can change on a frame
     /// for `best_match` to take it again, from 0 to 1. At 0 it takes no
-    /// change, and at 1 it takes each. Usual: 0.5.
+    /// change, and at 1 it takes each. Usual: 0.1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_tolerance: Option<f64>,
     /// The values of Find of the tracker. `motion.find` takes each value
@@ -6530,6 +6530,12 @@ pub struct Tracker {
     /// usual values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub find: Option<FindValues>,
+    /// How many patterns the tracker has made, also the ones deleted
+    /// since. A new pattern takes the next number in its name, and its
+    /// place follows the count. Left out while it is the number of
+    /// patterns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made: Option<u32>,
 }
 
 /// How a track takes the picture of a `point` pattern again.
@@ -6568,20 +6574,20 @@ pub enum PatternKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PatternChannel {
-    /// The channel in which the box has the most contrast on the first
-    /// frame of the track.
-    #[default]
-    Auto,
     /// The red channel.
     Red,
     /// The green channel.
     Green,
     /// The blue channel.
     Blue,
-    /// 0.2126 red, 0.7152 green and 0.0722 blue.
-    Luminance,
     /// The alpha channel.
     Alpha,
+    /// 0.2126 red, 0.7152 green and 0.0722 blue.
+    #[default]
+    Luminance,
+    /// The channel in which the box has the most contrast on the first
+    /// frame of the track.
+    Auto,
 }
 
 /// The values of Find of a tracker, as `motion.find` takes them. A value
@@ -6692,7 +6698,8 @@ pub enum ReferenceTime {
 /// box is. A field left out is at its usual value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pattern {
-    /// Its name in the list of the tracker, for example `Pattern 1`.
+    /// Its name in the list of the tracker, for example `Pattern 1`. A new
+    /// pattern takes the number of the patterns that the tracker has made.
     pub name: String,
     /// Off, the track buttons of the effects page pass over the pattern.
     /// `motion.track` still tracks it. Usual: on.
@@ -6704,7 +6711,10 @@ pub struct Pattern {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<MotionPath>,
     /// The middle of its own box, `[x, y]` as fractions of the picture from
-    /// its bottom left, each from -10 to 10. Usual: `[0.25, 0.75]`.
+    /// its bottom left, each from -10 to 10. A new pattern of a tracker is
+    /// at `[0.25, 0.75]`, `[0.75, 0.75]`, `[0.25, 0.25]` or `[0.75, 0.25]`
+    /// for the first four patterns that it makes, and then at `[0.5, 0.5]`.
+    /// Usual: `[0.25, 0.75]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<[f64; 2]>,
     /// The width of its own box, as a fraction of the width of the picture,
@@ -6717,7 +6727,7 @@ pub struct Pattern {
     pub height: Option<f64>,
     /// How far the point that a node follows is from the middle of the
     /// pattern, `[x, y]` as fractions of the width and the height of the
-    /// picture, up. Each from -10 to 10. Usual: `[0, 0]`.
+    /// picture, up. Each from -1000000 to 1000000. Usual: `[0, 0]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
     /// How a track follows it. Usual: `model`.
@@ -6733,7 +6743,7 @@ pub struct Pattern {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_height: Option<f64>,
     /// The channel in which a track of a `point` pattern looks. Usual:
-    /// `auto`.
+    /// `luminance`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<PatternChannel>,
 }

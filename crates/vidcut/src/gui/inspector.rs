@@ -1414,7 +1414,7 @@ fn fixed_row(ui: &mut egui::Ui, text: &str, mut now: f64) {
 }
 
 fn offset_row(ui: &mut egui::Ui, (id, text): (egui::Id, &str), now: f64) -> Option<f64> {
-    number_row(ui, (id, text), (now, 0.0), (Pattern::PLACES, 0.001))
+    number_row(ui, (id, text), (now, 0.0), (Pattern::OFFSETS, 0.001))
 }
 
 fn number_row(
@@ -2816,10 +2816,10 @@ impl Workspace {
             .filter(|&k| t.patterns[k].enabled)
             .collect();
         let mine = |c: &String, n: &String| *c == clip.id && *n == node.name;
-        let mut pick = (self.inspector.pattern_picked.as_ref())
+        let mut kept_pick = (self.inspector.pattern_picked.as_ref())
             .filter(|(c, n, _)| mine(c, n))
-            .map_or(0, |x| x.2)
-            .min(t.patterns.len().saturating_sub(1));
+            .map_or(0, |x| x.2);
+        let mut pick = kept_pick.min(t.patterns.len().saturating_sub(1));
         let set = |mut params: Value| {
             params["clip"] = json!(clip.id);
             params["node"] = json!(node.name);
@@ -2922,10 +2922,16 @@ impl Workspace {
                         .clicked()
                     {
                         pick = k;
+                        kept_pick = k;
                     }
                 });
                 if icon(ui, TRASH, "Delete", true) {
                     sends.push(set(json!({ "pattern": k + 1, "remove_pattern": true })));
+                    kept_pick = if k <= pick {
+                        pick.saturating_sub(1)
+                    } else {
+                        pick
+                    };
                 }
                 ui.end_row();
             }
@@ -2946,6 +2952,7 @@ impl Workspace {
                         let mut params = json!({});
                         params[put] = json!(true);
                         sends.push(set(params));
+                        kept_pick = t.patterns.len();
                     }
                 }
             });
@@ -2972,6 +2979,34 @@ impl Workspace {
                     naming = None;
                 }
                 ui.end_row();
+                if pattern.kind() == PatternKind::Point {
+                    let now = [pattern.wide(), pattern.high()];
+                    let sides = [
+                        ("Pattern Width", "pattern_width"),
+                        ("Pattern Height", "pattern_height"),
+                        ("Search Width", "search_width"),
+                        ("Search Height", "search_height"),
+                    ];
+                    let search = pattern.search();
+                    let rows = [
+                        (now[0], Pattern::POINT_SIDE, Pattern::SIDES),
+                        (now[1], Pattern::POINT_SIDE, Pattern::SIDES),
+                        (search[0], Pattern::SEARCH, Pattern::SEARCHES),
+                        (search[1], Pattern::SEARCH, Pattern::SEARCHES),
+                    ];
+                    for (i, ((name, put), (now, usual, range))) in
+                        sides.into_iter().zip(rows).enumerate()
+                    {
+                        let id =
+                            ui.scope_id()
+                                .with(("pattern-size", &clip.id, &node.name, pick, i));
+                        if let Some(v) = number_row(ui, (id, name), (now, usual), (range, 0.001)) {
+                            let mut params = json!({ "pattern": pick + 1 });
+                            params[put] = json!(v);
+                            sends.push(set(params));
+                        }
+                    }
+                }
                 let now = pattern.shift();
                 for (axis, name) in ["X Offset", "Y Offset"].into_iter().enumerate() {
                     let id =
@@ -2984,28 +3019,6 @@ impl Workspace {
                     }
                 }
                 if pattern.kind() == PatternKind::Point {
-                    let now = pattern.search();
-                    let sides = [
-                        ("Search Width", "search_width"),
-                        ("Search Height", "search_height"),
-                    ];
-                    for (axis, (name, put)) in sides.into_iter().enumerate() {
-                        let id = ui.scope_id().with((
-                            "pattern-search",
-                            &clip.id,
-                            &node.name,
-                            pick,
-                            axis,
-                        ));
-                        let usual = (now[axis], Pattern::SEARCH);
-                        if let Some(v) =
-                            number_row(ui, (id, name), usual, (Pattern::SEARCHES, 0.001))
-                        {
-                            let mut params = json!({ "pattern": pick + 1 });
-                            params[put] = json!(v);
-                            sends.push(set(params));
-                        }
-                    }
                     let channel = pattern.channel();
                     let changed = channel != PatternChannel::default();
                     label(ui, "Channel", changed);
@@ -3139,7 +3152,8 @@ impl Workspace {
             acts.push(node_set(slot, "find", json!(find)));
         }
         self.inspector.naming = naming;
-        self.inspector.pattern_picked = Some((clip.id.clone(), node.name.clone(), pick));
+        let kept_pick = kept_pick.min(t.patterns.len());
+        self.inspector.pattern_picked = Some((clip.id.clone(), node.name.clone(), kept_pick));
         self.inspector.find_open = open;
         for (method, params) in sends {
             self.send(method, params);

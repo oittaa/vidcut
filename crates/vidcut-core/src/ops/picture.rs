@@ -1017,6 +1017,7 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
         adaptive_mode: t.adaptive_mode.filter(|a| *a != AdaptiveMode::default()),
         match_tolerance: t.match_tolerance.filter(|v| *v != Tracker::TOLERANCE),
         find: t.find.filter(|f| *f != FindValues::default()),
+        made: t.made.filter(|m| *m as usize > t.patterns.len()),
         ..t.clone()
     })
 }
@@ -1031,8 +1032,8 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
         within(Some(v), Pattern::PLACES, why)?;
     }
     for v in p.offset.into_iter().flatten() {
-        let why = "a pattern's offset is two fractions, each from -10 to 10";
-        within(Some(v), Pattern::PLACES, why)?;
+        let why = "a pattern's offset is two fractions, each from -1000000 to 1000000";
+        within(Some(v), Pattern::OFFSETS, why)?;
     }
     let why = "a pattern's width and height are from 0.001 to 0.5";
     within(p.width, Pattern::SIDES, why)?;
