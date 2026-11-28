@@ -1188,6 +1188,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Shift+V selects one clip under the playhead (pp. 889, 900, 942).
     - It takes the lowest track that has a clip there.
     - The manual ties this key to the Source Track Selector of the Edit page. vidcut has no such control.
+  - Ctrl+Left and Ctrl+Right select the previous or the next clip. Ctrl+Up and Ctrl+Down select a clip on another track (pp. 825, 900).
+    - These keys start from the clip that was selected last. After the key, only the new clip is selected.
+    - Ctrl+Left and Ctrl+Right stay on the track of that clip. A gap does not count as a clip.
+    - Ctrl+Up and Ctrl+Down go to the nearest track above or below that has a clip and is not locked.
+    - The tracks are in the order of the screen: the highest video track first, then V1, A1 and the next audio tracks.
+    - On that track, the key selects the clip nearest the start of the selected clip.
+    - With no clip in that direction, the selection does not change.
+    - With no clip selected, the key selects the clip that Shift+V selects.
+    - The manual does not tell which clip counts as previous or above. Not measured ([todo](todo/shortcuts.md)).
 - **Edit points:**
   - The pointer at the center of an edit selects both sides (a roll).
   - The pointer just left or right of the edit selects one side (a resize).
@@ -6218,6 +6227,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |
+| Ctrl+Left / Ctrl+Right / Ctrl+Up / Ctrl+Down | Select the previous / next clip, or a clip above / below (§8.1) |
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |

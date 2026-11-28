@@ -4,6 +4,7 @@ use std::sync::Arc;
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{FindModel, Marker, PictureTool, Project, RenderCache, Subject};
+use vidcut_core::ops::beside::{Toward, clip_beside};
 use vidcut_core::preferences::Scope;
 use vidcut_core::request::{GradeLevel, Page, Request, ViewerMode};
 use vidcut_core::shortcuts::{Action, Panel};
@@ -1994,6 +1995,29 @@ impl Workspace {
             });
             let clips: Vec<String> = clip.into_iter().collect();
             self.send("selection.set", json!({ "clips": clips }));
+        }
+        let steps = [
+            (Action::SelectPrevious, Toward::Previous),
+            (Action::SelectNext, Toward::Next),
+            (Action::SelectAbove, Toward::Above),
+            (Action::SelectBelow, Toward::Below),
+        ];
+        for (action, toward) in steps {
+            if !fired.pressed(action) {
+                continue;
+            }
+            let at = self.snap.timeline.position;
+            let from = self.snap.selection.clips.last();
+            let clip = self.project().and_then(|p| match from {
+                Some(from) => clip_beside(p, from, toward),
+                None => p
+                    .tracks
+                    .iter()
+                    .find_map(|t| t.clip_at(at).map(|i| t.clips[i].id.clone())),
+            });
+            if let Some(clip) = clip {
+                self.send("selection.set", json!({ "clips": [clip], "cues": [] }));
+            }
         }
 
         let typed = [

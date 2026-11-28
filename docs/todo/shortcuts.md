@@ -16,6 +16,4 @@ The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). Th
 
 **Keys that move the clip selection:**
 
-- Ctrl+Left, Ctrl+Right, Ctrl+Up and Ctrl+Down move the clip selection in the manual (pp. 825, 900).
-- The manual does not tell which clip counts as previous or above.
-- To do: measure that rule, then build the four keys.
+- To do: cases 1 to 12 of shortcuts-resolve-runs.md tell which clip Ctrl+Left, Ctrl+Right, Ctrl+Up and Ctrl+Down select. Then make `ops::beside::clip_beside` follow them.
