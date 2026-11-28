@@ -1517,3 +1517,22 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The pixels are those of a frame 1080 pixels on its short side.
 - **Why:**
   - The owner chose the published UNISAL model. A published model cannot give the move of the model of Resolve.
+
+## X177. ProRes 4444 and DNxHR 444 render cache files hold only 0..1
+
+- **Resolve:**
+  - The render cache formats ProRes 4444, ProRes 4444 XQ and DNxHR 444 keep the values below 0 and above 1 (pp. 201, 203).
+  - Measured in Resolve Studio 21.2, with gray ramps from -0.1 to 2.0:
+    - A cache file holds each value v as E = PQ(0.01 × |v|^2.4). Thus v goes through gamma 2.4, with 1.0 at 100 nits, and then through the SMPTE ST 2084 curve.
+    - In DNxHR 444, one unit of E is 2628 codes of 12 bits for a v above 0. For a v below 0, it is 876 codes.
+    - The steps of ProRes 4444 and ProRes 4444 XQ are half of the steps of DNxHR 444.
+    - In DNxHR 444, one code is a step of 0.0016 near 1.0 and 0.0029 near 2.0.
+- **vidcut:**
+  - These three cache formats cut the values to 0..1.
+  - In 0..1, they keep the full 10-bit precision: 876 codes, with a step of 0.0011.
+  - The cache format Uncompressed 16-bit Float keeps all values.
+  - Exports do not read the render cache. Thus an export keeps all values.
+- **Why:**
+  - The FFmpeg encoders prores_ks, prores_aw and dnxhd take only 10-bit input.
+  - At 10 bits, the curve of Resolve gives 0..1 only 334 codes, in place of 876. One code near 1.0 is then a step of 0.0063.
+  - When these FFmpeg encoders take 12-bit input, the cache keeps the values outside 0..1 with the curve of Resolve ([todo](todo/float-cache-and-ai.md)).
