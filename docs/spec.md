@@ -4396,8 +4396,31 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.clear` with `all_layers` resets each layer. Undo gives the grades back ([gotchas](gotchas.md#resolves-edits)).
   - vidcut: the group items are grey on a clip in no color group ([§8.33](#833-color-groups-pp-33763381-3400)).
   - vidcut: Post Group Node Stack Layer, Copy Active Layer and the layers of a still are not built yet ([todo](todo/color-gallery.md)).
+- **Shared nodes** (pp. 3373–3375):
+  - A shared node is a corrector with copies in the grades of clips. A change of one copy goes to each copy (p. 3373).
+  - A grade can hold many shared nodes, in any order, with usual correctors between them (p. 3374).
+  - A copy of a shared node has a badge, and it is locked (pp. 3373–3374).
+  - Save as Shared Node, in the menu of a corrector, makes the corrector a shared node. Lock Node then unlocks it (p. 3374).
+  - The Add Node submenu has each shared node at its bottom. A shared node with a label shows its label there (p. 3374).
+  - A copy of a grade or of a still also copies its shared nodes (p. 3375).
+  - Convert to Corrector, in the menu of a copy, makes that copy a usual corrector (p. 3375).
+  - The Delete Shared Node submenu of a copy lists the shared nodes. Each copy of the deleted node stays in its grade, with no effect (p. 3375).
+  - A deleted shared node leaves the Add Node submenu (p. 3375).
+  - vidcut: `grade.share` makes a corrector of a clip grade a shared node. `shared_nodes` in the project keeps its settings, with a number from 1.
+  - vidcut: each copy holds that number in `shared`. The settings of a copy are all but its links, its place and its Magic Mask.
+  - vidcut: thus its keyframes, windows, label, lock and on state go to each copy (not measured).
+  - vidcut: a change of a copy changes the shared node. After each request, each copy takes the settings of its shared node. One undo step undoes the change in each copy.
+  - vidcut: a copied clip, grade or still keeps the links of its copies. Each copy then takes the settings of its shared node (not measured).
+  - vidcut: `grade.shared.add` adds a copy after a node, as Add Serial does (not measured). The Add Node submenu sends it.
+  - vidcut: a shared node with no label shows as Shared Node and its number (not measured).
+  - vidcut: `grade.unshare` makes a copy a usual corrector. It keeps its settings, and it is unlocked (not measured).
+  - vidcut: `grade.shared.delete` deletes a shared node. Each copy becomes a corrector with no change, and keeps its links, place and label (not measured).
+  - vidcut: a copy of no shared node becomes a usual corrector that keeps its settings (not measured).
+  - vidcut: the timeline grade has no copies. A copy that goes into it becomes a usual corrector. So does a copy in an imported timeline (not measured).
+  - vidcut: the grades of a color group have no copies either. The Node Editor shows no shared node items in their modes (not measured).
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`.
+`grade.share`, `grade.unshare`, `grade.shared.add` and `grade.shared.delete` work on shared nodes. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
 `grade.get` gives the nodes and the `output`.
 

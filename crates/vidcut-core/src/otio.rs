@@ -2332,8 +2332,9 @@ fn our_str(item: &Value, key: &str) -> Option<String> {
 }
 
 fn our_picture(item: &Value) -> Option<Picture> {
-    let p: Picture =
+    let mut p: Picture =
         serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
+    p.grade.iter_mut().for_each(Grade::unshared);
     crate::ops::picture::checked(&p)
         .ok()
         .flatten()

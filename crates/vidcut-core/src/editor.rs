@@ -884,6 +884,7 @@ impl Editor {
             _ => mutate(&mut working, &request, env, playhead, dry_run)?,
         };
         ops::linked::end_lone(&mut working);
+        ops::shared::synced(&mut working);
         need_timeline(&mut working)?;
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
@@ -5748,6 +5749,28 @@ fn mutate(
             ops::grade::paste(p, &of, *node, settings)?;
             Value::Null
         }
+        Request::GradeShare { clip, layer, node } => {
+            let of = grade_of(p, clip, (false, *layer, None), playhead)?;
+            json!({ "shared": ops::shared::share(p, &of, *node)? })
+        }
+        Request::GradeUnshare { clip, layer, node } => {
+            let of = grade_of(p, clip, (false, *layer, None), playhead)?;
+            ops::shared::unshare(p, &of, *node)?;
+            Value::Null
+        }
+        Request::GradeSharedAdd {
+            clip,
+            layer,
+            node,
+            shared,
+        } => {
+            let of = grade_of(p, clip, (false, *layer, None), playhead)?;
+            json!({ "node": ops::shared::add(p, &of, *node, *shared)? })
+        }
+        Request::GradeSharedDelete { shared } => {
+            ops::shared::remove(p, *shared)?;
+            Value::Null
+        }
         Request::GradeRipple {
             clip,
             layer,
@@ -8831,6 +8854,9 @@ pub fn open_otio(
     p.bins = meta.bins;
     p.groups = meta.groups;
     p.color_groups = meta.color_groups;
+    for g in &mut p.color_groups {
+        (g.pre.iter_mut().chain(&mut g.post)).for_each(crate::model::Grade::unshared);
+    }
     p.tape_marks = meta.tape_marks;
     p.timelines = meta.timelines.into();
     p.recent = meta.recent;

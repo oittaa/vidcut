@@ -3561,6 +3561,52 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<CopiedNode>,
     },
+    /// Make a corrector of the grade of a clip a shared node (Save as
+    /// Shared Node), and lock it. A change of a copy of a shared node goes
+    /// to each copy: all its settings but its links, its place and its
+    /// Magic Mask. Returns the `shared` number of the new shared node.
+    #[serde(rename = "grade.share")]
+    GradeShare {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+    },
+    /// Make a copy of a shared node in the grade of a clip a usual
+    /// corrector (Convert to Corrector). It keeps its settings and is
+    /// unlocked.
+    #[serde(rename = "grade.unshare")]
+    GradeUnshare {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+    },
+    /// Add a copy of shared node `shared` to the grade of a clip, after
+    /// `node`, as `grade.add` with `serial` does. Returns the `node` number
+    /// of the copy.
+    #[serde(rename = "grade.shared.add")]
+    GradeSharedAdd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The node stack layer of the clip grade, from 1 to the project's
+        /// `node_stack_layers` count. Left out: layer 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<usize>,
+        node: u32,
+        shared: u64,
+    },
+    /// Delete shared node `shared` (Delete Shared Node). Each copy stays in
+    /// its grade, with its links, its place and its label, as a corrector
+    /// with no adjustment.
+    #[serde(rename = "grade.shared.delete")]
+    GradeSharedDelete { shared: u64 },
     /// Ripple Node Changes to Selected Clips: give the changes of a
     /// corrector of the grade of a clip to the corrector of the same number
     /// in the grades of other clips. A change is a setting that differs

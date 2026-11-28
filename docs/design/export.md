@@ -925,6 +925,16 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `with_layer` removes the usual layers at the end. Thus a clip with one changed layer stores no empty layers after it.
   - A lower `node_stack_layers` count moves the layers above it to `Grade::kept_layers`, in each clip of the project (`ops::grade::count_layers`, `Grade::counted`). A higher count moves them back.
   - `ops::grade::clear_layers` resets each layer for `grade.clear` with `all_layers` (`Grade::reset_layers`). It keeps `kept_layers`.
+- A shared node (`SharedNode`) is in `Project::shared_nodes`. Each copy holds its number in `GradeNode::shared`. `ops::shared` has the requests.
+  - `GradeNode::shared_part` gives the settings that each copy shares. `GradeNode::take_shared` gives them to a copy, and keeps its links, its place and its Magic Mask.
+  - `ops::grade::edited` gives the grade before and after each change to `ops::shared::took`. A changed copy changes `SharedNode::node`.
+  - `took` then gives the new settings to the other copies at once, with `synced`. Why: a later change in the same `apply` can be on another copy, and that copy must not hold the old settings.
+  - `append_graph` gives the copies that it adds the settings of their shared nodes first (`ops::shared::current`). Why: a still keeps its copies as they were at the grab, and `took` must not take those settings.
+  - Why: a change finds its copy by its settings, not by its number. The numbers change when a node is added or removed.
+  - After each request, `ops::shared::synced` gives the settings of the shared node to each copy that differs, in each timeline and compound clip. It unlinks a copy of no shared node.
+  - Why: a copied clip, grade or still brings its copies. The copies then follow the shared node.
+  - `synced` writes only to the tracks that hold such a copy. Thus a request that changes no copy copies no track.
+  - The timeline grade has no copies: `ops::grade::store` and the import of a timeline unlink them (`Grade::unshared`).
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
@@ -1237,7 +1247,8 @@ Clips that share a Pre-Clip and a Post-Clip grade ([spec §8.33](../spec.md#833-
   - `ColorGroup::pre` and `ColorGroup::post` hold the two grades. Each has one layer.
   - `NextIds::color_group` gives the next ID. Thus an ID is not used again.
   - `validate` refuses a group with no name, and a group grade with layers or a Magic Mask.
-  - `validate` also refuses a clip whose group is not in the project.
+  - `validate` also refuses a clip whose group is not in the project, and a group grade with a copy of a shared node.
+  - `ops::grade::store` takes the copies of shared nodes out of a group grade, as it does for the timeline grade.
 - `ops::color_groups` holds the edits: `add`, `assign`, `unassign`, `rename`, `remove`, `collapse` and `get`.
   - `proposed_name` gives the name of a new group: the name of the last group made, with its number one higher.
   - `remove` takes the group out of each clip, also in the other timelines and in the compound clips.
