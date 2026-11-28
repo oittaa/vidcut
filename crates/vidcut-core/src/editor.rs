@@ -10202,14 +10202,21 @@ fn reframe_frames(p: &Project, c: &Clip) -> (Vec<i64>, Vec<crate::reframe::Frame
         center: crate::model::Picture::MIDDLE,
         size: 1.0,
     };
+    let file = |t: i64| f.file(f.at(t)) as f64;
+    let source = |t: i64| (c.source_in as f64 + c.phase + pace.exact(t - c.start)) / fps;
+    let (first, last) = (c.start, c.end() - 1);
+    let (file_from, file_to) = (file(first), file(last));
+    let (source_from, source_to) = (source(first), source(last));
+    let span = (last - first).max(1) as f64;
     for t in c.start..c.end() {
         let key = c.key_at(t as f64).round() as i64;
         let at = key as f64;
         let share = (t - c.start) as f64 / c.duration.max(1) as f64;
-        files.push(f.file(f.at(t)));
+        let even = (t - first) as f64 / span;
+        files.push((file_from + (file_to - file_from) * even).round() as i64);
         frames.push(crate::reframe::Frame {
             key,
-            source: (c.source_in as f64 + c.phase + pace.exact(t - c.start)) / fps,
+            source: source_from + (source_to - source_from) * even,
             seen: None,
             cut: false,
             zoom: picture.scale_at(at),

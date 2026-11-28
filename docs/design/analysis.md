@@ -354,8 +354,9 @@ flowchart TD
 
 - `picture.reframe` finds the point or the thing to follow on each frame, and the core decides the move ([spec](../spec.md#830-smart-reframe-pp-735-771772-815-920-956957-1208)).
 - `editor::reframe_plans` gives the plan of each clip. `editor::reframe_looks` gives the measurements that a GUI runs first.
-  - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`) and the frame of the file that it shows.
-    - It also gives the time of the source of each frame (`Pace::exact`).
+  - `reframe_frames` gives each frame of the clip: its keyframe position (`Clip::key_at`), a frame of the file and a time of the source (`Pace::exact`).
+    - The frames of the file and the times of the source go evenly from the first frame of the clip to its last frame.
+    - Why evenly: Resolve analyzes a retimed clip as at 100 %, and spreads that move over the clip. A Freeze Frame or a speed ramp does not change it.
     - It also gives the zoom, the anchor point, the rotation, the box of the Dynamic Zoom (`DynamicZoom::at`) and the position of each frame.
   - `reframe_shape` gives the size of the picture in the frame, by the scaling of the clip (`place::mapped`), and the flips.
 - Without `reference` and `subject`, `Env::salience` finds the point that stands out most on each frame ([saliency](#saliency)). `reframe::salient` takes the point of each frame.
