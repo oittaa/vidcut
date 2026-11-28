@@ -84,13 +84,8 @@ pub fn apply(p: &mut Project, id: &str, level: GradeLevel, clips: &[String]) -> 
             if clips.is_empty() {
                 return Err(Error::usage("give the clips that get the grade"));
             }
-            let count = p.settings.node_stack_layers.len();
-            for clip in clips {
-                grade::whole(p, clip)?;
-                let mut g = (still.grade.clone()).unwrap_or_else(|| Grade::usual(size));
-                g.counted(count, size);
-                grade::put_whole(p, clip, g)?;
-            }
+            let g = (still.grade).unwrap_or_else(|| Grade::usual(size));
+            grade::apply(p, &g, clips)?;
         }
         GradeLevel::Timeline => {
             if !clips.is_empty() {

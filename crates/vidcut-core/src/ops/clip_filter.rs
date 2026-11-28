@@ -79,3 +79,23 @@ pub fn admits(p: &Project, c: &Clip, f: &ClipFilter) -> bool {
         ClipFilter::Sizing => picture.is_some_and(|p| sizing(p)),
     }
 }
+
+pub fn top_at(clips: &[(&Track, &Clip)], at: i64) -> Option<usize> {
+    (clips.iter().enumerate())
+        .filter(|(_, (_, c))| c.start <= at && at < c.end())
+        .max_by_key(|(_, (t, _))| t.number())
+        .map(|(i, _)| i)
+}
+
+pub fn prior(p: &Project, at: i64, back: u32) -> Result<(String, String)> {
+    let clips = strip(p, p.timeline().map(|t| &t.clip_filter));
+    let i = top_at(&clips, at)
+        .ok_or_else(|| Error::not_found("no clip of the Thumbnail timeline is at the playhead"))?;
+    let current = clips[i].1.id.clone();
+    let from = (i.checked_sub(back as usize)).ok_or_else(|| {
+        Error::not_found(format!(
+            "{current} has no clip {back} places before it in the Thumbnail timeline"
+        ))
+    })?;
+    Ok((clips[from].1.id.clone(), current))
+}

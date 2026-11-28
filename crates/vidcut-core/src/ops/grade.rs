@@ -627,7 +627,7 @@ pub(super) fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> 
     Ok(())
 }
 
-pub(super) fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
+fn put_whole(p: &mut Project, id: &str, grade: Grade) -> Result<()> {
     checked(&grade)?;
     let grade = (!grade.is_usual(p.frame_size())).then_some(grade);
     let (ti, ci) = locate(p, id)?;
@@ -1629,6 +1629,22 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
             d.windows.clone_from(&copied.windows);
             Ok(())
         })?;
+    }
+    Ok(())
+}
+
+pub fn copy_whole(p: &Project, id: &str) -> Result<Grade> {
+    Ok(whole(p, id)?.unwrap_or_else(|| Grade::usual(p.frame_size())))
+}
+
+pub fn apply(p: &mut Project, grade: &Grade, to: &[String]) -> Result<()> {
+    checked(grade)?;
+    let frame = p.frame_size();
+    let mut fitted = grade.clone();
+    fitted.counted(p.settings.node_stack_layers.len(), frame);
+    for id in to {
+        whole(p, id)?;
+        put_whole(p, id, fitted.clone())?;
     }
     Ok(())
 }
