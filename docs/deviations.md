@@ -1379,7 +1379,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
 - **vidcut:** Film Grain Freeze is a switch and has no keyframes.
-- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md)).
 
 ## X153. Every clip pans as on a stereo track
 

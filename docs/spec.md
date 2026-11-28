@@ -211,7 +211,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The tray has a track for each value of the item selected first that has keyframes. Its time is the time of the lower timeline.
     - Its tracks work as the tracks of the Keyframes tab, with Reset Keyframes and without the curve. They share the selection of the tab.
     - `gui.show keyframe_tray` opens the tray. `gui.close keyframe_tray` closes it.
-    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md#buildable)):
+    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md)):
       - A divider that changes the height of the tray.
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
@@ -1966,7 +1966,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A drag of a side handle does not change the link.
     - One `titles.set` follows on release. Thus each drag is one undo step.
     - vidcut lays out the text at Zoom Y. It then stretches the text across by Zoom X / Zoom Y, about the position of the title.
-    - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md#zoom-x-and-zoom-y)).
+    - The pixels of a stretched title in Resolve are not measured ([todo](todo/titles.md)).
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer also opens the Title section.
@@ -2165,7 +2165,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The groups with buttons are Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, and Volume and Pan.
     - The text of the Video panel names no Keyframe buttons for Transform, Cropping or Dynamic Zoom (pp. 734–737).
     - The button of a group adds or removes a keyframe at the playhead on each value of the group. The manual tells this for the groups of the Effects panel (p. 747).
-    - vidcut does not have a group button for Volume and Pan yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+    - vidcut does not have a group button for Volume and Pan yet ([todo](todo/keyframes.md)).
   - The Transform, Crop and Composite sections have the group button, with one clip selected:
     - On a frame with a keyframe of the section, it removes each keyframe of the section on that frame.
     - On any other frame, it adds a keyframe on each value of the section, at the value of that frame.
@@ -5114,7 +5114,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The mask of a node is the union of its subjects (p. 3296).
   - In one node, the Magic Mask and a qualifier key give their intersection. The Magic Mask and a window also do (p. 3289).
   - The mask has hard edges. It does not make the soft edges of hair (pp. 3292, 3297).
-  - No measurement of version 2 checks these three rules yet ([todo](todo/subject-masks.md#measurements)).
+  - No measurement of version 2 checks these three rules yet ([todo](todo/subject-masks.md)).
 - vidcut:
   - The Magic Mask is a part of a corrector of the grade of a clip ([design](design/analysis.md#subject-masks)).
   - `grade.mask.click` adds a click on a frame. `grade.mask.set` changes Invert Mask, Quality or one click. `grade.mask.clear` deletes one click or all of them.
@@ -5130,7 +5130,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Each frame that the track reaches gets a map of each subject.
     - A track is a job with progress. A cancel stops it, and the clip keeps no map of it.
   - The model reads the picture that comes into the corrector, on the frame of the click and on each tracked frame.
-  - The rules with the mark "vidcut's choice" are not measured yet. Runs R3–R6 measure them ([todo](todo/subject-masks.md#measurements)).
+  - The rules with the mark "vidcut's choice" are not measured yet. Runs R3–R6 measure them ([todo](todo/subject-masks.md)).
   - A positive click outside the mask starts a new subject. A click on the mask of a subject goes to that subject (vidcut's choice).
   - A negative click outside the mask goes to the last subject of its frame.
   - For each subject on each frame, the model gives 256 by 256 values over the frame. The values scale to the frame size, bilinear.
@@ -7944,7 +7944,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A square marks each keyframe. A drag on it moves the position of that keyframe, and the path and the picture follow.
       - One `keyframes.set` with the `frames` of the keyframe follows on release.
       - The right-click menu of a square has Delete Keyframe. It sends `keyframes.remove`.
-      - Smooth points are not in vidcut yet ([todo](todo/keyframes.md#needs-a-resolve-run)).
+      - Smooth points are not in vidcut yet ([todo](todo/keyframes.md)).
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
     - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
     - With Shift too, Alt+wheel turns it to the next multiple of 15°.
@@ -7967,7 +7967,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The anchor point of Transform becomes the `anchor`.
     - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
     - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
-      - X and Y keys on different frames are such keyframes ([todo](todo/keyframes.md#needs-a-resolve-run)). So are anchor point keys with Bezier handles.
+      - X and Y keys on different frames are such keyframes ([todo](todo/keyframes.md)). So are anchor point keys with Bezier handles.
     - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys, and gives the same keys.
     - Resolve Studio 21.2 imports a file that vidcut writes with these keys. It renders and exports the same keys.
     - Pitch and yaw are played, with or without keyframes (D93).
