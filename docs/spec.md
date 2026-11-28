@@ -823,9 +823,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A click on the ruler moves the playhead, and you can drag the playhead.
 
 **Track display:**
-- The lower timeline has one row for each video track. An audio track has no row (p. 646; measured in Resolve Studio 21.2).
+- The lower timeline has one row for each video track (p. 646).
   - The label of a video row is the track, over the lowest audio track that holds the linked sound of its clips. An example is "V1" over "A3".
-  - A video track with no linked sound has the track alone as its label.
+  - When V1 has no linked sound, its label is V1 over the lowest audio track.
+  - Another video track with no linked sound has the track alone as its label.
+- An audio track has its own row when these three conditions are true:
+  - It is above the audio track of the V1 label.
+  - It holds a sound clip with no linked picture.
+  - It holds no sound clip that is linked to a picture.
+- Other audio tracks have no row. The upper timeline shows the same rows.
 - A video clip shows a filmstrip. Each picture is the frame under its left edge, and the first picture is the first frame of the clip.
   - Thus a picture that starts before a cut in the source shows the shot before the cut.
 - Its audio shows as a waveform band along the bottom. The band becomes larger with the track (p. 647).
@@ -837,16 +843,16 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - A disabled clip is dull. A muted clip shows a mute icon.
 
 **Track headers** (pp. 647, 678, 717): Enlarge (one track at a time), Lock, Mute (audio) and Video Enable icons (D43).
-- The Mute of a video row shows the state of the audio track of its label. These are measurements in Resolve Studio 21.2:
+- The Mute of a video row shows the state of the audio track of its label.
   - A click sets each audio track that holds the linked sound of its clips to the other state. Other audio tracks do not change.
   - The tooltip is Mute Track or Unmute Track.
   - A video track with no linked sound has a Mute too. A click changes no audio track.
-  - vidcut: the click is one undo step. The Mute of a video track with no linked sound is not lit, because no audio track gives it a state.
-- These are measurements in Resolve Studio 21.2:
-  - Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
-  - A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
-  - The labels of the tracks (V1, A1, ST1) are plain text in a column at the right end of the headers. A line separates the column from the icons.
-  - A Solo icon is between Lock and Mute.
+  - vidcut: the click is one undo step. A Mute with no audio track in its label is not lit.
+- The row of an audio track has its own Mute. It mutes only that track.
+- Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
+- A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
+- The labels of the tracks (V1, A1, ST1) are plain text in a column at the right end of the headers. A line separates the column from the icons.
+- A Solo icon is between Lock and Mute.
 - vidcut has no Solo icon yet. Its column stays empty, so Mute and Video Enable are in the columns of Resolve.
 - vidcut: the name of a track shows between the icons and the label, when the track has a name. A subtitle track always shows its name.
 

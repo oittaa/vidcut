@@ -380,8 +380,11 @@ The bar and the Jobs button:
 
 **Sound bands** ([spec §5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718)).
 
-- With Linked Selection on, `Rows::layout` gives a row to each video track and to no audio track.
+- With Linked Selection on, `Rows::layout` gives a row to each video track.
+  - It gives a row to an audio track only when the track is above the label track of the main track (`own_rows`).
+  - That track also holds a clip with no linked picture, and no clip linked to a picture.
 - `geometry::over` gives the audio track of the label of a video row: the lowest track in `geometry::heard_on`. `track_label` writes it under the name of the track.
+  - When `geometry::heard_on` of the main track is empty, `geometry::over` gives the lowest audio track.
 - `geometry::Bands` holds each sound clip that a band shows, with the video track of its row. `Rows::layout` makes it.
 - A main track row draws the band of each picture clip (`paint::sound_band_of`). `geometry::band` gives the linked sound clip on the highest audio track of each picture, at its own place. Thus a J/L cut shows.
   - `audio_edge` takes the same sound clip.
@@ -403,9 +406,10 @@ The bar and the Jobs button:
   - The previews then act alone too: `Ctx::alone` and `Preview::alone` for the drags, `Cut::apply` and `edits::applied` for the selected edits, and `dynamic_preview` for Dynamic Trim.
   - Then `edits::Plan::new` keeps the edits of linked clips, and the slip drag and `dynamic_target` keep each selected clip.
   - The header of a main track then has no Mute.
-- The Mute of a main track header shows `muted` of the track that `geometry::over` gives.
+- The Mute of a main track header shows `muted` of the track that `geometry::over` gives. With no such track, it is not lit.
   - A click sets `muted` on each track in `geometry::heard_on` to the other state. One track gets one `track.set`. Several tracks go as one `apply` with a label that names them.
-  - With no such track, the Mute is not lit, and a click sends nothing.
+  - With no track in `geometry::heard_on`, a click sends nothing.
+- The row of an audio track keeps its own Mute, which sets only that track.
 
 **Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 

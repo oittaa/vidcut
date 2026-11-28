@@ -105,10 +105,7 @@ impl Bands {
             .into_iter()
             .map(|i| &p.tracks[i])
             .collect();
-        let pictures: HashSet<u32> = videos
-            .iter()
-            .flat_map(|t| t.clips.iter().filter_map(|c| c.link))
-            .collect();
+        let pictures = pictures(p);
         let mut sounds: HashMap<String, String> = HashMap::new();
         for t in &videos {
             for b in band(p, t) {
@@ -121,11 +118,7 @@ impl Bands {
             let Some(a) = over(p, t).and_then(|a| p.track(&a)) else {
                 continue;
             };
-            for c in a
-                .clips
-                .iter()
-                .filter(|c| c.link.is_none_or(|l| !pictures.contains(&l)))
-            {
+            for c in a.clips.iter().filter(|c| sound_only(c, &pictures)) {
                 sounds.entry(c.id.clone()).or_insert_with(|| t.id.clone());
             }
         }
@@ -201,9 +194,44 @@ pub fn heard_on(p: &Project, t: &Track) -> Vec<String> {
 }
 
 pub fn over(p: &Project, t: &Track) -> Option<String> {
-    heard_on(p, t)
+    let lowest = heard_on(p, t)
         .into_iter()
-        .min_by_key(|id| p.track(id).map_or(usize::MAX, Track::number))
+        .min_by_key(|id| p.track(id).map_or(usize::MAX, Track::number));
+    lowest.or_else(|| {
+        p.tracks_of(TrackKind::Audio)
+            .into_iter()
+            .map(|i| &p.tracks[i])
+            .filter(|_| t.id == MAIN)
+            .min_by_key(|a| a.number())
+            .map(|a| a.id.clone())
+    })
+}
+
+fn pictures(p: &Project) -> HashSet<u32> {
+    p.tracks_of(TrackKind::Video)
+        .into_iter()
+        .flat_map(|i| p.tracks[i].clips.iter().filter_map(|c| c.link))
+        .collect()
+}
+
+fn sound_only(c: &Clip, pictures: &HashSet<u32>) -> bool {
+    c.link.is_none_or(|l| !pictures.contains(&l))
+}
+
+fn own_rows(p: &Project) -> HashSet<&str> {
+    let label = p
+        .track(MAIN)
+        .and_then(|v| over(p, v))
+        .and_then(|a| p.track(&a))
+        .map_or(0, Track::number);
+    let pictures = pictures(p);
+    p.tracks_of(TrackKind::Audio)
+        .into_iter()
+        .map(|i| &p.tracks[i])
+        .filter(|t| t.number() > label && !t.clips.is_empty())
+        .filter(|t| t.clips.iter().all(|c| sound_only(c, &pictures)))
+        .map(|t| t.id.as_str())
+        .collect()
 }
 
 pub fn band_hit(
@@ -276,10 +304,10 @@ impl Rows {
             TrackKind::Video if t.id == MAIN => 0.32,
             TrackKind::Video => 0.3,
         };
-        let bands = if linked {
-            Bands::of(p)
+        let (bands, rowed) = if linked {
+            (Bands::of(p), own_rows(p))
         } else {
-            Bands::default()
+            (Bands::default(), HashSet::new())
         };
         order.extend(
             p.tracks_of(TrackKind::Video)
@@ -287,7 +315,7 @@ impl Rows {
                 .rev()
                 .chain(p.tracks_of(TrackKind::Audio))
                 .map(|i| &p.tracks[i])
-                .filter(|t| !linked || t.kind != TrackKind::Audio)
+                .filter(|t| !linked || t.kind != TrackKind::Audio || rowed.contains(t.id.as_str()))
                 .map(|t| (t.id.as_str(), track(t), share(t))),
         );
         let big = order.iter().position(|t| Some(t.0) == enlarged);
