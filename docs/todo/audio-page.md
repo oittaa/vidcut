@@ -222,9 +222,17 @@ The sound of a clip on a video track moves to a clip of its own on an audio trac
 1. **Link groups** (#1411). `Clip::link` holds the groups of compound clips and clips with no media. The parts still need one place. Each part moves by the change of the lead. The behavior does not change.
 2. **Sound clips** (#1420). The sound moves to the audio tracks, in each part above. The parts of a group no longer need one place. The Cut page draws a linked pair as one item, with the band, the header mute and the J/L drag. The spec, the deviations and the design docs change.
 3. **Cut page rows.** The rows of the audio tracks as batch 2 measures them.
-4. **Link and unlink.** `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914), the sync offset and its four fixes (p. 915), as `edit.resync`.
+4. **Link and unlink** (#1427). `clip.link`, `clip.unlink`, Linked Selection (pp. 913–914), the sync offset and its four fixes (p. 915), as `edit.resync`.
    - Open: Resync Clip on the Cut page (p. 646). Batch 1 saw no change in one case. Batch 2 measures what it changes.
-   - Open: the questions of the link run in the batch 2 runbook. They are the form of the offset, links between clips of other media, Link of grouped clips, and a split with Linked Selection off.
+   - Open: the manual does not settle these points. The link run of batch 2 measures them.
+     - The text of the offset indicator, and whether a slip shows it.
+     - The start, the end and the source In after each of the four fixes, from the picture and from the sound.
+     - The indicators of a clip with two sound clips when one sound clip moves.
+     - An offset between linked clips of other media.
+     - Link of clips that are in other groups, and Unlink of one sound clip of two.
+     - A split with Linked Selection off.
+     - Whether the project keeps the Linked Selection switch, and whether Undo changes it.
+     - The groups of what is left after an overwrite over a linked pair.
 
 Each pull request changes the existing tests to the new model. It adds no tests.
 
