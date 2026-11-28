@@ -516,6 +516,17 @@ pub fn describe_at(
         ),
         "grade.paste" if d.flag("timeline") => "Paste a node into the timeline grade".into(),
         "grade.paste" => format!("Paste a node into the grade of {}", d.clips("clips")),
+        "grade.share" => format!("Save a node of {} as a shared node", d.clips("clip")),
+        "grade.unshare" => format!(
+            "Convert a shared node of {} to a corrector",
+            d.clips("clip")
+        ),
+        "grade.shared.add" => format!(
+            "Add shared node {} to {}",
+            d.text("shared"),
+            d.clips("clip")
+        ),
+        "grade.shared.delete" => format!("Delete shared node {}", d.text("shared")),
         "grade.ripple" => format!("Ripple Node Changes to {}", d.clips("clips")),
         "grade.append_node" => format!("Append Node to {}", d.clips("clips")),
         "grade.apply" if d.params["prior"] == 1 => "Apply Grade From One Clip Prior".into(),

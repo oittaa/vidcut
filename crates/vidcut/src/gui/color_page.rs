@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{
     BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
-    KeyOutput, Picture, Project, Qualifier, Settings, WindowKind,
+    KeyOutput, Picture, Project, Qualifier, Settings, SharedNode, WindowKind,
 };
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::preferences::SwitchingClips;
@@ -199,6 +199,10 @@ enum NodeAct {
     RemoveInput,
     Morph(GradeMixer),
     Mode(BlendMode),
+    Share,
+    Unshare,
+    AddShared(u64),
+    DeleteShared(u64),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,6 +350,7 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
             icon::SQUARE_HALF,
             "Key",
         ),
+        (d.shared.is_some(), icon::SHARE_NETWORK, "Shared Node"),
     ]
     .into_iter()
     .filter(|(on, ..)| *on)
@@ -1177,7 +1182,19 @@ fn grade_pick(mut picked: Vec<u32>, current: Option<u32>) -> (Vec<u32>, bool) {
     (picked, loose)
 }
 
-fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeAct>) {
+fn shared_name(s: &SharedNode) -> String {
+    match s.node.label.trim() {
+        "" => format!("Shared Node {}", s.number),
+        label => label.to_string(),
+    }
+}
+
+fn node_menu(
+    ui: &mut Ui,
+    (d, shared): (&GradeNode, Option<&[SharedNode]>),
+    keys: &Bindings,
+    act: &mut Option<NodeAct>,
+) {
     let key = |a: Action| keys.first(a).unwrap_or_default();
     let mut pick = |ui: &mut Ui, on: bool, button: egui::Button, a: NodeAct| {
         if ui.add_enabled(on, button).clicked() {
@@ -1202,6 +1219,14 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             let button = egui::Button::new(text).shortcut_text(shown);
             pick(ui, true, button, NodeAct::Add(add));
         }
+        let serial = adds.iter().any(|(a, _)| *a == GradeAdd::Serial);
+        if let Some(list) = shared.filter(|l| serial && !l.is_empty()) {
+            ui.separator();
+            for s in list {
+                let item = egui::Button::new(shared_name(s));
+                pick(ui, true, item, NodeAct::AddShared(s.number));
+            }
+        }
     });
     let delete = || egui::Button::new("Delete Node").shortcut_text(key(Action::DeleteNode));
     let (morph, to) = match &d.tool {
@@ -1215,6 +1240,9 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             pick(ui, true, egui::Button::new("Node Label"), NodeAct::Label);
             let lock = egui::Button::selectable(d.locked, "Lock Node");
             pick(ui, true, lock, NodeAct::Lock);
+            if let Some(list) = shared {
+                shared_menu(ui, (d, list), &mut pick);
+            }
             let off = egui::Button::selectable(!d.on, "Disable Node");
             pick(ui, true, off, NodeAct::Toggle);
             let free = d.inputs.iter().all(Option::is_none);
@@ -1271,6 +1299,26 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             }
         });
     }
+}
+
+fn shared_menu(
+    ui: &mut Ui,
+    (d, list): (&GradeNode, &[SharedNode]),
+    pick: &mut impl FnMut(&mut Ui, bool, egui::Button, NodeAct),
+) {
+    if d.shared.is_none() {
+        let save = egui::Button::new("Save as Shared Node");
+        pick(ui, true, save, NodeAct::Share);
+        return;
+    }
+    let convert = egui::Button::new("Convert to Corrector");
+    pick(ui, true, convert, NodeAct::Unshare);
+    ui.menu_button("Delete Shared Node", |ui| {
+        for s in list {
+            let item = egui::Button::new(shared_name(s));
+            pick(ui, true, item, NodeAct::DeleteShared(s.number));
+        }
+    });
 }
 
 fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>, clip: bool) {
@@ -3129,6 +3177,10 @@ impl Workspace {
                 page.grade_view.name(Port::Node(n), d.label.clone());
                 return;
             }
+            NodeAct::DeleteShared(s) => {
+                self.send("grade.shared.delete", json!({ "shared": s }));
+                return;
+            }
             _ => {}
         }
         let set = |more: Value| {
@@ -3137,7 +3189,13 @@ impl Workspace {
             ("grade.set", params(of, "clips", more))
         };
         let (method, p) = match act {
-            NodeAct::Add(_) | NodeAct::Delete | NodeAct::Label => return,
+            NodeAct::Add(_) | NodeAct::Delete | NodeAct::Label | NodeAct::DeleteShared(_) => return,
+            NodeAct::Share => ("grade.share", params(of, "clip", json!({ "node": n }))),
+            NodeAct::Unshare => ("grade.unshare", params(of, "clip", json!({ "node": n }))),
+            NodeAct::AddShared(s) => {
+                let more = json!({ "node": n, "shared": s });
+                ("grade.shared.add", params(of, "clip", more))
+            }
             NodeAct::Reset => {
                 let more = json!({ "node": n, "at": self.snap.timeline.position });
                 ("grade.clear", params(of, "clips", more))
@@ -3317,6 +3375,7 @@ impl Workspace {
         };
         let mut node_act: Option<(NodeAct, u32)> = None;
         let mut field_act: Option<FieldAct> = None;
+        let shared_nodes = (self.project_shared()).filter(|_| matches!(of, GradeOf::Clip(..)));
         let menu = |ui: &mut Ui, p: &Port| {
             let Port::Node(n) = *p else {
                 return;
@@ -3325,7 +3384,8 @@ impl Workspace {
                 return;
             };
             let mut act = None;
-            node_menu(ui, d, &self.snap.bindings, &mut act);
+            let shared = shared_nodes.as_ref().map(|p| p.shared_nodes.as_slice());
+            node_menu(ui, (d, shared), &self.snap.bindings, &mut act);
             if let Some(a) = act {
                 node_act = Some((a, n));
             }

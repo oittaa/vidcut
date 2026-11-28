@@ -884,6 +884,7 @@ impl Editor {
             _ => mutate(&mut working, &request, env, playhead, dry_run)?,
         };
         ops::linked::end_lone(&mut working);
+        ops::shared::synced(&mut working);
         need_timeline(&mut working)?;
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
@@ -5664,6 +5665,28 @@ fn mutate(
                 .as_ref()
                 .ok_or_else(|| Error::usage("give `settings`: the clipboard has no node"))?;
             ops::grade::paste(p, &of, *node, settings)?;
+            Value::Null
+        }
+        Request::GradeShare { clip, layer, node } => {
+            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            json!({ "shared": ops::shared::share(p, &of, *node)? })
+        }
+        Request::GradeUnshare { clip, layer, node } => {
+            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            ops::shared::unshare(p, &of, *node)?;
+            Value::Null
+        }
+        Request::GradeSharedAdd {
+            clip,
+            layer,
+            node,
+            shared,
+        } => {
+            let of = grade_of(p, clip, (false, *layer), playhead)?;
+            json!({ "node": ops::shared::add(p, &of, *node, *shared)? })
+        }
+        Request::GradeSharedDelete { shared } => {
+            ops::shared::remove(p, *shared)?;
             Value::Null
         }
         Request::GradeRipple {

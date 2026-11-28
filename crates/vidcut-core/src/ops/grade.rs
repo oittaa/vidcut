@@ -615,7 +615,9 @@ pub(super) fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> 
             if grade.is_masked() {
                 return Err(Error::invalid("the timeline grade has no Magic Mask"));
             }
-            let grade = (!grade.is_usual(frame)).then(|| grade.clone());
+            let mut grade = grade.clone();
+            grade.unshared();
+            let grade = (!grade.is_usual(frame)).then_some(grade);
             p.timeline_mut().ok_or_else(no_timeline)?.grade = grade;
         }
         GradeOf::Clip(id, layer) => {
@@ -683,8 +685,10 @@ pub(super) fn edited(
         }
     };
     marked(&mut g);
+    let before = g.clone();
     edit(&mut g)?;
     marked(&mut g);
+    super::shared::took(p, &before, &mut g);
     store(p, of, &g)
 }
 
@@ -1491,8 +1495,10 @@ pub fn append_node(p: &mut Project, from: &GradeOf, n: u32, to: &[GradeOf]) -> R
 }
 
 pub fn append_graph(p: &mut Project, of: &GradeOf, add: &Grade) -> Result<()> {
+    let mut add = add.clone();
+    super::shared::current(p, &mut add);
     edited(p, of, |g| {
-        appended(g, add);
+        appended(g, &add);
         Ok(())
     })
 }

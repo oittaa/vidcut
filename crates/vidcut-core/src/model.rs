@@ -37,6 +37,7 @@ pub struct Project {
     pub speakers: Speakers,
     pub queue: Vec<RenderJob>,
     pub stills: Vec<Still>,
+    pub shared_nodes: Vec<SharedNode>,
     pub albums: Vec<Album>,
 }
 
@@ -95,6 +96,10 @@ pub struct ProjectFile {
     /// out while there are none.
     #[serde(default)]
     pub stills: Vec<Still>,
+    /// The shared nodes of the clip grades, in the order they were made.
+    /// Left out while there are none.
+    #[serde(default)]
+    pub shared_nodes: Vec<SharedNode>,
     /// The still albums of the Gallery, in the order they were made. A
     /// project has one or more.
     pub albums: Vec<Album>,
@@ -128,6 +133,8 @@ struct ProjectOut<'a> {
     queue: &'a [RenderJob],
     #[serde(skip_serializing_if = "<[Still]>::is_empty")]
     stills: &'a [Still],
+    #[serde(skip_serializing_if = "<[SharedNode]>::is_empty")]
+    shared_nodes: &'a [SharedNode],
     albums: &'a [Album],
 }
 
@@ -161,6 +168,7 @@ impl Serialize for Project {
             speakers: &self.speakers,
             queue: &self.queue,
             stills: &self.stills,
+            shared_nodes: &self.shared_nodes,
             albums: &self.albums,
         }
         .serialize(s)
@@ -189,6 +197,7 @@ impl From<ProjectFile> for Project {
             speakers: f.speakers,
             queue: f.queue,
             stills: f.stills,
+            shared_nodes: f.shared_nodes,
             albums: f.albums,
         };
         p.check_out();
@@ -340,6 +349,17 @@ pub struct Still {
     /// the viewer shows it, at the size of the timeline, in 32-bit float
     /// OpenEXR.
     pub picture: String,
+}
+
+/// A shared node: a corrector that has copies in clip grades. A change of
+/// one copy goes to each copy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SharedNode {
+    /// 1 and up, never reused.
+    pub number: u64,
+    /// The settings of each copy: all but its links, its place and its
+    /// Magic Mask.
+    pub node: GradeNode,
 }
 
 /// A job of the render queue: an export of a timeline that waits for a
@@ -4600,6 +4620,22 @@ impl Grade {
         }
     }
 
+    pub fn every_node(&self) -> impl Iterator<Item = &GradeNode> {
+        let others = self.layers.iter().chain(&self.kept_layers);
+        self.nodes.iter().chain(others.flat_map(|l| &l.nodes))
+    }
+
+    pub fn every_node_mut(&mut self) -> impl Iterator<Item = &mut GradeNode> {
+        let others = self.layers.iter_mut().chain(&mut self.kept_layers);
+        (self.nodes.iter_mut()).chain(others.flat_map(|l| &mut l.nodes))
+    }
+
+    pub fn unshared(&mut self) {
+        for d in self.every_node_mut() {
+            d.shared = None;
+        }
+    }
+
     pub fn is_usual(&self, frame: [f64; 2]) -> bool {
         *self == Self::usual(frame)
     }
@@ -4804,6 +4840,10 @@ pub struct GradeNode {
     /// The Magic Mask of a corrector. Left out when it has no clicks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub magic_mask: Option<MagicMask>,
+    /// The number of the shared node that this corrector is a copy of.
+    /// Left out when it is not a copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared: Option<u64>,
 }
 
 impl GradeNode {
@@ -4824,7 +4864,31 @@ impl GradeNode {
             auto_key: false,
             windows: GradeWindow::fixed(frame),
             magic_mask: None,
+            shared: None,
         }
+    }
+
+    pub fn shared_part(&self) -> Self {
+        Self {
+            inputs: Vec::new(),
+            place: [0.0; 2],
+            key_from: None,
+            magic_mask: None,
+            shared: None,
+            ..self.clone()
+        }
+    }
+
+    pub fn take_shared(&mut self, part: &Self) {
+        let mut d = Self {
+            inputs: std::mem::take(&mut self.inputs),
+            place: self.place,
+            key_from: self.key_from,
+            magic_mask: self.magic_mask.take(),
+            shared: self.shared,
+            ..part.clone()
+        };
+        std::mem::swap(self, &mut d);
     }
 
     pub fn mixer(tool: GradeTool, inputs: Vec<Option<GradeLink>>, place: [f64; 2]) -> Self {
@@ -4844,6 +4908,7 @@ impl GradeNode {
             auto_key: false,
             windows: Vec::new(),
             magic_mask: None,
+            shared: None,
         }
     }
 
@@ -10556,6 +10621,7 @@ pub struct NextIds {
     pub group: u64,
     pub timeline: u64,
     pub still: u64,
+    pub shared: u64,
     pub album: u64,
 }
 
@@ -10588,6 +10654,7 @@ impl Project {
                 group: 1,
                 timeline: 1,
                 still: 1,
+                shared: 1,
                 album: 2,
             },
             bins: Vec::new(),
@@ -10595,6 +10662,7 @@ impl Project {
             speakers: Default::default(),
             queue: Vec::new(),
             stills: Vec::new(),
+            shared_nodes: Vec::new(),
             albums: vec![Album {
                 id: "a1".into(),
                 name: "Stills 1".into(),
