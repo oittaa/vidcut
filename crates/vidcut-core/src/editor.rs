@@ -5681,6 +5681,21 @@ fn mutate(
                 .collect();
             json!({ "clips": ops::ripple::ripple(p, &from, *node, before, &to)? })
         }
+        Request::GradeAppendNode {
+            clip,
+            layer,
+            node,
+            clips,
+        } => {
+            use ops::grade::GradeOf;
+            let layer = layer.unwrap_or(1);
+            let from = GradeOf::Clip(resolve_clip(p, clip, playhead)?, layer);
+            let to: Vec<GradeOf> = (resolve_clips(p, &clips.to_vec(), playhead)?.into_iter())
+                .map(|id| GradeOf::Clip(id, layer))
+                .collect();
+            ops::grade::append_node(p, &from, *node, &to)?;
+            Value::Null
+        }
         Request::GradeApply {
             from,
             prior,
