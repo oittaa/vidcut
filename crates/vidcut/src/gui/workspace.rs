@@ -444,6 +444,7 @@ impl Workspace {
                 live::GuiChange::Viewers { left, right, shown } => {
                     self.set_viewers([left, right], shown)?
                 }
+                live::GuiChange::Gallery { album, albums } => self.set_gallery(album, albums)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -612,6 +613,8 @@ impl Workspace {
             node_zoom: self.node_zoom(),
             node_list: self.effects_page.grade_list,
             node_wide: self.effects_page.grade_wide,
+            album: self.shown_album(),
+            albums: self.gallery.albums,
             viewers: self.viewer_state(),
             time: self.page_clock(),
             edit,
