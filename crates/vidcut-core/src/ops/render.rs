@@ -35,6 +35,11 @@ fn fixed(p: &Project, mut export: ExportParams) -> Result<(String, ExportParams)
         start: TimeSpec::Frames(a),
         end: RangeEnd::At(TimeSpec::Frames(b)),
     });
+    if export.per_clip
+        && let Some(f) = export.clip_filter.take()
+    {
+        export.clips = super::clip_filter::met(&top, &f, (a, b))?;
+    }
     export.background = false;
     Ok((timeline, export))
 }

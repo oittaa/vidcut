@@ -5682,6 +5682,15 @@ pub struct ExportParams {
     /// One file per clip (in the range) instead of one file.
     #[serde(default)]
     pub per_clip: bool,
+    /// With `per_clip`, only these clips, by id. Each has a frame in the
+    /// range. Left out: each clip in the range.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<String>,
+    /// With `per_clip`, only the clips of the video tracks that meet this
+    /// filter, as the Thumbnail timeline shows them. A job keeps the clips
+    /// that meet it at `render.add`, as `clips`. Not with `clips`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_filter: Option<crate::model::ClipFilter>,
     /// Leave the video out.
     #[serde(default)]
     pub audio_only: bool,
@@ -7087,8 +7096,10 @@ pub struct TimelineSet {
     /// that uses the project's settings gets its own first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own: Option<TimelineFormat>,
-    /// What the Export page renders of it: `entire` or `in_out`. `entire`
-    /// also clears its In and Out marks.
+    /// What the Export page renders of it: `entire`, `in_out` or
+    /// `filtered`. `entire` also clears its In and Out marks. `filtered`
+    /// needs a clip filter, and sets the marks at the span of its clips.
+    /// A clip filter of `all` makes `filtered` into `in_out`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::model::RenderRange>,
     /// The clips that its Thumbnail timeline shows, e.g.

@@ -197,6 +197,8 @@ pub struct ExportUi {
     pub(super) edit_wanted: Option<String>,
     pub(super) leave_edit: Option<super::export_page::LeaveEdit>,
     pub(super) duplicate_paths: bool,
+    pub(super) filter_prompt: Option<super::export_page::FilterPrompt>,
+    pub(super) filter_asked: Option<(String, vidcut_core::model::ClipFilter)>,
     pub(super) focus_name: bool,
     pub(super) job_details: bool,
     pub(super) hide_clips: bool,
@@ -245,6 +247,8 @@ impl ExportUi {
         self.edit_wanted = None;
         self.leave_edit = None;
         self.duplicate_paths = false;
+        self.filter_prompt = None;
+        self.filter_asked = None;
         self.queue = None;
         self.renaming = None;
     }
@@ -258,6 +262,7 @@ impl ExportUi {
             )
             || self.leave_edit.is_some()
             || self.duplicate_paths
+            || self.filter_prompt.is_some()
             || self.starting.as_ref().is_some_and(|s| {
                 !s.offline.is_empty() || s.weights || (!s.existing.is_empty() && s.rename.is_none())
             })
@@ -363,6 +368,7 @@ pub(super) struct Render {
     pub(super) tab: Tab,
     pub(super) more: Vec<MoreOutput>,
     pub(super) output_tab: usize,
+    pub(super) filter: Option<vidcut_core::model::ClipFilter>,
 }
 
 pub(super) struct SavePreset {
@@ -635,6 +641,7 @@ impl Render {
             tab: Tab::Video,
             more: Vec::new(),
             output_tab: 0,
+            filter: None,
         }
     }
 
@@ -820,6 +827,9 @@ impl Render {
         p["range"] = json!(self.range);
         if self.per_clip {
             self.clip_names(&mut p);
+            if let Some(f) = &self.filter {
+                p["clip_filter"] = json!(f);
+            }
         }
         if self.overwrite {
             p["overwrite"] = json!(true);
