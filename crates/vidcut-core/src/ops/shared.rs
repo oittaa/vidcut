@@ -112,7 +112,9 @@ pub(super) fn took(p: &mut Project, was: &Grade, now: &mut Grade) {
     synced(p);
     let registry = &p.shared_nodes;
     for d in now.every_node_mut() {
-        let shared = d.shared.and_then(|n| registry.iter().find(|s| s.number == n));
+        let shared = d
+            .shared
+            .and_then(|n| registry.iter().find(|s| s.number == n));
         if let Some(s) = shared.filter(|s| s.node != d.shared_part()) {
             d.take_shared(&s.node);
         }

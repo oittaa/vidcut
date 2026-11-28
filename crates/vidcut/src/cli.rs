@@ -141,6 +141,10 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.copy", &["window", "clip"]),
     ("grade.window.paste", &["clip"]),
     ("gallery.remove", &["stills"]),
+    ("gallery.move", &["album", "stills"]),
+    ("gallery.album.add", &["name"]),
+    ("gallery.album.rename", &["album", "name"]),
+    ("gallery.album.remove", &["album"]),
     ("gallery.apply", &["still", "clips"]),
     ("gallery.append", &["still", "clips"]),
     ("effects.add", &["clips", "kind"]),
@@ -271,6 +275,7 @@ const GROUPS: &[(&str, &str)] = &[
         "gallery",
         "Stills of the Color page: pictures of frames, with their grades",
     ),
+    ("gallery.album", "The still albums of the Gallery"),
     ("generators", "Pictures made with no file"),
     (
         "grade",

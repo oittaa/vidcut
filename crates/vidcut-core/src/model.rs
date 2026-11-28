@@ -38,6 +38,7 @@ pub struct Project {
     pub queue: Vec<RenderJob>,
     pub stills: Vec<Still>,
     pub shared_nodes: Vec<SharedNode>,
+    pub albums: Vec<Album>,
 }
 
 /// A whole project: its media and its timelines.
@@ -99,6 +100,9 @@ pub struct ProjectFile {
     /// Left out while there are none.
     #[serde(default)]
     pub shared_nodes: Vec<SharedNode>,
+    /// The still albums of the Gallery, in the order they were made. A
+    /// project has one or more.
+    pub albums: Vec<Album>,
 }
 
 #[derive(Serialize)]
@@ -131,6 +135,7 @@ struct ProjectOut<'a> {
     stills: &'a [Still],
     #[serde(skip_serializing_if = "<[SharedNode]>::is_empty")]
     shared_nodes: &'a [SharedNode],
+    albums: &'a [Album],
 }
 
 impl Serialize for Project {
@@ -164,6 +169,7 @@ impl Serialize for Project {
             queue: &self.queue,
             stills: &self.stills,
             shared_nodes: &self.shared_nodes,
+            albums: &self.albums,
         }
         .serialize(s)
     }
@@ -192,6 +198,7 @@ impl From<ProjectFile> for Project {
             queue: f.queue,
             stills: f.stills,
             shared_nodes: f.shared_nodes,
+            albums: f.albums,
         };
         p.check_out();
         p
@@ -305,12 +312,22 @@ impl ClipFilter {
     }
 }
 
+/// A still album of the Gallery: a named set of stills.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Album {
+    /// `a<N>`, never reused.
+    pub id: String,
+    pub name: String,
+}
+
 /// A still of the Gallery: a picture of a frame of a timeline, and the
 /// grades of the clip that the Color page graded on that frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Still {
     /// `s<N>`, never reused.
     pub id: String,
+    /// The album that holds the still.
+    pub album: String,
     /// The clip: the topmost clip on the frame that takes a grade.
     pub clip: String,
     /// The timeline of the clip.
@@ -10601,6 +10618,7 @@ pub struct NextIds {
     pub timeline: u64,
     pub still: u64,
     pub shared: u64,
+    pub album: u64,
 }
 
 fn first_id() -> u64 {
@@ -10633,6 +10651,7 @@ impl Project {
                 timeline: 1,
                 still: 1,
                 shared: 1,
+                album: 2,
             },
             bins: Vec::new(),
             groups: Vec::new(),
@@ -10640,6 +10659,10 @@ impl Project {
             queue: Vec::new(),
             stills: Vec::new(),
             shared_nodes: Vec::new(),
+            albums: vec![Album {
+                id: "a1".into(),
+                name: "Stills 1".into(),
+            }],
         }
     }
 
@@ -11449,6 +11472,16 @@ impl Project {
 
     pub fn still(&self, id: &str) -> Option<&Still> {
         self.stills.iter().find(|s| s.id == id)
+    }
+
+    pub fn alloc_album_id(&mut self) -> String {
+        let id = format!("a{}", self.next_id.album);
+        self.next_id.album += 1;
+        id
+    }
+
+    pub fn album(&self, id: &str) -> Option<&Album> {
+        self.albums.iter().find(|a| a.id == id)
     }
 
     pub fn subtitle_index(&self, id: &str) -> Option<usize> {

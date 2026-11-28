@@ -486,6 +486,13 @@ pub fn describe_at(
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
         "gallery.grab" => format!("Grab Still at {}", d.time("at")),
+        "gallery.move" => match d.list("stills").as_slice() {
+            [one] => format!("Move still {one} to album {}", d.text("album")),
+            many => format!("Move {} stills to album {}", many.len(), d.text("album")),
+        },
+        "gallery.album.add" => "Add Still Album".into(),
+        "gallery.album.rename" => format!("Rename album {}", d.text("album")),
+        "gallery.album.remove" => format!("Remove album {}", d.text("album")),
         "gallery.remove" => match d.list("stills").as_slice() {
             [one] => format!("Delete still {one}"),
             many => format!("Delete {} stills", many.len()),
