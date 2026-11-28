@@ -325,6 +325,9 @@ pub fn timeline(
     if let Some(message) = otio::unheard_track_pan(p, span) {
         notes.push(json!({ "code": "track_pan_kept", "message": message }));
     }
+    if let Some(message) = otio::unheard_solo_safe(p, span) {
+        notes.push(json!({ "code": "solo_safe_kept", "message": message }));
+    }
     let Some(writing) = write else {
         return Ok(json!({
             "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,

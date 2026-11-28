@@ -2788,8 +2788,9 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     let mut v = n.clone();
                     v.id = t.id.clone();
                     v.duck = None;
-                    v.muted |= t.muted || (inner_solo && !n.solo);
+                    v.muted |= t.muted || !n.in_mix(inner_solo);
                     v.solo = t.solo;
+                    v.solo_safe = t.solo_safe;
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
                     let laid = inner_layout(&out, n, part);
@@ -4440,6 +4441,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.transitions.clear();
         t.muted = false;
         t.solo = false;
+        t.solo_safe = false;
         t.volume_db = 0.0;
         t.voice_isolation = None;
         t.duck = None;

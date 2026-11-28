@@ -1782,6 +1782,14 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
+        /// Solo Safe: the track is heard also while other tracks are
+        /// soloed.
+        #[serde(default)]
+        solo_safe: Option<bool>,
+        /// Exclusive Solo: with `solo: true`, each other track that is not
+        /// Solo Safe loses its solo.
+        #[serde(default)]
+        exclusive: bool,
         /// The fader, in dB, from -100 to 10. -100 stands for the fader's
         /// bottom, minus infinity: the track is silent in playback and
         /// export.
@@ -5631,8 +5639,8 @@ pub enum Request {
     /// does.
     #[serde(rename = "gui.target")]
     GuiTarget { track: String },
-    /// The timeline's zoom and Timeline Options, kept between runs.
-    /// Answers what `gui.state` does.
+    /// The timeline's zoom, Timeline Options and Exclusive Solo, kept
+    /// between runs. Answers what `gui.state` does.
     #[serde(rename = "gui.timeline")]
     GuiTimeline(TimelineOptions),
     /// The Trim Editor (spec §8.6): while an edit is selected and the
@@ -7115,6 +7123,10 @@ pub struct TimelineOptions {
     /// Minimize Subtitle Track: the subtitle tracks drawn shorter.
     #[serde(default)]
     pub minimize_subtitles: Option<bool>,
+    /// Exclusive Solo: a click on the Solo of a track takes the solo off
+    /// each other track that is not Solo Safe.
+    #[serde(default)]
+    pub exclusive_solo: Option<bool>,
 }
 
 /// What Dynamic Trim does with selected clips.
